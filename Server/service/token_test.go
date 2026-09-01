@@ -230,3 +230,43 @@ func TestTokenService_FailsLoud(t *testing.T) {
 		t.Errorf("RevokeByLabel on a closed database: err = %v, want ErrInternal", err)
 	}
 }
+
+// The CLI has no authenticated operator, so it attributes a mint to the token's
+// own bound user. ActorSelf is a named value rather than a bare 0 because 0 is
+// a real actor id in the audit vocabulary ("the system") and a mint is not a
+// system action — recording one as unattributed loses who the token was for.
+func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
+	svc, database, ctx := tokenFixture(t)
+	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
+	seedTokenUser(t, database, 2, "ci-account", permissions.MemberRoleID)
+
+	minted, err := svc.Create(ctx, ActorSelf, "ci-account", "ci-bot", 0)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var actor int64
+	if err := database.QueryRowContext(ctx,
+		`SELECT actor_id FROM audit_log WHERE action = 'api_token_create' AND target_id = ?`,
+		minted.ID).Scan(&actor); err != nil {
+		t.Fatalf("reading the audit row: %v", err)
+	}
+	if actor != minted.User.ID {
+		t.Errorf("audit actor_id = %d, want %d (the bound user) — recording 0 loses "+
+			"who the token was created for", actor, minted.User.ID)
+	}
+
+	// An explicit actor is recorded verbatim: the panel has a real operator.
+	panelMint, err := svc.Create(ctx, 1, "ci-account", "panel-made", 0)
+	if err != nil {
+		t.Fatalf("Create (panel): %v", err)
+	}
+	if err := database.QueryRowContext(ctx,
+		`SELECT actor_id FROM audit_log WHERE action = 'api_token_create' AND target_id = ?`,
+		panelMint.ID).Scan(&actor); err != nil {
+		t.Fatalf("reading the audit row: %v", err)
+	}
+	if actor != 1 {
+		t.Errorf("audit actor_id = %d, want 1 — an explicit actor must not be rewritten", actor)
+	}
+}

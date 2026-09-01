@@ -94,11 +94,11 @@ func tokenCreate(ctx context.Context, tokens *service.TokenService, args []strin
 		return 2
 	}
 
-	// The audit row is attributed to the token's bound user, not to an
-	// operator: this command runs with no credential at all (it is the
+	// ActorSelf attributes the audit row to the token's bound user rather than
+	// to an operator: this command runs with no credential at all (it is the
 	// bootstrap path), so there is no actor identity to record. The panel's
 	// route, which does have one, records that instead.
-	minted, err := tokens.Create(ctx, 0, *username, *label, *expires)
+	minted, err := tokens.Create(ctx, service.ActorSelf, *username, *label, *expires)
 	switch {
 	case errors.Is(err, service.ErrNotFound):
 		fmt.Fprintf(os.Stderr, "error: no user named %q\n", *username)

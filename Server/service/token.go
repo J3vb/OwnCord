@@ -73,6 +73,15 @@ func (s *TokenService) Bind(ctx context.Context, username string) (*db.User, err
 	return user, nil
 }
 
+// ActorSelf attributes a mint's audit row to the token's own bound user
+// instead of to an operator. `server token create` is the bootstrap path — it
+// runs with no credential at all, so there is no operator identity to record,
+// and the account the token will act as is the most informative thing
+// available. It is a named value rather than a bare 0 because 0 is a real
+// actor id in the audit table's vocabulary ("the system"), and a mint is not
+// a system action.
+const ActorSelf int64 = -1
+
 // MintedToken is what Create hands back. Raw is shown exactly once and is not
 // recoverable afterwards — nothing stores it, only its hash.
 type MintedToken struct {
@@ -84,6 +93,9 @@ type MintedToken struct {
 
 // Create mints a token bound to the user Bind resolved, and writes the audit
 // row attributed to actorID.
+//
+// actorID is who the audit row names; pass ActorSelf to attribute it to the
+// bound user, which is what a caller with no authenticated operator does.
 //
 // lifetime <= 0 means the token never expires, which is both callers' default;
 // anything longer than maxTokenLifetime is refused rather than silently
@@ -104,6 +116,9 @@ func (s *TokenService) Create(ctx context.Context, actorID int64, username, labe
 	user, err := s.Bind(ctx, username)
 	if err != nil {
 		return nil, err
+	}
+	if actorID == ActorSelf {
+		actorID = user.ID
 	}
 
 	raw, err := auth.GenerateToken()

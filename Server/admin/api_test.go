@@ -1756,3 +1756,41 @@ func TestAdminAPI_Tokens_Unauthenticated(t *testing.T) {
 func itoa(n int64) string {
 	return fmt.Sprint(n)
 }
+
+// TestAdminAPI_NilServiceBundleFailsClosed pins the distinction
+// adminRequiredServices draws. A nil service the ROUTER dereferences has no
+// request-time branch left to fail closed in — the handler would panic on the
+// first request — so the constructor builds those from the handle it already
+// holds. A nil service only a HANDLER dereferences stays nil, because the
+// handler checks it and answers 500; those refusals are pinned elsewhere and
+// must keep being exercised.
+//
+// Reported by a review bot on the user and auth families: /stats, /users and
+// /tokens had moved off the raw handle without the guard moving with them, so
+// the fail-closed posture this constructor documents had quietly stopped being
+// true for exactly those routes.
+func TestAdminAPI_NilServiceBundleFailsClosed(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, nil)
+	token := createAdminUser(t, database) // Owner role — reaches the token routes too
+
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+	}{
+		{"stats", http.MethodGet, "/stats", nil},
+		{"users", http.MethodGet, "/users", nil},
+		{"tokens", http.MethodGet, "/tokens", nil},
+		{"setup status", http.MethodGet, "/setup/status", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A panic here fails the test outright, which is the point: the
+			// route must answer something, whatever it answers.
+			w := doRequest(t, handler, tc.method, tc.path, token, tc.body)
+			if w.Code >= 500 {
+				t.Errorf("%s %s = %d with a nil bundle; want a real answer, not a server fault: %s",
+					tc.method, tc.path, w.Code, w.Body.String())
+			}
+		})
+	}
+}

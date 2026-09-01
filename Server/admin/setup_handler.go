@@ -76,18 +76,34 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 			}
 			// The settings table is authoritative for the values the app
 			// reads live; fall back to the config/seed values on error.
-			if v, err := settings.Setting(r.Context(), "server_name"); err == nil && v != "" {
-				d.ServerName = v
-			}
-			if v, err := settings.Setting(r.Context(), "motd"); err == nil {
-				d.Motd = v
-			}
-			if v, err := settings.Setting(r.Context(), "registration_open"); err == nil {
-				d.RegistrationOpen = v == "1" || strings.EqualFold(v, "true")
+			//
+			// A nil settings service is one of those fallbacks rather than a
+			// panic: SettingsService is the fail-closed-at-the-handler kind
+			// (adminRequiredServices deliberately does not build it, so the
+			// rows pinning its refusals keep exercising them), and every read
+			// below is already best-effort with the config value standing in.
+			if settings != nil {
+				setupStatusSettingDefaults(r, settings, d)
 			}
 			resp.Defaults = d
 		}
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// setupStatusSettingDefaults overlays the live settings rows onto the
+// config-derived defaults. Each read is best-effort: the config value it would
+// replace is a valid answer, so a failure leaves it standing rather than
+// failing the status call the setup page cannot render without.
+func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsService, d *setupDefaults) {
+	if v, err := settings.Setting(r.Context(), "server_name"); err == nil && v != "" {
+		d.ServerName = v
+	}
+	if v, err := settings.Setting(r.Context(), "motd"); err == nil {
+		d.Motd = v
+	}
+	if v, err := settings.Setting(r.Context(), "registration_open"); err == nil {
+		d.RegistrationOpen = v == "1" || strings.EqualFold(v, "true")
 	}
 }
 

@@ -65,17 +65,25 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
-// adminRequiredServices fills in the two services the admin API cannot answer
-// a single request without, from the handle this package already holds.
+// adminRequiredServices fills in every service this mux dereferences without a
+// nil guard, from the handle this package already holds.
 //
-// Everywhere else a nil service is the fail-closed case an individual handler
-// implements — it refuses that one action. These two are different: without a
-// SessionService no request can be authenticated at all, and without a
-// SetupService the unauthenticated first-run routes have nothing to answer
-// with, on a server that by definition has nobody able to read its logs yet.
-// "Refuse this action" and "the admin API is unusable" are not the same
-// failure, so these are built rather than left for a construction site to hand
-// the middleware a nil to dereference.
+// The distinction that decides what belongs here: a service the ROUTER
+// dereferences must exist, because there is no request-time branch left to
+// fail closed in — the handler would simply panic. A service only a HANDLER
+// dereferences may be nil, because the handler checks it and answers 500
+// "… service unavailable"; those (Moderation, Roles, Channels) are
+// deliberately left alone, and the rows that pin their refusals construct
+// exactly that.
+//
+// Sessions and Setup were the first two: without a SessionService no request
+// can be authenticated at all, and without a SetupService the unauthenticated
+// first-run routes have nothing to answer with, on a server that by definition
+// has nobody able to read its logs yet. Users and Tokens joined them when the
+// user and token families moved those routes off the raw handle — before that
+// they operated on `database`, which is never nil here, so the fail-closed
+// posture the doc comment above claimed had quietly stopped being true for
+// /stats, /users and /tokens.
 func adminRequiredServices(database *db.DB, svc *service.Services) *service.Services {
 	if svc == nil {
 		svc = &service.Services{}
@@ -85,6 +93,12 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 	}
 	if svc.Setup == nil {
 		svc.Setup = service.NewSetupService(database)
+	}
+	if svc.Users == nil {
+		svc.Users = service.NewUserService(database)
+	}
+	if svc.Tokens == nil {
+		svc.Tokens = service.NewTokenService(database)
 	}
 	return svc
 }
@@ -98,10 +112,11 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// have added one more. Taking the bundle the caller already holds keeps
 	// that growth out of a 200-call-site signature.
 	//
-	// A nil bundle, or a nil service inside one, stays the fail-closed case the
-	// handlers already implement (they answer 500 "… service unavailable"
-	// rather than writing unchecked) — the tests that pin that behaviour pass
-	// exactly that.
+	// A nil service the HANDLERS check stays the fail-closed case they
+	// implement (they answer 500 "… service unavailable" rather than writing
+	// unchecked) — the tests that pin that behaviour pass exactly that. A nil
+	// service the ROUTER dereferences has no such branch left, so
+	// adminRequiredServices builds those; see its doc comment.
 	svc = adminRequiredServices(database, svc)
 	mod, roles, settings, channels := svc.Moderation, svc.Roles, svc.Settings, svc.Channels
 
