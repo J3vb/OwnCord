@@ -85,7 +85,11 @@ func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash s
 		return nil, ErrPrincipalGone
 	}
 	if auth.IsEffectivelyBanned(user) {
-		return nil, ErrPrincipalBanned
+		// Name the account in the wrap: the handshake logs this refusal
+		// verbatim with no user of its own in scope, and a banned client
+		// stuck in a reconnect loop is only diagnosable if the log says
+		// which account it is.
+		return nil, fmt.Errorf("user %d: %w", user.ID, ErrPrincipalBanned)
 	}
 	return user, nil
 }
@@ -95,11 +99,18 @@ func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash s
 type SessionVerdict int
 
 const (
-	// SessionLive: keep the connection.
-	SessionLive SessionVerdict = iota
 	// SessionRevoked: the session was deleted or has expired. Disconnect
 	// without an explanation — there is nobody authenticated to explain to.
-	SessionRevoked
+	//
+	// Deliberately the zero value: a hash absent from a sweep's verdict map
+	// reads as revoked, so an authenticator that answers for only some of
+	// the sessions it was asked about disconnects the rest instead of
+	// silently keeping them. The pre-seam sweep kicked on a missing batch
+	// row; the zero value is what preserves that fail-closed posture for
+	// every implementation of the seam, not just the total one below.
+	SessionRevoked SessionVerdict = iota
+	// SessionLive: keep the connection.
+	SessionLive
 	// SessionBanned: the session is still valid but its user is banned.
 	// Disconnect after telling them why.
 	SessionBanned

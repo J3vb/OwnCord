@@ -85,22 +85,27 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // posture the doc comment above claimed had quietly stopped being true for
 // /stats, /users and /tokens.
 func adminRequiredServices(database *db.DB, svc *service.Services) *service.Services {
-	if svc == nil {
-		svc = &service.Services{}
+	// Copy before filling: the bundle the caller passes is the app-wide one
+	// the composition root shares with the rest of the server, and these
+	// fallbacks are the admin mux's own. Writing them through the pointer
+	// would install admin's wiring into everyone else's view of the bundle.
+	filled := service.Services{}
+	if svc != nil {
+		filled = *svc
 	}
-	if svc.Sessions == nil {
-		svc.Sessions = service.NewSessionService(database)
+	if filled.Sessions == nil {
+		filled.Sessions = service.NewSessionService(database)
 	}
-	if svc.Setup == nil {
-		svc.Setup = service.NewSetupService(database)
+	if filled.Setup == nil {
+		filled.Setup = service.NewSetupService(database)
 	}
-	if svc.Users == nil {
-		svc.Users = service.NewUserService(database)
+	if filled.Users == nil {
+		filled.Users = service.NewUserService(database)
 	}
-	if svc.Tokens == nil {
-		svc.Tokens = service.NewTokenService(database)
+	if filled.Tokens == nil {
+		filled.Tokens = service.NewTokenService(database)
 	}
-	return svc
+	return &filled
 }
 
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {

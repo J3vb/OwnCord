@@ -59,8 +59,8 @@ type HubOptions struct {
 
 	// Auth is required: the handshake resolves its bearer token through it,
 	// and the periodic sweep asks it whether each live session is still good.
-	// Production passes Services.Auth; test helpers default it over the test
-	// database.
+	// Production passes Services.Sessions; test helpers default it over the
+	// test database.
 	Auth SocketAuthenticator
 
 	// LiveKit is the voice token signer; nil means voice is not configured

@@ -90,7 +90,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: user not found")
 	case errors.Is(err, service.ErrPrincipalBanned):
 		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeBanned, "you are banned"))
-		return nil, "", resumeHint{}, fmt.Errorf("auth: banned user")
+		return nil, "", resumeHint{}, fmt.Errorf("auth: %w", err) // carries "user N", see ResolveSocketPrincipal
 	case err != nil:
 		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
 		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)

@@ -112,7 +112,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 	}
 
 	// Synchronous first attempt — channel-conditional delete.
-	if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken); err != nil {
+	if _, err := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken); err != nil {
 		slog.Warn("LeaveVoiceChannelIfMatch failed, retrying in background",
 			"err", err, "user_id", userID, "channel_id", channelID,
 			"attempt", 1, "max_retries", 3)
@@ -137,7 +137,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 				}
 				delay *= 2
 
-				if _, retryErr := h.db.LeaveVoiceChannelIfMatch(retryCtx, userID, channelID, joinToken); retryErr != nil {
+				if _, retryErr := h.voice.LeaveIfMatch(retryCtx, userID, channelID, joinToken); retryErr != nil {
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",
 						"err", retryErr, "user_id", userID, "channel_id", channelID,
 						"attempt", attempt, "max_retries", maxRetries)
