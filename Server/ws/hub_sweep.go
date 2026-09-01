@@ -125,7 +125,7 @@ func (h *Hub) sweepRevokedSessions() {
 
 	// One batched lookup for every connected client instead of a query per
 	// client per sweep. The expiry and ban rules behind the verdicts are
-	// AuthService's — the same ones the handshake applies — so a live session
+	// SessionService's — the same ones the handshake applies — so a live session
 	// and a resuming one cannot disagree about what "still valid" means.
 	hashes := make([]string, len(snapshot))
 	for i, c := range snapshot {

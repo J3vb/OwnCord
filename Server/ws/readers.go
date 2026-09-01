@@ -151,7 +151,9 @@ type PresenceStamper interface {
 
 // SocketAuthenticator is the hub's view of the auth family: who a bearer token
 // authenticates at the handshake, whether a live connection's session is still
-// good, and the connect audit row. service.AuthService satisfies it.
+// good, and the connect audit row. service.SessionService satisfies it —
+// deliberately NOT AuthService, whose broadcaster dependency would close a
+// construction cycle with the hub (see SessionService's doc).
 //
 // The refusals are sentinels, not a boolean, because the hub answers them
 // differently on the wire and the difference is the whole point: a bad
