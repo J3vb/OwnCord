@@ -138,7 +138,7 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 	// Validate that the participant has a matching voice_states row (BUG-127).
 	// A replayed token from a previous session will not have a matching row,
 	// so we remove the rogue participant from LiveKit.
-	if h.db != nil {
+	if h.voice != nil {
 		h.webhookJoinedEnforceVoiceState(ctx, userID, channelID, joinToken)
 	}
 }
@@ -147,9 +147,9 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 // handleWebhookParticipantJoined: it matches the joining participant against
 // their DB row and removes them from the SFU when the row is missing, points
 // at another channel, or carries a different join token. Callers guarantee
-// h.db != nil.
+// h.voice != nil.
 func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channelID int64, joinToken string) {
-	state, stateErr := h.db.GetVoiceState(ctx, userID)
+	state, stateErr := h.voice.State(ctx, userID)
 	if stateErr != nil {
 		// A transient read failure (I/O error, lock contention, a
 		// maintenance window) is not proof of a rogue participant —
@@ -235,10 +235,10 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 
 	if exists {
 		h.webhookLeftCleanupClient(ctx, c, userID, channelID, joinToken)
-	} else if h.db != nil {
+	} else if h.voice != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
-		deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken)
+		deleted, dbErr := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)
@@ -277,10 +277,10 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, c
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, c, userID, channelID, joinToken)
-	} else if h.db != nil {
+	} else if h.voice != nil {
 		// Client has voiceChID=0 or moved to a different channel (e.g.
 		// after F5 reload), or this webhook is for an older join instance.
-		deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken)
+		deleted, dbErr := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)
@@ -299,7 +299,7 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, c
 func (h *Hub) webhookLeftFinishLeave(ctx context.Context, c *Client, userID, channelID int64, joinToken string) {
 	h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
 
-	if h.db != nil {
+	if h.voice != nil {
 		if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 				"error", err, "user_id", userID, "channel_id", channelID)
