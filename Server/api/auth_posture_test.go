@@ -169,7 +169,7 @@ func TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401(t *testing.T) {
 	}
 
 	if len(violations) > 0 {
-		var lines []string
+		lines := make([]string, 0, len(violations))
 		for _, v := range violations {
 			lines = append(lines, fmt.Sprintf("%s → %d %s", v.Key, v.Status, v.Body))
 		}

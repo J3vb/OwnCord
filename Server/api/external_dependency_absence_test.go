@@ -140,7 +140,7 @@ func TestAbsenceContract_NoMailModuleRequirement(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 	var hits []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if mailPattern.MatchString(line) {
 			hits = append(hits, strings.TrimSpace(line))
 		}
