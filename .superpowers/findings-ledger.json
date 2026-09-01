@@ -7535,13 +7535,19 @@
       "why": "Step 2 only handles the success branch (`if data, err := os.ReadFile(keyPath); err == nil`). Every non-nil read error — EACCES, EIO, EISDIR, ELOOP, EMFILE, or a dangling symlink's ENOENT — falls through to step 3, which generates a brand-new random key and writes it with `os.WriteFile(keyPath, ..., 0o600)` (O_WRONLY|O_CREATE|O_TRUNC). Wherever the write then succeeds, the original key is destroyed. This directly contradicts the invariant the file's own siblings enforce and that TestLoadOrGenerateTOTPKey_RejectsBadKeyFile pins for the corrupt-content cases (\"a corrupt totp.key is a hard error rather than a silent regeneration (which would orphan every stored secret)\" — Server/auth/totp_encrypt_test.go:212-249, which asserts the file is *not* rewritten). Only the invalid-hex and wrong-length branches fail closed; the read-error branch fails open.",
       "repro": "On a running server with 2FA users: `chmod 200 data/totp.key` (write-only — an ACL/umask/restore artifact; the same happens on a transient EIO, EMFILE, or a symlinked key file whose target is temporarily gone). Restart the server. os.ReadFile returns EACCES, the read branch is skipped, a fresh 32-byte key is generated and os.WriteFile truncates data/totp.key with it (the file is writable, so the write succeeds). The server logs \"auto-generated TOTP encryption key and saved to disk\" and starts normally. Now every users.totp_secret in the DB is AES-GCM ciphertext under the destroyed key: totpChallengeSecret (Server/api/totp_handler.go:160) calls DecryptTOTPSecret, GCM authentication fails, the fail-closed branch (totp_encrypt.go:139-149) returns an error and POST /api/v1/auth/verify-totp answers 500 INTERNAL_ERROR for every 2FA account, forever. The accounts cannot re-enroll either, because login never gets past the second factor. The old key is gone, so there is no recovery. The correct behaviour is the one the wrong-hex/wrong-length branches already implement: return an error for any error other than os.IsNotExist(err).",
       "evidence": "Server/auth/totp_encrypt.go:45-55\n\tkeyPath := filepath.Join(dataDir, \"totp.key\")\n\tif data, err := os.ReadFile(keyPath); err == nil {\n\t\t...\n\t\treturn key, nil\n\t}\n\n\t// 3. Auto-generate a new key.\n\tkey := make([]byte, totpKeyBytes)\n\tif _, err := rand.Read(key); err != nil { ... }\n\tif err := os.MkdirAll(dataDir, 0o700); err != nil { ... }\n\tif err := os.WriteFile(keyPath, []byte(hex.EncodeToString(key)), 0o600); err != nil { ... }\n\tslog.Warn(\"auto-generated TOTP encryption key and saved to disk; ...\")",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-3",
       "suggestedFix": "Distinguish \"absent\" from \"failed\" at the single read site: `data, err := os.ReadFile(keyPath); if err == nil { ...existing decode/length checks... }; if !errors.Is(err, os.ErrNotExist) { return nil, fmt.Errorf(\"reading totp.key: %w\", err) }` before falling through to generation. routerTOTPKey already panics on a non-nil error with a configured DataDir, so this fails the boot closed exactly like the corrupt-content branches.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "39cecf3",
+        "test": "Server/auth/totp_key_failclosed_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0322",

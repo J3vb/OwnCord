@@ -5,11 +5,14 @@
 by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
-**Status:** PLANNED 2026-09-01 — plan PR open; no step started. Entry-gate
-items 1 and 2 are met; item 3 is not evidenced and opens as B4-0 (the B3-0
-precedent). The owner decisions listed below block the steps that name them.
-_Update this line — not only the step table — as steps land; the
-[README.md](README.md) row is the status authority._
+**Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
+**B4-3 opened 2026-09-01** (branch `feat/b4-3-second-factor`; evidence block
+in its section — OC-0321 closed fail-closed, S-13 persisted through the
+limiter's persister shape, emergency recovery codes built). B4-3 started
+ahead of B4-1: the "after B4-1" ordering was hot-file avoidance, and B4-1 is
+decision-blocked with no branch open. The owner decisions listed below block
+the steps that name them. _Update this line — not only the step table — as
+steps land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
