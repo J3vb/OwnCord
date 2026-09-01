@@ -124,8 +124,15 @@ type Hub struct {
 	settings SettingsReader
 
 	// readers are the hub's remaining read seams (readers.go): snapshot,
-	// visibility, member payloads, dispatch, stale-voice cleanup.
+	// visibility, member payloads, dispatch, and the disconnect stamp.
 	readers HubReaders
+
+	// voice is the voice family's service (readers.go's VoiceStore): every
+	// voice_states read and write the join, moderation, control and sweep
+	// paths make. Required, like settings and readers — a hub that could
+	// answer a voice_join with a nil store would fail on the first join
+	// rather than at construction.
+	voice VoiceStore
 
 	settingsMu         syncutil.RWMutex
 	settingsName       string

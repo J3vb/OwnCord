@@ -94,16 +94,16 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_broadcast.go":    {"adapter", "", "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
 	"ws/hub_presence.go":     {"adapter", "", "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
 	"ws/hub_visibility.go":   {"adapter", "", "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
-	"ws/hub_sweep.go":        {"move", "voice", "stale-voice sweep reads and leaves"},
+	"ws/hub_sweep.go":        {"move", "auth", "session sweep re-reads the batched session/ban rows; the voice halves left with the voice family"},
 	"ws/messages.go":         {"adapter", "", "wire types + pure status helpers"},
-	"ws/readers.go":          {"adapter", "", "the hub's read seams: db types in the interface signatures, plus DBReaders wiring the handle in"},
+	"ws/readers.go":          {"adapter", "", "the hub's read seams and the VoiceStore seam: db types in the interface signatures, plus DBReaders wiring the handle in"},
 	"ws/replay.go":           {"move", "connection", "reconnect replay selection and delivery; serve.go's row split with its code in B3-5"},
 	"ws/serve.go":            {"move", "connection", "connect/disconnect lifecycle; B3-5 splits it by family first"},
 	"ws/serve_auth.go":       {"move", "auth", "handshake auth: session, user and role lookups, connect audit, failed-handshake teardown"},
 	"ws/serve_pumps.go":      {"adapter", "", "pure StatusOffline const; the disconnect write goes through the DisconnectMarker seam (readers.go)"},
-	"ws/serve_ready.go":      {"adapter", "", "ready snapshot reads through ReadySnapshotReader; stale-voice cleanup through StaleVoiceCleaner (readers.go)"},
-	"ws/voice_join.go":       {"move", "voice", "voice state reads and writes"},
-	"ws/voice_moderation.go": {"move", "voice", "mute/deafen/move persist voice state"},
+	"ws/serve_ready.go":      {"adapter", "", "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
+	"ws/voice_join.go":       {"adapter", "", "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
+	"ws/voice_moderation.go": {"adapter", "", "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},
 }
 
 // dbImportBoundary fails on any production file above the domain layer that

@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // oc0023VideoLimitRoleID is a dedicated, non-seeded role carrying every
@@ -87,7 +88,7 @@ func TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel B: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if camRes.Error != nil {
@@ -131,7 +132,7 @@ func TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel B: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if ssRes.Error != nil {

@@ -101,7 +101,13 @@ type CommandDispatcher interface {
 
 // VoiceDeps holds dependencies for voice handlers.
 type VoiceDeps struct {
-	DB          *db.DB
+	// Voice is the voice family's service (readers.go's VoiceStore): every
+	// voice_states read and write these handlers make. Reader is the
+	// channel/role/DM side of the same paths — the rows a voice decision is
+	// taken AGAINST, which belong to other families and are read through the
+	// dispatch seam.
+	Voice       VoiceStore
+	Reader      DispatchReader
 	Limiter     *auth.RateLimiter
 	Permissions *permissions.Checker
 	// PermSvc is the cached permission service. When non-nil the permission

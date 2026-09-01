@@ -163,7 +163,10 @@ type Store interface {
 	UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) error
 	EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
 	UpdateVoiceScreenshare(ctx context.Context, userID int64, screenshare bool) error
+	EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
 	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
+	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
+	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)

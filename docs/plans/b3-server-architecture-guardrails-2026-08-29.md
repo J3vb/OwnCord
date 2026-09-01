@@ -2084,6 +2084,74 @@ from `dev` `a6fca0c`. Two rows, one on each side of the process:
   not-found, orphaned-role, pagination, hub-count-is-the-caller's and
   fail-loud rows.
 
+**Evidence — voice family, 2026-09-01** — branch `feat/b3-8-voice-family`
+stacked on `feat/b3-8-user-family` (the user family's PR was still open;
+this one merges after it). Three rows, and the family's whole persistence
+surface:
+
+- **`service.VoiceService` owns `voice_states`** — every read and write the
+  join sequence, the moderation handlers, the self controls, the stale sweep
+  and the channel teardown make. Four decisions moved with them, and they are
+  the reason the family is a `move` and not a seam. All four are about a
+  member who moves while a request about them is in flight, which is the case
+  no single call site can see: the row is written from four goroutines that
+  never meet — the member's own read pump, a moderator's read pump, the sweep,
+  and the LiveKit webhook.
+  - `Join` picks the capacity-checked insert or the plain upsert from the
+    channel's own cap, so no handler can read a cap and then take the
+    unchecked insert.
+  - `LeaveIfMatch` is the only delete: conditional on the exact `(channel,
+joinedAt)` the caller snapshotted, because a member who rejoined between
+    snapshot and delete has a NEWER row an unconditional delete would destroy.
+  - `RestoreModFlags` re-applies a moderator's mute/deafen onto the row a
+    channel switch re-created, and returns the re-read row — the caller
+    broadcasts it, so an unrestored flag reaches every client as _lifted_.
+  - `RollbackServerDeafen` carries the OC-0034/OC-0036 direction rule: an undo
+    that CLEARS follows the row to wherever it is now, an undo that RE-APPLIES
+    stays on the channel that was authorized. Both halves are pinned by
+    `service/voice_test.go`, and both were revert-proved — scoping the undo to
+    `cur.ChannelID` unconditionally fails the re-apply row with "re-applied a
+    server deafen on channel 11, which the actor was never authorized
+    against"; making `Join` ignore the cap fails with "err = <nil>, want
+    ErrVoiceChannelFull".
+- **`ws` holds a `VoiceStore`, not a handle.** `VoiceDeps.DB *db.DB` is gone,
+  replaced by `Voice VoiceStore` (the service) and `Reader DispatchReader`
+  (the channel/role/DM rows a voice decision is taken _against_, which belong
+  to other families). `HubOptions.Voice` is required like `Settings` and
+  `Readers`, with the case added to `TestNewHub_RequiredCollaborators`. Unlike
+  every read seam so far, **`*db.DB` does not satisfy `VoiceStore`** — its
+  methods are the service's — which is what distinguishes a seam that narrows
+  the handle from a family that has actually moved.
+- **`StaleVoiceCleaner` is retired.** `readers.go` promised that later
+  families would "take their methods onto real services without touching the
+  consumers"; this is that. Its two methods are `State` and `LeaveIfMatch` on
+  the service, so `HubReaders` loses a field rather than gaining one.
+- **`DispatchReader` gains `GetChannelOverridesFor`**, the one read
+  `voiceJoinPublishPerms`' bare-hub fallback still needed. The two authz
+  residue rows in the family (`ws.(*Hub).voiceJoinPublishPerms`,
+  `ws.voiceModTarget`) are untouched: the permission derivation deliberately
+  did not move, so neither did its rows.
+- **Allowlist diff**: `ws/voice_join.go` and `ws/voice_moderation.go` `move` →
+  `adapter`, both now type-only. `ws/hub_sweep.go` keeps a `move` row but
+  changes **family** `voice` → `auth`: its voice halves left, and what remains
+  is the batched session/ban read the session sweep makes, which is the auth
+  family's. **`voice` leaves the move targets**: 12 → 10 `move`, 30 → 32
+  `adapter`. Remaining: auth 8, connection 2.
+- **Characterization**: `service/voice_test.go` (7 tests, 4 subtests) pins the
+  four decisions plus the channel-scoped `matched` boolean the OC-0005 refusals
+  read, and the fail-loud reads — a broken `AllStates` must error, never return
+  an empty roster, because the sweep deletes every row it cannot match to a
+  connected client. The `ws` voice suites are unchanged apart from the
+  mechanical deps sweep; `voice_moderation_deafen_race_test.go` still drives
+  the OC-0034 window through `voiceModDeafenPreMuteRaceHook`, now moving the
+  target with `d.Voice.Join`.
+- **One behaviour deliberately preserved**: the self-toggle handlers fill their
+  `update`/`tryReserve` fields with closures over the deps rather than method
+  values off `d.Voice`. A method value evaluates its receiver where it is
+  written, so a bare `VoiceDeps` fixture would fault at handler entry instead
+  of at a write the handler may never reach — a change in failure mode this
+  refactor has no business making.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

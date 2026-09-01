@@ -707,7 +707,11 @@ func TestNewHub_RequiredCollaborators(t *testing.T) {
 	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: partial}); err == nil {
 		t.Fatal("NewHub with an incomplete reader bundle must error")
 	}
-	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), ReplayRingSize: -1}); err == nil {
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database)}); err == nil {
+		t.Fatal("NewHub without the voice store must error")
+	}
+	voice := service.NewVoiceService(database)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), Voice: voice, ReplayRingSize: -1}); err == nil {
 		t.Fatal("NewHub with a negative replay ring must error")
 	}
 }

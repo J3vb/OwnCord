@@ -380,13 +380,13 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// The configured seam, never a caller-supplied handle: binding here is what
 	// lets a service-backed or instrumented Ready reader actually intercept the
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
-	// h.readers.StaleVoice.
+	// own read through the voice service.
 	database := h.readers.Ready
 	// Clean stale voice state BEFORE building ready and registering.
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
-	if vs, err := h.readers.StaleVoice.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
+	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
 		h.freshConnectCleanStaleVoice(ctx, c, vs)
 	}
 
@@ -521,7 +521,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	}
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
-	if _, delErr := h.readers.StaleVoice.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
 	// The DB row is gone, but the still-registered OLD *Client (if any) is

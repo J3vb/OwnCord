@@ -72,7 +72,7 @@ func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps a
 		rateWindow:   voiceMuteWindow,
 		rateMsg:      "too many mute toggles",
 		serverDeafen: false,
-		update:       d.DB.UpdateVoiceMute,
+		update:       func(ctx context.Context, userID int64, on bool) error { return d.Voice.SetSelfMute(ctx, userID, on) },
 		updateLog:    "ws handleVoiceMuteV2 UpdateVoiceMute",
 		failMsg:      "failed to update mute state",
 		changedLog:   "voice mute changed",
@@ -90,7 +90,7 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		rateWindow:   voiceDeafenWindow,
 		rateMsg:      "too many deafen toggles",
 		serverDeafen: true,
-		update:       d.DB.UpdateVoiceDeafen,
+		update:       func(ctx context.Context, userID int64, on bool) error { return d.Voice.SetSelfDeafen(ctx, userID, on) },
 		updateLog:    "ws handleVoiceDeafenV2 UpdateVoiceDeafen",
 		failMsg:      "failed to update deafen state",
 		changedLog:   "voice deafen changed",
@@ -113,6 +113,11 @@ type voiceStreamToggle struct {
 	// tryReserve is the atomic under-cap check-and-set for this stream's
 	// column; update is its plain unconditional write. Both are handed to
 	// enableVideoSlot, which owns the shared-budget rule.
+	//
+	// The handlers fill these with closures over the deps, not with method
+	// values off d.Voice: a method value evaluates its receiver where it is
+	// written, so a bare VoiceDeps fixture would fault at handler entry
+	// instead of at the write the handler may never reach.
 	tryReserve func(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
 	update     func(ctx context.Context, userID int64, enabled bool) error
 	logPrefix  string // handler name, for slog messages
@@ -145,7 +150,7 @@ func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enab
 	}
 
 	if enabled {
-		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, t.perm, t.permLabel); r != nil {
+		if r := requirePerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, voiceChID, t.perm, t.permLabel); r != nil {
 			return *r
 		}
 		// Enforce the channel's shared voice_max_video budget atomically (OC-0023:
@@ -177,8 +182,10 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		rateMsg:    "too many camera toggles",
 		perm:       permissions.UseVideo,
 		permLabel:  "USE_VIDEO",
-		tryReserve: d.DB.EnableCameraIfUnderLimit,
-		update:     d.DB.UpdateVoiceCamera,
+		tryReserve: func(ctx context.Context, userID, chID int64, max int) (bool, error) {
+			return d.Voice.ReserveCamera(ctx, userID, chID, max)
+		},
+		update:     func(ctx context.Context, userID int64, on bool) error { return d.Voice.SetCamera(ctx, userID, on) },
 		logPrefix:  "handleVoiceCameraV2",
 		kind:       "camera",
 		disableLog: "ws handleVoiceCameraV2 UpdateVoiceCamera",
@@ -197,8 +204,10 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 		rateMsg:    "too many screenshare toggles",
 		perm:       permissions.ShareScreen,
 		permLabel:  "SHARE_SCREEN",
-		tryReserve: d.DB.EnableScreenshareIfUnderLimit,
-		update:     d.DB.UpdateVoiceScreenshare,
+		tryReserve: func(ctx context.Context, userID, chID int64, max int) (bool, error) {
+			return d.Voice.ReserveScreenshare(ctx, userID, chID, max)
+		},
+		update:     func(ctx context.Context, userID int64, on bool) error { return d.Voice.SetScreenshare(ctx, userID, on) },
 		logPrefix:  "handleVoiceScreenshareV2",
 		kind:       "screenshare",
 		disableLog: "ws handleVoiceScreenshareV2 UpdateVoiceScreenshare",
@@ -222,7 +231,7 @@ func enableVideoSlot(
 	unconditionalSet func(ctx context.Context, userID int64, enabled bool) error,
 	logPrefix, kind string,
 ) *Result {
-	ch, chErr := d.DB.GetChannel(ctx, voiceChID)
+	ch, chErr := d.Reader.GetChannel(ctx, voiceChID)
 	if chErr != nil {
 		// Fail closed: an unreadable channel row is not "no cap
 		// configured" — falling through to the unconditional enable
@@ -256,7 +265,7 @@ func enableVideoSlot(
 // error is not a denial: it is reported as INTERNAL so an operator sees it
 // rather than the user seeing a permission-shaped refusal.
 func refuseIfServerSilenced(ctx context.Context, d VoiceDeps, userID int64, deafen bool) *Result {
-	state, err := d.DB.GetVoiceState(ctx, userID)
+	state, err := d.Voice.State(ctx, userID)
 	if err != nil {
 		slog.Error("ws refuseIfServerSilenced GetVoiceState", "err", err, "user_id", userID)
 		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
@@ -282,7 +291,7 @@ func refuseIfServerSilenced(ctx context.Context, d VoiceDeps, userID int64, deaf
 // voiceStateBroadcast reads the current voice state from DB and returns a
 // BroadcastAll event. Shared by all voice control V2 handlers.
 func voiceStateBroadcast(ctx context.Context, d VoiceDeps, userID int64) Result {
-	state, err := d.DB.GetVoiceState(ctx, userID)
+	state, err := d.Voice.State(ctx, userID)
 	if err != nil {
 		slog.Error("ws voiceStateBroadcast GetVoiceState", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to broadcast voice state update"}}
