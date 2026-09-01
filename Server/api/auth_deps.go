@@ -38,9 +38,13 @@ type AuthService interface {
 	// DeleteAccount confirms the password, anonymises and bans the account and
 	// broadcasts member_ban. ip is only logged and audited.
 	DeleteAccount(ctx context.Context, p service.Principal, password, ip string) error
-	// EnableTOTP confirms the password and stages a pending secret; qrURI is
-	// the enrolment payload for the authenticator app.
-	EnableTOTP(ctx context.Context, p service.Principal, password string) (qrURI string, err error)
+	// EnableTOTP confirms the password and stages a pending secret; the
+	// enrolment carries the otpauth URI for the authenticator app and the
+	// emergency recovery codes, shown once.
+	EnableTOTP(ctx context.Context, p service.Principal, password string) (*service.TOTPEnrollment, error)
+	// RegenerateRecoveryCodes confirms the password and replaces the
+	// account's emergency recovery codes; requires 2FA to be enabled.
+	RegenerateRecoveryCodes(ctx context.Context, p service.Principal, password string) ([]string, error)
 	// ConfirmTOTP verifies code against the pending secret, persists it and
 	// revokes the caller's other sessions.
 	ConfirmTOTP(ctx context.Context, p service.Principal, password, code string) (*service.TOTPChangeResult, error)

@@ -40,6 +40,9 @@ type authSuccessResponse struct {
 	PartialToken string        `json:"partial_token,omitempty"`
 	Requires2FA  bool          `json:"requires_2fa"`
 	User         *userResponse `json:"user,omitempty"`
+	// RecoveryCodesRemaining is present only when an emergency recovery
+	// code completed the second step: how many the account has left.
+	RecoveryCodesRemaining *int `json:"recovery_codes_remaining,omitempty"`
 }
 
 // MountAuthRoutes registers all auth endpoints on the given router. svc owns
@@ -82,6 +85,10 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 	r.With(requireAuth,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Delete("/api/v1/users/me/totp", handleDisableTOTP(svc))
+
+	r.With(requireAuth,
+		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
+		Post("/api/v1/users/me/totp/recovery-codes", handleRegenerateRecoveryCodes(svc))
 }
 
 // handleRegister processes POST /api/v1/auth/register.
@@ -317,9 +324,10 @@ func authResponse(res *service.AuthResult) authSuccessResponse {
 		}
 	}
 	return authSuccessResponse{
-		Token:       res.Token,
-		Requires2FA: false,
-		User:        toUserResponse(res.User),
+		Token:                  res.Token,
+		Requires2FA:            false,
+		User:                   toUserResponse(res.User),
+		RecoveryCodesRemaining: res.RecoveryCodesRemaining,
 	}
 }
 
@@ -345,6 +353,8 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusBadRequest, "INVALID_CREDENTIALS"
 	case errors.Is(err, service.ErrTOTPAlreadyEnabled):
 		status, code = http.StatusConflict, "TOTP_ALREADY_ENABLED"
+	case errors.Is(err, service.ErrConflict):
+		status, code = http.StatusConflict, "CONFLICT"
 	case errors.Is(err, service.ErrRateLimited):
 		status, code = http.StatusTooManyRequests, "RATE_LIMITED"
 	case errors.Is(err, service.ErrUnauthorized):

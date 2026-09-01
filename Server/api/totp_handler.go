@@ -81,15 +81,51 @@ func handleEnableTOTP(svc AuthService) http.HandlerFunc {
 			return
 		}
 
-		qrURI, err := svc.EnableTOTP(r.Context(), p, req.Password)
+		enrolment, err := svc.EnableTOTP(r.Context(), p, req.Password)
 		if err != nil {
 			writeAuthError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, totpEnableResponse{
-			QRURI:       qrURI,
-			BackupCodes: []string{},
+			QRURI:       enrolment.URI,
+			BackupCodes: enrolment.RecoveryCodes,
 		})
+	}
+}
+
+// recoveryCodesResponse is the JSON shape returned by
+// POST /api/v1/users/me/totp/recovery-codes. The field keeps the name the
+// enrolment response has always used for the same codes.
+type recoveryCodesResponse struct {
+	BackupCodes []string `json:"backup_codes"`
+}
+
+// handleRegenerateRecoveryCodes processes
+// POST /api/v1/users/me/totp/recovery-codes: password-confirmed, it replaces
+// the account's emergency recovery codes and returns the new set once.
+func handleRegenerateRecoveryCodes(svc AuthService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principal(r)
+		if !ok {
+			writeNotAuthenticated(w)
+			return
+		}
+
+		var req passwordConfirmationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: "malformed request body",
+			})
+			return
+		}
+
+		codes, err := svc.RegenerateRecoveryCodes(r.Context(), p, req.Password)
+		if err != nil {
+			writeAuthError(r.Context(), w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, recoveryCodesResponse{BackupCodes: codes})
 	}
 }
 
