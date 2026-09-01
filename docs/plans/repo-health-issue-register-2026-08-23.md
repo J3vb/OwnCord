@@ -76,8 +76,8 @@ together as if each row were a unique defect:
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     322 |
-| Open      |      53 |
+| Fixed     |     325 |
+| Open      |      50 |
 | Declined  |       3 |
 | Duplicate |       1 |
 | **Total** | **379** |

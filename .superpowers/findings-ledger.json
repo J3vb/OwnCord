@@ -7575,13 +7575,18 @@
       "why": "HandleChannelFocus reads `latestID` on the reader pool and then, two round trips later, issues `UpdateReadState(user, channel, latestID)` — whose SQL unconditionally sets `mention_count = 0` with no message-id guard. A mention raised for a message NEWER than the snapshotted `latestID` (by SendMessage's background `applyMentionCounts` goroutine) is wiped by that blind write. The sibling writer `IncrementMentionCounts` was explicitly hardened against the mirror-image race with an atomic `WHERE read_states.last_message_id < ?` guard; the clearing side has no equivalent, and nothing ever recomputes mention_count (GetChannelUnreadCounts reads the stored column), so the badge is lost forever.",
       "repro": "User U has read state (last_message_id=90, mention_count=0) in channel C, whose newest message id is 100. G1 = U's WS readPump handling `mark_read` for C (right-click → \"Mark as Read\", or one frame of the client's markAllRead burst — U is NOT looking at C). G2 = another user's send of \"@U ping\" in C.\n\n1. G1: GetLatestMessageID(C) -> 100.\n2. G1: GetReadState(U,C) -> (90, 0, found) — the skip branch does not fire.\n3. G2: CreateMessageWithMentions commits message id=101 mentioning U; SendMessage returns and `s.bg` spawns applyMentionCounts.\n4. G2 (background goroutine): IncrementMentionCounts(C, 101, [U]) -> guard `90 < 101` passes -> read_states.mention_count becomes 1.\n5. G1: UpdateReadState(U, C, 100) -> last_message_id=100, mention_count=0.\n\nResult: U's row is (last_message_id=100, mention_count=0) while message 101 mentions U and is unread. The channel still shows an unread count (101 > 100) but the @-mention badge is gone, and no code path ever re-derives it — IncrementMentionCounts for 101 has already run and DecrementMentionCounts only ever subtracts. The same unguarded wipe also runs from Server/service/message_crud.go:71 (SendMessage advancing the author's own read state to msgID), where a concurrent mention from another user with a higher id is destroyed identically.",
       "evidence": "Server/service/channel.go:281-291\n    latestID, err := s.st.GetLatestMessageID(ctx, channelID)\n    if err == nil {\n        lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)\n        if rsErr == nil && found && lastRead == latestID && mentions == 0 { ... return ch, nil }\n        if wErr := s.st.UpdateReadState(ctx, userID, channelID, latestID); wErr != nil { ... }\n\nServer/db/queries/sqlite/messages.sql:32-39 (UpdateReadState)\n    ON CONFLICT(user_id, channel_id) DO UPDATE SET\n        last_message_id = excluded.last_message_id,\n        mention_count = 0;      -- no msgID guard\n\nServer/db/mention_queries.go:229-231 (IncrementMentionCounts — the guard that exists on the other side)\n    ON CONFLICT(user_id, channel_id) DO UPDATE SET\n        mention_count = mention_count + 1\n    WHERE read_states.last_message_id < ?\n\nServer/service/message_crud.go:104-106 — the increment runs on its own goroutine:\n    s.bg(func() { s.applyMentionCounts(context.WithoutCancel(ctx), channelID, msgID, authorID, mentions, isDM, participantIDs) })\nServer/service/message.go:173 — bg: func(fn func()) { go fn() }",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "concurrency",
       "suggestedFix": "Make the read-and-clear atomic in one writer statement instead of passing a snapshot: replace the GetLatestMessageID/UpdateReadState pair with a single upsert that computes the id inline, e.g. `INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES (?, ?, (SELECT COALESCE(MAX(id),0) FROM messages WHERE channel_id = ? AND deleted = 0), 0) ON CONFLICT(user_id, channel_id) DO UPDATE SET last_message_id = excluded.last_message_id, mention_count = 0`. Any message committed before it is covered by last_message_id; any committed after finds `last_message_id < msgID` false only when it is genuinely covered, so IncrementMentionCounts' existing guard closes the other direction. One shared query change; HandleChannelFocus keeps its GetReadState skip-check, and message_crud.go:72 (which already has the exact msgID) can keep calling the existing signature.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fix": {
+        "commit": "074aea0",
+        "test": "Server/db/read_state_mention_race_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0324",
@@ -8183,13 +8188,18 @@
       "why": "messages_fts uses FTS5's default unicode61 tokenizer, where every non-alphanumeric rune ('_', '.', '\\'', '/', ':', '@', …) is a token separator, so \"user_id\" is indexed as the two tokens `user` and `id`. sanitizeFTSQuery keeps letters/digits/space, folds only '-' to a space, and silently DROPS every other rune — which concatenates the neighbouring tokens into one term that exists nowhere in the index. The '-' arm exists for exactly this reason (its own comment: \"Folding to a space (rather than dropping it) still matches the indexed tokens\"), but the rule was never applied to the other separators.",
       "repro": "Post a message \"don't touch user_id in docs/protocol.md\". FTS indexes the tokens don, t, touch, user, id, in, docs, protocol, md. Now search (GET /api/v1/messages/search?q=user_id, or the in-app search overlay): sanitizeFTSQuery returns \"userid\", the MATCH finds no such token, and SearchMessages returns zero hits with HTTP 200. Same for \"don't\" -> \"dont\", \"docs/protocol\" -> \"docsprotocol\", \"example.com\" -> \"examplecom\". Searching \"user id\" (with a space) matches, proving the content is indexed and reachable — only the punctuated spelling the user actually copied out of the message is silently unmatchable. Expected: fold each separator to a space, exactly as '-' already is, so the query becomes the same token sequence the tokenizer produced.",
       "evidence": "\tfor _, r := range q {\n\t\tswitch {\n\t\tcase unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ':\n\t\t\tsb.WriteRune(r)\n\t\tcase r == '-':\n\t\t\tsb.WriteRune(' ')\n\t\t}\n\t}\n// (no default: every other rune is dropped, joining adjacent tokens)",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "db-storage",
       "suggestedFix": "In sanitizeFTSQuery, replace the special-cased `case r == '-': sb.WriteRune(' ')` with a `default: sb.WriteRune(' ')` arm, so every non-alphanumeric rune folds to a space exactly as '-' already does. Output stays within the documented charset (letters, digits, spaces), so the fuzz/unit contracts still hold, and the query becomes the same token sequence unicode61 produced when indexing.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fix": {
+        "commit": "074aea0",
+        "test": "Server/db/message_edit_delete_race_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0358",
@@ -8200,13 +8210,18 @@
       "why": "MessageService.EditMessage checks msg.Deleted from a read taken before the write, and db.EditMessage re-reads the row but still issues an UPDATE keyed on id alone. OC-0284 added `AND deleted = 0` to SoftDeleteMessage and SetMessagePinned (and both check RowsAffected) precisely so a message that races the writer surfaces as ErrNotFound instead of silently succeeding; the edit path was not given the same guard, so it commits content/edited_at onto an already soft-deleted row and then reports success.",
       "repro": "Alice has message 100 open in the composer for editing. Interleave: (a) EditMessage reads message 100 via GetMessage — Deleted=false, passes the msg.Deleted guard and editMessageCheckAccess; (b) a moderator's chat_delete for message 100 commits (deleted=1, DecrementMentionCounts reverses its badges); (c) Alice's EditMessageContent UPDATE runs — no deleted predicate, so it rewrites the tombstone's content and stamps edited_at, then ReplaceMessageMentions re-inserts message_mentions rows for the now-deleted message that nothing will ever reverse; (d) the service returns success and the ws layer fans out chat_edited for a message every client has already tombstoned. Expected: `AND deleted = 0` plus a RowsAffected check mapping to ErrDeletedMessage, exactly as DeleteMessage and SetMessagePinned already do.",
       "evidence": "messages.sql:19  -- name: EditMessageContent :one\n                 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?\nmessages.sql:24  UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;\nmessages.sql:27  UPDATE messages SET pinned  = ? WHERE id = ? AND deleted = 0;\nmessage_queries.go:179  updated, err := d.q.EditMessageContent(ctx, dbgen.EditMessageContentParams{Content: content, ID: id})",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "db-storage",
       "suggestedFix": "Add `AND deleted = 0` to the EditMessageContent statement in Server/db/queries/sqlite/messages.sql (via the db-change skill so dbgen regenerates) and, in db.EditMessage, map the resulting sql.ErrNoRows to ErrNotFound/a deleted-message error rather than a bare wrap, so MessageService.EditMessage surfaces ErrDeletedMessage — one guard in the shared query, exactly as OC-0284 did for SoftDeleteMessage.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fix": {
+        "commit": "074aea0",
+        "test": "Server/db/message_edit_delete_race_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0359",

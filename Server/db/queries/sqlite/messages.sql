@@ -16,7 +16,11 @@ WHERE m.channel_id = ? AND m.deleted = 0
 ORDER BY m.id DESC LIMIT ?;
 
 -- name: EditMessageContent :one
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
+-- The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
+-- already carry (OC-0284): an edit that races a delete must not rewrite a
+-- tombstone. No row comes back when it loses, which the wrapper reports as
+-- ErrNotFound rather than a silent success (OC-0358).
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
           mentions_everyone;
 
@@ -34,6 +38,21 @@ SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0;
 -- only caller, and a focused channel has no outstanding mentions by definition.
 INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
 VALUES (?, ?, ?, 0)
+ON CONFLICT(user_id, channel_id) DO UPDATE SET
+    last_message_id = excluded.last_message_id,
+    mention_count = 0;
+
+-- name: MarkChannelReadAtLatest :exec
+-- Mark-read that computes its own watermark inside the writer statement.
+-- Passing a snapshot read moments earlier is what destroyed a mention raised
+-- during the round trip (OC-0323): the clear zeroed mention_count while
+-- last_message_id still pointed behind the mentioning message, so the badge was
+-- gone and nothing ever recomputed it. Computing MAX(id) here means every
+-- message committed before this statement is covered by last_message_id, and
+-- every message committed after it finds IncrementMentionCounts' own
+-- `last_message_id < msgID` guard true, so its mention survives.
+INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
+VALUES (?, ?, (SELECT COALESCE(MAX(m.id), 0) FROM messages m WHERE m.channel_id = ? AND m.deleted = 0), 0)
 ON CONFLICT(user_id, channel_id) DO UPDATE SET
     last_message_id = excluded.last_message_id,
     mention_count = 0;
