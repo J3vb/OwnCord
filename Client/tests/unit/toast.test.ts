@@ -25,6 +25,15 @@ describe("ToastContainer", () => {
     expect(toastEl!.textContent).toBe("Hello world");
   });
 
+  it("tags each toast with its type class, warning included", () => {
+    toast.show("Heads up", "warning");
+    toast.show("Done", "success");
+
+    const els = container.querySelectorAll(".toast");
+    expect(els[0]!.classList.contains("toast-warning")).toBe(true);
+    expect(els[1]!.classList.contains("toast-success")).toBe(true);
+  });
+
   it("auto-dismiss removes toast after duration", () => {
     toast.show("Temporary", "info", 3000);
 

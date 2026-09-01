@@ -15,7 +15,7 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
-import { initToast, teardownToast, showToast } from "@lib/toast";
+import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
@@ -496,8 +496,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onClose: () => closeSettings(),
       onChangePassword: async (oldPassword, newPassword) => {
         try {
-          await api.changePassword(oldPassword, newPassword);
-          showToast("Password changed successfully", "success");
+          const outcome = await api.changePassword(oldPassword, newPassword);
+          showChangeOutcomeToast(outcome, "Password changed successfully");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to change password";
           showToast(msg, "error");
@@ -555,9 +555,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onConfirmTotp: async (password, code) => {
         try {
-          await api.confirmTotp(password, code);
+          const outcome = await api.confirmTotp(password, code);
           updateUser({ totp_enabled: true });
-          showToast("Two-factor authentication enabled", "success");
+          showChangeOutcomeToast(outcome, "Two-factor authentication enabled");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to confirm 2FA";
           showToast(msg, "error");
@@ -566,9 +566,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onDisableTotp: async (password) => {
         try {
-          await api.disableTotp(password);
+          const outcome = await api.disableTotp(password);
           updateUser({ totp_enabled: false });
-          showToast("Two-factor authentication disabled", "success");
+          showChangeOutcomeToast(outcome, "Two-factor authentication disabled");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to disable 2FA";
           showToast(msg, "error");
