@@ -5,10 +5,11 @@
 by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
-**Status:** PLANNED 2026-09-01 — plan PR open; no step started. Entry-gate
-items 1 and 2 are met; item 3 is not evidenced and opens as B4-0 (the B3-0
-precedent). The owner decisions listed below block the steps that name them.
-_Update this line — not only the step table — as steps land; the
+**Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
+**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`;
+evidence in the B4-12 section — OC-0340 and OC-0341 fixed test-first,
+revert-proofs pass). The owner decisions listed below block the steps that
+name them. _Update this line — not only the step table — as steps land; the
 [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -687,6 +688,40 @@ true. The client unit suite stays green and no assertion is weakened
 Exit: all eight B4-tagged rows `fixed` in the ledger (or re-tagged with a
 written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
+
+**Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
+`feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` (number recorded
+below once opened). Fix commit `190344e`; ledger records flipped in the
+follow-up on the same branch (`fix.commit = 190344e`, `revertProof = pass`).
+Both findings had moved since they were filed: B3-8 put the CLI's logic
+behind `TokenService`, so OC-0340's hole was `Create` folding a negative
+lifetime into "never" (the admin route refused it at its edge; the CLI did
+not), and OC-0341's was still the CLI's revoke committing to the id branch.
+
+- **OC-0340:** `TokenService.Create` refuses `lifetime < 0` as
+  `ErrBadRequest` — the seam both callers share, so the CLI's
+  `--expires -1h` now exits 2 with the reason and mints nothing; zero stays
+  the documented "never" (`TestTokenService_CreateStoresOnlyTheHash` keeps
+  pinning that). Tests: the negative cases in
+  `TestTokenService_CreateRefusesUnusableInput`;
+  `TestTokenCreate_NegativeExpiryIsRefused` at the CLI (also that no-expiry
+  and a positive window still mint). Revert-proof: both fail with the
+  original `Create`.
+- **OC-0341:** `tokenRevoke` tries an all-digit argument as an id first and,
+  on `ErrNotFound`, as a label; id precedence is kept and now stated in the
+  usage text — the ambiguity the ledger noted ("a token with id 2024 would
+  be revoked instead") is the documented rule, not a silent surprise.
+  Test: `TestTokenRevoke_NumericLabelFallsThroughToLabel` — a label
+  `2024` revokes; an argument matching a live id revokes that token first;
+  once it is gone the same argument reaches the label; nothing left exits 1.
+  Revert-proof: fails with the original `tokenRevoke`.
+- **Gates:** `gofmt`, `go vet`, `go test -race` on `.` (the `main`
+  package, its first tests) and `service` green; pinned `golangci-lint`
+  v2.11.3 0 issues; `gendocs` drift-free (no route or config change);
+  `check:docs` counts moved to 331 fixed / 48 open on this branch (the
+  count-bearing documents are edited together with the ledger; B4-3's
+  branch moves the same lines for OC-0321 — whichever merges second
+  re-derives).
 
 ## Exit gate
 
