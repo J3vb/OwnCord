@@ -6,9 +6,9 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
-**B4-0 opened 2026-09-01** (branch `feat/b4-0-data-lifecycle`; evidence block
-in its section — the document, the `alphasnap` helper, no new advisory
-needed). Entry-gate items 1 and 2 met at draft; item 3's public half is
+**B4-0 opened 2026-09-01** (PR #1497 from `feat/b4-0-data-lifecycle`;
+evidence block in its section — the document, the `alphasnap` helper, no new
+advisory needed). Entry-gate items 1 and 2 met at draft; item 3's public half is
 B4-0's document, its private half stays counted-not-described. The owner
 decisions listed below block the steps that name them; B4-2 is the next
 unblocked step. _Update this line — not only the step table — as steps land;
@@ -276,9 +276,8 @@ met with this PR's SHA as evidence; any private advisories filed are counted
 private material, the evidence block records that instead of new advisories.
 
 **Evidence, 2026-09-01** — branch `feat/b4-0-data-lifecycle` from `dev`
-`aabac60`; PR to `dev` (number recorded below once opened; the squash SHA is
-recorded by the next step's PR, as B3 did). Closes entry-gate item 3's public
-half.
+`aabac60`; PR #1497 to `dev` (the squash SHA is recorded by the next step's
+PR, as B3 did). Closes entry-gate item 3's public half.
 
 - **Document:** [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md),
   linked from `docs/architecture/README.md`. Eight operations (O1 account
