@@ -88,19 +88,32 @@ func warnLowDisk(log *slog.Logger, label, path string) {
 	}
 }
 
-// getOutboundIP returns the preferred outbound IP of this machine by dialing
-// a known external address (no actual connection is made with UDP).
+// getOutboundIP returns an address this machine can be reached at, for the
+// startup banner only: the first global-unicast IPv4 on any interface, else
+// the first global-unicast IPv6, else "localhost". It reads the interface
+// table and never opens a socket — the previous UDP "dial" of an external
+// address sent no packet, but a network capture still saw a connect() to it
+// at every start, which is exactly what BPR-055's proof must not contain.
 func getOutboundIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return "localhost"
 	}
-	defer conn.Close() //nolint:errcheck
-	addr, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok {
-		slog.Warn("getOutboundIP: unexpected LocalAddr type, falling back to localhost",
-			"type", fmt.Sprintf("%T", conn.LocalAddr()))
-		return "localhost"
+	v6 := ""
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok || !ipNet.IP.IsGlobalUnicast() {
+			continue
+		}
+		if ip4 := ipNet.IP.To4(); ip4 != nil {
+			return ip4.String()
+		}
+		if v6 == "" {
+			v6 = ipNet.IP.String()
+		}
 	}
-	return addr.IP.String()
+	if v6 != "" {
+		return v6
+	}
+	return "localhost"
 }
