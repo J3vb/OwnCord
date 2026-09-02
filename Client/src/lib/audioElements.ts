@@ -10,7 +10,7 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
 } from "livekit-client";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref, STORAGE_PREFIX } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "@lib/livekitSession";
 import { voiceStore } from "@stores/voice.store";
@@ -45,8 +45,13 @@ const VOLUME_NOT_SET = -1;
 
 /** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's
  *  GainNode-backed setVolume(). On a miss at the host-scoped key, reads
- *  through to the pre-scoping unscoped key once and persists the result
- *  under the scoped key so the read-through isn't repeated. */
+ *  through to the pre-scoping unscoped key once, persists the result under
+ *  the scoped key and consumes the legacy key, so the migration applies to
+ *  the FIRST host connected to post-upgrade and no other. User ids are
+ *  per-server autoincrement integers: leaving the legacy key in place would
+ *  let every later brand-new host miss its own scoped key, read through to
+ *  the same legacy value and silence the unrelated user N there too
+ *  (OC-0313) — the shape channel-mutes.ts fixed for OC-0288. */
 function getSavedUserVolume(userId: number): number {
   const scopedKey = userVolumeKey(userId);
   if (currentHost === null) return loadPref<number>(scopedKey, 100);
@@ -54,9 +59,11 @@ function getSavedUserVolume(userId: number): number {
   const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);
   if (scoped !== VOLUME_NOT_SET) return scoped;
 
-  const legacy = loadPref<number>(`userVolume_${userId}`, VOLUME_NOT_SET);
+  const legacyKey = `userVolume_${userId}`;
+  const legacy = loadPref<number>(legacyKey, VOLUME_NOT_SET);
   if (legacy !== VOLUME_NOT_SET) {
     savePref(scopedKey, legacy);
+    localStorage.removeItem(STORAGE_PREFIX + legacyKey);
     return legacy;
   }
   return loadPref<number>(scopedKey, 100);
