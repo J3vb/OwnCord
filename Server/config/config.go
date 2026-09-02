@@ -284,6 +284,13 @@ type SecurityConfig struct {
 	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
 	// clamped to [0.1, 100].
 	AuthRateLimitMultiplier float64 `koanf:"auth_rate_limit_multiplier"`
+	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
+	// checks and hashes on every auth route, recovery-code matching at the
+	// second-factor step — run at once: the B4-4 admission budget. An
+	// over-budget attempt is refused with 429 RATE_LIMITED, runs no bcrypt
+	// and consumes no lockout attempt. 0 or unset = twice the CPU count
+	// (never below 4); clamped to [1, 4096].
+	ExpensiveAuthConcurrency int `koanf:"expensive_auth_concurrency"`
 }
 
 // defaults returns the default configuration.
@@ -342,6 +349,8 @@ func defaults() Config {
 		},
 		Security: SecurityConfig{
 			AuthRateLimitMultiplier: 1.0,
+			// 0 = auth.DefaultAdmissionBudget(): twice the core count.
+			ExpensiveAuthConcurrency: 0,
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:     false,

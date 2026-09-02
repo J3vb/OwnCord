@@ -25,6 +25,9 @@ the user; OC-0354 waits on owner question 8);
 `DELETE /api/v1/users/me/sessions` with its explicit response, the
 `session_revoke_all` audit row and the two-account proof; the new-login
 signal half waits on owner question 8);
+**B4-4 merged 2026-09-02** (PR #1504 = `eecf99b`; one atomic admission budget
+at every bcrypt site with race and bounded-work proofs; SEC-01's register row
+records the control and closes on the owner's advisory ID);
 **B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
 PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
 test-first, revert-proofs pass). The owner decisions listed below block the steps that
@@ -655,6 +658,54 @@ the gap.
 
 Exit: every expensive-auth site is budgeted; race/load tests green; SEC-01's
 public closure evidence satisfied and the advisory updated by the owner.
+
+**Evidence — 2026-09-02 (branch `feat/b4-4-admission-budget`, PR #1504):**
+
+- **Control.** `auth.AdmissionBudget` (`Server/auth/admission.go`) is one
+  counting semaphore: `TryAcquire` takes a slot without waiting or refuses,
+  the returned release is idempotent, and `Peak`/`InFlight` expose the
+  high-water mark the proofs read. The shared `auth.RateLimiter` owns the
+  single instance (`Admission()`), sized once at startup from
+  `security.expensive_auth_concurrency` (`SetAdmissionBudget` in
+  `internal/app.StartRuntime`; 0 = twice the core count, never below 4;
+  clamped to 1–4096), so the auth routes, the profile handler and the hub
+  take one server-owned decision.
+- **Sites.** Every bcrypt computation on an authentication path holds the
+  slot for exactly the expensive step: login (acquired before the failure
+  reservation, so a refusal charges neither the per-IP nor the per-username
+  budget), registration's hash, account deletion, TOTP enable/confirm/
+  disable and recovery-code regeneration (through
+  `requirePasswordConfirmation`, now a method on the service), the ten-hash
+  recovery-code issue, the up-to-ten-compare recovery-code match at
+  `verify-totp` (acquired before that attempt is reserved), and the
+  change-password route's old-password compare and new-password hash in
+  `api/profile_handler.go`. The refusal is `service.ErrAuthBusy` — 429
+  `RATE_LIMITED`, "too many authentication attempts in progress, try again
+  later" — and `confirmPassword` passes it through without counting a
+  failure.
+- **Proofs.** `TestAdmissionBudget_AdmitsAtMostSizeAtOnce` (40 goroutines
+  against a budget of 3 under `-race`: exactly 3 admitted, 37 refused, peak
+  3, drained after release), `TestAdmissionBudget_ReleaseIsIdempotent`,
+  `TestAdmissionBudget_RefusedWorkRunsNoBcrypt`;
+  `TestExpensiveAuth_RefusedWhenBudgetExhausted` (all eight service sites
+  answer `ErrAuthBusy` with the budget held, and the held slot stays the
+  peak), `TestExpensiveAuth_BusyRefusalsChargeNoAttempt` (ten refused
+  logins, three refused deletions and three refused confirmations leave
+  every lockout untripped for the real attempts that follow),
+  `TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget` (24 concurrent
+  logins against a budget of 2: peak at most 2, every outcome admitted or
+  refused, none lost); `TestLogin_RefusedWhenAuthBudgetExhausted` and
+  `TestChangePassword_RefusedWhenAuthBudgetExhausted` pin the 429 shape at
+  the transport and the recovery once the slot is back. Revert-proof: with
+  the budget calls removed from the sites the service and api tests fail —
+  no `ErrAuthBusy` is ever returned.
+- **Register.** SEC-01's row records the control and stays `confirmed`: the
+  flip carries the advisory ID the owner records (step 3, the HP-2
+  follow-up shape) — the one exit item this branch cannot do.
+- **Docs.** `docs/server-configuration.md` gains the key (the hand-written
+  Security table and the regenerated index); `docs/security.md` states the
+  contract in one line under two-factor authentication.
+- **Gates:** recorded at push in the PR's test plan.
 
 ## B4-5 — Locally generated recovery kit
 
