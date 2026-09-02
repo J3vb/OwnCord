@@ -145,6 +145,21 @@ type MessagesFt struct {
 	Content string `json:"content"`
 }
 
+type PartialAuthChallenge struct {
+	TokenHash string `json:"tokenHash"`
+	UserID    int64  `json:"userId"`
+	Device    string `json:"device"`
+	IpAddress string `json:"ipAddress"`
+	Failures  int64  `json:"failures"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+type PendingTotpEnrollment struct {
+	UserID    int64  `json:"userId"`
+	SecretEnc string `json:"secretEnc"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
 type Plugin struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
@@ -202,6 +217,20 @@ type Session struct {
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type TotpRecoveryCode struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	CodeHash  string  `json:"codeHash"`
+	CreatedAt string  `json:"createdAt"`
+	UsedAt    *string `json:"usedAt"`
+}
+
+type TotpUsedCode struct {
+	UserID    int64  `json:"userId"`
+	CodeHash  string `json:"codeHash"`
+	ExpiresAt string `json:"expiresAt"`
 }
 
 type User struct {

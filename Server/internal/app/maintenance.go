@@ -78,6 +78,13 @@ func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 		tickFailed = true
 	}
 
+	// Expired login challenges, staged enrolments and spent TOTP codes
+	// (migration 032) — the persisted second-factor state's sweep.
+	if err := database.CleanupExpiredSecondFactorState(bgCtx); err != nil {
+		log.Warn("failed to clean up expired second-factor state", "error", err)
+		tickFailed = true
+	}
+
 	// Scheduled backups + retention pruning, driven by the
 	// backup_schedule / backup_retention admin settings.
 	if err := admin.MaintainBackups(bgCtx, database, settings); err != nil {

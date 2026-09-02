@@ -5,7 +5,9 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -40,9 +42,17 @@ func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 		return key, nil
 	}
 
-	// 2. Check key file on disk.
+	// 2. Check key file on disk. Only a confirmed absence may fall through to
+	// generation: every stored TOTP secret is ciphertext under this key, so
+	// replacing the file on a read error (EACCES after a permissions change,
+	// EIO, a directory at the path, a dangling symlink) would orphan every
+	// second factor on the server with no way back (OC-0321). The corrupt-
+	// content branches below already fail closed; the read branch now does
+	// too.
 	keyPath := filepath.Join(dataDir, "totp.key")
-	if data, err := os.ReadFile(keyPath); err == nil {
+	data, err := os.ReadFile(keyPath)
+	switch {
+	case err == nil:
 		key, decErr := hex.DecodeString(string(data))
 		if decErr != nil {
 			return nil, fmt.Errorf("totp.key contains invalid hex: %w", decErr)
@@ -52,6 +62,15 @@ func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 		}
 		slog.Info("loaded TOTP encryption key from file", "path", keyPath)
 		return key, nil
+	case errors.Is(err, fs.ErrNotExist):
+		// ReadFile follows symlinks, so ENOENT also describes a symlink whose
+		// target is missing. That is something at the path, not nothing:
+		// refuse rather than write a new key through it.
+		if _, lstatErr := os.Lstat(keyPath); lstatErr == nil {
+			return nil, fmt.Errorf("totp.key at %s is a symlink whose target does not exist; restore the target or remove the link", keyPath)
+		}
+	default:
+		return nil, fmt.Errorf("reading totp.key: %w (refusing to generate a replacement — that would orphan every stored TOTP secret)", err)
 	}
 
 	// 3. Auto-generate a new key.
@@ -65,14 +84,48 @@ func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 		return nil, fmt.Errorf("creating data directory for totp.key: %w", err)
 	}
 
-	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(key)), 0o600); err != nil {
-		return nil, fmt.Errorf("writing totp.key: %w", err)
+	if err := writeKeyFileAtomic(keyPath, []byte(hex.EncodeToString(key))); err != nil {
+		return nil, err
 	}
 
 	slog.Warn("auto-generated TOTP encryption key and saved to disk; "+
 		"set OWNCORD_TOTP_KEY env var for production deployments",
 		"path", keyPath)
 	return key, nil
+}
+
+// writeKeyFileAtomic writes the key through a sibling temp file and a
+// rename, so a crash mid-write can never leave a truncated totp.key that the
+// next start refuses (docs/architecture/data-lifecycle.md, O7 A1). The
+// rename is the only step that makes the key visible, and it is atomic on
+// every filesystem the server runs on. A stale temp file from an earlier
+// interrupted run is removed first rather than failing the exclusive create.
+func writeKeyFileAtomic(keyPath string, contents []byte) error {
+	tmpPath := keyPath + ".tmp"
+	_ = os.Remove(tmpPath)
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: the path is dataDir/totp.key.tmp, not input
+	if err != nil {
+		return fmt.Errorf("creating totp.key temp file: %w", err)
+	}
+	if _, err := tmp.Write(contents); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("writing totp.key temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("syncing totp.key temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("closing totp.key temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, keyPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("writing totp.key: %w", err)
+	}
+	return nil
 }
 
 // EncryptTOTPSecret encrypts a plaintext TOTP secret using AES-256-GCM.
