@@ -39,8 +39,7 @@ registration modes with the upgrade mapping, the audited transition and
 the approval queue — BG-10's server half); **B4-8 opened 2026-09-02** (branch
 `feat/b4-8-diagnostics`, PR #1510; evidence in its section — the diagnostics
 inventory, the `egress-sites` invariant, the no-telemetry capture, the
-support-bundle contract). Next OC-0324 (B4-12(c)), then B4-5 → B4-6, HP-4,
-B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+support-bundle contract). **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions; awaiting the owner's signature). Next OC-0324 (B4-12(c)), then B4-5 → B4-6, and after HP-4's signature B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1109,6 +1108,26 @@ Questions the scorecard answers with commands:
 Owner signs. Acceptance authorises B4-9, B4-10, B4-11 (and may relax
 B4-10 ∥ B4-11). Pre-squash SHAs of the chain's PRs are recorded here.
 
+**Evidence, 2026-09-02** — branch `docs/hp-4-scorecard` from `dev` `b5e9d4a`;
+PR to `dev` (draft). [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md)
+answers the five questions with commands and their output:
+
+- **Drills D1–D5** as `TestHP4_*` in `Server/db/hp4_drills_test.go`, each on
+  its own `alphasnap.Copy`, with the before/after subject inventories pasted
+  (D1: exactly the predicted leftovers; D2: a restore resurrects the account
+  and nothing records the deletion; D3: newer data gone, schema HEAD's; D4:
+  the replay window survives O1 until pruned; D5: the sweep strands a file on
+  demand). The tracked snapshot stayed byte-identical.
+- **Drafts with rollbacks** in `docs/plans/hp-4-drafts/`: `erasure_jobs`,
+  `deletion_markers`, `audit_unlinking`, `retention`.
+- **Decisions recorded** (open to reversal at signature): erasure purges the
+  subject's replay events; `secure_delete` + WAL truncate for freed-page
+  honesty; markers live outside the database file and are replayed on every
+  open and restore; audit rows keep integrity through a marker token; no
+  holds, no DM retention, pinned exempt; B4-10 → B4-11 stays serial.
+- **Signature pending:** the owner signs the scorecard; acceptance authorises
+  B4-9 → B4-10 → B4-11.
+
 ## B4-9 — Complete account erasure
 
 BPR-052, BG-11; roadmap workstream 9. Replaces today's anonymise-and-ban
@@ -1143,6 +1162,13 @@ owner question 9 for message semantics.
 5. One PR (service + db via `db-change` + the job runner in the maintenance
    loop + tests). Client confirmation UX stays B9 (BG-11 wording).
 
+_Amendment 2026-09-02 (owner decision 9; HP-4 decisions 1 and 2):_ erased
+users' messages are **hard-deleted rows** (channel history shows nothing
+where they were), the subject's `events` rows go in the same transaction,
+the erasure connection runs with `secure_delete` on and truncates the WAL
+after commit; the job row and its file journal follow the `erasure_jobs`
+draft in `hp-4-drafts/`.
+
 Exit: lineage checklist green on the alpha copy; interruption/restart tests
 green; `trust-model.md:345`'s "No secure deletion" paragraph rewritten to
 the new truth (backup caveat remains until B4-10).
@@ -1175,6 +1201,15 @@ backup half.
 4. One PR, `db-change` for the schema; restore-path changes reviewed against
    the B4-0 restore failure model.
 
+_Amendment 2026-09-02 (HP-4 decisions 3 and 4):_ markers live in
+`data/erasure/markers.sqlite`, outside the file a restore overwrites, keyed
+by an HMAC of the user id under a key generated beside the TOTP key, and are
+replayed against the main database on every open and after every restore;
+audit rows about an erased subject keep action, time and order with
+`actor_id`/`target_id` zeroed, detail rewritten and the marker token in
+`audit_log.subject_token` — the `deletion_markers` and `audit_unlinking`
+drafts.
+
 Exit: unlinkability and non-resurrection tests green on alpha copies;
 `trust-model.md` backup caveat updated; BPR-053 row satisfied.
 
@@ -1204,6 +1239,14 @@ allow ∥). Blocked on owner questions 4 and 5.
 5. One PR. Deletion markers (B4-10) are not written for retention deletions
    — retention is policy, not subject erasure — the distinction is recorded
    in the data-lifecycle doc.
+
+_Amendment 2026-09-02 (owner decisions 4 and 5; HP-4 decisions 5 and 6):_
+minimum window one day; a channel policy overrides the server policy in
+either direction; pinned messages exempt; server and channel scope only, DMs
+untouched; **no hold mechanism** — retention is absolute; each sweep writes
+a `messages`-scoped marker so a restore cannot resurrect what the policy
+removed, which keeps B4-11 after B4-10. The `retention` draft in
+`hp-4-drafts/` is the shape.
 
 Exit: retention clock/attachment cleanup tests green (roadmap evidence);
 default-indefinite proven for fresh + upgraded (alpha copy) servers; holds
