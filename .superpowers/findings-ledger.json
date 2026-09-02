@@ -8173,13 +8173,19 @@
       "why": "The 2FA panel's entire state is derived from `authStore.getState().user?.totp_enabled`, but nothing on any production code path ever sets that field from the server. Its only two writers are the local post-action calls in MainPage (`updateUser({ totp_enabled: true })` at :559 and `false` at :570), and the dispatcher's AUTH_OK handler replaces `authStore.user` wholesale on *every* auth_ok — fresh connect and every WS resume alike — with the `auth_ok` payload user, which `buildAuthOK` (Server/ws/serve_ready.go:27-51) does not include `totp_enabled` in. So the flag is undefined at login and is reset to undefined by the first reconnect after an in-session enable.",
       "repro": "Enable 2FA on an account, then restart the desktop app (or just let the WebSocket drop and resume once). Open Settings → Account → Two-Factor Authentication. The badge reads \"Disabled\" and `buildTotpEnrollForm` is rendered; `buildTotpDisableView` is unreachable, so there is no way to turn 2FA off from the UI. Clicking Enable posts /users/me/totp/enable and the server answers 409 \"disable 2FA before re-enabling\" — an instruction the UI makes impossible to follow. The badge also actively lies about the state of a security control. Within a single session the same wipe happens on reconnect: enable 2FA (panel flips to \"Enabled\"), drop the socket, resume — the next render reads undefined again.",
       "evidence": "AccountTab.ts:786  `const enabled = authStore.getState().user?.totp_enabled === true;`\nAccountTab.ts:802-806  `if (enabled) { contentArea.appendChild(buildTotpDisableView(...)); } else { contentArea.appendChild(buildTotpEnrollForm(...)); }`\ndispatcher.ts:276  `setAuth(authStore.getState().token ?? \"\", payload.user, payload.server_name, payload.motd);`\nauth.store.ts:57-65  setAuth does `authStore.setState(() => ({ token, user, serverName, motd, isAuthenticated: true }))` — a wholesale replace, no merge.\nServer/ws/serve_ready.go:29-46  auth_ok payload user = {id, username, avatar, role, display_name, about, custom_status, status} — no totp_enabled.\nClient/src/lib/types.ts:823-828  `export interface AuthResponse { token?, partial_token?, requires_2fa }` — the login response's real `totp_enabled` (Server/api/auth_handler.go:62 and :721) is not even declared client-side, and main.ts's onLogin/onRegister/onTotpSubmit only read `result.token` / `result.requires_2fa` / `result.partial_token`.\n`api.getMe()` (api.ts:321) is never called anywhere in Client/src, and its `MemberResponse` (types.ts:916-925) carries no totp_enabled either.\nServer/api/totp_handler.go:194-200  `if user.TOTPSecret != nil && *user.TOTPSecret != \"\" { 409 TOTP_ALREADY_ENABLED \"disable 2FA before re-enabling\" }`",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "flow-reconnect",
       "suggestedFix": "Fix it in the one payload both the fresh-connect and resume paths share rather than in each client writer: add `\"totp_enabled\": user.TOTPSecret != nil` to the `user` map in buildAuthOK (Server/ws/serve_ready.go:29-46), declaring the field on the auth_ok user in protocol/schema.json and regenerating Server/ws/message_types.go + Client/src/lib/protocolTypes.ts via the protocol-change skill. That makes authStore.user.totp_enabled authoritative on every connect, so the existing wholesale setAuth stays correct and no client-side merge is needed.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-02",
+      "fix": {
+        "commit": "1c7c5b2",
+        "test": "Client/tests/unit/auth.store.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0355",

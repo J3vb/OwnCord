@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip_address TEXT,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL
+    expires_at TEXT    NOT NULL,
+    unseen     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);

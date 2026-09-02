@@ -319,7 +319,11 @@ does not claim").
 - A user may hold up to 25 sessions; the 26th evicts the oldest
   (`Server/db/auth_queries.go:237`, `:249-251`).
 - Each session records device, IP, creation, last use and expiry
-  (`001_initial_schema.sql:37-46`).
+  (`001_initial_schema.sql:37-46`), and whether it is an unacknowledged new
+  login: a session created by a login is `unseen` until the account lists
+  its sessions from another device (`033_sessions_unseen.sql`,
+  `UserService.MarkSessionsSeen`; B4-7's new-login signal, REST-only by owner
+  decision 8).
 - Users list and revoke their own sessions: `GET`/`DELETE /api/v1/users/me/sessions`
   (`Server/api/profile_handler.go:92-93`); revocation is scoped to the calling
   user (`Server/service/user.go:366`).

@@ -578,6 +578,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           throw err;
         }
       },
+      onRefreshTotpStatus: async () => {
+        // GET /users/me is the only response that states totp_enabled;
+        // auth_ok never does (OC-0354). A failed read changes nothing.
+        try {
+          const me = await api.getMe();
+          if (typeof me.totp_enabled === "boolean") {
+            updateUser({ totp_enabled: me.totp_enabled });
+          }
+        } catch (err) {
+          log.warn("Failed to refresh the 2FA state", err);
+        }
+      },
       onStatusChange: (status) => applyPresence(status),
     });
     settingsOverlay.mount(root);

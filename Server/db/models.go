@@ -54,6 +54,9 @@ type Session struct {
 	CreatedAt string
 	LastUsed  string
 	ExpiresAt string
+	// Unseen is the new-login signal (B4-7): true from the login that created
+	// the session until the account lists its sessions from another device.
+	Unseen bool
 }
 
 // APIToken represents a row in the api_tokens table — a long-lived, revocable

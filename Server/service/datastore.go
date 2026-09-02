@@ -140,6 +140,7 @@ type Store interface {
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
 	TouchSession(ctx context.Context, tokenHash string) error
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
+	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	GetUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 

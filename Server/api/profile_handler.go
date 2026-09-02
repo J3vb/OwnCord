@@ -95,6 +95,10 @@ type sessionResponse struct {
 	CreatedAt string `json:"created_at"`
 	LastUsed  string `json:"last_used"`
 	IsCurrent bool   `json:"is_current"`
+	// Unseen is the new-login signal (B4-7): true from the login that created
+	// the session until the account lists its sessions from another device.
+	// This listing acknowledges every row but the caller's own.
+	Unseen bool `json:"unseen"`
 }
 
 // sessionsListResponse is the JSON envelope for GET /api/v1/users/me/sessions.
@@ -560,7 +564,20 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 				CreatedAt: s.CreatedAt,
 				LastUsed:  s.LastUsed,
 				IsCurrent: sess != nil && s.ID == sess.ID,
+				Unseen:    s.Unseen,
 			})
+		}
+
+		// The response carries the flags as they were; this listing is the
+		// acknowledgement (B4-7), except for the caller's own session. An
+		// API-token principal has no session and acknowledges every row.
+		var callerSessionID int64
+		if sess != nil {
+			callerSessionID = sess.ID
+		}
+		if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
 		}
 
 		writeJSON(w, http.StatusOK, resp)

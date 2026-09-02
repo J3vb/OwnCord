@@ -83,6 +83,20 @@ func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, err
 	return sessions, nil
 }
 
+// MarkSessionsSeen acknowledges the account's new logins (B4-7): every
+// session's unseen flag clears except the caller's own, since a listing from
+// another device is what "seen" means. Returns how many rows changed.
+func (d *DB) MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error) {
+	res, err := d.q.MarkSessionsSeen(ctx, dbgen.MarkSessionsSeenParams{
+		UserID: userID,
+		ID:     exceptSessionID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("MarkSessionsSeen: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // DeleteSessionByID removes a session by its ID, but only if it belongs to
 // the specified user. Returns ErrNotFound if the session does not exist or
 // does not belong to the user.
