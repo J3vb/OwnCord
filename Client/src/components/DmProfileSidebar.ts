@@ -120,8 +120,14 @@ function loadNote(userId: number, host: string): string {
     // channel-mutes.ts fixed for OC-0288.
     const legacy = localStorage.getItem(legacyNoteKey(userId));
     if (legacy === null) return "";
-    localStorage.setItem(scopedNoteKey(userId, host), legacy);
-    localStorage.removeItem(legacyNoteKey(userId));
+    try {
+      localStorage.setItem(scopedNoteKey(userId, host), legacy);
+      localStorage.removeItem(legacyNoteKey(userId));
+    } catch {
+      // Quota: the scoped copy could not be written. Keep the legacy key
+      // for a later retry rather than losing the note behind an empty
+      // panel (Codex on PR #1502); the note itself was read fine.
+    }
     return legacy;
   } catch {
     return "";

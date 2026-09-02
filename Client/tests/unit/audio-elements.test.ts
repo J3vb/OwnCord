@@ -285,7 +285,12 @@ describe("AudioElements", () => {
       // what the module is expected to remove.
       const legacyStorageKey = "owncord:settings:userVolume_7";
       localStorage.setItem(legacyStorageKey, "0");
+      // savePref persists for real here, so the scoped copy reads back and
+      // the migration may consume the legacy entry.
+      const saved = new Map<string, unknown>();
+      mockSavePref.mockImplementation((key: string, val: unknown) => saved.set(key, val));
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (saved.has(key)) return saved.get(key);
         if (key === "userVolume_7" && localStorage.getItem(legacyStorageKey) !== null) return 0;
         return defaultVal;
       });
@@ -299,6 +304,32 @@ describe("AudioElements", () => {
         setAudioVolumeHost("b.example.com");
         expect(elements.getUserVolume(7)).toBe(100);
         expect(mockSavePref).not.toHaveBeenCalledWith("userVolume_7:b.example.com", 0);
+      } finally {
+        localStorage.removeItem(legacyStorageKey);
+      }
+    });
+
+    it("keeps the legacy key when the scoped copy could not be written (Codex on PR #1502)", () => {
+      // savePref swallows a quota failure. Consuming the legacy entry on
+      // the strength of a write that never landed would leave this user's
+      // only persisted volume gone — 100 on the next read. The mocked
+      // savePref persists nothing, which is exactly a failed write.
+      const legacyStorageKey = "owncord:settings:userVolume_7";
+      localStorage.setItem(legacyStorageKey, "0");
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "userVolume_7" && localStorage.getItem(legacyStorageKey) !== null) return 0;
+        return defaultVal;
+      });
+
+      try {
+        setAudioVolumeHost("a.example.com");
+        expect(elements.getUserVolume(7)).toBe(0);
+        expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 0);
+        // Not consumed: the scoped copy never read back.
+        expect(localStorage.getItem(legacyStorageKey)).toBe("0");
+        // The next read still serves the legacy value (and retries the copy).
+        expect(elements.getUserVolume(7)).toBe(0);
+        expect(mockSavePref).toHaveBeenCalledTimes(2);
       } finally {
         localStorage.removeItem(legacyStorageKey);
       }

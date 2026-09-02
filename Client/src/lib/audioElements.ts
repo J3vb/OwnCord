@@ -63,7 +63,13 @@ function getSavedUserVolume(userId: number): number {
   const legacy = loadPref<number>(legacyKey, VOLUME_NOT_SET);
   if (legacy !== VOLUME_NOT_SET) {
     savePref(scopedKey, legacy);
-    localStorage.removeItem(STORAGE_PREFIX + legacyKey);
+    // Consume the legacy key only once the scoped copy is really there:
+    // savePref swallows a quota failure, and deleting the only persisted
+    // copy would reset this user to 100 on the next read (Codex on PR
+    // #1502). A failed write leaves the legacy key for the next attempt.
+    if (loadPref<number>(scopedKey, VOLUME_NOT_SET) === legacy) {
+      localStorage.removeItem(STORAGE_PREFIX + legacyKey);
+    }
     return legacy;
   }
   return loadPref<number>(scopedKey, 100);
