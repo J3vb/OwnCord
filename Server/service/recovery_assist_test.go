@@ -33,27 +33,27 @@ func TestRecoveryAssist_IssueIsOwnerOnlyWithFixedWording(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
 
-	if _, err := svc.IssueRecoveryAssist(ctx, user, owner.ID, "in_person"); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.IssueRecoveryAssist(ctx, user.ID, owner.ID, "in_person"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("issue by a member = %v, want forbidden", err)
 	}
-	if _, err := svc.IssueRecoveryAssist(ctx, nil, user.ID, "in_person"); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("issue without an actor = %v, want forbidden", err)
+	if _, err := svc.IssueRecoveryAssist(ctx, 0, user.ID, "in_person"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("issue by an unknown actor = %v, want forbidden", err)
 	}
 	for _, bad := range []string{"", "checked their ID at the office", "IN_PERSON"} {
-		if _, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, bad); !errors.Is(err, ErrBadRequest) {
+		if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, bad); !errors.Is(err, ErrBadRequest) {
 			t.Fatalf("verification %q = %v, want bad request", bad, err)
 		}
 	}
-	if _, err := svc.IssueRecoveryAssist(ctx, owner, 9999, "in_person"); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, 9999, "in_person"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown target = %v, want not found", err)
 	}
-	if _, err := svc.IssueRecoveryAssist(ctx, owner, owner.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, owner.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("self-issuance = %v, want bad request", err)
 	}
 	if err := database.BanUser(ctx, user.ID, "test", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
-	if _, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("banned target = %v, want bad request", err)
 	}
 	if a, _ := database.GetRecoveryAssist(ctx, user.ID); a != nil {
@@ -72,7 +72,7 @@ func TestRecoveryAssist_RedeemsOnceWithoutSecondFactor(t *testing.T) {
 	_, _, logs := newKitService(t, false) // a fresh captured log for this test's hygiene check
 	_ = logs
 
-	issue, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "video_call")
+	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "video_call")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRecoveryAssist_LogCarriesNoRecoveryMaterial(t *testing.T) {
 	database := svc.st.(*db.DB)
 	oid, _ := database.CreateUser(ctx, "owner", "hash", int(permissions.OwnerRoleID))
 	owner, _ := database.GetUserByID(ctx, oid)
-	issue, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person")
+	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestRecoveryAssist_LogCarriesNoRecoveryMaterial(t *testing.T) {
 func TestRecoveryAssist_ExpiryAndReplacement(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
-	first, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person")
+	first, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRecoveryAssist_ExpiryAndReplacement(t *testing.T) {
 		t.Fatalf("sessions after a refused attempt = %d, want both kept", len(sessions))
 	}
 	// A new issuance replaces it; the old credential never works again.
-	second, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "voice_call")
+	second, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "voice_call")
 	if err != nil {
 		t.Fatalf("re-issue: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestRecoveryAssist_ExpiryAndReplacement(t *testing.T) {
 func TestRecoveryAssist_SurvivesARestart(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
-	issue, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person")
+	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRecoveryAssist_SurvivesARestart(t *testing.T) {
 func TestRecoveryAssist_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
-	issue, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person")
+	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
-	cred, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person")
+	cred, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 		t.Fatalf("kit after an assisted recovery = %v, want success", err)
 	}
 	// A kit recovery withdraws an outstanding credential.
-	if _, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person"); err != nil {
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); err != nil {
 		t.Fatalf("re-issue: %v", err)
 	}
 	recovered, _ := database.GetUserByID(ctx, user.ID)
@@ -294,11 +294,11 @@ func TestRecoveryAssist_IssuanceIsBudgeted(t *testing.T) {
 	svc, owner, user, database := newAssistFixture(t, false)
 	// Per target: the fourth issuance for one account within the hour is refused.
 	for i := range recoveryAssistTargetLimit {
-		if _, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person"); err != nil {
+		if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); err != nil {
 			t.Fatalf("issuance %d: %v", i+1, err)
 		}
 	}
-	if _, err := svc.IssueRecoveryAssist(ctx, owner, user.ID, "in_person"); !errors.Is(err, ErrRateLimited) {
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("over the per-target budget = %v, want rate limited", err)
 	}
 	// Per owner: across accounts, the sixth issuance is refused.
@@ -312,7 +312,7 @@ func TestRecoveryAssist_IssuanceIsBudgeted(t *testing.T) {
 	}
 	issued := 0
 	for _, uid := range others {
-		if _, err := svc.IssueRecoveryAssist(ctx, owner, uid, "in_person"); err == nil {
+		if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, uid, "in_person"); err == nil {
 			issued++
 		} else if !errors.Is(err, ErrRateLimited) {
 			t.Fatalf("unexpected refusal: %v", err)

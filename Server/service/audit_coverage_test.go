@@ -109,7 +109,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		{"recovery credential issued", "recovery_assist_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, owner, user, database := newAssistFixture(t, false)
 			rec := audittest.Install(t, database)
-			issue, err := svc.IssueRecoveryAssist(context.Background(), owner, user.ID, "in_person")
+			issue, err := svc.IssueRecoveryAssist(context.Background(), owner.ID, user.ID, "in_person")
 			if err != nil {
 				t.Fatalf("IssueRecoveryAssist: %v", err)
 			}

@@ -380,7 +380,12 @@ func (s *AuthService) recoveryLockout(ctx context.Context, in RecoverInput, user
 // the account, shown once. Only its argon2id verifier is stored; a later
 // issuance replaces an outstanding one. Redemption is the public recovery
 // route, which signs the holder in without the second factor.
-func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actor *db.User, targetID int64, verification string) (*RecoveryAssistIssue, error) {
+func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID int64, verification string) (*RecoveryAssistIssue, error) {
+	actor, err := s.st.GetUserByID(ctx, actorID)
+	if err != nil {
+		slog.Error("recovery assist: GetUserByID (actor) failed", "err", err, "actor_id", actorID)
+		return nil, ErrRecoveryAssistFailed
+	}
 	if actor == nil {
 		return nil, ErrRecoveryAssistOwnerOnly
 	}

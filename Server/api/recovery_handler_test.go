@@ -116,8 +116,7 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	uid := seedUser(t, database, "assisted", "AssistedPass1!", 4)
 	oldToken := issueSessionToken(t, database, uid)
 	oid := seedUser(t, database, "owner", "OwnerPass1!", int(permissions.OwnerRoleID))
-	owner, _ := database.GetUserByID(ctx, oid)
-	issue, err := service.NewAuthService(database, limiter, nil, nil).IssueRecoveryAssist(ctx, owner, uid, "voice_call")
+	issue, err := service.NewAuthService(database, limiter, nil, nil).IssueRecoveryAssist(ctx, oid, uid, "voice_call")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAssist: %v", err)
 	}

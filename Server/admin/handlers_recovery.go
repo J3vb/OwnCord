@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -39,17 +38,12 @@ func handleIssueRecoveryCredential(authSvc *service.AuthService) http.HandlerFun
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "recovery service unavailable")
 			return
 		}
-		actor, ok := r.Context().Value(adminUserKey).(*db.User)
-		if !ok || actor == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-			return
-		}
 		var req issueRecoveryCredentialRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
 			return
 		}
-		issue, err := authSvc.IssueRecoveryAssist(r.Context(), actor, id, req.Verification)
+		issue, err := authSvc.IssueRecoveryAssist(r.Context(), actorFromContext(r), id, req.Verification)
 		if err != nil {
 			writeRecoveryErr(w, err)
 			return
