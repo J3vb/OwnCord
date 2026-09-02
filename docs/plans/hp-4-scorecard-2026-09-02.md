@@ -27,26 +27,26 @@ of [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md).
 `dev` is squash-merge only; each step's pre-squash commits survive on its
 pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 
-| PR    | Step                                                                                                      | On `dev`                       |
-| ----- | --------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| #1497 | B4-0 — failure models, data-class inventory, drill protocol, alphasnap                                    | `d8653ea`                      |
-| #1498 | B4-2 — absence proofs                                                                                     | `920b034`                      |
-| #1499 | B4-3 — OC-0321, durable second factor, recovery codes                                                     | `9587c9e`                      |
-| #1500 | B4-7 — sign-out-everywhere                                                                                | `21080e2`                      |
-| #1501 | B4-12(d) — OC-0340, OC-0341                                                                               | `9515174`                      |
-| #1502 | B4-12(a) — OC-0313, OC-0329                                                                               | `12dbc88`                      |
-| #1503 | B4-12(b) — OC-0314                                                                                        | `366f199`                      |
-| #1504 | B4-4 — admission budget                                                                                   | `eecf99b`                      |
-| #1505 | B4-12(a) follow-up — quota-safe migrations                                                                | `a595786`                      |
-| #1506 | owner decisions (closed; the content landed via #1507)                                                    | closed, not merged             |
-| #1507 | B4-7 — new-login signal, OC-0354                                                                          | `dc69fbb`                      |
-| #1508 | B4-1 — registration modes                                                                                 | `8bd4212`                      |
-| #1510 | B4-8 — diagnostics inventory, egress-sites, no-telemetry capture                                          | `b5e9d4a`                      |
-| #1509 | B4-12(c) — OC-0324                                                                                        | open — ready, auto-merge armed |
-| #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair | open — ready, auto-merge armed |
-| #1512 | B4-5 — recovery kit                                                                                       | open — draft, stacked on #1511 |
-| #1513 | B4-6 — owner-assisted recovery                                                                            | open — draft, stacked on #1512 |
-| #1514 | B4-8 review fixes                                                                                         | open — ready, auto-merge armed |
+| PR    | Step                                                                                                      | On `dev`                             |
+| ----- | --------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| #1497 | B4-0 — failure models, data-class inventory, drill protocol, alphasnap                                    | `d8653ea`                            |
+| #1498 | B4-2 — absence proofs                                                                                     | `920b034`                            |
+| #1499 | B4-3 — OC-0321, durable second factor, recovery codes                                                     | `9587c9e`                            |
+| #1500 | B4-7 — sign-out-everywhere                                                                                | `21080e2`                            |
+| #1501 | B4-12(d) — OC-0340, OC-0341                                                                               | `9515174`                            |
+| #1502 | B4-12(a) — OC-0313, OC-0329                                                                               | `12dbc88`                            |
+| #1503 | B4-12(b) — OC-0314                                                                                        | `366f199`                            |
+| #1504 | B4-4 — admission budget                                                                                   | `eecf99b`                            |
+| #1505 | B4-12(a) follow-up — quota-safe migrations                                                                | `a595786`                            |
+| #1506 | owner decisions (closed; the content landed via #1507)                                                    | closed, not merged                   |
+| #1507 | B4-7 — new-login signal, OC-0354                                                                          | `dc69fbb`                            |
+| #1508 | B4-1 — registration modes                                                                                 | `8bd4212`                            |
+| #1510 | B4-8 — diagnostics inventory, egress-sites, no-telemetry capture                                          | `b5e9d4a`                            |
+| #1509 | B4-12(c) — OC-0324                                                                                        | `fc4c562` (merged after measurement) |
+| #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair | open — ready, auto-merge armed       |
+| #1512 | B4-5 — recovery kit                                                                                       | open — draft, stacked on #1511       |
+| #1513 | B4-6 — owner-assisted recovery                                                                            | open — draft, stacked on #1512       |
+| #1514 | B4-8 review fixes                                                                                         | open — ready, auto-merge armed       |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is
 serialized as the plan required; #1512 and #1513 carry #1511's commits until
