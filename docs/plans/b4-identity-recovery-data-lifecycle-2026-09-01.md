@@ -31,8 +31,10 @@ records the control and closes on the owner's advisory ID);
 **B4-12 batch (d) merged 2026-09-02** (PR #1501 = `9515174`; OC-0340 and
 OC-0341 closed — a negative token lifetime is refused at the service seam both
 callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
-8–10 recorded 2026-09-02** (amendments under the questions): next B4-7's
-new-login half with OC-0354, then B4-1 with OC-0324, B4-5 → B4-6, B4-8, HP-4,
+8–10 recorded 2026-09-02** (amendments under the questions);
+**B4-7 new-login half opened 2026-09-02** (branch `feat/b4-7-new-login`,
+PR #1507; evidence in its section — the REST-only `unseen` session flag, and
+OC-0354 closed with it). Next B4-1 with OC-0324, then B4-5 → B4-6, B4-8, HP-4,
 B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
@@ -884,6 +886,48 @@ then.
   (`TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly`) rather than a
   lowered floor.
 
+**Evidence, 2026-09-02 — new-login signal half** — branch
+`feat/b4-7-new-login` from `dev` `a595786`; PR to `dev` #1507 (draft, opened
+2026-09-02). Fix commit `1c7c5b2`; ledger record OC-0354 flipped on the same
+branch (`fix.commit = 1c7c5b2`, `revertProof = pass`). Owner decision 8 chose
+the REST-only contract, so there is no protocol change and no B2 fixture work.
+BG-08's server half is complete; the UI that surfaces both signals is B9.
+
+- **Contract:** `sessions.unseen` (migration 033, `INTEGER NOT NULL DEFAULT
+0`, so rows from before the upgrade read as seen). A session created by a
+  login (`db.CreateSession`) starts unseen; a registration's first session
+  does not (`CreateUserWithInvite` — no other device exists to tell).
+  `GET /api/v1/users/me/sessions` carries `unseen` per row and is the
+  acknowledgement: `UserService.MarkSessionsSeen` clears every row but the
+  caller's own once the response is built, so the device that just signed in
+  never acknowledges itself and the response shows the flags as they were;
+  an API-token principal (no session) acknowledges every row. No audit row —
+  nothing security-sensitive changes.
+- **Tests:** `TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers` (db:
+  flags per login, the caller's own row kept, another account untouched, id 0
+  acknowledges all, the token lookup carries the flag);
+  `TestCreateUserWithInvite_Success` (registration's first session not
+  flagged); `TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists` (api:
+  the phone lists first and acknowledges only the laptop; the laptop sees the
+  phone as new exactly once). Revert-proof: with the acknowledgement made a
+  no-op, both flag tests fail.
+- **OC-0354 (B4-12 batch (b), the server-side half of the round trip):** the
+  profile response already stated `totp_enabled`; the client never read it,
+  and every `auth_ok` (whose user object omits the field) wiped it. The
+  Account tab's 2FA section now calls `onRefreshTotpStatus` (`GET /users/me`
+  → `updateUser`) when it opens, rebuilding only if the answer differs from
+  what it shows, and `setAuth` keeps the known value when the same account
+  re-authenticates without it — never across accounts, and the payload wins
+  when present. Tests: `auth.store.test.ts`, `totp-settings.test.ts`;
+  revert-proof: two cases fail with the two changes undone.
+- **Docs:** `api.md` (the contract on the sessions route), `trust-model.md`
+  (multi-device bullet), `schema.md` regenerated; the hand-written `sessions`
+  fixtures in the admin, api, db and ws test packages gained the column.
+- **Gates:** four build-tag builds, `go vet`, `go test -race ./...`,
+  `-tags deadlock ./ws/`, pinned `golangci-lint` v2.11.3 0 issues, `sqlc
+generate` and `genprotocol` no diff; client full unit suite, `tsc`, `oxlint`
+  and `eslint`; `check:docs` (336 fixed / 43 open) and the ledger check.
+
 ## B4-8 — Local diagnostics, support-bundle contract, no-telemetry proof
 
 BPR-055; roadmap workstream 12; the B4 half of BG-15 per owner question 10.
@@ -1150,6 +1194,11 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   keeps the warning inline (yellow, no three-second fade) on a partial
   success — the fields clear either way, because the password did change.
   Pinned in `settings-overlay.test.ts` and the MainPage-level test.
+
+- **Server-side half, OC-0354 (2026-09-02, PR #1507 with B4-7's new-login
+  half):** the flag round-trips from `GET /users/me` and a same-account
+  re-authentication keeps it — see B4-7's second evidence block; the ledger
+  record flips in that PR, closing batch (b).
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
 `feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,
