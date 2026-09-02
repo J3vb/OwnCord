@@ -18,6 +18,9 @@ on migration, so a pre-scoping value reaches the first host only);
 **B4-2 merged 2026-09-02** (PR #1498 = `920b034`; the BPR-042 route-posture
 and dead-credential proofs and the BPR-043 absence proofs, all with negative
 controls — test files only, no gap found);
+**B4-12 batch (b), client half, merged 2026-09-02** (PR #1503 = `366f199`;
+OC-0314 closed — the partial-success warning on password/2FA changes reaches
+the user; OC-0354 waits on owner question 8);
 **B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`, PR #1504;
 evidence
 block in its section — one atomic admission budget at every bcrypt site,
@@ -1008,6 +1011,43 @@ unrelated user N.
   (the B2-8 precedent boundary). `check:docs` counts move to 331 fixed /
   48 open on this branch (batch (d) and B4-3 move the same lines;
   whichever merges later re-derives).
+
+**Evidence, 2026-09-01 — batch (b), client half, OC-0314** — branch
+`fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` #1503 (draft,
+opened 2026-09-01). Fix commit `b9ddb5a`; ledger record flipped in
+`435abcb` on the same branch (`fix.commit = b9ddb5a`,
+`revertProof = pass`). OC-0354 stays open: where `totp_enabled` travels
+(the `auth_ok` user or the profile response) is owner question 8's field
+placement, and it lands as the batch's second PR once decided.
+
+- **OC-0314:** the three credential-change calls (`changePassword`,
+  `confirmTotp`, `disableTotp`) are typed `PartialSuccessResponse |
+undefined` and hand back the 200 body; `showChangeOutcomeToast`
+  (`lib/toast.ts`) shows the server's warning as a `warning` toast for 12 s
+  (a new `ToastType` with its `.toast-warning` rule) or the plain success
+  message; MainPage's three handlers use it. No server change.
+- **Tests:** `api.test.ts` (204 → `undefined`, 200 → the body, for all
+  three), `toast-coverage.test.ts` (the warning wins, 204 → success, an
+  empty warning → success; four toast types forwarded), `toast.test.ts`
+  (the type class on the element), `main-page.test.ts` (the real settings
+  overlay's password form → `changePassword` answers the warning body → a
+  `.toast-warning` carrying the server's text and no success toast).
+  Revert-proof: with the six source files reverted the helper and MainPage
+  tests fail and `tsc` rejects the old `void` signatures; the API
+  passthrough tests hold either way (the body was always returned — the
+  type threw it away), which is why the MainPage-level test exists.
+- **Gates:** `tsc --noEmit`; `oxlint src/` (the two pre-existing
+  `messages.store.ts` warnings, unrelated); `eslint` on the changed files;
+  prettier check; the full client unit suite green — 191 files, 5256
+  tests, no assertion weakened. `check:docs` counts move to 330 fixed /
+  49 open on this branch (B4-3 and batches (a) and (d) move the same
+  lines; whichever merges later re-derives).
+- **Review fix (Codex P2, 2026-09-02):** the password form was still
+  painting its green "Password changed successfully." beside the warning
+  toast. `onChangePassword` now resolves with the outcome, and the form
+  keeps the warning inline (yellow, no three-second fade) on a partial
+  success — the fields clear either way, because the password did change.
+  Pinned in `settings-overlay.test.ts` and the MainPage-level test.
 
 ## Exit gate
 

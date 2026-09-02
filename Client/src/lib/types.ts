@@ -844,6 +844,18 @@ export interface RegisterResponse {
   readonly token: string;
 }
 
+/**
+ * Body of the credential-change endpoints (PUT /users/me/password,
+ * POST /users/me/totp/confirm, DELETE /users/me/totp) when the change
+ * committed but the other sessions could not be revoked: the server answers
+ * 200 with this instead of the plain 204, and the warning is the one signal
+ * telling the user to revoke those sessions by hand.
+ */
+export interface PartialSuccessResponse {
+  readonly warning?: string;
+  readonly sessions_revoked?: number;
+}
+
 /** GET /api/health response. */
 export interface HealthResponse {
   readonly status: string;

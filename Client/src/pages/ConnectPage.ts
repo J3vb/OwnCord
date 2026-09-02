@@ -230,7 +230,7 @@ export function createConnectPage(
       settingsOverlay = createSettingsOverlay({
         isAuthenticated: false,
         onClose: () => closeSettings(),
-        onChangePassword: () => Promise.resolve(),
+        onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
         onUploadAvatar: () => Promise.reject(new Error("Not authenticated")),
         onLogout: () => {},
