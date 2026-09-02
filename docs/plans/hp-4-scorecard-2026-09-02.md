@@ -239,16 +239,16 @@ node .superpowers/render-ledger.mjs --check
 node -e 'const l=require("./.superpowers/findings-ledger.json");for(const id of ["OC-0313","OC-0314","OC-0321","OC-0324","OC-0329","OC-0340","OC-0341","OC-0354"])console.log(id,l.findings.find(f=>f.id===id).status)'
 ```
 
-| Finding | Status                                          | Where |
-| ------- | ----------------------------------------------- | ----- |
-| OC-0313 | `fixed`                                         |       |
-| OC-0314 | `fixed`                                         |       |
-| OC-0321 | `fixed`                                         |       |
-| OC-0324 | `open` (fixed on #1509's branch, merge pending) |       |
-| OC-0329 | `fixed`                                         |       |
-| OC-0340 | `fixed`                                         |       |
-| OC-0341 | `fixed`                                         |       |
-| OC-0354 | `fixed`                                         |       |
+| Finding | Status                                    | Where |
+| ------- | ----------------------------------------- | ----- |
+| OC-0313 | `fixed`                                   |       |
+| OC-0314 | `fixed`                                   |       |
+| OC-0321 | `fixed`                                   |       |
+| OC-0324 | `fixed` (#1509, merged after measurement) |       |
+| OC-0329 | `fixed`                                   |       |
+| OC-0340 | `fixed`                                   |       |
+| OC-0341 | `fixed`                                   |       |
+| OC-0354 | `fixed`                                   |       |
 
 All eight are `fixed` on `dev` (#1509 merged after this scorecard was
 measured, `fc4c562`). Roadmap rule 2 — zero open B4-tagged findings at exit
