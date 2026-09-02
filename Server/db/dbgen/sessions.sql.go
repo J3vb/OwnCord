@@ -58,6 +58,14 @@ func (q *Queries) DeleteSessionByToken(ctx context.Context, token string) error 
 	return err
 }
 
+const deleteUserSessions = `-- name: DeleteUserSessions :execresult
+DELETE FROM sessions WHERE user_id = ?
+`
+
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteUserSessions, userID)
+}
+
 const evictOldestSessions = `-- name: EvictOldestSessions :exec
 DELETE FROM sessions WHERE id IN (
     SELECT s2.id FROM sessions AS s2 WHERE s2.user_id = ?
