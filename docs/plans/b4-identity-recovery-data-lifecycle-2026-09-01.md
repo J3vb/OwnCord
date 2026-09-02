@@ -21,6 +21,10 @@ controls — test files only, no gap found);
 **B4-12 batch (b), client half, merged 2026-09-02** (PR #1503 = `366f199`;
 OC-0314 closed — the partial-success warning on password/2FA changes reaches
 the user; OC-0354 waits on owner question 8);
+**B4-7 (sign-out-everywhere half) merged 2026-09-02** (PR #1500 = `21080e2`;
+`DELETE /api/v1/users/me/sessions` with its explicit response, the
+`session_revoke_all` audit row and the two-account proof; the new-login
+signal half waits on owner question 8);
 **B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`, PR #1504;
 evidence
 block in its section — one atomic admission budget at every bcrypt site,
@@ -791,6 +795,50 @@ Blocked on owner question 8 for the signal's transport only.
 Exit: sign-out-everywhere green with the two-account proof; the new-login
 contract live and fixture-covered in its chosen transport; BG-08's server
 half done (UI remains B9).
+
+**Evidence, 2026-09-01 — sign-out-everywhere half** — branch
+`feat/b4-7-sessions` from `dev` `aabac60`; PR to `dev` #1500 (draft,
+opened 2026-09-01). The new-login signal half waits on owner question 8
+and lands as a second PR under this step; BG-08's server half completes
+then.
+
+- **Contract:** `DELETE /api/v1/users/me/sessions` revokes every session
+  of the calling account, the current one included, and answers `200`
+  `{"sessions_revoked": n, "current_session_revoked": true}` (false only
+  for an API-token principal, which holds no session) — the explicit note
+  the plan asked for, so the client re-authenticates instead of treating
+  the next 401 as an error. Backed by a dedicated `DeleteUserSessions`
+  query (sessions.sql, sqlc regenerated) and `UserService.RevokeAllSessions`,
+  which writes the `session_revoke_all` audit row naming the account and
+  the count, never a token or device (`TestAuditCoverage_ServiceMutations`
+  gained the row and the detail denylist covers it).
+- **Two-account proof:** `TestRevokeAllSessions_OnlyTheCallersAccount`
+  interleaves two accounts' sessions in creation order, signs one out
+  everywhere, and requires exactly that account's sessions gone (both,
+  the current one included), the other account's two untouched, and the
+  caller's token refused afterwards; `TestRevokeAllSessions_Unauthorized`
+  pins the anonymous 401 (the B4-2 posture walk will see the route as
+  session-gated when the branches meet).
+- **Docs:** `api.md` (route index regenerated to 122 routes; endpoint
+  prose), `security.md` (audit list), `trust-model.md` ("Multi-device
+  sessions" gains the bullet).
+- **Gates:** `gofmt`, `go vet`, `go test -race` on `api`, `service`, `db`
+  green; the pinned `golangci-lint` v2.11.3 (local build) 0 issues; `gendocs`
+  regenerated; prettier and `check:docs` green.
+- **Review fixes (Codex, 2026-09-02):** (P1) the route now drops the
+  account's live WebSockets in the same request — `ws.Hub.DisconnectRevokedUser`
+  behind the `api.SessionDisconnector` seam the profile mount's broadcaster
+  satisfies — instead of leaving a connected device to the revoked-session
+  sweep's next tick; `TestRevokeAllSessions_DisconnectsTheAccountsLiveSockets`.
+  (P2) a call that revokes nothing (an API-token principal keeps its
+  session-less credential) writes no audit row, and the route is capped at
+  five calls per account per minute (`429 RATE_LIMITED`);
+  `TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow`,
+  `TestRevokeAllSessions_IsRateLimitedPerAccount`. The Linux coverage floor
+  for `db` (79.3) was 0.1 under after the dev merge because the new
+  `DeleteUserSessions` wrapper had no db-package test; it has one now
+  (`TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly`) rather than a
+  lowered floor.
 
 ## B4-8 — Local diagnostics, support-bundle contract, no-telemetry proof
 

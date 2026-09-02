@@ -110,6 +110,21 @@ type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
+// SessionDisconnector is the hub's half of sign-out-everywhere: once the
+// sessions are gone, the live sockets they authenticated must go too, or a
+// device keeps its connection until the revoked-session sweep notices
+// (Codex P1 on PR #1500). *ws.Hub implements it; a ProfileBroadcaster that
+// does not (tests, a nil hub) simply skips the disconnect.
+type SessionDisconnector interface {
+	DisconnectRevokedUser(userID int64)
+}
+
+// revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
+// per account. A session principal revokes itself with the first call; an
+// API-token principal keeps its credential, so the cap is what keeps repeated
+// no-op calls from costing anything (Codex P2 on PR #1500).
+const revokeAllSessionsRateLimitPerMinute = 5
+
 // MountProfileRoutes registers user profile management endpoints.
 // All routes require authentication. trustedProxies is used for rate limiting.
 //
@@ -132,6 +147,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		}
 
 		r.Get("/sessions", handleListSessions(svc))
+		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
 		r.Delete("/sessions/{id}", handleRevokeSession(svc))
 	})
 }
@@ -573,6 +589,58 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// revokeAllSessionsResponse is the JSON shape returned by
+// DELETE /api/v1/users/me/sessions: the count, and an explicit note that the
+// caller's own session was among them, so the client knows to re-authenticate
+// rather than treat the next 401 as an error.
+type revokeAllSessionsResponse struct {
+	SessionsRevoked int64 `json:"sessions_revoked"`
+	CurrentRevoked  bool  `json:"current_session_revoked"`
+}
+
+// handleRevokeAllSessions processes DELETE /api/v1/users/me/sessions —
+// sign-out-everywhere. The current session is revoked with the rest, and so
+// is every live WebSocket the account holds.
+func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "not authenticated",
+			})
+			return
+		}
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
+
+		// Per account, not per IP: the principal is authenticated, and the
+		// no-op case (an API token with nothing to revoke) is the one to cap.
+		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error: "RATE_LIMITED", Message: "too many sign-out-everywhere requests, try again later",
+			})
+			return
+		}
+
+		n, err := svc.Users.RevokeAllSessions(r.Context(), user.ID)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		// The sessions are gone; drop the sockets they authenticated now
+		// rather than at the sweep's next tick, so "stops working
+		// immediately" holds for a connected device too.
+		if n > 0 {
+			if d, ok := broadcaster.(SessionDisconnector); ok {
+				d.DisconnectRevokedUser(user.ID)
+			}
+		}
+		writeJSON(w, http.StatusOK, revokeAllSessionsResponse{
+			SessionsRevoked: n,
+			CurrentRevoked:  sess != nil,
+		})
 	}
 }
 

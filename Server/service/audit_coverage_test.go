@@ -105,6 +105,19 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, []string{raw, hash}
 		}},
+		{"session revoke all", "session_revoke_all", func(t *testing.T) (*audittest.Recorder, []string) {
+			_, database := newTestModerationService(t)
+			raw, _ := auth.GenerateToken()
+			hash := auth.HashToken(raw)
+			if _, err := database.CreateSession(context.Background(), 4, hash, "test", "127.0.0.1"); err != nil {
+				t.Fatalf("CreateSession: %v", err)
+			}
+			rec := audittest.Install(t, database)
+			if _, err := NewUserService(database).RevokeAllSessions(context.Background(), 4); err != nil {
+				t.Fatalf("RevokeAllSessions: %v", err)
+			}
+			return rec, []string{raw, hash}
+		}},
 		{"message delete", "message_delete", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestMessageService(t)
 			const body = "secret message body 4d0d1405"

@@ -76,7 +76,7 @@ Users can delete their own account via `DELETE /api/v1/auth/account` with passwo
 
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
 
-- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
 - **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`

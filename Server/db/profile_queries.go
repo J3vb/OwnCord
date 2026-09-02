@@ -103,3 +103,17 @@ func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) err
 	}
 	return nil
 }
+
+// DeleteUserSessions removes every session of the user — the caller's own
+// included — and reports how many went. Sign-out-everywhere (B4-7).
+func (d *DB) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
+	result, err := d.q.DeleteUserSessions(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteUserSessions: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("DeleteUserSessions rows: %w", err)
+	}
+	return rows, nil
+}
