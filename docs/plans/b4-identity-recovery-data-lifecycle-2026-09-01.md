@@ -1061,10 +1061,14 @@ unrelated user N.
   whichever merges later re-derives).
 - **Post-merge review fix (Codex, 2026-09-02, PR #1505):** both migrations
   consumed the legacy key on the strength of a scoped write that can fail
-  silently at storage quota. The volume reader now removes the legacy key
-  only once the scoped copy reads back; the note reader keeps the key for a
-  later retry and still returns the note it read. Pinned by the failed-write
-  cases in `audio-elements.test.ts` and `dm-profile-sidebar.test.ts`.
+  silently at storage quota, and a first fix that merely kept the key left
+  it readable by the next host with the same user id. Both readers now
+  migrate through `lib/legacyKeyMigration.ts`: the legacy key is removed
+  before the scoped copy is written (its bytes then fit the copy), and a copy
+  that still fails is restored under a claim naming the owning scoped key and
+  remembered in memory, so only the first host reads it and retries. Pinned
+  by `legacy-key-migration.test.ts` and the failed-write cases in
+  `audio-elements.test.ts` and `dm-profile-sidebar.test.ts`.
 
 **Evidence, 2026-09-01 — batch (b), client half, OC-0314** — branch
 `fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` #1503 (draft,

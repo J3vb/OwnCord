@@ -15,6 +15,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
+import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,24 +112,13 @@ function loadNote(userId: number, host: string): string {
     const scoped = localStorage.getItem(scopedNoteKey(userId, host));
     if (scoped !== null) return scoped;
 
-    // Miss at the scoped key: read through to the pre-scoping legacy key
-    // once, persist it under this host's key, and consume the legacy entry so
-    // the migration can only ever apply to the FIRST host opened post-upgrade.
-    // User ids are per-server autoincrement integers, so leaving the legacy
-    // key in place would show server A's private note about user N for the
-    // unrelated user N on every other server (OC-0329) — the same shape
-    // channel-mutes.ts fixed for OC-0288.
-    const legacy = localStorage.getItem(legacyNoteKey(userId));
-    if (legacy === null) return "";
-    try {
-      localStorage.setItem(scopedNoteKey(userId, host), legacy);
-      localStorage.removeItem(legacyNoteKey(userId));
-    } catch {
-      // Quota: the scoped copy could not be written. Keep the legacy key
-      // for a later retry rather than losing the note behind an empty
-      // panel (Codex on PR #1502); the note itself was read fine.
-    }
-    return legacy;
+    // Miss at the scoped key: migrate the pre-scoping legacy note through
+    // `migrateLegacyValue`, which moves it under the key of the FIRST host
+    // opened post-upgrade and no other. User ids are per-server autoincrement
+    // integers, so a legacy note left readable would show server A's private
+    // note about user N for the unrelated user N on every other server
+    // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
+    return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
   } catch {
     return "";
   }

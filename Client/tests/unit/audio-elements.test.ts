@@ -255,23 +255,43 @@ describe("AudioElements", () => {
       expect(elements.getUserVolume(7)).toBe(100);
     });
 
+    /** loadPref as the real one behaves, so the scoped copies the migration
+     *  writes straight to localStorage read back. */
+    function loadPrefFromStorage(key: string, defaultVal: unknown): unknown {
+      const raw = localStorage.getItem(`owncord:settings:${key}`);
+      return raw === null ? defaultVal : (JSON.parse(raw) as unknown);
+    }
+
+    function clearVolumeKeys(): void {
+      for (const key of [
+        "owncord:settings:userVolume_7",
+        "owncord:settings:userVolume_7:a.example.com",
+        "owncord:settings:userVolume_7:b.example.com",
+        "owncord:legacy-claim:owncord:settings:userVolume_7",
+      ]) {
+        localStorage.removeItem(key);
+      }
+    }
+
     it("migrates a pre-scoping legacy volume through to the scoped key without leaking to a different host", () => {
       // A save made before host-scoping existed lives at the bare
       // `userVolume_7` key. It must still apply once a host is set, and the
       // migration must write under THAT host's scoped key specifically —
       // not clobber a different host's own explicit choice.
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "userVolume_7") return 30;
-        if (key === "userVolume_7:b.example.com") return 80;
-        return defaultVal;
-      });
+      localStorage.setItem("owncord:settings:userVolume_7", "30");
+      localStorage.setItem("owncord:settings:userVolume_7:b.example.com", "80");
+      mockLoadPref.mockImplementation(loadPrefFromStorage);
 
-      setAudioVolumeHost("a.example.com");
-      expect(elements.getUserVolume(7)).toBe(30);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 30);
+      try {
+        setAudioVolumeHost("a.example.com");
+        expect(elements.getUserVolume(7)).toBe(30);
+        expect(localStorage.getItem("owncord:settings:userVolume_7:a.example.com")).toBe("30");
 
-      setAudioVolumeHost("b.example.com");
-      expect(elements.getUserVolume(7)).toBe(80);
+        setAudioVolumeHost("b.example.com");
+        expect(elements.getUserVolume(7)).toBe(80);
+      } finally {
+        clearVolumeKeys();
+      }
     });
 
     it("consumes the legacy key on migration so a later host does not inherit it (OC-0313)", () => {
@@ -279,59 +299,68 @@ describe("AudioElements", () => {
       // exactly once. A later brand-new host has no scoped value of its own
       // and must fall through to the 100 default — not adopt server A's
       // volume (a 0 here is a silenced, unrelated user 7 on server B).
-      //
-      // loadPref is mocked, so the legacy value is served for as long as the
-      // real localStorage still holds the legacy entry — which is exactly
-      // what the module is expected to remove.
-      const legacyStorageKey = "owncord:settings:userVolume_7";
-      localStorage.setItem(legacyStorageKey, "0");
-      // savePref persists for real here, so the scoped copy reads back and
-      // the migration may consume the legacy entry.
-      const saved = new Map<string, unknown>();
-      mockSavePref.mockImplementation((key: string, val: unknown) => saved.set(key, val));
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (saved.has(key)) return saved.get(key);
-        if (key === "userVolume_7" && localStorage.getItem(legacyStorageKey) !== null) return 0;
-        return defaultVal;
-      });
+      localStorage.setItem("owncord:settings:userVolume_7", "0");
+      mockLoadPref.mockImplementation(loadPrefFromStorage);
 
       try {
         setAudioVolumeHost("a.example.com");
         expect(elements.getUserVolume(7)).toBe(0);
-        expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 0);
-        expect(localStorage.getItem(legacyStorageKey)).toBeNull();
+        expect(localStorage.getItem("owncord:settings:userVolume_7:a.example.com")).toBe("0");
+        expect(localStorage.getItem("owncord:settings:userVolume_7")).toBeNull();
 
         setAudioVolumeHost("b.example.com");
         expect(elements.getUserVolume(7)).toBe(100);
-        expect(mockSavePref).not.toHaveBeenCalledWith("userVolume_7:b.example.com", 0);
+        expect(localStorage.getItem("owncord:settings:userVolume_7:b.example.com")).toBeNull();
       } finally {
-        localStorage.removeItem(legacyStorageKey);
+        clearVolumeKeys();
       }
     });
 
-    it("keeps the legacy key when the scoped copy could not be written (Codex on PR #1502)", () => {
-      // savePref swallows a quota failure. Consuming the legacy entry on
-      // the strength of a write that never landed would leave this user's
-      // only persisted volume gone — 100 on the next read. The mocked
-      // savePref persists nothing, which is exactly a failed write.
-      const legacyStorageKey = "owncord:settings:userVolume_7";
-      localStorage.setItem(legacyStorageKey, "0");
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "userVolume_7" && localStorage.getItem(legacyStorageKey) !== null) return 0;
-        return defaultVal;
+    it("binds the legacy key to the first host when the scoped copy could not be written (Codex on PRs #1502 and #1505)", () => {
+      // Storage at quota: the scoped write throws. The value was read fine,
+      // so it must still apply, and the legacy key must survive for a later
+      // attempt — bound to server A, so the unrelated user 7 on server B
+      // neither inherits nor consumes it in the meantime.
+      localStorage.setItem("owncord:settings:userVolume_7", "0");
+      mockLoadPref.mockImplementation(loadPrefFromStorage);
+      const realSetItem = Storage.prototype.setItem;
+      const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (key === "owncord:settings:userVolume_7:a.example.com") {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        }
+        realSetItem.call(this, key, value);
       });
 
       try {
         setAudioVolumeHost("a.example.com");
         expect(elements.getUserVolume(7)).toBe(0);
-        expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 0);
-        // Not consumed: the scoped copy never read back.
-        expect(localStorage.getItem(legacyStorageKey)).toBe("0");
-        // The next read still serves the legacy value (and retries the copy).
+        expect(localStorage.getItem("owncord:settings:userVolume_7:a.example.com")).toBeNull();
+        expect(localStorage.getItem("owncord:settings:userVolume_7")).toBe("0");
+        expect(localStorage.getItem("owncord:legacy-claim:owncord:settings:userVolume_7")).toBe(
+          "owncord:settings:userVolume_7:a.example.com",
+        );
+
+        setAudioVolumeHost("b.example.com");
+        expect(elements.getUserVolume(7)).toBe(100);
+        expect(localStorage.getItem("owncord:settings:userVolume_7:b.example.com")).toBeNull();
+        expect(localStorage.getItem("owncord:settings:userVolume_7")).toBe("0");
+
+        // Quota relieved: server A's next read completes the migration.
+        setItem.mockRestore();
+        setAudioVolumeHost("a.example.com");
         expect(elements.getUserVolume(7)).toBe(0);
-        expect(mockSavePref).toHaveBeenCalledTimes(2);
+        expect(localStorage.getItem("owncord:settings:userVolume_7:a.example.com")).toBe("0");
+        expect(localStorage.getItem("owncord:settings:userVolume_7")).toBeNull();
+        expect(
+          localStorage.getItem("owncord:legacy-claim:owncord:settings:userVolume_7"),
+        ).toBeNull();
       } finally {
-        localStorage.removeItem(legacyStorageKey);
+        setItem.mockRestore();
+        clearVolumeKeys();
       }
     });
   });
