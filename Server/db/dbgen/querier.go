@@ -33,6 +33,11 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
+	// The consume deletes only the live credential whose verifier the caller
+	// compared against, so the affected row count is what tells two concurrent
+	// redemptions, an expired credential, and a credential replaced since the
+	// compare apart.
+	ConsumeRecoveryAssist(ctx context.Context, arg ConsumeRecoveryAssistParams) (sql.Result, error)
 	// The consume is conditional: only an unspent kit is spent, and the affected
 	// row count is what tells two concurrent redemptions apart.
 	ConsumeRecoveryKit(ctx context.Context, arg ConsumeRecoveryKitParams) (sql.Result, error)
@@ -101,6 +106,7 @@ type Querier interface {
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
 	DeletePartialAuthChallenge(ctx context.Context, tokenHash string) (sql.Result, error)
 	DeletePendingTOTPEnrollment(ctx context.Context, userID int64) error
+	DeleteRecoveryAssist(ctx context.Context, userID int64) error
 	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 	DeleteRecoveryKit(ctx context.Context, userID int64) error
 	DeleteRole(ctx context.Context, id int64) error
@@ -202,6 +208,7 @@ type Querier interface {
 	// UPSERT when the row is already correct, keeping no-op focus events off the
 	// single writer connection.
 	GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error)
+	GetRecoveryAssist(ctx context.Context, userID int64) (RecoveryAssist, error)
 	GetRecoveryKit(ctx context.Context, userID int64) (RecoveryKit, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
@@ -352,6 +359,10 @@ type Querier interface {
 	// v1.30.0 miscounts multi-byte characters and truncates the next query.
 	UpsertPartialAuthChallenge(ctx context.Context, arg UpsertPartialAuthChallengeParams) error
 	UpsertPendingTOTPEnrollment(ctx context.Context, arg UpsertPendingTOTPEnrollmentParams) error
+	// Owner-issued recovery credentials (B4-6): one per account, replaced on
+	// issuance, deleted by the redemption that consumes it. The verifier is an
+	// argon2id PHC string and no query returns anything else about the secret.
+	UpsertRecoveryAssist(ctx context.Context, arg UpsertRecoveryAssistParams) error
 	// Recovery kits (B4-5): one verifier per account, replaced on enrolment,
 	// spent by a successful recovery. The verifier is an argon2id PHC string;
 	// no query ever returns anything else about the kit.

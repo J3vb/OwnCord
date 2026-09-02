@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // The recovery kit (B4-5, BPR-044; owner decision 2): a secret the account
@@ -35,6 +37,40 @@ var (
 	ErrRecoveryFailed       = &authError{ErrInternal, "recovery failed — please try again"}
 	ErrRecoveryKitFailed    = &authError{ErrInternal, "failed to issue the recovery kit"}
 )
+
+// The owner-issued recovery credential (B4-6, BPR-045; owner decision 3):
+// short-lived, single-use, issued by the server owner only after verifying
+// the person out of band. It is redeemed through the same public route as
+// the kit and told apart by shape.
+const (
+	recoveryAssistTTL = 15 * time.Minute
+	// Issuance budgets, per owner and per target account.
+	recoveryAssistIssueLimit  = 5
+	recoveryAssistTargetLimit = 3
+	recoveryAssistIssueWindow = time.Hour
+)
+
+// RecoveryVerifications is the fixed wording an issuance must record: how
+// the owner verified the person. Nothing free-form is accepted, so nothing
+// content-bearing can reach the audit log (BPR-045's safe audit record).
+var RecoveryVerifications = []string{"in_person", "voice_call", "video_call", "trusted_contact"}
+
+var (
+	ErrRecoveryAssistOwnerOnly    = &authError{ErrForbidden, "only the server owner can issue a recovery credential"}
+	ErrRecoveryAssistVerification = &authError{ErrBadRequest, "verification must be one of in_person, voice_call, video_call, trusted_contact"}
+	ErrRecoveryAssistTarget       = &authError{ErrNotFound, "no such account"}
+	ErrRecoveryAssistUnusable     = &authError{ErrBadRequest, "this account cannot be recovered with a credential"}
+	ErrRecoveryAssistBudget       = &authError{ErrRateLimited, "too many recovery credentials issued; try again later"}
+	ErrRecoveryAssistFailed       = &authError{ErrInternal, "failed to issue the recovery credential"}
+)
+
+// RecoveryAssistIssue is what the owner receives exactly once.
+type RecoveryAssistIssue struct {
+	Credential   string
+	ExpiresAt    string
+	Username     string
+	Verification string
+}
 
 // RecoveryKitIssue is what enrolment hands back exactly once.
 type RecoveryKitIssue struct {
@@ -152,14 +188,24 @@ func newRecoveryAttempt(in RecoverInput) recoveryAttempt {
 	}
 }
 
-// RecoverWithKit redeems the account's kit from the public route and signs
-// the holder in without the second factor (owner decision 2).
+// recoveryTarget is what an attempt may redeem: the account and whichever
+// credentials are live for it. An unknown account is a nil user; a spent kit
+// or an expired credential reads as none.
+type recoveryTarget struct {
+	user   *db.User
+	kit    *db.RecoveryKit
+	assist *db.RecoveryAssist
+}
+
+// RecoverWithKit redeems a recovery secret from the public route — the
+// account's kit (B4-5) or an owner-issued credential (B4-6), told apart by
+// shape — and signs the holder in without the second factor.
 func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*AuthResult, error) {
 	at := newRecoveryAttempt(in)
 	if s.limiter.IsLockedOut(at.ipLock) || s.limiter.IsLockedOut(at.userLock) {
 		return nil, ErrRecoveryLockedOut
 	}
-	user, kit, err := s.recoveryCandidate(ctx, in)
+	target, err := s.recoveryCandidate(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -172,93 +218,124 @@ func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*Aut
 	if !admitted {
 		return nil, ErrAuthBusy
 	}
-	newHash, err := s.recoverAdmitted(ctx, in, user, kit, at)
+	kind, newHash, err := s.recoverAdmitted(ctx, in, target, at)
 	release()
 	if err != nil {
 		return nil, err
 	}
-	return s.completeRecovery(ctx, in, user, newHash, at)
+	return s.completeRecovery(ctx, in, target, kind, newHash, at)
 }
 
 // recoverAdmitted is the admitted part of an attempt: the reservation, the
-// compare and the new-password hash. It returns the hash to commit.
-func (s *AuthService) recoverAdmitted(ctx context.Context, in RecoverInput, user *db.User, kit *db.RecoveryKit, at recoveryAttempt) (string, error) {
+// compare and the new-password hash. It returns the matched kind and the
+// hash to commit.
+func (s *AuthService) recoverAdmitted(ctx context.Context, in RecoverInput, target recoveryTarget, at recoveryAttempt) (auth.RecoverySecretKind, string, error) {
 	// Reserve the attempt before the compare, as login does (F3), so a
 	// concurrent burst is capped at the same budget a sequential one gets;
 	// the fifth failure trips the lockout (owner decision 2).
 	if !s.limiter.Allow(at.ipFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) ||
 		!s.limiter.Allow(at.userFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) {
-		s.recoveryLockout(ctx, in, user, at)
-		return "", ErrRecoveryLockedOut
+		s.recoveryLockout(ctx, in, target.user, at)
+		return auth.RecoverySecretMalformed, "", ErrRecoveryLockedOut
 	}
-	matched, err := s.compareRecoverySecret(kit, in.KitSecret)
+	kind, err := s.compareRecoverySecret(target, in.KitSecret)
 	if err != nil {
-		return "", err
+		return auth.RecoverySecretMalformed, "", err
 	}
-	if !matched {
-		s.recoveryLockout(ctx, in, user, at)
-		return "", ErrRecoveryKitInvalid
+	if kind == auth.RecoverySecretMalformed {
+		s.recoveryLockout(ctx, in, target.user, at)
+		return auth.RecoverySecretMalformed, "", ErrRecoveryKitInvalid
 	}
-	if auth.IsEffectivelyBanned(user) {
-		return "", ErrBanned
+	if auth.IsEffectivelyBanned(target.user) {
+		return auth.RecoverySecretMalformed, "", ErrBanned
 	}
 	newHash, err := auth.HashPassword(in.NewPassword)
 	if err != nil {
-		return "", ErrPasswordHash
+		return auth.RecoverySecretMalformed, "", ErrPasswordHash
 	}
-	return newHash, nil
+	return kind, newHash, nil
 }
 
-// recoveryCandidate looks up the account and its live kit. An unknown
-// account reads as no account; a spent kit reads as no kit.
-func (s *AuthService) recoveryCandidate(ctx context.Context, in RecoverInput) (*db.User, *db.RecoveryKit, error) {
+// recoveryCandidate looks up the account and its live credentials.
+func (s *AuthService) recoveryCandidate(ctx context.Context, in RecoverInput) (recoveryTarget, error) {
 	user, err := s.st.GetUserByUsername(ctx, in.Username)
 	if err != nil {
 		slog.Error("recovery: GetUserByUsername failed", "err", err, "ip", in.IP)
-		return nil, nil, ErrRecoveryFailed
+		return recoveryTarget{}, ErrRecoveryFailed
 	}
 	if user == nil {
-		return nil, nil, nil
+		return recoveryTarget{}, nil
 	}
 	kit, err := s.st.GetRecoveryKit(ctx, user.ID)
 	if err != nil {
 		slog.Error("recovery: GetRecoveryKit failed", "err", err, "user_id", user.ID)
-		return nil, nil, ErrRecoveryFailed
+		return recoveryTarget{}, ErrRecoveryFailed
 	}
 	if kit != nil && kit.UsedAt != nil {
 		kit = nil
 	}
-	return user, kit, nil
+	assist, err := s.st.GetRecoveryAssist(ctx, user.ID)
+	if err != nil {
+		slog.Error("recovery: GetRecoveryAssist failed", "err", err, "user_id", user.ID)
+		return recoveryTarget{}, ErrRecoveryFailed
+	}
+	if assist != nil && !assist.Live(time.Now()) {
+		assist = nil
+	}
+	return recoveryTarget{user: user, kit: kit, assist: assist}, nil
 }
 
 // compareRecoverySecret runs the one argon2id compare every attempt costs,
 // whatever the input and whatever exists: a malformed secret still compares
-// (its canonical form is empty), and without a live kit the compare runs
-// against a verifier nobody holds — so the answer is no at the same price,
-// and neither the account nor the kit can be told apart by timing. The
-// caller holds the admission slot.
-func (s *AuthService) compareRecoverySecret(kit *db.RecoveryKit, secret string) (bool, error) {
-	canonical, wellFormed := auth.NormalizeRecoveryKitSecret(secret)
+// (its canonical form is empty), and the verifier is the one the secret's
+// shape selects — the kit's or the owner-issued credential's — or, when the
+// account holds no live credential of that kind, a verifier nobody holds.
+// So the answer is no at the same price, and neither the account nor its
+// credentials can be told apart by timing. It returns the kind that
+// matched, or Malformed. The caller holds the admission slot.
+func (s *AuthService) compareRecoverySecret(target recoveryTarget, secret string) (auth.RecoverySecretKind, error) {
+	canonical, kind := auth.NormalizeRecoverySecret(secret)
 	verifier, err := auth.DummyRecoveryKitVerifier()
 	if err != nil {
-		return false, ErrRecoveryFailed
+		return auth.RecoverySecretMalformed, ErrRecoveryFailed
 	}
-	if kit != nil {
-		verifier = kit.Verifier
+	held := false
+	switch {
+	case kind == auth.RecoverySecretKit && target.kit != nil:
+		verifier, held = target.kit.Verifier, true
+	case kind == auth.RecoverySecretAssist && target.assist != nil:
+		verifier, held = target.assist.Verifier, true
 	}
 	matched := auth.VerifyRecoveryKitSecret(verifier, canonical)
-	return matched && wellFormed && kit != nil, nil
+	if !matched || !held || kind == auth.RecoverySecretMalformed {
+		return auth.RecoverySecretMalformed, nil
+	}
+	return kind, nil
 }
 
-// completeRecovery redeems the kit in one transaction with the already
-// hashed new password and signs the holder in without the second factor
-// (owner decision 2): the kit is the proof of possession this path accepts.
-func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, user *db.User, newHash string, at recoveryAttempt) (*AuthResult, error) {
-	revoked, err := s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
-		"account recovered with the recovery kit; every session revoked")
+// completeRecovery redeems the matched credential in one transaction with
+// the already hashed new password and signs the holder in without the
+// second factor (owner decisions 2 and 3): the credential is the proof of
+// possession this path accepts.
+func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, target recoveryTarget, kind auth.RecoverySecretKind, newHash string, at recoveryAttempt) (*AuthResult, error) {
+	user := target.user
+	var err error
+	var revoked int64
+	via := "kit"
+	if kind == auth.RecoverySecretAssist {
+		via = "owner_credential"
+		// Consume exactly the credential the compare verified: one issued
+		// meanwhile is a different row and stays.
+		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
+			"account recovered with an owner-issued credential; every session revoked")
+	} else {
+		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
+			"account recovered with the recovery kit; every session revoked")
+	}
 	if err != nil {
-		if errors.Is(err, db.ErrRecoveryKitSpent) {
-			// Lost the race to a concurrent redemption: the kit is spent now.
+		if errors.Is(err, db.ErrRecoveryKitSpent) || errors.Is(err, db.ErrRecoveryAssistSpent) {
+			// Lost the race to a concurrent redemption (or the credential
+			// expired meanwhile): it is spent now.
 			s.recoveryLockout(ctx, in, user, at)
 			return nil, ErrRecoveryKitInvalid
 		}
@@ -278,7 +355,7 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, use
 	if err != nil || fresh == nil {
 		return nil, ErrRecoveryFailed
 	}
-	slog.Info("account recovered with the recovery kit", "user_id", user.ID, "ip", in.IP, "sessions_revoked", revoked)
+	slog.Info("account recovered", "via", via, "user_id", user.ID, "ip", in.IP, "sessions_revoked", revoked)
 	return &AuthResult{Token: token, User: fresh}, nil
 }
 
@@ -297,4 +374,98 @@ func (s *AuthService) recoveryLockout(ctx context.Context, in RecoverInput, user
 				"recovery locked for 15 minutes after repeated failed kit attempts")
 		}
 	}
+}
+
+// IssueRecoveryAssist is the owner-only half of BPR-045 (owner decision 3):
+// after verifying the person out of band — recorded as one of
+// RecoveryVerifications, fixed wording so nothing content-bearing exists to
+// leak — the server owner receives a 15-minute, single-use credential for
+// the account, shown once. Only its argon2id verifier is stored; a later
+// issuance replaces an outstanding one. Redemption is the public recovery
+// route, which signs the holder in without the second factor.
+func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID int64, verification string) (*RecoveryAssistIssue, error) {
+	actor, err := s.st.GetUserByID(ctx, actorID)
+	if err != nil {
+		slog.Error("recovery assist: GetUserByID (actor) failed", "err", err, "actor_id", actorID)
+		return nil, ErrRecoveryAssistFailed
+	}
+	if actor == nil {
+		return nil, ErrRecoveryAssistOwnerOnly
+	}
+	role, err := s.st.GetRoleByID(ctx, actor.RoleID)
+	if err != nil {
+		slog.Error("recovery assist: GetRoleByID failed", "err", err, "actor_id", actor.ID)
+		return nil, ErrRecoveryAssistFailed
+	}
+	if role == nil || (role.ID != permissions.OwnerRoleID && role.Position < permissions.OwnerRolePosition) {
+		return nil, ErrRecoveryAssistOwnerOnly
+	}
+	if !slices.Contains(RecoveryVerifications, verification) {
+		return nil, ErrRecoveryAssistVerification
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil {
+		slog.Error("recovery assist: GetUserByID failed", "err", err, "user_id", targetID)
+		return nil, ErrRecoveryAssistFailed
+	}
+	if target == nil {
+		return nil, ErrRecoveryAssistTarget
+	}
+	// Not for the issuer's own account (they are signed in), a banned
+	// account (it cannot sign in), an application still pending, or an
+	// anonymised row (the reserved "[...]" names).
+	if target.ID == actor.ID || auth.IsEffectivelyBanned(target) || target.PendingApproval() || strings.HasPrefix(target.Username, "[") {
+		return nil, ErrRecoveryAssistUnusable
+	}
+	// The argon2id hash of the credential takes an admission slot (B4-4),
+	// taken before the issuance budgets are spent: a refusal for load
+	// charges nothing.
+	release, admitted := s.limiter.Admission().TryAcquire()
+	if !admitted {
+		return nil, ErrAuthBusy
+	}
+	defer release()
+	if !s.reserveIssuance(actor.ID, target.ID) {
+		return nil, ErrRecoveryAssistBudget
+	}
+	shown, canonical, err := auth.GenerateRecoveryAssistSecret()
+	if err != nil {
+		return nil, ErrRecoveryAssistFailed
+	}
+	verifier, err := auth.HashRecoveryKitSecret(canonical)
+	if err != nil {
+		return nil, ErrRecoveryAssistFailed
+	}
+	expires := time.Now().Add(recoveryAssistTTL)
+	if err := s.st.UpsertRecoveryAssist(ctx, target.ID, verifier, actor.ID, verification, expires); err != nil {
+		slog.Error("recovery assist: UpsertRecoveryAssist failed", "err", err, "user_id", target.ID)
+		return nil, ErrRecoveryAssistFailed
+	}
+	db.WriteAudit(ctx, s.st, actor.ID, "recovery_assist_issued", "user", target.ID,
+		"verification: "+verification+"; single use, expires in 15 minutes")
+	slog.Info("recovery credential issued", "user_id", target.ID, "actor_id", actor.ID, "verification", verification)
+	return &RecoveryAssistIssue{
+		Credential:   shown,
+		ExpiresAt:    expires.UTC().Format(time.RFC3339),
+		Username:     target.Username,
+		Verification: verification,
+	}, nil
+}
+
+// reserveIssuance spends one slot of the owner's and the account's issuance
+// budgets, both or neither: the peek and the spend run under one lock, so
+// concurrent issuances cannot slip past either limit and a refusal on one
+// budget never consumes the other.
+func (s *AuthService) reserveIssuance(actorID, targetID int64) bool {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+	actorKey := fmt.Sprintf("recovery_assist_issue:%d", actorID)
+	targetKey := fmt.Sprintf("recovery_assist_target:%d", targetID)
+	if !s.limiter.Check(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow) ||
+		!s.limiter.Check(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow) {
+		return false
+	}
+	s.limiter.Allow(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow)
+	s.limiter.Allow(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow)
+	return true
 }

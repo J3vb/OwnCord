@@ -93,6 +93,12 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 		return 0, fmt.Errorf("RedeemRecoveryKit sessions: %w", err)
 	}
 	sessionsRevoked, _ = revoked.RowsAffected()
+	// A recovery by kit withdraws any owner-issued credential still
+	// outstanding for the account (B4-6): the situation it was issued for
+	// is over.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_assists WHERE user_id = ?`, userID); err != nil {
+		return 0, fmt.Errorf("RedeemRecoveryKit withdraw credential: %w", err)
+	}
 	if err := q.LogAudit(ctx, dbgen.LogAuditParams{
 		ActorID: userID, Action: auditAction, TargetType: "user", TargetID: userID, Detail: auditDetail,
 	}); err != nil {

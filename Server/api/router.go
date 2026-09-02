@@ -136,7 +136,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// AuthBroadcaster, so DELETE /api/v1/auth/account fans out member_ban and
 	// force-disconnects the deleted user's own socket exactly like the admin
 	// ban path does for the same DB state.
-	MountAuthRoutes(r, service.NewAuthService(database, limiter, totpKey, hub), AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
+	authSvc := service.NewAuthService(database, limiter, totpKey, hub)
+	svc.Auth = authSvc // the admin panel's owner-only recovery issuance (B4-6) shares it
+	MountAuthRoutes(r, authSvc, AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
 
 	// Voice: webhook, LiveKit health and signalling-proxy routes. The client
 	// and the companion process are built by internal/app, which reports

@@ -28,6 +28,9 @@ type Services struct {
 	Tokens      *TokenService
 	Sessions    *SessionService
 	Setup       *SetupService
+	// Auth is set by the composition root once the hub exists; the admin
+	// panel's owner-only recovery issuance (B4-6) shares it.
+	Auth *AuthService
 }
 
 // New creates all domain services wired together.

@@ -40,6 +40,25 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 		action string
 		run    func(t *testing.T) (*audittest.Recorder, []string)
 	}{
+		{"recovery credential issued", "recovery_assist_issued", func(t *testing.T) (*audittest.Recorder, []string) {
+			handler, database, token, _ := fixture(t)
+			target, err := database.CreateUser(context.Background(), "locked-out", "hash", 3)
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPost, "/users/"+itoa(target)+"/recovery-credential", token,
+				map[string]any{"verification": "in_person"})
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			var issue struct {
+				Credential string `json:"credential"`
+			}
+			_ = json.NewDecoder(w.Body).Decode(&issue)
+			stored, _ := database.GetRecoveryAssist(context.Background(), target)
+			return rec, []string{issue.Credential, stored.Verifier}
+		}},
 		{"channel role perms set", "channel_perms_update", func(t *testing.T) (*audittest.Recorder, []string) {
 			handler, database, token, chID := fixture(t)
 			rec := audittest.Install(t, database)

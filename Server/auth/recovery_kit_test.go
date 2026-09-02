@@ -78,3 +78,66 @@ func TestRecoveryKitVerifier_ParametersComeFromTheVerifier(t *testing.T) {
 		t.Fatalf("DummyRecoveryKitVerifier: %v", err)
 	}
 }
+
+// An owner-issued credential (B4-6) is shorter than a kit secret, and the
+// shape alone tells the two apart.
+func TestRecoveryAssistSecret_ShapeAndKind(t *testing.T) {
+	shown, canonical, err := GenerateRecoveryAssistSecret()
+	if err != nil {
+		t.Fatalf("GenerateRecoveryAssistSecret: %v", err)
+	}
+	if groups := strings.Split(shown, "-"); len(groups) != 6 || len(shown) != 29 || len(canonical) != 24 {
+		t.Fatalf("shown = %q (canonical %d chars), want six groups of four", shown, len(canonical))
+	}
+	if got, kind := NormalizeRecoverySecret(strings.ToLower(shown)); kind != RecoverySecretAssist || got != canonical {
+		t.Fatalf("NormalizeRecoverySecret(credential) = %q, %v; want %q as an assist secret", got, kind, canonical)
+	}
+	kitShown, kitCanonical, _ := GenerateRecoveryKitSecret()
+	if got, kind := NormalizeRecoverySecret(kitShown); kind != RecoverySecretKit || got != kitCanonical {
+		t.Fatalf("NormalizeRecoverySecret(kit) = %q, %v; want the kit shape", got, kind)
+	}
+	for _, bad := range []string{"", canonical[:23], canonical + "A", "1" + canonical[1:], kitCanonical[:30]} {
+		if _, kind := NormalizeRecoverySecret(bad); kind != RecoverySecretMalformed {
+			t.Errorf("NormalizeRecoverySecret(%q) = %v, want malformed", bad, kind)
+		}
+	}
+	// A credential verifies like a kit secret: same argon2id verifier shape.
+	verifier, err := HashRecoveryKitSecret(canonical)
+	if err != nil {
+		t.Fatalf("HashRecoveryKitSecret: %v", err)
+	}
+	if !VerifyRecoveryKitSecret(verifier, canonical) || VerifyRecoveryKitSecret(verifier, kitCanonical) {
+		t.Fatal("the credential's verifier accepts the wrong secret or refuses the right one")
+	}
+}
+
+// A verifier from another version or with absent parameters never verifies.
+func TestRecoveryKitVerifier_RefusesForeignParameters(t *testing.T) {
+	_, canonical, _ := GenerateRecoveryKitSecret()
+	verifier, err := HashRecoveryKitSecret(canonical)
+	if err != nil {
+		t.Fatalf("HashRecoveryKitSecret: %v", err)
+	}
+	parts := strings.Split(verifier, "$")
+	if len(parts) != 6 {
+		t.Fatalf("verifier has %d fields, want 6: %q", len(parts), verifier)
+	}
+	foreign := func(version, params string) string {
+		p := append([]string(nil), parts...)
+		p[2], p[3] = version, params
+		return strings.Join(p, "$")
+	}
+	for name, v := range map[string]string{
+		"other version":  foreign("v=18", parts[3]),
+		"zero memory":    foreign(parts[2], "m=0,t=2,p=1"),
+		"zero time":      foreign(parts[2], "m=19456,t=0,p=1"),
+		"zero threads":   foreign(parts[2], "m=19456,t=2,p=0"),
+		"garbled params": foreign(parts[2], "memory=19456"),
+		"bad salt":       strings.Join(append(append([]string(nil), parts[:4]...), "*not-base64*", parts[5]), "$"),
+		"bad hash":       strings.Join(append(append([]string(nil), parts[:5]...), "*not-base64*"), "$"),
+	} {
+		if VerifyRecoveryKitSecret(v, canonical) {
+			t.Errorf("%s: verifier %q accepted the secret", name, v)
+		}
+	}
+}

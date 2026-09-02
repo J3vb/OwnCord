@@ -1464,6 +1464,14 @@ CREATE TABLE IF NOT EXISTS recovery_kits (
     created_at TEXT    NOT NULL,
     used_at    TEXT
 );
+CREATE TABLE IF NOT EXISTS recovery_assists (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    verification TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -23,6 +23,9 @@ const (
 	recoveryKitSecretBytes = 20
 	recoveryKitSecretLen   = 32
 	recoveryKitGroup       = 4
+	// An owner-issued credential (B4-6) is shorter: 15 bytes, 24 characters.
+	recoveryAssistSecretBytes = 15
+	recoveryAssistSecretLen   = 24
 
 	// argon2id parameters: OWASP's minimum for the memory-constrained
 	// profile, chosen because verification takes an admission slot (B4-4)
@@ -37,12 +40,24 @@ const (
 
 var recoveryKitEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// GenerateRecoveryKitSecret returns a fresh kit secret as the user sees it
-// (grouped) and its canonical form (the string the verifier is made from).
-func GenerateRecoveryKitSecret() (shown, canonical string, err error) {
-	raw := make([]byte, recoveryKitSecretBytes)
+// RecoverySecretKind is what a presented secret's shape says it is: a kit
+// secret (32 characters) or an owner-issued recovery credential (24
+// characters, B4-6). The shape selects which verifier the one compare of a
+// recovery attempt runs against, so the two paths never interfere.
+type RecoverySecretKind int
+
+const (
+	RecoverySecretMalformed RecoverySecretKind = iota
+	RecoverySecretKit
+	RecoverySecretAssist
+)
+
+// generateRecoverySecret returns n random bytes as the user sees them
+// (base32 in groups of four) and in canonical form.
+func generateRecoverySecret(n int) (shown, canonical string, err error) {
+	raw := make([]byte, n)
 	if _, err := rand.Read(raw); err != nil {
-		return "", "", fmt.Errorf("GenerateRecoveryKitSecret: %w", err)
+		return "", "", fmt.Errorf("generateRecoverySecret: %w", err)
 	}
 	canonical = recoveryKitEncoding.EncodeToString(raw)
 	var b strings.Builder
@@ -55,10 +70,22 @@ func GenerateRecoveryKitSecret() (shown, canonical string, err error) {
 	return b.String(), canonical, nil
 }
 
-// NormalizeRecoveryKitSecret turns user input — however it was grouped,
-// spaced or cased — into the canonical form, and reports whether it has a
-// kit secret's shape at all.
-func NormalizeRecoveryKitSecret(input string) (canonical string, ok bool) {
+// GenerateRecoveryKitSecret returns a fresh kit secret as the user sees it
+// (grouped) and its canonical form (the string the verifier is made from).
+func GenerateRecoveryKitSecret() (shown, canonical string, err error) {
+	return generateRecoverySecret(recoveryKitSecretBytes)
+}
+
+// GenerateRecoveryAssistSecret returns a fresh owner-issued recovery
+// credential (B4-6): 15 random bytes, shown as six groups of four.
+func GenerateRecoveryAssistSecret() (shown, canonical string, err error) {
+	return generateRecoverySecret(recoveryAssistSecretBytes)
+}
+
+// NormalizeRecoverySecret turns user input — however it was grouped, spaced
+// or cased — into canonical form and reports which kind of secret its shape
+// makes it; anything else is malformed.
+func NormalizeRecoverySecret(input string) (canonical string, kind RecoverySecretKind) {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(input) {
 		switch {
@@ -67,14 +94,25 @@ func NormalizeRecoveryKitSecret(input string) (canonical string, ok bool) {
 		case r == '-' || r == ' ' || r == '\t' || r == '\n' || r == '\r':
 			// separators
 		default:
-			return "", false
+			return "", RecoverySecretMalformed
 		}
 	}
 	canonical = b.String()
-	if len(canonical) != recoveryKitSecretLen {
-		return "", false
+	switch len(canonical) {
+	case recoveryKitSecretLen:
+		return canonical, RecoverySecretKit
+	case recoveryAssistSecretLen:
+		return canonical, RecoverySecretAssist
+	default:
+		return "", RecoverySecretMalformed
 	}
-	return canonical, true
+}
+
+// NormalizeRecoveryKitSecret is NormalizeRecoverySecret for enrolment, which
+// accepts a kit secret's shape only.
+func NormalizeRecoveryKitSecret(input string) (canonical string, ok bool) {
+	canonical, kind := NormalizeRecoverySecret(input)
+	return canonical, kind == RecoverySecretKit
 }
 
 // HashRecoveryKitSecret returns the argon2id verifier of a canonical secret
