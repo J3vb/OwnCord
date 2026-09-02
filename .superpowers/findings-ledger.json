@@ -7615,13 +7615,19 @@
       "why": "Identity is normalized by two different rules that disagree. `loginAuthenticate` derives the per-username failure/lockout key with `strings.ToLower` (full Unicode folding), while the account it is protecting is resolved with `WHERE username = ? COLLATE NOCASE` (Server/db/queries/sqlite/users.sql:5) and stored under `username TEXT NOT NULL UNIQUE COLLATE NOCASE` (Server/migrations/001_initial_schema.sql:24) — SQLite's NOCASE folds ASCII A–Z only. `auth.ValidateUsername` (Server/auth/helpers.go:19-47) rejects only control and Cf runes, and registration applies no case normalization (auth_handler.go:298 `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))`), so two accounts that differ only by a non-ASCII letter's case are two independent rows — yet they collapse to a single `login_user_fail:` / `login_user_lock:` key. Failed logins against one account therefore lock the other out of its own account. The disagreement is one-directional (anything equal under NOCASE is also equal under ToLower), so this is collateral over-locking, not an auth bypass.",
       "repro": "1. Register \"ärger\" (password P1) and \"Ärger\" (password P2). Both succeed: the UNIQUE COLLATE NOCASE index does not fold \"Ä\"/\"ä\", so two separate users rows exist. 2. POST /api/v1/auth/login 10 times with username \"ärger\" and a wrong password. At auth_handler.go:471 unameKey = \"ärger\"; :515 records each attempt under \"login_user_fail:ärger\"; on the 10th, :541-542 calls limiter.Lockout(\"login_user_lock:ärger\", loginUserLockoutDuration = 15m) (Server/api/constants.go:119,126). 3. The owner of \"Ärger\" now POSTs /auth/login with the CORRECT password P2. Line 471 computes strings.ToLower(\"Ärger\") == \"ärger\", so line 473's IsLockedOut(\"login_user_lock:ärger\") is true and the request is answered 429 RATE_LIMITED \"account temporarily locked due to too many failed attempts\" for the full 15 minutes — even though that account has had zero failed attempts. The same collision also means an attacker can spend attempts against a username string that matches no account at all (the constant-time path at :525-535 still records the failure for a non-existent user) and have it trip a real account's lockout.",
       "evidence": "Server/api/auth_handler.go:471-473,501,515,541-542:\n\tunameKey := strings.ToLower(req.Username)\n\tuserLockKey := \"login_user_lock:\" + unameKey\n\tif limiter.IsLockedOut(userLockKey) { ... 429 ... }\n\t...\n\tuserFailKey := \"login_user_fail:\" + unameKey\n\t... limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) ...\n\t\tif !limiter.Check(userFailKey, ...) { limiter.Lockout(r.Context(), userLockKey, loginUserLockoutDuration) }\n\nServer/db/queries/sqlite/users.sql:5:\n\tFROM users WHERE username = ? COLLATE NOCASE;\n\nServer/migrations/001_initial_schema.sql:24:\n\tusername    TEXT    NOT NULL UNIQUE COLLATE NOCASE,\n\nThe comment above line 471 states the intent explicitly — \"canonicalize the username the same way GetUserByUsername does (COLLATE NOCASE)\" — which strings.ToLower does not do for non-ASCII.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "state-desync",
       "suggestedFix": "One-token change at Server/api/auth_handler.go:471 — use the fold the repo already established for this exact hazard: `unameKey := db.LowerASCII(req.Username)` instead of `strings.ToLower(req.Username)` (package api already imports Server/db). That makes the lockout key agree exactly with COLLATE NOCASE, keeps the intended admin/Admin/ADMIN bucket sharing, and stops distinct non-ASCII-case accounts from colliding. Drop the now-unused `strings` import only if nothing else in the file uses it (it does — leave it).",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-02",
+      "fix": {
+        "commit": "9553097",
+        "test": "Server/service/lockout_fold_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0325",

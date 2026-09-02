@@ -5,7 +5,7 @@
 §HP-4 (roadmap
 [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md), B4)
 **Commits reviewed:** the identity chain's squash merges on `dev` (table
-below) and the five pull requests still open at measurement
+below) and the pull requests still open at measurement
 **Measured at:** `dev` `b5e9d4a` (#1510, B4-8), branch `docs/hp-4-scorecard`
 **Measured:** 2026-09-02
 **Evidence base:** [data-lifecycle.md](../architecture/data-lifecycle.md)
@@ -250,10 +250,9 @@ node -e 'const l=require("./.superpowers/findings-ledger.json");for(const id of 
 | OC-0341 | `fixed`                                         |       |
 | OC-0354 | `fixed`                                         |       |
 
-Seven are `fixed` on `dev`; OC-0324 is `fixed` on #1509's branch and merges
-with it (ready, auto-merge armed). Roadmap rule 2 — zero open B4-tagged
-findings at exit — holds once #1509 lands; nothing else in the ledger is
-B4-tagged.
+All eight are `fixed` on `dev` (#1509 merged after this scorecard was
+measured, `fc4c562`). Roadmap rule 2 — zero open B4-tagged findings at exit
+— holds; nothing else in the ledger is B4-tagged.
 
 ## Decisions this scorecard records
 
