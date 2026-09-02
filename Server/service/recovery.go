@@ -152,6 +152,8 @@ func newRecoveryAttempt(in RecoverInput) recoveryAttempt {
 	}
 }
 
+// RecoverWithKit redeems the account's kit from the public route and signs
+// the holder in without the second factor (owner decision 2).
 func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*AuthResult, error) {
 	at := newRecoveryAttempt(in)
 	if s.limiter.IsLockedOut(at.ipLock) || s.limiter.IsLockedOut(at.userLock) {
@@ -162,26 +164,49 @@ func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*Aut
 		return nil, err
 	}
 
+	// The expensive work — the argon2id compare and, on a match, the bcrypt
+	// hash of the new password — runs under one admission slot (B4-4), taken
+	// before the attempt is charged: a refusal for load costs the caller
+	// nothing, so a busy server cannot lock an honest holder out.
+	release, admitted := s.limiter.Admission().TryAcquire()
+	if !admitted {
+		return nil, ErrAuthBusy
+	}
+	newHash, err := s.recoverAdmitted(ctx, in, user, kit, at)
+	release()
+	if err != nil {
+		return nil, err
+	}
+	return s.completeRecovery(ctx, in, user, newHash, at)
+}
+
+// recoverAdmitted is the admitted part of an attempt: the reservation, the
+// compare and the new-password hash. It returns the hash to commit.
+func (s *AuthService) recoverAdmitted(ctx context.Context, in RecoverInput, user *db.User, kit *db.RecoveryKit, at recoveryAttempt) (string, error) {
 	// Reserve the attempt before the compare, as login does (F3), so a
 	// concurrent burst is capped at the same budget a sequential one gets;
 	// the fifth failure trips the lockout (owner decision 2).
 	if !s.limiter.Allow(at.ipFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) ||
 		!s.limiter.Allow(at.userFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) {
 		s.recoveryLockout(ctx, in, user, at)
-		return nil, ErrRecoveryLockedOut
+		return "", ErrRecoveryLockedOut
 	}
 	matched, err := s.compareRecoverySecret(kit, in.KitSecret)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !matched {
 		s.recoveryLockout(ctx, in, user, at)
-		return nil, ErrRecoveryKitInvalid
+		return "", ErrRecoveryKitInvalid
 	}
 	if auth.IsEffectivelyBanned(user) {
-		return nil, ErrBanned
+		return "", ErrBanned
 	}
-	return s.completeRecovery(ctx, in, user, at)
+	newHash, err := auth.HashPassword(in.NewPassword)
+	if err != nil {
+		return "", ErrPasswordHash
+	}
+	return newHash, nil
 }
 
 // recoveryCandidate looks up the account and its live kit. An unknown
@@ -207,8 +232,11 @@ func (s *AuthService) recoveryCandidate(ctx context.Context, in RecoverInput) (*
 }
 
 // compareRecoverySecret runs the one argon2id compare every attempt costs,
-// whatever exists: without a live kit it compares against a verifier nobody
-// holds, so the answer is no at the same price.
+// whatever the input and whatever exists: a malformed secret still compares
+// (its canonical form is empty), and without a live kit the compare runs
+// against a verifier nobody holds — so the answer is no at the same price,
+// and neither the account nor the kit can be told apart by timing. The
+// caller holds the admission slot.
 func (s *AuthService) compareRecoverySecret(kit *db.RecoveryKit, secret string) (bool, error) {
 	canonical, wellFormed := auth.NormalizeRecoveryKitSecret(secret)
 	verifier, err := auth.DummyRecoveryKitVerifier()
@@ -218,26 +246,14 @@ func (s *AuthService) compareRecoverySecret(kit *db.RecoveryKit, secret string) 
 	if kit != nil {
 		verifier = kit.Verifier
 	}
-	release, admitted := s.limiter.Admission().TryAcquire()
-	if !admitted {
-		return false, ErrAuthBusy
-	}
-	matched := wellFormed && auth.VerifyRecoveryKitSecret(verifier, canonical)
-	release()
-	return matched && kit != nil, nil
+	matched := auth.VerifyRecoveryKitSecret(verifier, canonical)
+	return matched && wellFormed && kit != nil, nil
 }
 
-// completeRecovery hashes the new password, redeems the kit in one
-// transaction and signs the holder in without the second factor (owner
-// decision 2): the kit is the proof of possession this path accepts.
-func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, user *db.User, at recoveryAttempt) (*AuthResult, error) {
-	newHash, admitted, err := s.limiter.Admission().HashPassword(in.NewPassword)
-	if !admitted {
-		return nil, ErrAuthBusy
-	}
-	if err != nil {
-		return nil, ErrPasswordHash
-	}
+// completeRecovery redeems the kit in one transaction with the already
+// hashed new password and signs the holder in without the second factor
+// (owner decision 2): the kit is the proof of possession this path accepts.
+func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, user *db.User, newHash string, at recoveryAttempt) (*AuthResult, error) {
 	revoked, err := s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
 		"account recovered with the recovery kit; every session revoked")
 	if err != nil {
