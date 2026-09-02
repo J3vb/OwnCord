@@ -334,6 +334,45 @@ describe("DmProfileSidebar", () => {
     expect(noteEl.value).toBe("Pre-existing note");
 
     sidebar.destroy?.();
+    // The migration wrote server A's scoped copy; clear both keys.
     localStorage.removeItem("owncord:dm-note:42");
+    localStorage.removeItem("owncord:dm-note:a.example.com:42");
+  });
+
+  it("consumes the legacy note on migration so a second host does not inherit it (OC-0329)", () => {
+    // User ids are per-server, so the pre-scoping note about server A's user
+    // 42 must reach server A exactly once and never show for the unrelated
+    // user 42 on server B.
+    const user = makeUser({ id: 42 });
+    localStorage.setItem("owncord:dm-note:42", "Pre-existing note");
+
+    try {
+      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+      sidebarA.mount(container);
+      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElA.value).toBe("Pre-existing note");
+      sidebarA.destroy?.();
+
+      // Migrated under server A's key and consumed at the legacy one.
+      expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
+      expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
+
+      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
+      sidebarB.mount(container);
+      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElB.value).toBe("");
+      sidebarB.destroy?.();
+
+      // Reopening server A still finds its migrated note.
+      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+      sidebarA2.mount(container);
+      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElA2.value).toBe("Pre-existing note");
+      sidebarA2.destroy?.();
+    } finally {
+      localStorage.removeItem("owncord:dm-note:42");
+      localStorage.removeItem("owncord:dm-note:a.example.com:42");
+      localStorage.removeItem("owncord:dm-note:b.example.com:42");
+    }
   });
 });

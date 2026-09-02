@@ -106,13 +106,23 @@ function scopedNoteKey(userId: number, host: string): string {
 
 function loadNote(userId: number, host: string): string {
   try {
-    if (host !== "") {
-      const scoped = localStorage.getItem(scopedNoteKey(userId, host));
-      if (scoped !== null) return scoped;
-    }
-    // Fall back to the legacy key so a note saved before per-server scoping
-    // (or while the host was unknown) is not silently lost.
-    return localStorage.getItem(legacyNoteKey(userId)) ?? "";
+    if (host === "") return localStorage.getItem(legacyNoteKey(userId)) ?? "";
+
+    const scoped = localStorage.getItem(scopedNoteKey(userId, host));
+    if (scoped !== null) return scoped;
+
+    // Miss at the scoped key: read through to the pre-scoping legacy key
+    // once, persist it under this host's key, and consume the legacy entry so
+    // the migration can only ever apply to the FIRST host opened post-upgrade.
+    // User ids are per-server autoincrement integers, so leaving the legacy
+    // key in place would show server A's private note about user N for the
+    // unrelated user N on every other server (OC-0329) — the same shape
+    // channel-mutes.ts fixed for OC-0288.
+    const legacy = localStorage.getItem(legacyNoteKey(userId));
+    if (legacy === null) return "";
+    localStorage.setItem(scopedNoteKey(userId, host), legacy);
+    localStorage.removeItem(legacyNoteKey(userId));
+    return legacy;
   } catch {
     return "";
   }

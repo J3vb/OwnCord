@@ -12,6 +12,9 @@ public half is its document, the private half stays counted-not-described);
 S-13 persisted through the limiter's persister shape, emergency recovery codes
 built — B4-3 ran ahead of the decision-blocked B4-1, whose "after B4-1"
 ordering was hot-file avoidance);
+**B4-12 batch (a) merged 2026-09-02** (PR #1502 = `12dbc88`; OC-0313 and
+OC-0329 closed — the legacy per-user volume and DM-note keys are consumed
+on migration, so a pre-scoping value reaches the first host only);
 **B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
 PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
 test-first, revert-proofs pass). The owner decisions listed below block the steps that
@@ -848,6 +851,38 @@ true. The client unit suite stays green and no assertion is weakened
 Exit: all eight B4-tagged rows `fixed` in the ledger (or re-tagged with a
 written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
+
+**Evidence, 2026-09-01 — batch (a), OC-0313 + OC-0329** — branch
+`fix/b4-12a-legacy-keys` from `dev` `aabac60`; PR to `dev` #1502 (draft,
+opened 2026-09-01). Fix commit `40f6973`; ledger records flipped in
+`448ccf7` on the same branch (`fix.commit = 40f6973`, `revertProof = pass`).
+Both readers already migrated the pre-scoping value to the host-scoped key
+on a miss; neither consumed the legacy entry, so every later brand-new host
+missed its own key, read through to the same value and adopted it for its
+unrelated user N.
+
+- **OC-0313:** `getSavedUserVolume` (`audioElements.ts`) removes the
+  `STORAGE_PREFIX + userVolume_N` entry right after persisting the scoped
+  copy — the `channel-mutes.ts` shape from OC-0288. Test in
+  `audio-elements.test.ts`: host A inherits the legacy 0 (a silenced user)
+  once, the legacy entry is gone from localStorage, host B reads the 100
+  default and writes nothing. Revert-proof: fails with the original reader.
+- **OC-0329:** `loadNote` (`DmProfileSidebar.ts`) reads through once,
+  writes the host's key and removes the legacy one, inside the existing
+  try/catch; an empty host still reads the legacy key as before. Test in
+  `dm-profile-sidebar.test.ts`: server A shows the note, its scoped copy
+  exists, the legacy key is null, server B's user 42 sees an empty note,
+  and server A still finds its note afterwards. The pre-existing
+  legacy-fallback test keeps passing (its cleanup now also clears the
+  scoped copy the migration writes). Revert-proof: fails with the original
+  reader.
+- **Gates:** `tsc --noEmit`; `oxlint src/` (two pre-existing warnings in
+  `messages.store.ts`, unrelated); `eslint` on the two files; prettier
+  check; the full client unit suite green — 191 files, 5251 tests, no
+  assertion weakened (CLAUDE.md rule); no `Client/src/` structural work
+  (the B2-8 precedent boundary). `check:docs` counts move to 331 fixed /
+  48 open on this branch (batch (d) and B4-3 move the same lines;
+  whichever merges later re-derives).
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
 `feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,

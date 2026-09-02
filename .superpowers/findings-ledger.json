@@ -7375,13 +7375,19 @@
       "why": "`getSavedUserVolume` falls back to the unscoped `userVolume_{id}` key on a miss at the host-scoped key and persists the result under the scoped key, but unlike the identical migration in channel-mutes.ts it never removes the legacy key. Every subsequent brand-new host also misses its own scoped key, reads through to the same legacy value, and adopts it — so a volume (including a 0 = silenced) set for user id N on one server is silently applied to the unrelated user id N on every other server.",
       "repro": "Pre-scoping install has `owncord:settings:userVolume_7 = 0` (the user silenced person #7 on server A before host-scoping existed).\n\n1. Connect to server A. MainPage.ts:108 calls `setAudioVolumeHost(\"a.example.com\")`. `getSavedUserVolume(7)`: scoped key `userVolume_7:a.example.com` misses -> legacy `userVolume_7` returns 0 -> `savePref(\"userVolume_7:a.example.com\", 0)` -> returns 0. The legacy key `userVolume_7` is still present.\n2. Log out, connect to server B. `setAudioVolumeHost(\"b.example.com\")`. `getSavedUserVolume(7)`: scoped key `userVolume_7:b.example.com` misses -> legacy `userVolume_7` still returns 0 -> `savePref(\"userVolume_7:b.example.com\", 0)` -> returns 0.\n3. In a voice call on server B, `handleTrackSubscribedAudio` calls `participant.setVolume(this.getEffectiveVolume(7))` = 0. User id 7 on server B — a different person, never touched by the user — is inaudible, with the volume slider showing 0 and no explanation.\n\nThe same happens on every further new host. channel-mutes.ts:106-111 fixes exactly this shape by consuming the legacy key (`localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY)`) so the migration can only apply to the first host; audioElements.ts has no such removal.\n\nNot test-locked: tests/unit/audio-elements.test.ts:256-273 only covers the case where the second host has its OWN explicit value (80), which short-circuits before the legacy branch.",
       "evidence": "audioElements.ts:50-63\nfunction getSavedUserVolume(userId: number): number {\n  const scopedKey = userVolumeKey(userId);\n  if (currentHost === null) return loadPref<number>(scopedKey, 100);\n\n  const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);\n  if (scoped !== VOLUME_NOT_SET) return scoped;\n\n  const legacy = loadPref<number>(`userVolume_${userId}`, VOLUME_NOT_SET);\n  if (legacy !== VOLUME_NOT_SET) {\n    savePref(scopedKey, legacy);   // <-- legacy key is never removed\n    return legacy;\n  }\n  return loadPref<number>(scopedKey, 100);\n}\n\nchannel-mutes.ts:106-111 (the corrected sibling)\n  if (keyExists(MUTED_KEY)) {\n    const legacy = parseMutedIds(loadPref<unknown[]>(MUTED_KEY, []));\n    writeMuted(legacy);\n    localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);\n    return legacy;\n  }",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "client-state",
       "suggestedFix": "Consume the legacy key in the same branch, exactly as channel-mutes.ts does. In getSavedUserVolume, after `savePref(scopedKey, legacy)` at audioElements.ts:59, add `localStorage.removeItem(\"owncord:settings:\" + `userVolume_${userId}`)` (use the same STORAGE_PREFIX constant the settings helpers use rather than a literal), so the migration can only ever apply to the first host connected post-upgrade and every later host falls through to the 100 default at line 62.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "40f6973",
+        "test": "Client/tests/unit/audio-elements.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0314",
@@ -7694,13 +7700,19 @@
       "why": "loadNote reads the host-scoped key, and on a miss reads through to the legacy unscoped `owncord:dm-note:{userId}` key — but it neither migrates the value into the scoped key nor removes the legacy one. Because user ids are per-server SQLite autoincrement integers, that read-through fires on every server the user connects to. The two other modules with the same shape got this right: channel-mutes.ts:106-111 writes the scoped key and then `localStorage.removeItem` on the legacy one, citing OC-0288 for why leaving it in place lets every subsequent host inherit server A's data; identity.ts::migrateLegacyIdentityKey saves-then-deletes for the same reason.",
       "repro": "On a build predating the host-scoping fix (MainPage.ts:253, OC-0177), write a DM note about user 7 on server A — it lands at `owncord:dm-note:7`. Upgrade. Connect to server B (a completely different host) and open the DM profile sidebar for B's user 7: loadNote misses `owncord:dm-note:B:7` and returns server A's note text about a different person. The same happens on server C, D, ... because saveNote (line 121) only ever writes the scoped key and nothing ever deletes the legacy entry, so the read-through is permanent rather than one-time.",
       "evidence": "DmProfileSidebar.ts:107-118\n  function loadNote(userId: number, host: string): string {\n    try {\n      if (host !== \"\") {\n        const scoped = localStorage.getItem(scopedNoteKey(userId, host));\n        if (scoped !== null) return scoped;\n      }\n      // Fall back to the legacy key so a note saved before per-server scoping\n      // (or while the host was unknown) is not silently lost.\n      return localStorage.getItem(legacyNoteKey(userId)) ?? \"\";\n\ncontrast channel-mutes.ts:106-111\n  if (keyExists(MUTED_KEY)) {\n    const legacy = parseMutedIds(loadPref<unknown[]>(MUTED_KEY, []));\n    writeMuted(legacy);\n    localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);\n    return legacy;\n  }",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-lib",
       "suggestedFix": "Consume the legacy key in the one shared reader. In loadNote (DmProfileSidebar.ts:107-118), replace the fallback `return localStorage.getItem(legacyNoteKey(userId)) ?? \"\";` with a read-migrate-delete: read the legacy value; if it is non-null and host !== \"\", `localStorage.setItem(scopedNoteKey(userId, host), legacy); localStorage.removeItem(legacyNoteKey(userId));` before returning it (all inside the existing try/catch). One host inherits the pre-scoping note exactly once — as the existing test expects — and every later host sees an empty note.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "40f6973",
+        "test": "Client/tests/unit/dm-profile-sidebar.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0330",
