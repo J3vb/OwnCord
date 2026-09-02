@@ -34,8 +34,10 @@ callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
 8–10 recorded 2026-09-02** (amendments under the questions);
 **B4-7 new-login half opened 2026-09-02** (branch `feat/b4-7-new-login`,
 PR #1507; evidence in its section — the REST-only `unseen` session flag, and
-OC-0354 closed with it). Next B4-1 with OC-0324, then B4-5 → B4-6, B4-8, HP-4,
-B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+OC-0354 closed with it); **B4-1 opened 2026-09-02** (branch
+`feat/b4-1-registration-modes`, PR #1508; evidence in its section — the four
+modes, the upgrade mapping, the audited transition, the approval queue). Next
+OC-0324 (B4-12(c)), then B4-5 → B4-6, B4-8, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -432,6 +434,70 @@ requires an invite — effective modes `closed` and `invite-only` only.
 Exit: all modes enforce their documented behaviour with the state-test
 matrix green; upgrade mapping proven; transitions audited; evidence block
 records the matrix and the migration pair.
+
+**Evidence, 2026-09-02** — branch `feat/b4-1-registration-modes` from `dev`
+`a595786` (stacked on B4-7's second half, #1507); PR to `dev` #1508 (draft,
+opened 2026-09-02). Fix commit `eb583bf`. Owner decision 1 chose the locked
+account for approval mode.
+
+- **Mode setting:** `registration_mode` ∈ `closed | invite | approval | open`
+  replaces the boolean; migration 034 derives it — a fresh install (no users
+  when the migrations run) is `invite`; an upgrade maps `registration_open`
+  1/true → `invite` and anything else → `closed`, never `open` — and removes
+  the old row. `SettingsService` validates the enum (lower-cased, trimmed),
+  writes a `registration_mode_change` audit row naming old and new mode, and
+  allows `require_2fa` only while the mode is `closed`; the mode cannot leave
+  `closed` while `require_2fa` is on, and an unrelated patch is never gated.
+  The setup wizard and its status carry `registration_mode` (default
+  `invite`); the admin panel's Settings page and the wizard's step 4 use a
+  mode select.
+- **Policy gate:** `RegistrationPolicy` refuses `closed` (403, before the
+  body is read) and, as before, a `require_2fa` server; an unparseable value
+  fails closed and is logged. `Register` then admits per mode
+  (`admitRegistration`): invite mode needs a code (an empty one gets the
+  uniform 400 before any bcrypt work) and spends it exactly as before
+  (`CreateUserWithInvite`, OC-0376's transaction); open mode creates the
+  account and its first session in one transaction
+  (`CreateUserWithSession`); approval mode records a locked application
+  (`users.registration_status = pending`, no session,
+  `202 {"status":"pending_approval"}`) that `Login` refuses with
+  `403 account is awaiting approval`.
+- **Approval queue:** `GET /admin/api/registrations`, `POST …/{id}/approve`,
+  `POST …/{id}/deny` (`MANAGE_SERVER`), audited `registration_approve` /
+  `registration_deny`; the Users page shows the pending card with both
+  buttons. Denial anonymises and locks the row for good (`denied`, the
+  username released) instead of deleting it — audit rows reference the id,
+  the convention `DeleteAccount` already follows. Applications are absent
+  from the member roster, the admin user list and the `require_2fa`
+  enrolment count.
+- **Abuse limits (decision 1):** open and approval registration are budgeted
+  at 5 per client address per 24 h and the queue is capped at 100
+  applications, both `429 RATE_LIMITED`; invite mode is budgeted by its
+  invites.
+- **State tests:** `TestRegister_ModeMatrix` — every mode × valid / expired /
+  revoked / absent / used-up invite, with the account, lock and
+  invite-consumption consequences (concurrent reuse stays OC-0376's proof);
+  `TestMigration034_MapsRegistrationOpenWithoutOpening` (seven upgrade and
+  fresh-install cases); `TestRegister_ApprovalMode_LockedUntilApproved`;
+  `TestPendingUsers_HeldOutsideTheRosterUntilDecided`;
+  `TestCreateUserWithSession_CommitsBothOrNeither`;
+  `TestRegister_InviteFreeModesAreBudgetedPerAddress`,
+  `TestRegister_ApprovalQueueIsCapped`,
+  `TestRegister_InviteModeRefusesAnEmptyCodeBeforeHashing`; the
+  `TestSettings_*` mode and require_2fa preconditions;
+  `TestAdminAPI_Registrations_ListApproveDeny` and
+  `…_RequireManageServer`; the audit-coverage rows for the three new
+  actions. The boolean-era tests moved to the mode.
+- **Client:** nothing structural (BG-10's UX is B9); the connect page shows a
+  notice on the 202 instead of wiring a missing token.
+- **Docs:** `api.md` (register modes and 202, the registration-queue
+  section, settings and wizard fields), `security.md` (audit list,
+  require_2fa rule, checklist), `schema.md` regenerated, traceability row
+  BPR-041.
+- **Gates:** four build-tag builds, `go vet`, `go test -race ./...`,
+  `-tags deadlock ./ws/`, pinned `golangci-lint` 0 issues on the changed
+  packages, `sqlc generate` no diff, `gendocs` regenerated; client full unit
+  suite, `tsc`, `oxlint` and `eslint`; `check:docs` and the ledger check.
 
 ## B4-2 — Authenticated-only and no-external-dependency absence proofs
 
