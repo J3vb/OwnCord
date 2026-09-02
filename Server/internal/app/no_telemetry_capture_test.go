@@ -188,7 +188,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 	if err := conn.Write(dialCtx, websocket.MessageText, authFrame); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
-	for i := 0; i < 2; i++ { // auth_ok, ready
+	for i := range 2 { // auth_ok, ready
 		if _, _, err := conn.Read(dialCtx); err != nil {
 			t.Fatalf("read frame %d after auth: %v", i, err)
 		}
