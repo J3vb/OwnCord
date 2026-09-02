@@ -70,9 +70,10 @@ the server automatically when a startup-only value changed. Note that
 
 ### Security (`security`)
 
-| Key                                   | Type  | Default | Description                                                                                                                                                                                                                                     |
-| ------------------------------------- | ----- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `security.auth_rate_limit_multiplier` | float | `1.0`   | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100. |
+| Key                                   | Type  | Default | Description                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `security.auth_rate_limit_multiplier` | float | `1.0`   | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100.                                                                                |
+| `security.expensive_auth_concurrency` | int   | `0`     | Bounds how many bcrypt computations — password checks and hashes on every auth route, recovery-code matching at the second-factor step — run at once. An over-budget attempt is refused with `429 RATE_LIMITED`, runs no bcrypt and consumes no lockout attempt. `0` = twice the CPU count (never below 4); clamped to 1–4096. |
 
 ### Uploads (`upload`)
 
@@ -182,7 +183,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 56 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 57 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -208,6 +209,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `plugins.http_allowlist`                    | Plugins (`plugins`)                     |
 | `plugins.max_memory_mb`                     | Plugins (`plugins`)                     |
 | `security.auth_rate_limit_multiplier`       | Security (`security`)                   |
+| `security.expensive_auth_concurrency`       | Security (`security`)                   |
 | `server.admin_allowed_cidrs`                | Server (`server`)                       |
 | `server.allowed_origins`                    | Server (`server`)                       |
 | `server.data_dir`                           | Server (`server`)                       |

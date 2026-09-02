@@ -38,6 +38,9 @@ import (
 func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry) (api.Runtime, error) {
 	// Lockouts are persisted to the database so they survive restarts (M2).
 	limiter := auth.NewPersistentRateLimiter(database)
+	// B4-4: the one admission budget for expensive authentication work lives
+	// in the limiter, so sizing it here covers every route and the hub alike.
+	limiter.SetAdmissionBudget(cfg.Security.ExpensiveAuthConcurrency)
 	// Service layer — centralises business logic for REST and WS handlers.
 	// *db.DB satisfies service.Store directly.
 	svc := service.New(database, limiter)
