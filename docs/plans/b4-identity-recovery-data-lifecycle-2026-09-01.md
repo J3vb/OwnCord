@@ -15,6 +15,9 @@ ordering was hot-file avoidance);
 **B4-12 batch (a) merged 2026-09-02** (PR #1502 = `12dbc88`; OC-0313 and
 OC-0329 closed — the legacy per-user volume and DM-note keys are consumed
 on migration, so a pre-scoping value reaches the first host only);
+**B4-2 merged 2026-09-02** (PR #1498 = `920b034`; the BPR-042 route-posture
+and dead-credential proofs and the BPR-043 absence proofs, all with negative
+controls — test files only, no gap found);
 **B4-7 (sign-out-everywhere half) opened 2026-09-01** (branch
 `feat/b4-7-sessions`, PR #1500; evidence block in its section). The new-login signal
 half waits on owner question 8. The owner decisions listed below block the
@@ -406,6 +409,78 @@ Exit: inventory + absence tests green and RED-proven; BPR-042's traceability
 row cites them; no production code changed (or any gap found is filed and
 fixed in its own right — a gap here is a security finding and follows
 docs/security.md, not this plan).
+
+**Evidence, 2026-09-01** — branch `feat/b4-2-absence-proofs` from `dev`
+`aabac60`; PR #1498 to `dev` (the squash SHA is recorded by the next step's
+PR). Test files only, plus a two-line refactor of
+`api/absence_contract_test.go` (`fullRouter` now delegates to a new
+`fullRouterWithDB`) so the new tests can mint principals behind the
+production router. No production code changed; **no gap was found** — every
+route off the public surface already answered the uniform 401.
+
+- **Route-posture inventory** (`api/auth_posture_test.go`):
+  `TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401` walks the
+  production router (`chi.Walk`, admin and plugin subrouters included; the
+  B2 guard of ≥ 100 routes kept) and sends an anonymous request to every
+  route not in `publicSurface`, requiring `401` with error `UNAUTHORIZED` —
+  never a 200, a resource-revealing 404, or a body parser's 400 ahead of
+  authentication. `publicSurface` is the declared public surface with a
+  reason per entry, shrink-only (a stale entry fails the test): the two
+  health probes, `/api/v1/info`, the three credential entry points
+  (`login`, `register`, `verify-totp`), the updater manifest, the WebSocket
+  handshake (in-band auth, `TestEpoch1Fixtures/auth-failure`), the admin
+  panel's static files and first-run setup pair (perimeter-gated; the
+  `/admin/api` routes beneath are `RequireAdminAuth`-gated and walked),
+  `/api/v1/metrics`, the two LiveKit perimeter routes and the LiveKit
+  signalling proxy. `optionalPublicSurface` carries `/metrics/*` for the
+  `-tags otel` run CI performs on this package (`ci.yml`). Negative
+  control: `TestAuthPosture_NegativeControl` mounts an unauthenticated probe
+  route beside the production tree and requires exactly it to be reported.
+  A finding worth recording: the walk passed on its first run — at
+  `aabac60` every non-public route, `/admin/api` and `/api/v1/admin/plugins`
+  included, already answered the uniform 401.
+- **Dead-credential uniformity** (`api/dead_session_test.go`):
+  `TestAuthPosture_DeadCredentialsFailUniformly` mints a member behind the
+  production router, proves a live session and a live API token are
+  accepted (controls), then presents six dead classes — missing, revoked
+  session, expired session (row kept, `expires_at` in the past), unknown
+  token, **partial-auth token** (minted through a real 2FA login challenge,
+  the `TestLogin_RequiresTOTPChallenge` shape) and revoked API token — to
+  both the API gate (`/api/v1/auth/me`) and the admin gate
+  (`/admin/api/me`), requiring the identical `401 UNAUTHORIZED` from every
+  pair; a banned account with a valid session is pinned as the documented
+  `403 FORBIDDEN` exception.
+- **No external dependency** (`api/external_dependency_absence_test.go`,
+  the B2 absence-contract shape — vocabulary pins, honestly labelled):
+  `TestAbsenceContract_NoMailTransportImport` parses every production `.go`
+  file under `Server/` (237 at `aabac60`; tests and `dbgen` excluded) and
+  fails on an import matching a mail-transport or e-mail pattern;
+  `_NoMailModuleRequirement` scans `go.mod`; `_NoMailConfigKeyOrRoute` walks
+  the koanf keys and the route tree; `_NoEmailColumn` opens a fresh migrated
+  schema and inspects every table's columns via `pragma_table_info`.
+  Negative controls: `_ImportScannerNegativeControl` plants a `net/smtp`
+  import in a temp tree, `_ColumnScannerNegativeControl` plants a
+  `contacts.email` column in a temp database; each scanner must report
+  exactly the plant. Registration, login, session listing and revocation
+  already pass in the offline unit harness (`TestRegister_*`, `TestLogin_*`,
+  the sessions tests) — BPR-043's evidence at the unit tier; the
+  internet-blocked network capture is B4-8's.
+- **Traceability:** BPR-042 and BPR-043 rows now cite the tests (the UI /
+  public-docs clauses stay B9's; recovery clauses land with B4-5/B4-6).
+- **Gates before push:** `gofmt -l` clean; `go vet ./api/` and
+  `go vet -tags otel,wazero ./api/`; `go test -race ./api/` (whole package,
+  green, ~113 s); `go test -tags otel -race -run 'TestAuthPosture|TestAbsenceContract' ./api/`
+  green; `npx prettier --check .` and `npm run check:docs` green.
+- **Review fixes (2026-09-02, Codex on #1498, both valid):** `mailPattern`
+  had no rule for the bare word `mail`, so `go-mail`, `mail_address` or
+  `/mail/recovery` would have passed every scanner — it now matches `mail`
+  at a name boundary (pinned by `TestAbsenceContract_MailPatternBoundaries`,
+  with the non-matches that keep it honest); and only the import and column
+  scanners had negative controls, so the go.mod, config-key and route scans
+  were extracted into functions and each got one (a planted `go-mail`
+  requirement, a planted `mail_address` key, a planted `/mail/recovery`
+  route), making the traceability row's "each with a negative control"
+  true. Tests green under the default and `otel` tags; lint 0 issues.
 
 ## B4-3 — TOTP key-file fail-closed, durable second-factor state, emergency recovery codes
 
