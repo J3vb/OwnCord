@@ -502,6 +502,21 @@ account for approval mode.
   `-tags deadlock ./ws/`, pinned `golangci-lint` 0 issues on the changed
   packages, `sqlc generate` no diff, `gendocs` regenerated; client full unit
   suite, `tsc`, `oxlint` and `eslint`; `check:docs` and the ledger check.
+- **Review fixes (Codex, 2026-09-02, `205b86a`):** (P1) a taken
+  `[denied-<id>]` name made a denial fail and left the application pending —
+  the namespace is reserved at registration like `[deleted-…]`, and
+  `DenyPendingUser` falls back to suffixed variants the way `anonymiseUser`
+  does (`TestDenyPendingUser_FallsBackWhenTheDeniedNameIsTaken`); (P2) the
+  queue cap was a count followed by an insert — the insert now carries the
+  cap in one serialized statement, `db.ErrPendingQueueFull` → 429
+  (`TestCreatePendingUser_CapIsEnforcedByTheInsert`,
+  `TestRegister_ApprovalQueueCapHoldsUnderConcurrency` under `-race`); (P2)
+  two concurrent mode patches could audit the same previous value —
+  `SettingsService.Patch` runs one at a time
+  (`TestSettings_RegistrationModeTransitionsChainUnderConcurrency`); and,
+  raised on the stacked #1509 against B4-7's client change, a profile
+  refresh landing after a local 2FA change no longer overwrites it (an
+  epoch bumped by every local change guards the answer).
 
 ## B4-2 — Authenticated-only and no-external-dependency absence proofs
 

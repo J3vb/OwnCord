@@ -165,17 +165,31 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 	return uid, nil
 }
 
+// ErrPendingQueueFull is CreatePendingUser refusing the application because
+// the approval queue already holds maxPending rows.
+var ErrPendingQueueFull = errors.New("approval queue is full")
+
 // CreatePendingUser records an approval-mode application (B4-1): the account
 // row exists, holding the username, as registration_status = 'pending' with
-// no session, so it cannot sign in until ApprovePendingUser.
-func (d *DB) CreatePendingUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
+// no session, so it cannot sign in until ApprovePendingUser. The queue cap is
+// enforced by the insert itself (one serialized statement), so concurrent
+// applications cannot overshoot it; ErrPendingQueueFull when it is full.
+func (d *DB) CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error) {
 	res, err := d.q.CreatePendingUser(ctx, dbgen.CreatePendingUserParams{
-		Username: username,
-		Password: passwordHash,
-		RoleID:   int64(roleID),
+		Username:   username,
+		Password:   passwordHash,
+		RoleID:     int64(roleID),
+		MaxPending: int64(maxPending),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("CreatePendingUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("CreatePendingUser rows: %w", err)
+	}
+	if n == 0 {
+		return 0, ErrPendingQueueFull
 	}
 	return res.LastInsertId()
 }
@@ -233,18 +247,38 @@ func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 // approved account never goes through here. ErrNotFound when nothing pending
 // matches.
 func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
-	res, err := d.q.DenyPendingUser(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("DenyPendingUser: %w", err)
+	// users.username is UNIQUE COLLATE NOCASE and the "[denied-…]" namespace
+	// is reserved at registration (auth.ValidateUsername), but a row from
+	// before the reservation could hold the plain name; like DeleteAccount's
+	// anonymisation, fall back to randomly suffixed variants rather than
+	// leave the application pending.
+	var lastErr error
+	for attempt := range anonymiseUserAttempts {
+		name := fmt.Sprintf("[denied-%d]", userID)
+		if attempt > 0 {
+			suffix := make([]byte, 6)
+			if _, err := rand.Read(suffix); err != nil {
+				return fmt.Errorf("DenyPendingUser suffix: %w", err)
+			}
+			name = fmt.Sprintf("[denied-%d-%s]", userID, hex.EncodeToString(suffix))
+		}
+		res, err := d.q.DenyPendingUser(ctx, dbgen.DenyPendingUserParams{Username: name, ID: userID})
+		if err == nil {
+			n, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("DenyPendingUser rows: %w", err)
+			}
+			if n == 0 {
+				return ErrNotFound
+			}
+			return nil
+		}
+		if !IsUniqueConstraintError(err) {
+			return fmt.Errorf("DenyPendingUser: %w", err)
+		}
+		lastErr = err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("DenyPendingUser rows: %w", err)
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return fmt.Errorf("DenyPendingUser: %w", lastErr)
 }
 
 // GetUserByUsername returns the user with the given username (case-insensitive),
