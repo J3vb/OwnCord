@@ -164,3 +164,43 @@ func TestDeleteAccount_PurgesTheRecoveryCredential(t *testing.T) {
 		t.Fatal("the recovery credential survived account deletion")
 	}
 }
+
+func TestDeleteRecoveryAssist_WithdrawsTheCredential(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid := seedRecoveringUser(t, database, "withdrawn")
+	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
+		t.Fatalf("UpsertRecoveryAssist: %v", err)
+	}
+	if err := database.DeleteRecoveryAssist(ctx, uid); err != nil {
+		t.Fatalf("DeleteRecoveryAssist: %v", err)
+	}
+	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {
+		t.Fatalf("credential after withdrawal = %+v, want none", a)
+	}
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "newhash", "recovery_assist_used", "late"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
+		t.Fatalf("redeem after withdrawal = %v, want ErrRecoveryAssistSpent", err)
+	}
+	// A row whose expiry cannot be parsed is not live either.
+	if (&db.RecoveryAssist{ExpiresAt: "not a time"}).Live(time.Now()) {
+		t.Fatal("an unparsable expiry reads as live")
+	}
+}
+
+func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid, _ := database.CreateUser(ctx, "rotating", "hash", 4)
+	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
+		t.Fatalf("UpsertRecoveryKit: %v", err)
+	}
+	if err := database.DeleteRecoveryKit(ctx, uid); err != nil {
+		t.Fatalf("DeleteRecoveryKit: %v", err)
+	}
+	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {
+		t.Fatalf("kit after deletion = %+v, want none", kit)
+	}
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "gone"); !errors.Is(err, db.ErrRecoveryKitSpent) {
+		t.Fatalf("redeem after deletion = %v, want ErrRecoveryKitSpent", err)
+	}
+}
