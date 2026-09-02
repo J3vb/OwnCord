@@ -217,7 +217,13 @@ var (
 	ErrLogoutFailed = &authError{ErrInternal, "failed to logout"}
 
 	// Password confirmation (account deletion and TOTP management).
-	ErrTooManyAttempts            = &authError{ErrRateLimited, "too many failed attempts, try again later"}
+	ErrTooManyAttempts = &authError{ErrRateLimited, "too many failed attempts, try again later"}
+	// ErrAuthBusy is the B4-4 admission refusal: the process-wide budget for
+	// expensive authentication work is exhausted, so this attempt ran no
+	// bcrypt and consumed no lockout attempt. Same category as the lockouts
+	// (429 RATE_LIMITED); a message of its own so an operator can tell load
+	// from abuse.
+	ErrAuthBusy                   = &authError{ErrRateLimited, "too many authentication attempts in progress, try again later"}
 	ErrPasswordRequired           = &authError{ErrInvalidInput, "password is required"}
 	ErrIncorrectPassword          = &authError{ErrInvalidInput, "incorrect password"}
 	ErrPasswordConfirmationFailed = &authError{ErrInvalidInput, "password confirmation failed"}
@@ -314,7 +320,13 @@ func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResult, error) {
 	// Hash password before consuming the invite so that a hashing failure
 	// does not burn a valid invite code.
-	hash, err := auth.HashPassword(in.Password)
+	// The hash is bcrypt at full cost, so it takes an admission slot like a
+	// compare does (B4-4): a burst of registrations cannot grow the CPU
+	// backlog past the budget, and a refusal burns nothing.
+	hash, admitted, err := s.limiter.Admission().HashPassword(in.Password)
+	if !admitted {
+		return nil, ErrAuthBusy
+	}
 	if err != nil {
 		return nil, ErrPasswordHash
 	}
@@ -457,6 +469,15 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// is keyed per USER and is the only cross-IP brute-force defence, so
 	// scaling it with the shared-NAT multiplier would hand a distributed
 	// attacker more guesses (api/constants_test.go pins this call site).
+	// B4-4: take an admission slot before the attempt is reserved, so an
+	// over-budget request is refused without charging the failure budgets
+	// and without a bcrypt compare; the slot goes back right after the
+	// compare, the only expensive step.
+	release, admitted := s.limiter.Admission().TryAcquire()
+	if !admitted {
+		return nil, ErrAuthBusy
+	}
+	defer release()
 	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
 		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
@@ -471,7 +492,9 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	if user != nil {
 		storedHash = user.PasswordHash
 	}
-	if !auth.CheckPassword(storedHash, in.Password) {
+	matched := auth.CheckPassword(storedHash, in.Password)
+	release()
+	if !matched {
 		// The attempt was already recorded atomically up-front (F3); here
 		// only decide the lockouts, at the same boundary as before: the
 		// 10th in-window failure locks the key. Check is read-only, so
@@ -532,6 +555,18 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// The reservation sits after the store read above, as in authenticate,
 	// so an outage does not consume attempts (OC-0377); it still precedes
 	// the code compare, the check-then-act the up-front record closes.
+	// An emergency recovery code is matched against up to ten bcrypt hashes,
+	// so it takes an admission slot before the attempt is reserved (B4-4): a
+	// refusal charges nothing. A TOTP code is an HMAC and needs no slot.
+	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
+	release := func() {}
+	if isRecovery {
+		var admitted bool
+		if release, admitted = s.limiter.Admission().TryAcquire(); !admitted {
+			return nil, ErrAuthBusy
+		}
+		defer release()
+	}
 	if !s.limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 		return nil, ErrTooManyAttempts
 	}
@@ -541,8 +576,9 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// by the conditional update that consumed it, not by the replay window,
 	// so the Unmark below applies to TOTP codes only.
 	var recoveryRemaining *int
-	if canonical, isRecovery := auth.NormalizeRecoveryCode(code); isRecovery {
+	if isRecovery {
 		remaining, matched, err := s.consumeRecoveryCode(ctx, user.ID, canonical)
+		release()
 		if err != nil {
 			return nil, ErrTOTPUnavailable
 		}
@@ -662,7 +698,14 @@ func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, 
 // issueRecoveryCodes generates a set and stores its hashes, replacing any
 // previous set.
 func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
+	// Ten bcrypt hashes: one admission slot (B4-4), like the compare that
+	// admitted the caller a moment ago.
+	release, admitted := s.limiter.Admission().TryAcquire()
+	if !admitted {
+		return nil, ErrAuthBusy
+	}
 	codes, hashes, err := auth.GenerateRecoveryCodes()
+	release()
 	if err != nil {
 		slog.Error("recovery codes: generation failed", "user_id", userID, "error", err)
 		return nil, ErrRecoveryCodesFailed
@@ -751,7 +794,11 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 
 	// Verify the supplied password matches the stored hash.
 	failKey := auth.Key("delete_fail", user.ID)
-	if !auth.CheckPassword(user.PasswordHash, password) {
+	matched, admitted := s.limiter.Admission().CheckPassword(user.PasswordHash, password)
+	if !admitted {
+		return ErrAuthBusy
+	}
+	if !matched {
 		if !s.limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
 			s.limiter.Lockout(ctx, lockKey, deleteAccountLockoutDuration)
 		}
@@ -937,7 +984,12 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 // and trips the lockout on the threshold; a correct one resets the counter.
 func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, password, lockKey string) error {
 	failKey := auth.Key("pw_confirm_fail", user.ID)
-	if err := requirePasswordConfirmation(user, password); err != nil {
+	if err := s.requirePasswordConfirmation(user, password); err != nil {
+		if errors.Is(err, ErrAuthBusy) {
+			// Refused before any compare ran (B4-4): not an attempt, so not
+			// a failure to count.
+			return err
+		}
 		if !s.limiter.Allow(failKey, PwConfirmFailureThreshold, PwConfirmFailureWindow) {
 			s.limiter.Lockout(ctx, lockKey, PwConfirmLockoutDuration)
 		}
@@ -1035,11 +1087,18 @@ func parseBooleanSettingValue(value string) (bool, error) {
 	}
 }
 
-func requirePasswordConfirmation(user *db.User, password string) error {
+// requirePasswordConfirmation checks the confirming password inside one
+// admission slot (B4-4); ErrAuthBusy means the budget refused and no compare
+// ran.
+func (s *AuthService) requirePasswordConfirmation(user *db.User, password string) error {
 	if password == "" {
 		return ErrPasswordRequired
 	}
-	if !auth.CheckPassword(user.PasswordHash, password) {
+	matched, admitted := s.limiter.Admission().CheckPassword(user.PasswordHash, password)
+	if !admitted {
+		return ErrAuthBusy
+	}
+	if !matched {
 		return ErrPasswordConfirmationFailed
 	}
 	return nil

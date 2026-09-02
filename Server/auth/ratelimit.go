@@ -57,11 +57,15 @@ type rateLimiterShard struct {
 type RateLimiter struct {
 	shards [rateLimiterShards]rateLimiterShard
 	store  LockoutPersister // nil = pure in-memory (tests, non-login limiters)
+	// admission is the one budget for expensive authentication work (B4-4).
+	// It lives here because the limiter is already the single instance the
+	// auth routes, the profile routes and the hub share.
+	admission *AdmissionBudget
 }
 
 // newRateLimiter allocates the per-shard maps shared by both constructors.
 func newRateLimiter(store LockoutPersister) *RateLimiter {
-	rl := &RateLimiter{store: store}
+	rl := &RateLimiter{store: store, admission: NewAdmissionBudget(0)}
 	for i := range rl.shards {
 		rl.shards[i].windows = make(map[string]*entry)
 		rl.shards[i].lockouts = make(map[string]*lockoutEntry)
@@ -89,6 +93,18 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 	}
 	return rl
 }
+
+// Admission is the process-wide budget for expensive authentication work
+// (B4-4, SEC-01): every password compare or hash on an auth route, and the
+// recovery-code match at verify, is admitted through it, so the single
+// server-owned admission decision lives with the single shared limiter.
+func (r *RateLimiter) Admission() *AdmissionBudget { return r.admission }
+
+// SetAdmissionBudget replaces the budget with one of size concurrent
+// computations (security.expensive_auth_concurrency; zero means the
+// default). Startup wiring calls it before any route mounts; it is not for
+// use with requests in flight.
+func (r *RateLimiter) SetAdmissionBudget(size int) { r.admission = NewAdmissionBudget(size) }
 
 // shardFor maps key to its bucket via FNV-1a (inlined so hashing allocates
 // nothing, unlike hash/fnv's digest).

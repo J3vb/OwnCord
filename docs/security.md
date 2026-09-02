@@ -65,6 +65,7 @@ OwnCord supports TOTP-based 2FA:
 - `require_2fa` requires all users to have 2FA enabled and registration to be closed
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
+- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); an over-budget attempt is refused with `429 RATE_LIMITED`, runs no bcrypt and counts as no failed attempt
 - TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
 
 ## Account Deletion

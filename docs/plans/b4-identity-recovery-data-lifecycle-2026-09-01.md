@@ -8,11 +8,14 @@ verified at `39019e7f`
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
 **B4-0 merged 2026-09-02** (PR #1497 = `d8653ea`; entry-gate item 3's
 public half is its document, the private half stays counted-not-described);
-**B4-3 opened 2026-09-01** (PR #1499 from `feat/b4-3-second-factor`;
-evidence block in its section — OC-0321 closed fail-closed, S-13 persisted through the
-limiter's persister shape, emergency recovery codes built). B4-3 started
-ahead of B4-1: the "after B4-1" ordering was hot-file avoidance, and B4-1 is
-decision-blocked with no branch open. The owner decisions listed below block
+**B4-3 merged 2026-09-02** (PR #1499 = `9587c9e`; OC-0321 closed fail-closed,
+S-13 persisted through the limiter's persister shape, emergency recovery codes
+built — B4-3 ran ahead of the decision-blocked B4-1, whose "after B4-1"
+ordering was hot-file avoidance);
+**B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`; evidence
+block in its section — one atomic admission budget at every bcrypt site,
+race and bounded-work proofs; SEC-01's register row records the control and
+closes on the owner's advisory ID). The owner decisions listed below block
 the steps that name them. _Update this line — not only the step table — as
 steps land; the [README.md](README.md) row is the status authority._
 
@@ -568,6 +571,54 @@ the gap.
 
 Exit: every expensive-auth site is budgeted; race/load tests green; SEC-01's
 public closure evidence satisfied and the advisory updated by the owner.
+
+**Evidence — 2026-09-02 (branch `feat/b4-4-admission-budget`):**
+
+- **Control.** `auth.AdmissionBudget` (`Server/auth/admission.go`) is one
+  counting semaphore: `TryAcquire` takes a slot without waiting or refuses,
+  the returned release is idempotent, and `Peak`/`InFlight` expose the
+  high-water mark the proofs read. The shared `auth.RateLimiter` owns the
+  single instance (`Admission()`), sized once at startup from
+  `security.expensive_auth_concurrency` (`SetAdmissionBudget` in
+  `internal/app.StartRuntime`; 0 = twice the core count, never below 4;
+  clamped to 1–4096), so the auth routes, the profile handler and the hub
+  take one server-owned decision.
+- **Sites.** Every bcrypt computation on an authentication path holds the
+  slot for exactly the expensive step: login (acquired before the failure
+  reservation, so a refusal charges neither the per-IP nor the per-username
+  budget), registration's hash, account deletion, TOTP enable/confirm/
+  disable and recovery-code regeneration (through
+  `requirePasswordConfirmation`, now a method on the service), the ten-hash
+  recovery-code issue, the up-to-ten-compare recovery-code match at
+  `verify-totp` (acquired before that attempt is reserved), and the
+  change-password route's old-password compare and new-password hash in
+  `api/profile_handler.go`. The refusal is `service.ErrAuthBusy` — 429
+  `RATE_LIMITED`, "too many authentication attempts in progress, try again
+  later" — and `confirmPassword` passes it through without counting a
+  failure.
+- **Proofs.** `TestAdmissionBudget_AdmitsAtMostSizeAtOnce` (40 goroutines
+  against a budget of 3 under `-race`: exactly 3 admitted, 37 refused, peak
+  3, drained after release), `TestAdmissionBudget_ReleaseIsIdempotent`,
+  `TestAdmissionBudget_RefusedWorkRunsNoBcrypt`;
+  `TestExpensiveAuth_RefusedWhenBudgetExhausted` (all eight service sites
+  answer `ErrAuthBusy` with the budget held, and the held slot stays the
+  peak), `TestExpensiveAuth_BusyRefusalsChargeNoAttempt` (ten refused
+  logins, three refused deletions and three refused confirmations leave
+  every lockout untripped for the real attempts that follow),
+  `TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget` (24 concurrent
+  logins against a budget of 2: peak at most 2, every outcome admitted or
+  refused, none lost); `TestLogin_RefusedWhenAuthBudgetExhausted` and
+  `TestChangePassword_RefusedWhenAuthBudgetExhausted` pin the 429 shape at
+  the transport and the recovery once the slot is back. Revert-proof: with
+  the budget calls removed from the sites the service and api tests fail —
+  no `ErrAuthBusy` is ever returned.
+- **Register.** SEC-01's row records the control and stays `confirmed`: the
+  flip carries the advisory ID the owner records (step 3, the HP-2
+  follow-up shape) — the one exit item this branch cannot do.
+- **Docs.** `docs/server-configuration.md` gains the key (the hand-written
+  Security table and the regenerated index); `docs/security.md` states the
+  contract in one line under two-factor authentication.
+- **Gates:** recorded at push in the PR's test plan.
 
 ## B4-5 — Locally generated recovery kit
 
