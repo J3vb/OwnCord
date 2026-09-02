@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 123 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 126 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -67,6 +67,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | POST    | `/admin/api/logs/ticket`                                             |
 | GET     | `/admin/api/me`                                                      |
+| GET     | `/admin/api/registrations`                                           |
+| POST    | `/admin/api/registrations/{id}/approve`                              |
+| POST    | `/admin/api/registrations/{id}/deny`                                 |
 | GET     | `/admin/api/roles`                                                   |
 | POST    | `/admin/api/roles`                                                   |
 | PATCH   | `/admin/api/roles/reorder`                                           |
@@ -202,7 +205,21 @@ endpoints return plain-text errors — see their section):
 
 ### POST /api/v1/auth/register
 
-Create a new account using an invite code. The first user is created via `/admin/api/setup` instead.
+Create a new account. What it takes depends on the server's `registration_mode`
+setting (B4-1; the admin panel's Settings page, or the setup wizard):
+
+| Mode       | Behaviour                                                                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                   |
+| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                          |
+| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Users page. |
+| `open`     | No invite. `201` with a session.                                                                                                                                               |
+
+`approval` and `open` also budget 5 registrations per client address per 24
+hours, and `approval` caps the pending queue at 100 applications; both refusals
+are `429 RATE_LIMITED`. A fresh install is `invite`; an upgraded server keeps
+its former `registration_open` choice as `invite` (1) or `closed` (0), never
+`open`. The first user is created via `/admin/api/setup` instead.
 
 **Auth:** None (public)
 **Rate limit:** 3 requests/minute per IP
@@ -217,11 +234,11 @@ Create a new account using an invite code. The first user is created via `/admin
 }
 ```
 
-| Field         | Type   | Required | Notes                                                                 |
-| ------------- | ------ | -------- | --------------------------------------------------------------------- |
-| `username`    | string | Yes      | HTML-stripped, trimmed. Must be non-empty.                            |
-| `password`    | string | Yes      | Validated for strength (min length, complexity).                      |
-| `invite_code` | string | Yes      | Must be a valid, non-expired, non-revoked invite with remaining uses. |
+| Field         | Type   | Required         | Notes                                                                                                        |
+| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `username`    | string | Yes              | HTML-stripped, trimmed. Must be non-empty.                                                                   |
+| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                             |
+| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode. |
 
 #### Response 201 Created
 
@@ -245,15 +262,24 @@ Create a new account using an invite code. The first user is created via `/admin
 
 See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
+#### Response 202 Accepted (`approval` mode)
+
+```json
+{ "status": "pending_approval" }
+```
+
+No session is issued. The applicant signs in normally once approved; a denied
+application is anonymised and locked, and its username is released.
+
 #### Errors
 
-| Status | Code                  | Cause                                                                   |
-| ------ | --------------------- | ----------------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | Missing username/password/invite_code, or weak password                 |
-| 400    | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username          |
-| 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required |
-| 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP                            |
-| 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                  |
+| Status | Code                  | Cause                                                                                                                   |
+| ------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | Missing username or password, or weak password                                                                          |
+| 400    | `INVALID_CREDENTIALS` | In `invite` mode: missing or bad invite code, expired/revoked invite; any mode: duplicate username                      |
+| 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required                                                 |
+| 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP; in `approval`/`open` mode, 5 per address per day or a full approval queue |
+| 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                                                                  |
 
 ---
 
@@ -1838,7 +1864,7 @@ nothing about the configuration.
   "defaults": {
     "server_name": "OwnCord",
     "motd": "Welcome!",
-    "registration_open": false,
+    "registration_mode": "invite",
     "port": 8443,
     "tls_mode": "self-signed",
     "tls_domain": "",
@@ -1872,7 +1898,7 @@ error.
   "wizard": {
     "server_name": "My Server",
     "motd": "Welcome!",
-    "registration_open": false,
+    "registration_mode": "invite",
     "port": 8443,
     "tls_mode": "self-signed",
     "tls_domain": "",
@@ -1884,8 +1910,9 @@ error.
 ```
 
 All `wizard` fields are optional; `server_name`, `motd` and
-`registration_open` are stored in the settings table (live), the rest are
-written back to `config.yaml` (consumed at startup).
+`registration_mode` (`closed` / `invite` / `approval` / `open`, default
+`invite`) are stored in the settings table (live), the rest are written back
+to `config.yaml` (consumed at startup).
 
 #### Response 200 OK
 
@@ -2036,6 +2063,66 @@ Array of:
 
 ---
 
+## Registration Queue
+
+Approval-mode applications (`registration_mode = approval`) wait here. An
+application is a locked account: it holds its username but cannot sign in
+until approved. Denial anonymises the row and locks it for good (the same
+convention account deletion uses, because audit rows reference the id) and
+releases the username. Both decisions are audited (`registration_approve`,
+`registration_deny`).
+
+### GET /admin/api/registrations
+
+**Auth:** `MANAGE_SERVER`
+
+Query: `limit` (1–500, default 50), `offset`.
+
+#### Response 200 OK
+
+```json
+[{ "id": 12, "username": "alex", "created_at": "2026-09-02T10:00:00Z" }]
+```
+
+Oldest application first.
+
+---
+
+### POST /admin/api/registrations/{id}/approve
+
+Unlock the application; the account can sign in from now on.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                  |
+| ------ | ------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST` | Malformed id                           |
+| 404    | `NOT_FOUND`   | No application with that id is pending |
+
+---
+
+### POST /admin/api/registrations/{id}/deny
+
+Refuse the application: the row is anonymised and locked, its username
+released.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                  |
+| ------ | ------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST` | Malformed id                           |
+| 404    | `NOT_FOUND`   | No application with that id is pending |
+
+---
+
 ## Server Settings
 
 ### GET /admin/api/settings
@@ -2048,7 +2135,7 @@ Returns the settings table as a flat string map, e.g.:
 {
   "server_name": "My Server",
   "motd": "Welcome!",
-  "registration_open": "1",
+  "registration_mode": "invite",
   "require_2fa": "0"
 }
 ```
@@ -2067,8 +2154,12 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
-`registration_open`, `backup_schedule`, `backup_retention`. Boolean settings
-accept `1/0/true/false` and are normalized to `1`/`0`.
+`registration_mode`, `backup_schedule`, `backup_retention`. Boolean settings
+accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
+accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
+lower-case); a change of mode is audited as `registration_mode_change`
+naming the old and new mode, and while `require_2fa` is on the mode cannot
+leave `closed`.
 
 `backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
 enforced by the server's maintenance loop — see the Backup Strategy section
@@ -2087,9 +2178,9 @@ user has TOTP enabled.
 
 #### Errors
 
-| Status | Code          | Cause                                                                |
-| ------ | ------------- | -------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Unknown key, invalid boolean, or `require_2fa` preconditions not met |
+| Status | Code          | Cause                                                                                     |
+| ------ | ------------- | ----------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Unknown key, invalid boolean or registration mode, or `require_2fa` preconditions not met |
 
 ---
 

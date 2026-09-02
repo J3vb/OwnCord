@@ -235,22 +235,23 @@ type TotpUsedCode struct {
 }
 
 type User struct {
-	ID                int64   `json:"id"`
-	Username          string  `json:"username"`
-	Password          string  `json:"password"`
-	Avatar            *string `json:"avatar"`
-	RoleID            int64   `json:"roleId"`
-	TotpSecret        *string `json:"totpSecret"`
-	Status            string  `json:"status"`
-	CreatedAt         string  `json:"createdAt"`
-	LastSeen          *string `json:"lastSeen"`
-	Banned            int64   `json:"banned"`
-	BanReason         *string `json:"banReason"`
-	BanExpires        *string `json:"banExpires"`
-	IdentityPublicKey *string `json:"identityPublicKey"`
-	DisplayName       *string `json:"displayName"`
-	About             *string `json:"about"`
-	CustomStatus      *string `json:"customStatus"`
+	ID                 int64   `json:"id"`
+	Username           string  `json:"username"`
+	Password           string  `json:"password"`
+	Avatar             *string `json:"avatar"`
+	RoleID             int64   `json:"roleId"`
+	TotpSecret         *string `json:"totpSecret"`
+	Status             string  `json:"status"`
+	CreatedAt          string  `json:"createdAt"`
+	LastSeen           *string `json:"lastSeen"`
+	Banned             int64   `json:"banned"`
+	BanReason          *string `json:"banReason"`
+	BanExpires         *string `json:"banExpires"`
+	IdentityPublicKey  *string `json:"identityPublicKey"`
+	DisplayName        *string `json:"displayName"`
+	About              *string `json:"about"`
+	CustomStatus       *string `json:"customStatus"`
+	RegistrationStatus string  `json:"registrationStatus"`
 }
 
 type UserBlock struct {

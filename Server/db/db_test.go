@@ -186,13 +186,22 @@ func TestMigrateInsertsDefaultSettings(t *testing.T) {
 		t.Fatalf("Migrate() error: %v", err)
 	}
 
+	// A fresh install (no users when the migrations run) is invite-only
+	// (B4-1, BPR-041), and the pre-mode boolean is gone.
 	var value string
-	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='registration_open'").Scan(&value)
+	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='registration_mode'").Scan(&value)
 	if err != nil {
 		t.Fatalf("settings query error: %v", err)
 	}
-	if value != "0" {
-		t.Errorf("registration_open = %q, want '0'", value)
+	if value != "invite" {
+		t.Errorf("registration_mode = %q, want 'invite'", value)
+	}
+	var stale int
+	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM settings WHERE key='registration_open'").Scan(&stale); err != nil {
+		t.Fatalf("settings query error: %v", err)
+	}
+	if stale != 0 {
+		t.Errorf("registration_open row still present after migration 034")
 	}
 }
 

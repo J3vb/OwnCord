@@ -105,6 +105,30 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, []string{raw, hash}
 		}},
+		{"registration approve", "registration_approve", func(t *testing.T) (*audittest.Recorder, []string) {
+			_, database := newTestModerationService(t)
+			uid, err := database.CreatePendingUser(context.Background(), "applicant-a", "hash", 4)
+			if err != nil {
+				t.Fatalf("CreatePendingUser: %v", err)
+			}
+			rec := audittest.Install(t, database)
+			if err := NewUserService(database).ApproveRegistration(context.Background(), 1, uid); err != nil {
+				t.Fatalf("ApproveRegistration: %v", err)
+			}
+			return rec, []string{"hash"}
+		}},
+		{"registration deny", "registration_deny", func(t *testing.T) (*audittest.Recorder, []string) {
+			_, database := newTestModerationService(t)
+			uid, err := database.CreatePendingUser(context.Background(), "applicant-d", "hash", 4)
+			if err != nil {
+				t.Fatalf("CreatePendingUser: %v", err)
+			}
+			rec := audittest.Install(t, database)
+			if err := NewUserService(database).DenyRegistration(context.Background(), 1, uid); err != nil {
+				t.Fatalf("DenyRegistration: %v", err)
+			}
+			return rec, []string{"hash"}
+		}},
 		{"session revoke all", "session_revoke_all", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
 			raw, _ := auth.GenerateToken()

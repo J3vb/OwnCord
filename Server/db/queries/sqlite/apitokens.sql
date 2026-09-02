@@ -51,7 +51,7 @@ UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?;
 -- below 'T' and a same-day space-form expiry would otherwise read as lapsed.
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status
+       display_name, about, custom_status, registration_status
 FROM users
 WHERE banned = 0
    OR (ban_expires IS NOT NULL

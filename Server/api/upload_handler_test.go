@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,

@@ -118,8 +118,21 @@ func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			writeAuthError(r.Context(), w, err)
 			return
 		}
+		if res.PendingApproval {
+			// Approval mode (B4-1): the application is recorded and an admin
+			// decides; there is no session to hand out yet.
+			writeJSON(w, http.StatusAccepted, registrationPendingResponse{Status: "pending_approval"})
+			return
+		}
 		writeJSON(w, http.StatusCreated, authResponse(res))
 	}
+}
+
+// registrationPendingResponse is the 202 body of an approval-mode
+// registration: the application exists, an admin decides, and the applicant
+// signs in normally once approved.
+type registrationPendingResponse struct {
+	Status string `json:"status"`
 }
 
 // registerReadRequest decodes and validates the registration body, writing the
@@ -160,10 +173,12 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	req.InviteCode = strings.TrimSpace(req.InviteCode)
 
-	if req.Username == "" || req.Password == "" || req.InviteCode == "" {
+	// Whether an invite is needed depends on the registration mode (B4-1),
+	// which the service decides; only the credentials are required here.
+	if req.Username == "" || req.Password == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{
 			Error:   "INVALID_INPUT",
-			Message: "username, password, and invite_code are required",
+			Message: "username and password are required",
 		})
 		return req, false
 	}

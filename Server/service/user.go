@@ -352,6 +352,44 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	return res, nil
 }
 
+// ListPendingRegistrations is the approval queue (B4-1), oldest first.
+func (s *UserService) ListPendingRegistrations(ctx context.Context, limit, offset int) ([]db.PendingUser, error) {
+	pending, err := s.st.ListPendingUsers(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list pending registrations: %w", ErrInternal, err)
+	}
+	return pending, nil
+}
+
+// ApproveRegistration unlocks an approval-mode application so the account
+// can sign in. ErrNotFound when the id is not a pending application.
+func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID int64) error {
+	if err := s.st.ApprovePendingUser(ctx, userID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
+		}
+		return fmt.Errorf("%w: failed to approve registration: %w", ErrInternal, err)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_approve", "user", userID, "application approved")
+	slog.Info("registration approved", "actor_id", actorID, "user_id", userID)
+	return nil
+}
+
+// DenyRegistration refuses an approval-mode application: the row is
+// anonymised and locked for good and its username released. Only a row that
+// is still pending is touched; an approved account never goes through here.
+func (s *UserService) DenyRegistration(ctx context.Context, actorID, userID int64) error {
+	if err := s.st.DenyPendingUser(ctx, userID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
+		}
+		return fmt.Errorf("%w: failed to deny registration: %w", ErrInternal, err)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_deny", "user", userID, "application denied")
+	slog.Info("registration denied", "actor_id", actorID, "user_id", userID)
+	return nil
+}
+
 // ListSessions returns all active sessions for a user.
 func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Session, error) {
 	sessions, err := s.st.ListUserSessions(ctx, userID)

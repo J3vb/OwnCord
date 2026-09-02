@@ -169,6 +169,14 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
 		r.With(requirePerm(permissions.KickMembers)).
 			Delete("/users/{id}/sessions", handleForceLogout(mod))
+		// The approval-mode registration queue (B4-1): deciding who joins
+		// is server management, not moderation of existing members.
+		r.With(requirePerm(permissions.ManageServer)).
+			Get("/registrations", handleListRegistrations(svc.Users))
+		r.With(requirePerm(permissions.ManageServer)).
+			Post("/registrations/{id}/approve", handleApproveRegistration(svc.Users))
+		r.With(requirePerm(permissions.ManageServer)).
+			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
 
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))

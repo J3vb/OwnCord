@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
@@ -1065,13 +1066,13 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"max_upload_bytes",
 		"voice_quality",
 		"require_2fa",
-		"registration_open",
+		"registration_mode",
 		"backup_schedule",
 		"backup_retention",
 	}
 
 	// Boolean-typed settings require valid boolean values; others accept any string.
-	booleanKeys := map[string]bool{"require_2fa": true, "registration_open": true}
+	booleanKeys := map[string]bool{"require_2fa": true}
 
 	for _, key := range whitelistedKeys {
 		t.Run(key, func(t *testing.T) {
@@ -1082,6 +1083,9 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 			value := "testvalue"
 			if booleanKeys[key] {
 				value = "0"
+			}
+			if key == "registration_mode" {
+				value = "closed"
 			}
 			body := map[string]string{key: value}
 			w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
@@ -1114,7 +1118,7 @@ func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
-		"registration_open": "false",
+		"registration_mode": "closed",
 		"require_2fa":       "true",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
@@ -1134,7 +1138,7 @@ func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrat
 	}
 
 	body := map[string]string{
-		"registration_open": "false",
+		"registration_mode": "closed",
 		"require_2fa":       "true",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
@@ -1177,7 +1181,7 @@ func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testin
 	}
 
 	enableBody := map[string]string{
-		"registration_open": "false",
+		"registration_mode": "closed",
 		"require_2fa":       "true",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, enableBody)

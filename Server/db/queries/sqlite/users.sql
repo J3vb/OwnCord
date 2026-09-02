@@ -1,17 +1,47 @@
 -- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status
+       display_name, about, custom_status, registration_status
 FROM users WHERE username = ? COLLATE NOCASE;
 
 -- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status
+       display_name, about, custom_status, registration_status
 FROM users WHERE id = ?;
 
 -- name: CreateUser :execresult
 INSERT INTO users (username, password, role_id) VALUES (?, ?, ?);
+
+-- Approval-mode registration (B4-1): the account exists from the application
+-- on, as registration_status = 'pending', and cannot sign in until an admin
+-- approves it. Denial anonymises the row and marks it 'denied' for good.
+-- name: CreatePendingUser :execresult
+INSERT INTO users (username, password, role_id, registration_status) VALUES (?, ?, ?, 'pending');
+
+-- name: ListPendingUsers :many
+SELECT id, username, created_at FROM users
+WHERE registration_status = 'pending'
+ORDER BY created_at ASC, id ASC
+LIMIT ? OFFSET ?;
+
+-- name: CountPendingUsers :one
+SELECT COUNT(*) FROM users WHERE registration_status = 'pending';
+
+-- name: ApprovePendingUser :execresult
+UPDATE users SET registration_status = 'active' WHERE id = ? AND registration_status = 'pending';
+
+-- name: DenyPendingUser :execresult
+UPDATE users
+SET registration_status = 'denied',
+    username = '[denied-' || id || ']',
+    password = '',
+    avatar = NULL,
+    display_name = NULL,
+    about = NULL,
+    custom_status = NULL,
+    status = 'offline'
+WHERE id = ? AND registration_status = 'pending';
 
 -- name: UpdateUserStatus :exec
 UPDATE users SET status = ?, last_seen = datetime('now') WHERE id = ?;
@@ -56,6 +86,7 @@ SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_ke
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
+  AND u.registration_status = 'active'
 ORDER BY u.username ASC;
 
 -- name: CountUsers :one
@@ -73,4 +104,5 @@ SELECT COUNT(*) FROM users
 WHERE (banned = 0
        OR (ban_expires IS NOT NULL
            AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
-  AND totp_secret IS NULL;
+  AND totp_secret IS NULL
+  AND registration_status = 'active';

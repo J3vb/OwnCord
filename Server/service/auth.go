@@ -60,6 +60,9 @@ type AuthResult struct {
 	PartialToken string
 	Requires2FA  bool
 	User         *db.User
+	// PendingApproval is an approval-mode registration: the application is
+	// recorded, no session is issued, and an admin decides (B4-1).
+	PendingApproval bool
 	// RecoveryCodesRemaining is set when an emergency recovery code, not a
 	// TOTP code, completed the second step: how many the account has left,
 	// so the client can prompt for regeneration (nil otherwise).
@@ -194,8 +197,17 @@ var (
 	// Registration.
 	ErrRegistrationPolicyUnavailable = &authError{ErrInternal, "failed to load registration policy"}
 	ErrRegistrationClosed            = &authError{ErrForbidden, "registration is currently closed"}
-	ErrRegistrationRequires2FA       = &authError{ErrForbidden, "registration is unavailable while two-factor authentication is required"}
-	ErrPasswordHash                  = &authError{ErrInternal, "failed to process registration"}
+	// ErrAccountPending is an approval-mode application trying to sign in
+	// before an admin approved it (B4-1).
+	ErrAccountPending = &authError{ErrForbidden, "account is awaiting approval"}
+	// ErrRegistrationRateLimited and ErrRegistrationQueueFull are the
+	// per-mode abuse limits of open and approval registration (owner
+	// decision 1): a per-address creation budget and a cap on the approval
+	// queue. Both share the rate-limit category, so the client backs off.
+	ErrRegistrationRateLimited = &authError{ErrRateLimited, "too many registrations from this address, try again later"}
+	ErrRegistrationQueueFull   = &authError{ErrRateLimited, "registration queue is full, try again later"}
+	ErrRegistrationRequires2FA = &authError{ErrForbidden, "registration is unavailable while two-factor authentication is required"}
+	ErrPasswordHash            = &authError{ErrInternal, "failed to process registration"}
 	// ErrRegistrationRejected is the generic register refusal: an unknown,
 	// used-up or expired invite and a taken username share it so the response
 	// reveals neither. The transport writes it as 400 INVALID_CREDENTIALS.
@@ -298,11 +310,11 @@ func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadca
 // runs before the transport reads any credential: a closed server refuses
 // even a malformed body with the policy's 403.
 func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
-	registrationOpen, err := s.registrationOpen(ctx)
+	mode, err := registrationModeSetting(ctx, s.st)
 	if err != nil {
 		return ErrRegistrationPolicyUnavailable
 	}
-	if !registrationOpen {
+	if mode == RegistrationClosed {
 		return ErrRegistrationClosed
 	}
 
@@ -316,8 +328,86 @@ func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 	return nil
 }
 
-// Register consumes the invite, creates the account and issues a session.
+// Per-mode abuse limits for the modes that need no invite (owner decision
+// 1): one address may create this many accounts or applications per day,
+// and the approval queue is capped.
+const (
+	inviteFreeRegistrationsPerIPPerDay = 5
+	maxPendingRegistrations            = 100
+)
+
+// admitRegistration runs the mode's gates before any bcrypt work: closed
+// refuses, invite mode needs a code to redeem, the invite-free modes spend
+// the address budget, and approval mode needs room in the queue.
+func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (RegistrationMode, error) {
+	mode, err := registrationModeSetting(ctx, s.st)
+	if err != nil {
+		return "", ErrRegistrationPolicyUnavailable
+	}
+	switch mode {
+	case RegistrationClosed:
+		return "", ErrRegistrationClosed
+	case RegistrationInvite:
+		if strings.TrimSpace(in.InviteCode) == "" {
+			// Nothing to redeem: the same answer a bad code gets, so the
+			// response reveals nothing new.
+			return "", ErrRegistrationRejected
+		}
+		return mode, nil
+	case RegistrationApproval, RegistrationOpen:
+		// Gated below.
+	}
+	// Without an invite to spend, the address is the only budget.
+	if !s.limiter.Allow("register_ip:"+in.IP, inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
+		return "", ErrRegistrationRateLimited
+	}
+	if mode == RegistrationApproval {
+		pending, err := s.st.CountPendingUsers(ctx)
+		if err != nil {
+			return "", ErrRegistrationPolicyUnavailable
+		}
+		if pending >= maxPendingRegistrations {
+			return "", ErrRegistrationQueueFull
+		}
+	}
+	return mode, nil
+}
+
+// createRegisteredAccount persists what the mode admits: an application
+// (no session), or an account with its first session, minted through
+// newSessionToken so the token exists only once the row committed.
+func (s *AuthService) createRegisteredAccount(ctx context.Context, mode RegistrationMode, in RegisterInput, hash string) (uid int64, token string, err error) {
+	role := int(permissions.MemberRoleID)
+	switch mode {
+	case RegistrationApproval:
+		uid, err = s.st.CreatePendingUser(ctx, in.Username, hash, role)
+	case RegistrationOpen:
+		token, err = newSessionToken(func(tokenHash string) (err error) {
+			uid, err = s.st.CreateUserWithSession(ctx, in.Username, hash, role, tokenHash, in.Device, in.IP)
+			return err
+		})
+	case RegistrationInvite, RegistrationClosed:
+		// Closed never reaches here (admitRegistration refuses it); invite
+		// mode spends the code and the account commits with its session.
+		token, err = newSessionToken(func(tokenHash string) (err error) {
+			uid, err = s.st.CreateUserWithInvite(ctx, in.Username, hash, role, in.InviteCode, tokenHash, in.Device, in.IP)
+			return err
+		})
+	}
+	return uid, token, err
+}
+
+// Register creates the account the current registration mode allows
+// (B4-1): invite mode consumes the invite and issues a session, open mode
+// issues a session without one, approval mode records a locked application
+// and issues nothing. Closed mode never reaches here (RegistrationPolicy
+// gates the route) but is refused again in case a caller skips the gate.
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResult, error) {
+	mode, err := s.admitRegistration(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
 	// Hash password before consuming the invite so that a hashing failure
 	// does not burn a valid invite code.
 	// The hash is bcrypt at full cost, so it takes an admission slot like a
@@ -336,12 +426,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// invite use and the first session commit together: a fault at any step
 	// — the session insert included — rolls the whole registration back and
 	// burns nothing (OC-0376).
-	var uid int64
-	token, err := newSessionToken(func(tokenHash string) (err error) {
-		uid, err = s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode,
-			tokenHash, in.Device, in.IP)
-		return err
-	})
+	uid, token, err := s.createRegisteredAccount(ctx, mode, in, hash)
 	if err != nil {
 		// UNIQUE constraint violation → duplicate username → 400.
 		// Any other error → 500.
@@ -356,9 +441,16 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		}
 	}
 
-	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP)
+	if mode == RegistrationApproval {
+		slog.Info("registration application recorded", "username", in.Username, "user_id", uid, "ip", in.IP)
+		db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
+			"application recorded, awaiting approval")
+		return &AuthResult{PendingApproval: true}, nil
+	}
+
+	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP, "mode", string(mode))
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
-		"new account created via invite")
+		"new account created ("+string(mode)+" registration)")
 
 	user, err := s.st.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
@@ -382,6 +474,12 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 		db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "login_blocked_banned", "user", user.ID,
 			"banned user attempted login from "+in.IP)
 		return nil, ErrBanned
+	}
+	// An approval-mode application holds the username and the password, but
+	// is not an account until an admin says so (B4-1).
+	if user.PendingApproval() {
+		slog.Info("pending application login attempt", "user_id", user.ID, "ip", in.IP)
+		return nil, ErrAccountPending
 	}
 
 	require2FA, err := s.require2FAEnabled(ctx)
@@ -1059,10 +1157,6 @@ func issueSession(ctx context.Context, st Store, userID int64, device, ip string
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 	return getBooleanSetting(ctx, s.st, "require_2fa", false)
-}
-
-func (s *AuthService) registrationOpen(ctx context.Context) (bool, error) {
-	return getBooleanSetting(ctx, s.st, "registration_open", true)
 }
 
 func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {

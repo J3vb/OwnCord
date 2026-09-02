@@ -1206,6 +1206,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
@@ -1291,7 +1292,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
 	('require_2fa', 'false'),
-	('registration_open', 'true');
+	('registration_mode', 'invite');
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
