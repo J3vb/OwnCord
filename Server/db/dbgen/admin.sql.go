@@ -147,7 +147,7 @@ func (q *Queries) GetSetting(ctx context.Context, key string) (string, error) {
 }
 
 const getUserSessions = `-- name: GetUserSessions :many
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions WHERE user_id = ?
 ORDER BY created_at DESC
 `
@@ -170,6 +170,7 @@ func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]Session,
 			&i.CreatedAt,
 			&i.LastUsed,
 			&i.ExpiresAt,
+			&i.Unseen,
 		); err != nil {
 			return nil, err
 		}

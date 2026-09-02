@@ -203,3 +203,92 @@ func TestDeleteSessionByID_NotFound(t *testing.T) {
 		t.Error("DeleteSessionByID should fail for non-existent session")
 	}
 }
+
+// B4-7's new-login signal: a session created by a login is the account's
+// unseen new login until another device lists sessions, and the device that
+// signed in never acknowledges itself.
+func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "seenuser", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	other, err := database.CreateUser(ctx, "otheruser", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(other): %v", err)
+	}
+	login := func(t *testing.T, userID int64, tokenHash, device string) int64 {
+		t.Helper()
+		id, err := database.CreateSession(ctx, userID, tokenHash, device, "10.0.0.1")
+		if err != nil {
+			t.Fatalf("CreateSession(%s): %v", device, err)
+		}
+		return id
+	}
+	laptop := login(t, uid, "hash-laptop", "Laptop")
+	phone := login(t, uid, "hash-phone", "Phone")
+	tablet := login(t, other, "hash-tablet", "Tablet")
+
+	unseen := func(t *testing.T, userID int64) map[int64]bool {
+		t.Helper()
+		sessions, err := database.ListUserSessions(ctx, userID)
+		if err != nil {
+			t.Fatalf("ListUserSessions: %v", err)
+		}
+		flags := make(map[int64]bool, len(sessions))
+		for _, s := range sessions {
+			flags[s.ID] = s.Unseen
+		}
+		return flags
+	}
+
+	if got := unseen(t, uid); !got[laptop] || !got[phone] {
+		t.Fatalf("logins should start unseen, got %v", got)
+	}
+
+	// The phone lists: it acknowledges the laptop's login, never its own.
+	n, err := database.MarkSessionsSeen(ctx, uid, phone)
+	if err != nil {
+		t.Fatalf("MarkSessionsSeen(phone): %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows acknowledged = %d, want 1", n)
+	}
+	if got := unseen(t, uid); got[laptop] || !got[phone] {
+		t.Errorf("after the phone lists: laptop unseen = %v, phone unseen = %v; want false, true", got[laptop], got[phone])
+	}
+	if got := unseen(t, other); !got[tablet] {
+		t.Error("another account's login was acknowledged")
+	}
+
+	// Listing again from the phone changes nothing; the laptop's listing
+	// acknowledges the phone.
+	if n, err := database.MarkSessionsSeen(ctx, uid, phone); err != nil || n != 0 {
+		t.Errorf("second MarkSessionsSeen(phone) = %d, %v; want 0, nil", n, err)
+	}
+	if _, err := database.MarkSessionsSeen(ctx, uid, laptop); err != nil {
+		t.Fatalf("MarkSessionsSeen(laptop): %v", err)
+	}
+	if got := unseen(t, uid); got[phone] {
+		t.Error("the laptop's listing should have acknowledged the phone's login")
+	}
+
+	// An API-token principal holds no session and acknowledges every row.
+	extra := login(t, uid, "hash-extra", "Desktop")
+	if _, err := database.MarkSessionsSeen(ctx, uid, 0); err != nil {
+		t.Fatalf("MarkSessionsSeen(0): %v", err)
+	}
+	if got := unseen(t, uid); got[extra] {
+		t.Error("session id 0 should acknowledge every row")
+	}
+
+	// The token lookup carries the flag too.
+	sess, err := database.GetSessionByTokenHash(ctx, "hash-tablet")
+	if err != nil || sess == nil {
+		t.Fatalf("GetSessionByTokenHash: %v, %v", sess, err)
+	}
+	if !sess.Unseen {
+		t.Error("GetSessionByTokenHash dropped the unseen flag")
+	}
+}

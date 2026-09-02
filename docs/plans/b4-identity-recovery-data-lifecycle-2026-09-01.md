@@ -30,9 +30,13 @@ at every bcrypt site with race and bounded-work proofs; SEC-01's register row
 records the control and closes on the owner's advisory ID);
 **B4-12 batch (d) merged 2026-09-02** (PR #1501 = `9515174`; OC-0340 and
 OC-0341 closed — a negative token lifetime is refused at the service seam both
-callers share, and a numeric label can be revoked). Every remaining step waits
-on an owner decision listed below. _Update this line — not only the step
-table — as steps land; the [README.md](README.md) row is the status authority._
+callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
+8–10 recorded 2026-09-02** (amendments under the questions);
+**B4-7 new-login half opened 2026-09-02** (branch `feat/b4-7-new-login`,
+PR #1507; evidence in its section — the REST-only `unseen` session flag, and
+OC-0354 closed with it). Next B4-1 with OC-0324, then B4-5 → B4-6, B4-8, HP-4,
+B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -253,6 +257,47 @@ BPR-032).
     redaction rules, user-initiation requirement); the export endpoint and
     operator/client UX land in B6/B9 under BG-15. Confirm, or pull the
     endpoint into B4-8.
+
+**Decisions recorded 2026-09-02** (owner answers — each the option the plan
+proposed; the steps they name are unblocked from this date):
+
+1. Registration (B4-1): the mode set, the invite-only default and the
+   upgrade mapping stand. Approval mode creates the account up front with
+   the applicant's credentials and holds it locked until an admin approves
+   it in the admin panel — nothing is sent to the applicant; a denied
+   application removes the locked account, audited. `approval` and `open`
+   get a per-IP creation limit and a queue-size cap.
+2. Recovery kit (B4-5): using the kit bypasses TOTP (it means "I lost my
+   devices") and forces a password reset; one active kit per account,
+   regeneration invalidates the old; the client presents a word phrase and
+   a downloadable file (B9 formats the same secret); five failed kit
+   attempts lock recovery for 15 minutes, audited.
+3. Admin-assisted recovery (B4-6): owner only; the credential lives 15
+   minutes and is single-use; the audit row is `recovery_assist_issued`
+   with category, actor id, subject id and the recorded verification
+   decision — nothing else.
+4. Retention (B4-11): minimum window one day; a channel policy overrides
+   the server policy in either direction; pinned messages are exempt;
+   server and channel scope only, DMs untouched.
+5. Holds: no hold mechanism in beta — retention is absolute, and the exit
+   gate's hold rule does not apply. A hold, if ever wanted, is its own
+   later step.
+6. Answered by B4-0 (PR #1497): no owner-side material existed; the
+   document was written as specified.
+7. Confirmed: no email or SMTP path in B4; optional SMTP recovery is a
+   post-B4 decision revisited at B9.
+8. New-login signal (B4-7's second half): REST-only — sessions gain an
+   `unseen` flag the client surfaces on its next fetch; no protocol change.
+   OC-0354's `totp_enabled` goes on the `GET /users/me` profile response.
+9. Erasure (B4-9): erased users' messages are hard-deleted rows; channel
+   history shows nothing where they were.
+10. Support bundle (B4-8): the data contract, the local-diagnostics
+    inventory and the no-telemetry proof only; the export endpoint and the
+    UX land in B6/B9 under BG-15.
+
+Build order from here: B4-7's new-login half with OC-0354, then B4-1 with
+the OC-0324 batch behind it, then B4-5 → B4-6 (serial on `service/auth.go`)
+with B4-8 beside them, then HP-4 and B4-9 → B4-10 → B4-11.
 
 ## B4-0 — Destructive-operation failure/threat models and data-class inventory
 
@@ -841,6 +886,48 @@ then.
   (`TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly`) rather than a
   lowered floor.
 
+**Evidence, 2026-09-02 — new-login signal half** — branch
+`feat/b4-7-new-login` from `dev` `a595786`; PR to `dev` #1507 (draft, opened
+2026-09-02). Fix commit `1c7c5b2`; ledger record OC-0354 flipped on the same
+branch (`fix.commit = 1c7c5b2`, `revertProof = pass`). Owner decision 8 chose
+the REST-only contract, so there is no protocol change and no B2 fixture work.
+BG-08's server half is complete; the UI that surfaces both signals is B9.
+
+- **Contract:** `sessions.unseen` (migration 033, `INTEGER NOT NULL DEFAULT
+0`, so rows from before the upgrade read as seen). A session created by a
+  login (`db.CreateSession`) starts unseen; a registration's first session
+  does not (`CreateUserWithInvite` — no other device exists to tell).
+  `GET /api/v1/users/me/sessions` carries `unseen` per row and is the
+  acknowledgement: `UserService.MarkSessionsSeen` clears every row but the
+  caller's own once the response is built, so the device that just signed in
+  never acknowledges itself and the response shows the flags as they were;
+  an API-token principal (no session) acknowledges every row. No audit row —
+  nothing security-sensitive changes.
+- **Tests:** `TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers` (db:
+  flags per login, the caller's own row kept, another account untouched, id 0
+  acknowledges all, the token lookup carries the flag);
+  `TestCreateUserWithInvite_Success` (registration's first session not
+  flagged); `TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists` (api:
+  the phone lists first and acknowledges only the laptop; the laptop sees the
+  phone as new exactly once). Revert-proof: with the acknowledgement made a
+  no-op, both flag tests fail.
+- **OC-0354 (B4-12 batch (b), the server-side half of the round trip):** the
+  profile response already stated `totp_enabled`; the client never read it,
+  and every `auth_ok` (whose user object omits the field) wiped it. The
+  Account tab's 2FA section now calls `onRefreshTotpStatus` (`GET /users/me`
+  → `updateUser`) when it opens, rebuilding only if the answer differs from
+  what it shows, and `setAuth` keeps the known value when the same account
+  re-authenticates without it — never across accounts, and the payload wins
+  when present. Tests: `auth.store.test.ts`, `totp-settings.test.ts`;
+  revert-proof: two cases fail with the two changes undone.
+- **Docs:** `api.md` (the contract on the sessions route), `trust-model.md`
+  (multi-device bullet), `schema.md` regenerated; the hand-written `sessions`
+  fixtures in the admin, api, db and ws test packages gained the column.
+- **Gates:** four build-tag builds, `go vet`, `go test -race ./...`,
+  `-tags deadlock ./ws/`, pinned `golangci-lint` v2.11.3 0 issues, `sqlc
+generate` and `genprotocol` no diff; client full unit suite, `tsc`, `oxlint`
+  and `eslint`; `check:docs` (336 fixed / 43 open) and the ledger check.
+
 ## B4-8 — Local diagnostics, support-bundle contract, no-telemetry proof
 
 BPR-055; roadmap workstream 12; the B4 half of BG-15 per owner question 10.
@@ -1107,6 +1194,11 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   keeps the warning inline (yellow, no three-second fade) on a partial
   success — the fields clear either way, because the password did change.
   Pinned in `settings-overlay.test.ts` and the MainPage-level test.
+
+- **Server-side half, OC-0354 (2026-09-02, PR #1507 with B4-7's new-login
+  half):** the flag round-trips from `GET /users/me` and a same-account
+  re-authentication keeps it — see B4-7's second evidence block; the ledger
+  record flips in that PR, closing batch (b).
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
 `feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,

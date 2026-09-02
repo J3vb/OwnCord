@@ -103,5 +103,6 @@ func sessionFromGen(s dbgen.Session) Session {
 		CreatedAt: s.CreatedAt,
 		LastUsed:  s.LastUsed,
 		ExpiresAt: s.ExpiresAt,
+		Unseen:    s.Unseen != 0,
 	}
 }

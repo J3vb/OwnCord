@@ -56,6 +56,9 @@ export interface SettingsOverlayOptions {
   onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
   onConfirmTotp(password: string, code: string): Promise<void>;
   onDisableTotp(password: string): Promise<void>;
+  /** Re-read the 2FA state from GET /users/me, the only response that
+   *  carries it, and put it in the auth store (OC-0354). */
+  onRefreshTotpStatus(): Promise<void>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
 }

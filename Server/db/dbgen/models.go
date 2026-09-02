@@ -212,6 +212,7 @@ type Session struct {
 	CreatedAt string  `json:"createdAt"`
 	LastUsed  string  `json:"lastUsed"`
 	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
 }
 
 type Setting struct {

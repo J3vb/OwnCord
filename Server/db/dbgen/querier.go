@@ -272,6 +272,10 @@ type Querier interface {
 	// `last_message_id < msgID` guard true, so its mention survives.
 	MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelReadAtLatestParams) error
 	MarkRecoveryCodeUsed(ctx context.Context, arg MarkRecoveryCodeUsedParams) (sql.Result, error)
+	// The new-login signal (B4-7): listing the account's sessions from one
+	// device acknowledges every other session's login. The caller's own row is
+	// left alone so a device never acknowledges itself.
+	MarkSessionsSeen(ctx context.Context, arg MarkSessionsSeenParams) (sql.Result, error)
 	// Disconnect bookkeeping. It clears only 'online', which is the one status
 	// that means "has a live session"; idle, dnd and invisible are choices the
 	// user made and are what the next connect reads instead of stamping online

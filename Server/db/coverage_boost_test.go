@@ -771,8 +771,14 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 		t.Errorf("invite uses = %v, want 1", inv)
 	}
 	// The first session commits with the account (OC-0376).
-	if sess, err := database.GetSessionByTokenHash(context.Background(), "sess-newuser"); err != nil || sess == nil || sess.UserID != uid {
+	sess, err := database.GetSessionByTokenHash(context.Background(), "sess-newuser")
+	if err != nil || sess == nil || sess.UserID != uid {
 		t.Errorf("session = %+v, %v; want a session for user %d", sess, err, uid)
+	}
+	// A registration's first session is not a new login to signal (B4-7):
+	// no other device exists to tell.
+	if sess != nil && sess.Unseen {
+		t.Error("registration's first session should not be flagged unseen")
 	}
 }
 

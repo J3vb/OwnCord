@@ -67,30 +67,30 @@ Open ledger, re-verified 2026-08-29; counts re-derived 2026-08-31 after B3-9
 (PR #1454) closed `OC-0345`, `OC-0346`, `OC-0376`, `OC-0377`, `OC-0378`, the
 2026-08-31 post-merge audit recorded `OC-0379` fixed on arrival, the B3-8
 role family closed `OC-0374`, and its message/read-state family closed
-`OC-0323`, `OC-0357` and `OC-0358`; B4-3 closed `OC-0321`; B4-12(a) closed `OC-0313` and `OC-0329`; B4-12(b) closed `OC-0314`; B4-12(d) closed `OC-0340` and `OC-0341`:
+`OC-0323`, `OC-0357` and `OC-0358`; B4-3 closed `OC-0321`; B4-12(a) closed `OC-0313` and `OC-0329`; B4-12(b) closed `OC-0314`; B4-12(d) closed `OC-0340` and `OC-0341`; B4-7's second half closed `OC-0354`:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 335     |
-| open      | **44**  |
+| fixed     | 336     |
+| open      | **43**  |
 | declined  | 3       |
 | duplicate | 1       |
 | **total** | **383** |
 
-Of the 44 open records:
+Of the 43 open records:
 
-- **1 high, 9 medium, 34 low. Zero critical.** The high is `OC-0350`, an
+- **1 high, 8 medium, 34 low. Zero critical.** The high is `OC-0350`, an
   admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
-- Three hunts: 20 from `general-2026-08-22-b`, 23 from `general-2026-08-29`,
-  1 from `b2-1-fixture-capture-2026-08-28` (the 2026-08-29 hunt count is down one: `OC-0374` closed with the role family; the 2026-08-22 count is down six more: `OC-0313` and `OC-0329` closed in B4-12(a), `OC-0321` in B4-3, `OC-0314` in B4-12(b), `OC-0340` and `OC-0341` in B4-12(d)). The three
+- Three hunts: 20 from `general-2026-08-22-b`, 22 from `general-2026-08-29`,
+  1 from `b2-1-fixture-capture-2026-08-28` (the 2026-08-29 hunt count is down two: `OC-0374` closed with the role family, `OC-0354` in B4-7's second half; the 2026-08-22 count is down six more: `OC-0313` and `OC-0329` closed in B4-12(a), `OC-0321` in B4-3, `OC-0314` in B4-12(b), `OC-0340` and `OC-0341` in B4-12(d)). The three
   `b3-1-auth-characterization-2026-08-29` records (defects the auth
   characterization rows pinned as-is) were fixed in B3-9 on 2026-08-30.
-- **All 44 resolve to a live `file:line`** — 0 dead paths, re-checked
+- **All 43 resolve to a live `file:line`** — 0 dead paths, re-checked
   2026-08-29; the five B3-9 closed were live then and are fixed now.
   `OC-0323` used to be the exception (its line had drifted past end of file
   when B2 work shortened `Server/service/channel.go`); the message/read-state
   family fixed it, so the exception is gone rather than carried.
-- 30 sit under `Client/`, 14 under `Server/`.
+- 29 sit under `Client/`, 14 under `Server/`.
 - **None of the 2026-08-22 records is assigned to B1**; their register phases
   span B2–B10. The 2026-08-29 records are not yet phased in the register.
 

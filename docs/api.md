@@ -688,6 +688,15 @@ old one).
 
 List the authenticated user's active sessions.
 
+`unseen` is the new-login signal (B4-7, BG-08): a session created by a login
+starts `true` and stays so until the account lists its sessions from
+another device. This listing is that acknowledgement — every row's flag
+clears except the caller's own, so the device that just signed in never
+acknowledges itself, and the response carries the flags as they were before
+it. An API-token principal, which holds no session, acknowledges every row.
+No push transport exists for the signal; a client that wants it polls this
+route.
+
 **Auth:** Required
 
 #### Response 200 OK
@@ -701,7 +710,8 @@ List the authenticated user's active sessions.
       "ip": "192.168.1.100",
       "created_at": "2026-07-01T10:00:00Z",
       "last_used": "2026-07-19T09:00:00Z",
-      "is_current": true
+      "is_current": true,
+      "unseen": false
     }
   ]
 }

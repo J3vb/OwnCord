@@ -82,6 +82,7 @@ describe("SettingsOverlay", () => {
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {
@@ -1254,6 +1255,7 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
       onConfirmTotp: vi.fn().mockResolvedValue(undefined),
       onDisableTotp: vi.fn().mockResolvedValue(undefined),
+      onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
     });
 
     overlay.mount(localContainer);
