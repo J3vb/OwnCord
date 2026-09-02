@@ -447,9 +447,18 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			return
 		}
 
-		// Verify old password using constant-time bcrypt comparison.
+		// Verify old password using constant-time bcrypt comparison, inside
+		// the one admission slot every password route takes (B4-4): a refused
+		// attempt ran no compare and counts as no failure.
 		failKey := auth.Key("pw_confirm_fail", user.ID)
-		if !auth.CheckPassword(user.PasswordHash, req.OldPassword) {
+		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
+		if !admitted {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error: "RATE_LIMITED", Message: service.ErrAuthBusy.Error(),
+			})
+			return
+		}
+		if !matched {
 			if !limiter.Allow(failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, service.PwConfirmLockoutDuration)
 			}
@@ -476,8 +485,14 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			return
 		}
 
-		// Hash new password.
-		hash, err := auth.HashPassword(req.NewPassword)
+		// Hash new password — bcrypt at full cost, so through the budget too.
+		hash, admitted, err := limiter.Admission().HashPassword(req.NewPassword)
+		if !admitted {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error: "RATE_LIMITED", Message: service.ErrAuthBusy.Error(),
+			})
+			return
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error: "INTERNAL_ERROR", Message: "failed to process password change",
