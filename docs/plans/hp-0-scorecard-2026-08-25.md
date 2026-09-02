@@ -82,7 +82,7 @@ Of the 43 open records:
 - **1 high, 8 medium, 34 low. Zero critical.** The high is `OC-0350`, an
   admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
 - Three hunts: 20 from `general-2026-08-22-b`, 22 from `general-2026-08-29`,
-  1 from `b2-1-fixture-capture-2026-08-28` (the 2026-08-29 hunt count is down two: `OC-0374` closed with the role family, `OC-0354` in B4-7's second half; the 2026-08-22 count is down seven more: `OC-0313` and `OC-0329` closed in B4-12(a), `OC-0321` in B4-3, `OC-0314` in B4-12(b), `OC-0340` and `OC-0341` in B4-12(d), `OC-0354` in B4-7). The three
+  1 from `b2-1-fixture-capture-2026-08-28` (the 2026-08-29 hunt count is down two: `OC-0374` closed with the role family, `OC-0354` in B4-7's second half; the 2026-08-22 count is down six more: `OC-0313` and `OC-0329` closed in B4-12(a), `OC-0321` in B4-3, `OC-0314` in B4-12(b), `OC-0340` and `OC-0341` in B4-12(d)). The three
   `b3-1-auth-characterization-2026-08-29` records (defects the auth
   characterization rows pinned as-is) were fixed in B3-9 on 2026-08-30.
 - **All 43 resolve to a live `file:line`** — 0 dead paths, re-checked
