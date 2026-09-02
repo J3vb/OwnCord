@@ -77,7 +77,8 @@ Commands:
   list
         List API tokens (never prints raw tokens).
   revoke <id|label>
-        Revoke a token by numeric id or by label.
+        Revoke a token by numeric id, or by label — an all-digit argument is
+        tried as an id first and as a label when no active token has that id.
 `)
 }
 
@@ -163,9 +164,12 @@ func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []strin
 	}
 	arg := rest[0]
 
-	// An argument that parses as an integer is an id; anything else is a
+	// An argument that parses as an integer is tried as an id first; when no
+	// active token carries that id it is tried as a label, because labels are
+	// free text and an all-digit one is legal (OC-0341). Anything else is a
 	// label. Revoking by label is the CLI's own form — an operator recovering
-	// a compromised credential knows what they typed, not the row id.
+	// a compromised credential knows what they typed, not the row id — and
+	// the id keeps precedence, as the usage text says.
 	var (
 		affected int64
 		err      error
@@ -173,6 +177,8 @@ func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []strin
 	if id, perr := strconv.ParseInt(arg, 10, 64); perr == nil {
 		if err = tokens.Revoke(ctx, 0, id); err == nil {
 			affected = 1
+		} else if errors.Is(err, service.ErrNotFound) {
+			affected, err = tokens.RevokeByLabel(ctx, 0, arg)
 		}
 	} else {
 		affected, err = tokens.RevokeByLabel(ctx, 0, arg)

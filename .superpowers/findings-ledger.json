@@ -7911,13 +7911,19 @@
       "why": "`--expires` is a `flag.Duration` with no lower bound, and the only test applied to it is `if *expires > 0`. A negative duration therefore falls into the same branch as the documented `0 = never` value, so `expiresAt` stays nil and `CreateAPIToken` writes `expires_at = NULL`. The operator asked for a bounded credential and gets a permanent one, with a success message and exit code 0. The sibling HTTP path (`Server/admin/handlers_tokens.go:70`) carries an explicit `if req.ExpiresHours < 0 { 400 }` guard with a comment saying precisely this — \"Negatives must not fall into that same nil-expiresAt branch\" — so the guard exists on one path and is missing on the other.",
       "repro": "Run `server token create --label ci --expires -1h` (e.g. from a script that computes the remaining window and lands on a negative value, or a typo'd `-1h` where `1h` was meant). flag.Duration parses -1h0m0s without error; `*expires > 0` is false; `expiresAt` stays nil; the row is inserted with `expires_at = NULL`. stdout prints a raw token and stderr says \"Created API token #N ... Store this token now\", exit 0. `server token list` then shows EXPIRES as `-`. The operator believes they minted a one-hour token and has actually minted a permanent full-privilege (owner-bound by default) API credential. The same input against `POST /admin/api/tokens` is rejected with 400.",
       "evidence": "Server/token_cli.go:83   expires := fs.Duration(\"expires\", 0, \"validity duration, e.g. 720h (default: never)\")\nServer/token_cli.go:117  var expiresAt *time.Time\nServer/token_cli.go:118  if *expires > 0 {\nServer/token_cli.go:119      t := time.Now().Add(*expires)\nServer/token_cli.go:120      expiresAt = &t\nServer/token_cli.go:121  }\nServer/token_cli.go:122  id, err := database.CreateAPIToken(ctx, user.ID, auth.HashToken(raw), *label, expiresAt)\n\n-- guarded sibling --\nServer/admin/handlers_tokens.go:70  if req.ExpiresHours < 0 || req.ExpiresHours > 24*365*10 {\nServer/admin/handlers_tokens.go:71      writeErr(w, http.StatusBadRequest, \"BAD_REQUEST\", \"expires_hours must be between 0 and 87600\")",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-3",
       "suggestedFix": "In tokenCreate, immediately after the `--label` check (Server/token_cli.go:90), add the lower-bound guard the HTTP path already has: `if *expires < 0 { fmt.Fprintln(os.Stderr, \"error: --expires must not be negative\"); return 2 }`. One guard in tokenCreate covers the only caller (main.go:53 -> runTokenCLI -> tokenCreate).",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "190344e",
+        "test": "Server/service/token_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0341",
@@ -7928,13 +7934,19 @@
       "why": "`tokenRevoke` documents its argument as `<id|label>` but dispatches purely on whether the string parses as an int64, not on whether that dispatch found anything. Labels are unvalidated free text (`--label` is only checked non-empty here and only trimmed in the admin handler), so an all-digit label is creatable. For such a token the id branch is taken, matches no row, and the function reports failure without ever trying `RevokeAPITokenByLabel`.",
       "repro": "`server token create --label 2024 --user alice` mints token row id 7 with label \"2024\". `server token revoke 2024` parses 2024 as an id, calls RevokeAPIToken(ctx, 2024), which affects 0 rows (no token has id 2024), and prints `no active token matched \"2024\"` with exit 1 — the label branch is never reached. The token stays live and, per the CLI, is unrevokable by the name the operator knows it by. (Worse if a token with id 2024 does exist: an unrelated token is revoked instead.) Making the id branch fall through to the label branch when `affected == 0` fixes both halves.",
       "evidence": "Server/token_cli.go:180  if id, perr := strconv.ParseInt(arg, 10, 64); perr == nil {\nServer/token_cli.go:181      affected, err = database.RevokeAPIToken(ctx, id)\nServer/token_cli.go:182      if err == nil && affected > 0 { db.WriteAudit(...) }\nServer/token_cli.go:185  } else {\nServer/token_cli.go:186      affected, err = database.RevokeAPITokenByLabel(ctx, arg)\nServer/token_cli.go:195  if affected == 0 {\nServer/token_cli.go:196      fmt.Fprintf(os.Stderr, \"no active token matched %q\\n\", arg)\nServer/token_cli.go:197      return 1\n\n-- usage text promising both --\nServer/token_cli.go:73   revoke <id|label>\nServer/token_cli.go:74         Revoke a token by numeric id or by label.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-3",
       "suggestedFix": "Make the id branch fall through instead of terminating. At Server/token_cli.go:180-190, after the id attempt, add: `if err == nil && affected == 0 { affected, err = database.RevokeAPITokenByLabel(ctx, arg); if err == nil && affected > 0 { db.WriteAudit(ctx, database, 0, \"api_token_revoke\", \"api_token\", 0, arg) } }`. This keeps id precedence and costs one extra query only on the miss path.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "190344e",
+        "test": "Server/token_cli_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0342",
