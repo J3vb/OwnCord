@@ -34,6 +34,15 @@ var absentPattern = regexp.MustCompile(`(?i)federat|directory|discover|listing`)
 // tree, not the bare-config subset setupRouter mounts.
 func fullRouter(t *testing.T) http.Handler {
 	t.Helper()
+	handler, _ := fullRouterWithDB(t)
+	return handler
+}
+
+// fullRouterWithDB is fullRouter handing back the database too, for tests
+// that need to mint users, sessions and tokens behind the routes they probe
+// (auth_posture_test.go, dead_session_test.go).
+func fullRouterWithDB(t *testing.T) (http.Handler, *db.DB) {
+	t.Helper()
 
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -62,7 +71,7 @@ func fullRouter(t *testing.T) http.Handler {
 	}
 	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
-	return handler
+	return handler, database
 }
 
 // TestAbsenceContract_NoFederationDirectoryOrListingRoutes walks every route
