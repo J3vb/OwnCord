@@ -6,6 +6,8 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
+**B4-0 merged 2026-09-02** (PR #1497 = `d8653ea`; entry-gate item 3's
+public half is its document, the private half stays counted-not-described);
 **B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
 PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
 test-first, revert-proofs pass). The owner decisions listed below block the steps that
@@ -80,12 +82,12 @@ record pre-squash `refs/pull/<n>/head` SHAs at merge time.
 
 ## Entry gate
 
-| Condition                                                            | State 2026-09-01                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| B3 domain, database, audit, and lifecycle boundaries are established | **Met.** Evidence block below: the B3-0 inventory is live and green at `39019e7f` with zero `move` rows; lifecycle owns start/stop/drain in `Server/internal/app/`; the settings/audit, auth, session, token, upload, user and voice families sit behind `Server/service/`.                                                                                                                                                                                                                                              |
-| Backup/restore fixtures and representative alpha data are captured   | **Met.** Evidence block below: admin backup create/list/delete/restore handlers with a restore round-trip test; scheduled backup + retention pruning in the maintenance loop; the B3-7 anonymised snapshot `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` with its standing migration canary, whose README names "B4 — HP-4 drills" as its first consumer.                                                                                                                                                            |
-| Destructive operations have private threat and failure models        | **Not evidenced.** Nothing in the repository is or points at such a model: HP-2's threat work covered protocol, trust, E2EE and predicates; `docs/trust-model.md` discloses operator powers and today's deletion limits but is a disclosure, not a failure model; B3 produced none. Whether private owner-side material exists cannot be verified from the repository — owner question 6. **B4-0 closes this item** (the B3-0 precedent: B3's entry-gate item 3 did not exist either and became the phase's first step). |
-| _(context)_ B3 exit signed; `dev` at or past `39019e7f`              | **Met.** `git merge-base --is-ancestor 39019e7f HEAD` exits 0 on `dev`; `39019e7` is "docs(b3): exit signed" (PR #1495).                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Condition                                                            | State 2026-09-01                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B3 domain, database, audit, and lifecycle boundaries are established | **Met.** Evidence block below: the B3-0 inventory is live and green at `39019e7f` with zero `move` rows; lifecycle owns start/stop/drain in `Server/internal/app/`; the settings/audit, auth, session, token, upload, user and voice families sit behind `Server/service/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Backup/restore fixtures and representative alpha data are captured   | **Met.** Evidence block below: admin backup create/list/delete/restore handlers with a restore round-trip test; scheduled backup + retention pruning in the maintenance loop; the B3-7 anonymised snapshot `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` with its standing migration canary, whose README names "B4 — HP-4 drills" as its first consumer.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Destructive operations have private threat and failure models        | **Not evidenced.** Nothing in the repository is or points at such a model: HP-2's threat work covered protocol, trust, E2EE and predicates; `docs/trust-model.md` discloses operator powers and today's deletion limits but is a disclosure, not a failure model; B3 produced none. Whether private owner-side material exists cannot be verified from the repository — owner question 6. **B4-0 closes this item** (the B3-0 precedent: B3's entry-gate item 3 did not exist either and became the phase's first step). _2026-09-01: B4-0 opened — the public half is [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md); the private half needed no new advisory (that document's last section); owner question 6 stays open for owner-side material._ |
+| _(context)_ B3 exit signed; `dev` at or past `39019e7f`              | **Met.** `git merge-base --is-ancestor 39019e7f HEAD` exits 0 on `dev`; `39019e7` is "docs(b3): exit signed" (PR #1495).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 **Entry evidence, 2026-09-01, measured at `39019e7f`:**
 
@@ -272,6 +274,60 @@ Exit: the document exists with all five parts; entry-gate item 3 flips to
 met with this PR's SHA as evidence; any private advisories filed are counted
 (not described) in the evidence block. If owner question 6 surfaces existing
 private material, the evidence block records that instead of new advisories.
+
+**Evidence, 2026-09-01** — branch `feat/b4-0-data-lifecycle` from `dev`
+`aabac60`; PR #1497 to `dev` (the squash SHA is recorded by the next step's
+PR, as B3 did). Closes entry-gate item 3's public half.
+
+- **Document:** [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md),
+  linked from `docs/architecture/README.md`. Eight operations (O1 account
+  deletion, O2 message deletion/purge, O3 orphan sweep, O4 backup/restore,
+  O5 replay-event retention, O6 session sweeps, O7 TOTP key lifecycle, O8
+  recovery-secret rotation as a requirement) each modelled on the same five
+  axes — interrupted, disk-full, transaction-vs-file, concurrent writer,
+  restore-over-newer; a 26-row data-class inventory with today's behaviour
+  under O1, the hard-delete cascade rule per class (from `Server/migrations/`)
+  and the B4 step that changes it; the drill protocol with five HP-4
+  baseline drills (D1–D5); an appendix of subject-inventory queries — the
+  seed of B4-9's generated lineage checklist. Every claim names its function
+  or file.
+- **Corrections to this plan's verify table, found writing it:** (a) upload
+  files are not simply "left behind" by today's deletion — rows linked to the
+  soft-deleted messages and the old avatar become sweep-eligible and the
+  orphan sweep reclaims them on a later tick, best-effort, only when storage
+  is configured, and a failed unlink strands the file with no row naming it
+  (O3 A1); the B4-9 requirement (synchronous, journaled removal plus a
+  reconciliation pass) is unchanged, the baseline is now accurate. (b)
+  `login_attempts` has no writer at HEAD — nothing to erase, and no B4 work
+  should be planned for it. (c) FTS: account deletion empties the message's
+  index entry (the content change fires `messages_au`); an ordinary soft
+  delete keeps the terms until the content changes. (d) `audit_log` has had
+  no foreign key to `users` since migration 003; the unlinkability work
+  (B4-10) is not constrained by one.
+- **Helper:** `Server/internal/alphasnap` — `Path()` resolves the tracked
+  snapshot from the package's own location with a `go.mod` walk-up fallback,
+  `Copy(dir)` writes a private byte copy (`os.CreateTemp`, no SQLite
+  connection on the source). Tests: `TestPathPointsAtTrackedSnapshot`,
+  `TestCopyIsByteIdenticalAndLeavesSourceAlone` (size, mtime and no
+  `-wal`/`-shm`/`-journal` sidecar on the source), `TestCopyMakesDistinctFiles`,
+  `TestCopyRefusesMissingDir`. `gofmt -l` clean; `go vet` clean; `go test
+-race ./internal/alphasnap/` green; all four build-tag variants build;
+  `cmd/dbinventory` unchanged at 53 importers / 0 unlisted (the package
+  imports no `db`). `golangci-lint` could not run locally — the installed
+  binary is built with Go 1.25 and refuses the module's 1.26.7 target, the
+  mismatch the register's health table already records — so CI's pinned
+  lint is the evidence.
+- **Private half:** no new advisory needed — every gap the document records
+  is already public (OC-0321; the deletion limits `docs/trust-model.md`
+  discloses), a requirement on an operation B4 has not built, or an
+  operator-facing failure mode nobody can trigger without owning the host
+  (reasoning in the document's last section). SEC-01 remains the one
+  pre-existing private item touching these operations. Owner question 6 is
+  still open: owner-side models, if they exist, merge into the operation
+  catalogue rather than replacing it.
+- **Gates before push:** `npx prettier --check .` on the pinned 3.9.6 under
+  Node 24; `npm run check:docs` (count claims and the ledger schema); the
+  Go checks above.
 
 ## B4-1 — Registration modes
 
