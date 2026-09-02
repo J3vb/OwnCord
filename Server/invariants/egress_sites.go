@@ -150,18 +150,31 @@ func egressSite(f *ast.File, fset *token.FileSet, line int) string {
 		}
 		name := fd.Name.Name
 		if fd.Recv != nil && len(fd.Recv.List) > 0 {
-			switch r := fd.Recv.List[0].Type.(type) {
-			case *ast.StarExpr:
-				if id, ok := r.X.(*ast.Ident); ok {
-					return "(*" + id.Name + ")." + name
+			if star, ok := fd.Recv.List[0].Type.(*ast.StarExpr); ok {
+				if id := receiverIdent(star.X); id != "" {
+					return "(*" + id + ")." + name
 				}
-			case *ast.Ident:
-				return r.Name + "." + name
+			} else if id := receiverIdent(fd.Recv.List[0].Type); id != "" {
+				return id + "." + name
 			}
 		}
 		return name
 	}
 	return "(file scope)"
+}
+
+// receiverIdent is the receiver's type name with any generic instantiation
+// stripped: T, T[K] and T[K, V] all name T.
+func receiverIdent(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.IndexExpr:
+		return receiverIdent(x.X)
+	case *ast.IndexListExpr:
+		return receiverIdent(x.X)
+	}
+	return ""
 }
 
 // egressHits lists every outbound construct in f: calls and composite

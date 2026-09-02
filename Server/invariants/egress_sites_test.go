@@ -89,11 +89,17 @@ import "net/http"
 type Updater struct{}
 func (u *Updater) fetchLatestRelease() { _, _ = http.Get("https://example.invalid/") }
 `
+	genericMethod := `package x
+import "net/http"
+type Updater[T any] struct{ v T }
+func (u *Updater[T]) fetchLatestRelease() { _, _ = http.Get("https://example.invalid/") }
+`
 	cases := []struct {
 		name, rel, src string
 		want           int
 	}{
 		{"unlisted http.Get", "service/reach.go", reach, 1},
+		{"listed file, inventoried method with a generic receiver", "updater/updater.go", genericMethod, 0},
 		// A listed file exempts only its inventoried sites: a dial added to
 		// another function of the same file is a new egress path.
 		{"listed file, unlisted function", "updater/updater.go", reach, 1},
