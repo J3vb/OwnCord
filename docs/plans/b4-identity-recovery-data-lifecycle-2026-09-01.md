@@ -531,7 +531,10 @@ so no hot-file overlap occurred.
   figures aggregate 81.2%, `auth` 91.4%, `db` 79.4%, `service` 74.4%,
   `ws` 88.0%. Ratchet: `auth` 90.8 → 91.4, `service` 71.3 → 74.3 (74.4
   measured, minus 0.1 for the 0.1 run-to-run variance CI has shown on this
-  package), aggregate 79.8 → 81.1 (varies, minus 0.1); `db` stays 79.3 —
+  package), aggregate 79.8 → 80.9 (81.2 measured locally and floored at
+  81.1; once the dev merge added B4-0's `internal/alphasnap`, 47% covered,
+  to the denominator, CI measured 81.0 — the lowest Linux figure observed,
+  minus 0.1 for variance, per the ratchet rule); `db` stays 79.3 —
   this branch measures 79.4 against `dev`'s 79.7, a 0.3-point dip from the
   wrappers' fault branches, above the floor and disclosed; `ws` untouched.
 - **Private half:** nothing new to file — the controls added are described
