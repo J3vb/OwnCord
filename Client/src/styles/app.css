@@ -3793,6 +3793,9 @@ ul.md-list-nested {
 .toast-success {
   border-left: 4px solid var(--green);
 }
+.toast-warning {
+  border-left: 4px solid var(--yellow);
+}
 
 /* ── Reconnecting Banner ── */
 .reconnecting-banner {
