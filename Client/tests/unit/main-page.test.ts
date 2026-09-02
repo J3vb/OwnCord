@@ -939,6 +939,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       expect(toast!.textContent).toBe(warning);
     });
     expect(container.querySelector(".toast-success")).toBeNull();
+    // The form carries the same warning inline (Codex P2 on PR #1503): no
+    // green "changed successfully" beside the warning toast.
+    // The toast is shown before the callback resolves, so the form's own
+    // update lands a microtask later.
+    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    expect(status).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(status!.textContent).toBe(warning);
+    });
+    expect(status!.style.color).toBe("var(--yellow)");
+    expect(container.textContent).not.toContain("Password changed successfully.");
   });
 
   it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {

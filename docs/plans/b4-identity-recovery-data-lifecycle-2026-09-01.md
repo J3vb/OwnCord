@@ -916,6 +916,12 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   tests, no assertion weakened. `check:docs` counts move to 330 fixed /
   49 open on this branch (B4-3 and batches (a) and (d) move the same
   lines; whichever merges later re-derives).
+- **Review fix (Codex P2, 2026-09-02):** the password form was still
+  painting its green "Password changed successfully." beside the warning
+  toast. `onChangePassword` now resolves with the outcome, and the form
+  keeps the warning inline (yellow, no three-second fade) on a partial
+  success — the fields clear either way, because the password did change.
+  Pinned in `settings-overlay.test.ts` and the MainPage-level test.
 
 ## Exit gate
 

@@ -498,6 +498,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const outcome = await api.changePassword(oldPassword, newPassword);
           showChangeOutcomeToast(outcome, "Password changed successfully");
+          // The form shows the same outcome inline, so a partial success is
+          // never a green "changed successfully" beside the warning toast.
+          return outcome;
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to change password";
           showToast(msg, "error");
