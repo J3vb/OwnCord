@@ -915,6 +915,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws: fakeWs(), api: hostedApi });
     page.mount(container);
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    // The store notifies on the next tick, and opening rebuilds the live
+    // Account tab then — drive the form a user would see, not the
+    // placeholder built at mount.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const inputs = [...container.querySelectorAll<HTMLInputElement>("input[type='password']")];
     const byPlaceholder = (placeholder: string): HTMLInputElement => {
