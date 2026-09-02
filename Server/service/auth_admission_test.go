@@ -211,16 +211,14 @@ func TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := range attempts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			_, errs[i] = f.svc.Login(ctx, LoginInput{
 				Username: fmt.Sprintf("ghost-%d", i),
 				Password: "nope",
 				IP:       fmt.Sprintf("203.0.113.%d", 30+i),
 			})
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
