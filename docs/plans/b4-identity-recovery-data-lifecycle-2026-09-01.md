@@ -15,7 +15,8 @@ ordering was hot-file avoidance);
 **B4-12 batch (a) merged 2026-09-02** (PR #1502 = `12dbc88`; OC-0313 and
 OC-0329 closed — the legacy per-user volume and DM-note keys are consumed
 on migration, so a pre-scoping value reaches the first host only);
-**B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`; evidence
+**B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`, PR #1504;
+evidence
 block in its section — one atomic admission budget at every bcrypt site,
 race and bounded-work proofs; SEC-01's register row records the control and
 closes on the owner's advisory ID). The owner decisions listed below block
@@ -575,7 +576,7 @@ the gap.
 Exit: every expensive-auth site is budgeted; race/load tests green; SEC-01's
 public closure evidence satisfied and the advisory updated by the owner.
 
-**Evidence — 2026-09-02 (branch `feat/b4-4-admission-budget`):**
+**Evidence — 2026-09-02 (branch `feat/b4-4-admission-budget`, PR #1504):**
 
 - **Control.** `auth.AdmissionBudget` (`Server/auth/admission.go`) is one
   counting semaphore: `TryAcquire` takes a slot without waiting or refuses,
