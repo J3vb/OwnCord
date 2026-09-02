@@ -1194,6 +1194,14 @@ Questions the scorecard answers with commands:
 Owner signs. Acceptance authorises B4-9, B4-10, B4-11 (and may relax
 B4-10 ∥ B4-11). Pre-squash SHAs of the chain's PRs are recorded here.
 
+- **Review fixes (Codex on #1510, 2026-09-02, follow-up PR):** the inventory
+  is per site — each row names the functions that may reach out, the rule
+  flags a dial anywhere else in a listed file and `TestEgressAllowIsLive`
+  checks every site both ways; the two LiveKit rows are `config`, not
+  `loopback`, because `voice.livekit_url` may name a remote LiveKit and then
+  the probes and each session's signalling leave the machine; the startup
+  banner brackets an IPv6 address (`TestWSURL_BracketsIPv6`).
+
 ## B4-9 — Complete account erasure
 
 BPR-052, BG-11; roadmap workstream 9. Replaces today's anonymise-and-ban
