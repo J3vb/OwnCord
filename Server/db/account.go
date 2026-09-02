@@ -58,6 +58,14 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 		{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
 		{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
+		// Second-factor state (migration 032): an in-flight login challenge,
+		// a pending enrolment, the replay window and the recovery codes are
+		// credentials too, and the anonymised row would keep them alive
+		// (docs/architecture/data-lifecycle.md, class 4).
+		{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
+		{"pending_totp_enrollments", `DELETE FROM pending_totp_enrollments WHERE user_id = ?`},
+		{"totp_used_codes", `DELETE FROM totp_used_codes WHERE user_id = ?`},
+		{"totp_recovery_codes", `DELETE FROM totp_recovery_codes WHERE user_id = ?`},
 	}
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {

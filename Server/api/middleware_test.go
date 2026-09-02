@@ -1212,6 +1212,39 @@ CREATE TABLE IF NOT EXISTS users (
     custom_status TEXT
 );
 
+-- Second-factor state (migration 032): the auth service persists its
+-- partial-auth challenges, pending enrolments, replay window and recovery
+-- codes through the Store, so this schema carries the tables too.
+CREATE TABLE IF NOT EXISTS partial_auth_challenges (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device     TEXT    NOT NULL DEFAULT '',
+    ip_address TEXT    NOT NULL DEFAULT '',
+    failures   INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pending_totp_enrollments (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret_enc TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS totp_used_codes (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+);
+
+CREATE TABLE IF NOT EXISTS totp_recovery_codes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

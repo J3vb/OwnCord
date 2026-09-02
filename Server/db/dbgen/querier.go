@@ -24,6 +24,9 @@ type Querier interface {
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
+	CleanupExpiredPartialAuthChallenges(ctx context.Context, expiresAt string) error
+	CleanupExpiredPendingTOTPEnrollments(ctx context.Context, expiresAt string) error
+	CleanupExpiredUsedTOTPCodes(ctx context.Context, expiresAt string) error
 	ClearAllVoiceStates(ctx context.Context) error
 	ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error)
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
@@ -35,6 +38,7 @@ type Querier interface {
 	CountChannels(ctx context.Context) (int64, error)
 	CountDMParticipants(ctx context.Context, channelID int64) (int64, error)
 	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Authorization probe for the file route: an unlinked attachment is readable by
 	// everyone exactly while some user's avatar points at it. Covered by the
@@ -83,9 +87,13 @@ type Querier interface {
 	// again by the uploader.
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
+	DeletePartialAuthChallenge(ctx context.Context, tokenHash string) (sql.Result, error)
+	DeletePendingTOTPEnrollment(ctx context.Context, userID int64) error
+	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
+	DeleteUsedTOTPCode(ctx context.Context, arg DeleteUsedTOTPCodeParams) error
 	DisablePlugin(ctx context.Context, id int64) error
 	// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 	// already carry (OC-0284): an edit that races a delete must not rewrite a
@@ -169,6 +177,8 @@ type Querier interface {
 	// separator form of ban_expires to 'T' before comparing, because ' ' sorts
 	// below 'T' and a same-day space-form expiry would otherwise read as lapsed.
 	GetOwnerUser(ctx context.Context) (User, error)
+	GetPartialAuthChallenge(ctx context.Context, tokenHash string) (GetPartialAuthChallengeRow, error)
+	GetPendingTOTPEnrollment(ctx context.Context, userID int64) (GetPendingTOTPEnrollmentRow, error)
 	GetReactionCounts(ctx context.Context, messageID int64) ([]GetReactionCountsRow, error)
 	// Reactors for one (message, emoji) pair, oldest reaction first. The reactions
 	// table has no timestamp column, so the autoincrement id carries the order.
@@ -198,7 +208,9 @@ type Querier interface {
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
+	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
+	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
 	InstallPlugin(ctx context.Context, arg InstallPluginParams) (sql.Result, error)
 	IsBlocked(ctx context.Context, arg IsBlockedParams) (int64, error)
 	IsDMParticipant(ctx context.Context, arg IsDMParticipantParams) (int64, error)
@@ -244,6 +256,7 @@ type Querier interface {
 	// offsets when stripping them, so a non-ASCII character here truncates the
 	// generated SQL of THIS and every following query by the byte/rune delta.
 	ListRoles(ctx context.Context) ([]Role, error)
+	ListUnusedRecoveryCodes(ctx context.Context, userID int64) ([]ListUnusedRecoveryCodesRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
@@ -257,6 +270,7 @@ type Querier interface {
 	// every message committed after it finds IncrementMentionCounts' own
 	// `last_message_id < msgID` guard true, so its mention survives.
 	MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelReadAtLatestParams) error
+	MarkRecoveryCodeUsed(ctx context.Context, arg MarkRecoveryCodeUsedParams) (sql.Result, error)
 	// Disconnect bookkeeping. It clears only 'online', which is the one status
 	// that means "has a live session"; idle, dnd and invisible are choices the
 	// user made and are what the next connect reads instead of stamping online
@@ -313,6 +327,10 @@ type Querier interface {
 	UpsertChannelPermission(ctx context.Context, arg UpsertChannelPermissionParams) error
 	UpsertChannelUserPermission(ctx context.Context, arg UpsertChannelUserPermissionParams) error
 	UpsertLockout(ctx context.Context, arg UpsertLockoutParams) error
+	// Second-factor state (migration 032, B4-3). ASCII only in this file: sqlc
+	// v1.30.0 miscounts multi-byte characters and truncates the next query.
+	UpsertPartialAuthChallenge(ctx context.Context, arg UpsertPartialAuthChallengeParams) error
+	UpsertPendingTOTPEnrollment(ctx context.Context, arg UpsertPendingTOTPEnrollmentParams) error
 	UseInviteAtomic(ctx context.Context, code string) (sql.Result, error)
 	UserCount(ctx context.Context) (int64, error)
 }
