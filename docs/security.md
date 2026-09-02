@@ -45,6 +45,22 @@ the code line or test that makes it true.
 OwnCord supports TOTP-based 2FA:
 
 - Users enroll via Settings > Account (QR code + backup codes)
+- Emergency recovery codes (BPR-046): ten `XXXXX-XXXXX` codes are issued once at
+  enrolment and on every `POST /api/v1/users/me/totp/recovery-codes`
+  (password-confirmed). Each is accepted once in place of a TOTP code at
+  `verify-totp`, which then reports `recovery_codes_remaining`; the server
+  stores bcrypt hashes only, and disabling 2FA or deleting the account removes
+  the set. Security questions do not exist and will not.
+- Second-factor state is durable (migration 032): the login challenge, a
+  pending enrolment (encrypted under the TOTP key) and the 90-second replay
+  window survive a restart, stored as digests and ciphertext — never a token
+  or code in the clear. A store fault fails closed: no challenge is issued and
+  no code is accepted on trust.
+- The TOTP encryption key (`data/totp.key`, or `OWNCORD_TOTP_KEY`) is generated
+  only when confirmed absent; any other read error refuses to start rather than
+  replace the key (which would orphan every stored secret), and the write is
+  atomic. Back the key file up beside the database — a backup does not contain
+  it.
 - Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
 - `require_2fa` requires all users to have 2FA enabled and registration to be closed
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
@@ -60,7 +76,7 @@ Users can delete their own account via `DELETE /api/v1/auth/account` with passwo
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`
-- **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`
+- **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
 - **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`

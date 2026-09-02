@@ -60,6 +60,19 @@ type AuthResult struct {
 	PartialToken string
 	Requires2FA  bool
 	User         *db.User
+	// RecoveryCodesRemaining is set when an emergency recovery code, not a
+	// TOTP code, completed the second step: how many the account has left,
+	// so the client can prompt for regeneration (nil otherwise).
+	RecoveryCodesRemaining *int
+}
+
+// TOTPEnrollment is what EnableTOTP hands the caller: the otpauth URI for
+// the authenticator app and the emergency recovery codes (BPR-046), shown
+// exactly once. The server keeps bcrypt hashes of the codes; the plaintext
+// exists only in this value.
+type TOTPEnrollment struct {
+	URI           string
+	RecoveryCodes []string
 }
 
 // TOTPChangeResult reports a committed 2FA enable or disable. Warning is
@@ -228,6 +241,13 @@ var (
 	ErrTOTPEnableFailed     = &authError{ErrInternal, "failed to enable two-factor authentication"}
 	ErrTOTPRequiredByServer = &authError{ErrForbidden, "two-factor authentication is required for this server"}
 	ErrTOTPDisableFailed    = &authError{ErrInternal, "failed to disable two-factor authentication"}
+	// ErrTOTPEnrollmentStage is a persister fault while staging an enrolment
+	// (B4-3): the pending secret could not be made durable, so none is staged.
+	ErrTOTPEnrollmentStage = &authError{ErrInternal, "failed to stage two-factor enrolment"}
+
+	// Recovery codes (B4-3).
+	ErrRecoveryCodesRequireTOTP = &authError{ErrConflict, "enable two-factor authentication before requesting recovery codes"}
+	ErrRecoveryCodesFailed      = &authError{ErrInternal, "failed to issue recovery codes"}
 )
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -250,16 +270,19 @@ type AuthService struct {
 
 // NewAuthService wires the auth slice. limiter is the shared auth rate
 // limiter (lockouts are keyed inside it); totpKey is the AES-256 key that
-// encrypts TOTP secrets at rest; broadcaster may be nil. The three in-memory
-// stores — partial-login challenges, pending TOTP enrolments, used TOTP
-// codes — are created here with the fixed TTLs the route mount used to own.
+// encrypts TOTP secrets at rest; broadcaster may be nil. The three
+// second-factor stores — partial-login challenges, pending TOTP enrolments,
+// used TOTP codes — are created here with the fixed TTLs the route mount
+// used to own, and since B4-3 they persist through st (S-13): the database
+// is authoritative, so a restart keeps an in-flight challenge, a staged
+// enrolment and the replay window, and a store fault fails closed.
 func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
 	return &AuthService{
 		st:          st,
 		limiter:     limiter,
-		partial:     auth.NewPartialAuthStore(partialAuthStoreTTL),
-		pending:     auth.NewPendingTOTPStore(pendingTOTPStoreTTL),
-		usedCodes:   auth.NewUsedTOTPCodeStore(),
+		partial:     auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
+		pending:     auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
+		usedCodes:   auth.NewUsedTOTPCodeStore().WithPersister(st),
 		totpKey:     totpKey,
 		broadcaster: broadcaster,
 	}
@@ -354,8 +377,9 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 		return nil, ErrAuthPolicyUnavailable
 	}
 	if user.TOTPSecret != nil {
-		partialToken, err := s.partial.Issue(user.ID, in.Device, in.IP)
+		partialToken, err := s.partial.Issue(ctx, user.ID, in.Device, in.IP)
 		if err != nil {
+			slog.Error("failed to issue two-factor challenge", "user_id", user.ID, "error", err)
 			return nil, ErrTOTPChallengeStart
 		}
 		return &AuthResult{PartialToken: partialToken, Requires2FA: true}, nil
@@ -473,7 +497,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 // bound to the login request's device and IP rather than this one's.
 func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string) (*AuthResult, error) {
 	code = strings.TrimSpace(code)
-	challenge, ok := s.partial.Lookup(partialToken)
+	challenge, ok := s.partial.Lookup(ctx, partialToken)
 	if !ok {
 		return nil, ErrTOTPChallengeInvalid
 	}
@@ -512,23 +536,42 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	if !auth.VerifyTOTPCodeOnce(secret, code, time.Now().UTC(), user.ID, s.usedCodes) {
+	// An emergency recovery code (B4-3) stands in for the TOTP code: it has a
+	// different shape, so the input routes itself. A recovery code is spent
+	// by the conditional update that consumed it, not by the replay window,
+	// so the Unmark below applies to TOTP codes only.
+	var recoveryRemaining *int
+	if canonical, isRecovery := auth.NormalizeRecoveryCode(code); isRecovery {
+		remaining, matched, err := s.consumeRecoveryCode(ctx, user.ID, canonical)
+		if err != nil {
+			return nil, ErrTOTPUnavailable
+		}
+		if !matched {
+			s.partial.RegisterFailure(ctx, partialToken, partialAuthMaxFailures)
+			return nil, ErrTOTPCodeInvalid
+		}
+		recoveryRemaining = &remaining
+	} else if !auth.VerifyTOTPCodeOnce(ctx, secret, code, time.Now().UTC(), user.ID, s.usedCodes) {
 		// The attempt was already recorded atomically up-front via
 		// limiter.Allow; only the per-partial-token counter is advanced here.
-		s.partial.RegisterFailure(partialToken, partialAuthMaxFailures)
+		s.partial.RegisterFailure(ctx, partialToken, partialAuthMaxFailures)
 		return nil, ErrTOTPCodeInvalid
 	}
 
 	s.limiter.Reset(ctx, totpRateLimitKey)
 
-	claimed, ok := s.partial.Consume(partialToken)
+	claimed, ok := s.partial.Consume(ctx, partialToken)
 	if !ok {
 		// The claim lost: a concurrent verify consumed the challenge (or it
 		// expired) after this request marked its code. Release the code —
 		// if the winner is mid-recovery (Consume → issueSession failed →
 		// Restore), the restored token must not be stuck behind this mark
-		// until the authenticator rolls over (Codex P2 on PR #1454).
-		s.usedCodes.Unmark(user.ID, code)
+		// until the authenticator rolls over (Codex P2 on PR #1454). A spent
+		// recovery code stays spent: the account holds nine more, and
+		// un-spending one would hand a racing verifier a second use.
+		if recoveryRemaining == nil {
+			s.usedCodes.Unmark(ctx, user.ID, code)
+		}
 		return nil, ErrTOTPChallengeInvalid
 	}
 
@@ -541,15 +584,94 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		// release the accepted code: the retry completes the login without
 		// another password step. Code first, then token, so a concurrent
 		// retry never finds a live token with a dead code.
-		s.usedCodes.Unmark(user.ID, code)
-		s.partial.Restore(partialToken, claimed)
+		if recoveryRemaining == nil {
+			s.usedCodes.Unmark(ctx, user.ID, code)
+		}
+		s.partial.Restore(ctx, partialToken, claimed)
 		return nil, ErrSessionIssue
 	}
 
-	slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP)
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "totp_verified", "user", user.ID,
-		"two-factor verification completed from "+challenge.IP)
-	return &AuthResult{Token: token, User: user}, nil
+	detail := "two-factor verification completed from " + challenge.IP
+	if recoveryRemaining != nil {
+		detail = "two-factor verification completed with a recovery code from " + challenge.IP
+	}
+	slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP, "recovery_code", recoveryRemaining != nil)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "totp_verified", "user", user.ID, detail)
+	return &AuthResult{Token: token, User: user, RecoveryCodesRemaining: recoveryRemaining}, nil
+}
+
+// consumeRecoveryCode spends the recovery code matching canonical, if the
+// user holds one. matched is false for no match or for a code another
+// verification spent first; remaining is how many the user has left, or -1
+// when the count could not be read after a successful spend (the login
+// still proceeds — the code is gone either way).
+func (s *AuthService) consumeRecoveryCode(ctx context.Context, userID int64, canonical string) (remaining int, matched bool, err error) {
+	ids, hashes, err := s.st.ListUnusedRecoveryCodes(ctx, userID)
+	if err != nil {
+		slog.Error("recovery codes: listing failed", "user_id", userID, "error", err)
+		return 0, false, err
+	}
+	idx := auth.MatchRecoveryCode(canonical, hashes)
+	if idx < 0 {
+		return 0, false, nil
+	}
+	consumed, err := s.st.MarkRecoveryCodeUsed(ctx, ids[idx])
+	if err != nil {
+		slog.Error("recovery codes: consuming failed", "user_id", userID, "error", err)
+		return 0, false, err
+	}
+	if !consumed {
+		return 0, false, nil
+	}
+	left, err := s.st.CountUnusedRecoveryCodes(ctx, userID)
+	if err != nil {
+		slog.Warn("recovery codes: counting the remainder failed", "user_id", userID, "error", err)
+		return -1, true, nil
+	}
+	return left, true, nil
+}
+
+// RegenerateRecoveryCodes confirms the password and replaces the account's
+// emergency recovery codes with a fresh set; the old set is invalid the
+// moment the new one is stored (one transaction). Requires 2FA to be
+// enabled — the codes stand in for a TOTP code and mean nothing without one.
+func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, password string) ([]string, error) {
+	user := p.User
+
+	lockKey := auth.Key("pw_confirm_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return nil, ErrTooManyAttempts
+	}
+	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
+		return nil, err
+	}
+	if user.TOTPSecret == nil || *user.TOTPSecret == "" {
+		return nil, ErrRecoveryCodesRequireTOTP
+	}
+
+	codes, err := s.issueRecoveryCodes(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("recovery codes regenerated", "user_id", user.ID)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "recovery_codes_regenerated", "user", user.ID,
+		"emergency recovery codes regenerated")
+	return codes, nil
+}
+
+// issueRecoveryCodes generates a set and stores its hashes, replacing any
+// previous set.
+func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
+	codes, hashes, err := auth.GenerateRecoveryCodes()
+	if err != nil {
+		slog.Error("recovery codes: generation failed", "user_id", userID, "error", err)
+		return nil, ErrRecoveryCodesFailed
+	}
+	if err := s.st.ReplaceRecoveryCodes(ctx, userID, hashes); err != nil {
+		slog.Error("recovery codes: storing failed", "user_id", userID, "error", err)
+		return nil, ErrRecoveryCodesFailed
+	}
+	return codes, nil
 }
 
 // challengeSecret resolves the user behind a partial-auth challenge and
@@ -660,31 +782,44 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 }
 
 // EnableTOTP confirms the password and stages a pending secret; the returned
-// URI is the enrolment payload for the authenticator app.
-func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (string, error) {
+// enrolment carries the otpauth URI for the authenticator app and the
+// emergency recovery codes (B4-3), whose hashes are stored now so they are
+// in place the moment ConfirmTOTP turns the second factor on. Staging again
+// replaces both the pending secret and the codes.
+func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (*TOTPEnrollment, error) {
 	user := p.User
 
 	// BUG-111: Per-user lockout for password confirmation.
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
 	if s.limiter.IsLockedOut(lockKey) {
-		return "", ErrTooManyAttempts
+		return nil, ErrTooManyAttempts
 	}
 
 	if user.TOTPSecret != nil && *user.TOTPSecret != "" {
-		return "", ErrTOTPAlreadyEnabled
+		return nil, ErrTOTPAlreadyEnabled
 	}
 
 	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	secret, err := auth.GenerateTOTPSecret()
 	if err != nil {
-		return "", ErrTOTPSecretGenerate
+		return nil, ErrTOTPSecretGenerate
 	}
 
-	s.pending.Put(user.ID, secret)
-	return auth.BuildTOTPURI(user.Username, secret, "OwnCord"), nil
+	if err := s.pending.Put(ctx, user.ID, secret); err != nil {
+		slog.Error("failed to stage two-factor enrolment", "user_id", user.ID, "error", err)
+		return nil, ErrTOTPEnrollmentStage
+	}
+	codes, err := s.issueRecoveryCodes(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &TOTPEnrollment{
+		URI:           auth.BuildTOTPURI(user.Username, secret, "OwnCord"),
+		RecoveryCodes: codes,
+	}, nil
 }
 
 // ConfirmTOTP verifies code against the pending secret, persists it and
@@ -702,12 +837,12 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 		return nil, err
 	}
 
-	secret, ok := s.pending.Lookup(user.ID)
+	secret, ok := s.pending.Lookup(ctx, user.ID)
 	if !ok {
 		return nil, ErrNoPendingTOTP
 	}
 
-	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
+	if !auth.VerifyTOTPCodeOnce(ctx, secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
 		return nil, ErrTOTPCodeInvalid
 	}
 
@@ -720,7 +855,7 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, &encryptedSecret); err != nil {
 		return nil, ErrTOTPEnableFailed
 	}
-	s.pending.Delete(user.ID)
+	s.pending.Delete(ctx, user.ID)
 
 	// Security tail of the 2FA change: once the secret update committed,
 	// revoking the other sessions must not be aborted by a dead request.
@@ -766,9 +901,14 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 		return nil, ErrTOTPRequiredByServer
 	}
 
-	s.pending.Delete(user.ID)
+	s.pending.Delete(ctx, user.ID)
 	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
 		return nil, ErrTOTPDisableFailed
+	}
+	// The recovery codes stand in for a TOTP code and mean nothing without
+	// one; a leftover set would be inert but is a credential all the same.
+	if err := s.st.DeleteRecoveryCodes(ctx, user.ID); err != nil {
+		slog.Warn("recovery codes: deleting after 2FA disable failed", "user_id", user.ID, "error", err)
 	}
 
 	// Security tail of the 2FA change: once the secret update committed,
