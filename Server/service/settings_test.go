@@ -245,7 +245,7 @@ func TestSettings_SettingWrapsErrNotFound(t *testing.T) {
 // Patches run one at a time, so the registration_mode_change rows chain:
 // each row's new mode is the next row's old mode, from the migrated default
 // to the value that finally stuck — whatever order the racers landed in.
-func TestSettings_ModeTransitionsChainUnderConcurrency(t *testing.T) {
+func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T) {
 	svc, database := newSettingsService(t)
 	rec := audittest.Install(t, database)
 	ctx := context.Background()
