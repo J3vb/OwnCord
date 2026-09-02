@@ -384,6 +384,13 @@ func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int6
 	if err != nil {
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}
+	if n == 0 {
+		// Nothing changed, so there is nothing to audit: an API-token
+		// principal keeps its (session-less) credential and could otherwise
+		// grow the audit log one row per call (Codex P2 on PR #1500).
+		slog.Debug("sign-out-everywhere found no session to revoke", "user_id", userID)
+		return 0, nil
+	}
 	// Audit rows must survive a request canceled after the delete committed.
 	// The row names the account and the count, never a token or a device.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,

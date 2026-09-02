@@ -768,6 +768,20 @@ then.
 - **Gates:** `gofmt`, `go vet`, `go test -race` on `api`, `service`, `db`
   green; the pinned `golangci-lint` v2.11.3 (local build) 0 issues; `gendocs`
   regenerated; prettier and `check:docs` green.
+- **Review fixes (Codex, 2026-09-02):** (P1) the route now drops the
+  account's live WebSockets in the same request — `ws.Hub.DisconnectRevokedUser`
+  behind the `api.SessionDisconnector` seam the profile mount's broadcaster
+  satisfies — instead of leaving a connected device to the revoked-session
+  sweep's next tick; `TestRevokeAllSessions_DisconnectsTheAccountsLiveSockets`.
+  (P2) a call that revokes nothing (an API-token principal keeps its
+  session-less credential) writes no audit row, and the route is capped at
+  five calls per account per minute (`429 RATE_LIMITED`);
+  `TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow`,
+  `TestRevokeAllSessions_IsRateLimitedPerAccount`. The Linux coverage floor
+  for `db` (79.3) was 0.1 under after the dev merge because the new
+  `DeleteUserSessions` wrapper had no db-package test; it has one now
+  (`TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly`) rather than a
+  lowered floor.
 
 ## B4-8 — Local diagnostics, support-bundle contract, no-telemetry proof
 

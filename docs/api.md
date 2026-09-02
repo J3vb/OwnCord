@@ -722,10 +722,14 @@ Revoke one of the authenticated user's sessions by ID.
 ### DELETE /api/v1/users/me/sessions
 
 Sign out everywhere: revoke every session of the authenticated account,
-the current one included. The caller's token stops working with this
+the current one included, and drop the account's live WebSocket
+connections in the same request. The caller's token stops working with this
 response, so the client re-authenticates rather than treating the next 401
 as an error. Never touches another account's sessions. Writes a
-`session_revoke_all` audit row naming the account and the count.
+`session_revoke_all` audit row naming the account and the count when at
+least one session was revoked (an API-token principal, which holds no
+session, revokes nothing and writes nothing). Limited to 5 calls per
+account per minute (`429 RATE_LIMITED`).
 
 **Auth:** Required
 

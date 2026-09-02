@@ -131,6 +131,38 @@ func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 	}
 }
 
+// ─── DeleteUserSessions tests (B4-7, sign-out-everywhere) ────────────────────
+
+func TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	alice, _ := database.CreateUser(ctx, "alice-all", "hash", 4)
+	bob, _ := database.CreateUser(ctx, "bob-all", "hash", 4)
+	database.CreateSession(ctx, alice, "alice-a", "Chrome", "1.2.3.4")
+	database.CreateSession(ctx, bob, "bob-a", "Firefox", "5.6.7.8")
+	database.CreateSession(ctx, alice, "alice-b", "Phone", "9.9.9.9")
+
+	n, err := database.DeleteUserSessions(ctx, alice)
+	if err != nil {
+		t.Fatalf("DeleteUserSessions: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("revoked = %d, want 2", n)
+	}
+	if left, _ := database.ListUserSessions(ctx, alice); len(left) != 0 {
+		t.Errorf("alice still has %d session(s)", len(left))
+	}
+	if left, _ := database.ListUserSessions(ctx, bob); len(left) != 1 {
+		t.Errorf("bob has %d session(s), want 1 untouched", len(left))
+	}
+
+	// Nothing left to revoke is not an error, just zero.
+	n, err = database.DeleteUserSessions(ctx, alice)
+	if err != nil || n != 0 {
+		t.Fatalf("second DeleteUserSessions = (%d, %v), want (0, nil)", n, err)
+	}
+}
+
 // ─── DeleteSessionByID tests ─────────────────────────────────────────────────
 
 func TestDeleteSessionByID_Success(t *testing.T) {
