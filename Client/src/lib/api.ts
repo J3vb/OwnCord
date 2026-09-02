@@ -27,6 +27,7 @@ import type {
   GroupDmResponse,
   BlockedUsersResponse,
   GifSearchResponse,
+  PartialSuccessResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -373,8 +374,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       currentPassword: string,
       newPassword: string,
       signal?: AbortSignal,
-    ): Promise<void> {
-      return request<void>(
+    ): Promise<PartialSuccessResponse | undefined> {
+      // 204 on full success; 200 with a warning body when the password
+      // changed but the other sessions could not be revoked (OC-0314).
+      return request<PartialSuccessResponse | undefined>(
         "PUT",
         "/users/me/password",
         { old_password: currentPassword, new_password: newPassword },
@@ -389,20 +392,38 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request("POST", "/users/me/totp/enable", { password }, signal);
     },
 
-    confirmTotp(password: string, code: string, signal?: AbortSignal): Promise<void> {
+    confirmTotp(
+      password: string,
+      code: string,
+      signal?: AbortSignal,
+    ): Promise<PartialSuccessResponse | undefined> {
       // Unlike every other endpoint on this client, a wrong answer here
       // (an invalid enrollment code) is reported as 401 UNAUTHORIZED rather
       // than 400/403 — see doFetch's `skipUnauthorized`. Without this the
       // global session-expiry sink would fire on a mistyped code, signing
       // the user out and deleting their stored credential for a session
       // that was never actually invalid.
-      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal, {
-        skipUnauthorized: true,
-      });
+      return request<PartialSuccessResponse | undefined>(
+        "POST",
+        "/users/me/totp/confirm",
+        { password, code },
+        signal,
+        {
+          skipUnauthorized: true,
+        },
+      );
     },
 
-    disableTotp(password: string, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", "/users/me/totp", { password }, signal);
+    disableTotp(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<PartialSuccessResponse | undefined> {
+      return request<PartialSuccessResponse | undefined>(
+        "DELETE",
+        "/users/me/totp",
+        { password },
+        signal,
+      );
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {

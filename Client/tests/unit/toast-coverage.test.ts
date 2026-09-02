@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { initToast, teardownToast, showToast } from "../../src/lib/toast";
+import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "../../src/lib/toast";
 import type { ToastContainer } from "../../src/components/Toast";
 
 /**
@@ -44,6 +44,62 @@ describe("toast global helper", () => {
       showToast("message");
       expect(first.show).not.toHaveBeenCalled();
       expect(second.show).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── showChangeOutcomeToast (OC-0314) ─────────────────────
+
+  describe("showChangeOutcomeToast", () => {
+    // The credential-change endpoints answer 204 on full success and 200
+    // with a `warning` when the change committed but the other sessions
+    // could not be revoked. The warning is the only signal the user gets
+    // to go and revoke them by hand, so it must win over the success text.
+    it("shows the server's partial-success warning, as a warning, for longer than a plain toast", () => {
+      const container = createMockContainer();
+      initToast(container);
+
+      showChangeOutcomeToast(
+        {
+          warning:
+            "password changed, but other sessions could not be revoked; revoke them from the sessions list",
+          sessions_revoked: 0,
+        },
+        "Password changed successfully",
+      );
+
+      expect(container.show).toHaveBeenCalledOnce();
+      const [message, type, durationMs] = vi.mocked(container.show).mock.calls[0]!;
+      expect(message).toBe(
+        "password changed, but other sessions could not be revoked; revoke them from the sessions list",
+      );
+      expect(type).toBe("warning");
+      expect(durationMs).toBeGreaterThan(5000);
+    });
+
+    it("shows the plain success message when the server answered 204 (no body)", () => {
+      const container = createMockContainer();
+      initToast(container);
+
+      showChangeOutcomeToast(undefined, "Two-factor authentication enabled");
+
+      expect(container.show).toHaveBeenCalledWith(
+        "Two-factor authentication enabled",
+        "success",
+        undefined,
+      );
+    });
+
+    it("treats a body without a warning as a full success", () => {
+      const container = createMockContainer();
+      initToast(container);
+
+      showChangeOutcomeToast({ warning: "", sessions_revoked: 2 }, "Password changed successfully");
+
+      expect(container.show).toHaveBeenCalledWith(
+        "Password changed successfully",
+        "success",
+        undefined,
+      );
     });
   });
 
@@ -106,18 +162,20 @@ describe("toast global helper", () => {
       expect(container.show).not.toHaveBeenCalled();
     });
 
-    it("handles all three toast types", () => {
+    it("handles all four toast types", () => {
       const container = createMockContainer();
       initToast(container);
 
       showToast("info msg", "info");
       showToast("error msg", "error");
       showToast("success msg", "success");
+      showToast("warning msg", "warning");
 
-      expect(container.show).toHaveBeenCalledTimes(3);
+      expect(container.show).toHaveBeenCalledTimes(4);
       expect(container.show).toHaveBeenNthCalledWith(1, "info msg", "info", undefined);
       expect(container.show).toHaveBeenNthCalledWith(2, "error msg", "error", undefined);
       expect(container.show).toHaveBeenNthCalledWith(3, "success msg", "success", undefined);
+      expect(container.show).toHaveBeenNthCalledWith(4, "warning msg", "warning", undefined);
     });
   });
 });
