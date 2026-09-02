@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -134,5 +135,18 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	}
 	if rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": issue.Credential, "new_password": "N3w-Str0ng!Pass2"}); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("replayed credential = %d, want 401", rr.Code)
+	}
+}
+
+// The public route bounds the username as login does (Codex on #1512): it
+// becomes a limiter key and a lockout row.
+func TestRecoverRoute_BoundsTheUsername(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	for _, name := range []string{strings.Repeat("a", 33), strings.Repeat("a", 200000)} {
+		rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": name, "credential": "AAAA-AAAA-AAAA-AAAA-AAAA-AAAA", "new_password": "N3w-Str0ng!Pass"})
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("username of %d bytes = %d, want 400", len(name), rr.Code)
+		}
 	}
 }

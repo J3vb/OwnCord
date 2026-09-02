@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -96,6 +97,17 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 		}
 		if req.Username == "" || secret == "" || req.NewPassword == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username, kit_secret (or credential) and new_password are required"})
+			return
+		}
+		// Bound and normalise the username as login does: it becomes a limiter
+		// key and, on the fifth failure, a lockout row, so it must stay small.
+		if len(req.Username) > maxLoginUsernameLen*4 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username too long"})
+			return
+		}
+		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+		if err := auth.ValidateUsername(req.Username); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
 			return
 		}
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {

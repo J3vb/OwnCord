@@ -259,3 +259,28 @@ func TestRecoveryKit_AdmissionBudgetRefusesWithoutWork(t *testing.T) {
 		t.Fatalf("recovery once the slot is back: %v", err)
 	}
 }
+
+// A refusal for load charges no attempt (Codex on #1512): an honest holder
+// retrying through a busy period is not locked out by the refusals.
+func TestRecoveryKit_AdmissionRefusalChargesNoAttempt(t *testing.T) {
+	ctx := context.Background()
+	svc, user, _ := newKitService(t, false)
+	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	if err != nil {
+		t.Fatalf("EnrolRecoveryKit: %v", err)
+	}
+	svc.limiter.SetAdmissionBudget(1)
+	release, admitted := svc.limiter.Admission().TryAcquire()
+	if !admitted {
+		t.Fatal("could not hold the only slot")
+	}
+	for i := range recoveryKitFailureThreshold + 2 {
+		if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.90"); err != ErrAuthBusy { //nolint:errorlint // the sentinel itself, not its kind
+			t.Fatalf("attempt %d under load = %v, want ErrAuthBusy", i+1, err)
+		}
+	}
+	release()
+	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.90"); err != nil {
+		t.Fatalf("recover after the busy period = %v, want success (the refusals must not have counted)", err)
+	}
+}
