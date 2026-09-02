@@ -9,7 +9,7 @@ import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import type { UserStatus } from "@lib/types";
+import type { PartialSuccessResponse, UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { buildAccountTab } from "./settings/AccountTab";
@@ -28,7 +28,16 @@ import { createLogsTab } from "./settings/LogsTab";
 
 export interface SettingsOverlayOptions {
   onClose(): void;
-  onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
+  /**
+   * Change the password. Resolves with the server's partial-success body
+   * when the password changed but the other sessions could not be revoked
+   * (its `warning` is the instruction the form must keep showing), or with
+   * `undefined` on a clean success.
+   */
+  onChangePassword(
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<PartialSuccessResponse | undefined>;
   /**
    * Patch the signed-in user's profile. Every field is optional and omitted
    * means "leave unchanged"; an empty string clears the nullable ones, which

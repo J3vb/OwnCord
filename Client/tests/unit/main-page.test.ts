@@ -899,6 +899,63 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
+  it("surfaces the server's partial-success warning on a password change instead of an unqualified success (OC-0314)", async () => {
+    // PUT /users/me/password answers 200 + warning (not 204) when the
+    // password changed but the other sessions could not be revoked. The
+    // warning is the only thing telling the user to revoke them by hand,
+    // so a green "changed successfully" toast here would hide a live
+    // stolen session.
+    const warning =
+      "password changed, but other sessions could not be revoked; revoke them from the sessions list";
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
+    } as unknown as ApiClient;
+
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    // The store notifies on the next tick, and opening rebuilds the live
+    // Account tab then — drive the form a user would see, not the
+    // placeholder built at mount.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const inputs = [...container.querySelectorAll<HTMLInputElement>("input[type='password']")];
+    const byPlaceholder = (placeholder: string): HTMLInputElement => {
+      const el = inputs.find((i) => i.placeholder === placeholder);
+      if (el === undefined) throw new Error(`no password input with placeholder ${placeholder}`);
+      return el;
+    };
+    byPlaceholder("Old password").value = "old-password";
+    byPlaceholder("New password").value = "new-password-1";
+    byPlaceholder("Confirm new password").value = "new-password-1";
+    const changeBtn = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Change Password",
+    );
+    if (changeBtn === undefined) throw new Error("no Change Password button");
+    changeBtn.click();
+
+    await vi.waitFor(() => {
+      expect(hostedApi.changePassword).toHaveBeenCalledWith("old-password", "new-password-1");
+      const toast = container.querySelector('[data-testid="toast"]');
+      expect(toast).not.toBeNull();
+      expect(toast!.classList.contains("toast-warning")).toBe(true);
+      expect(toast!.textContent).toBe(warning);
+    });
+    expect(container.querySelector(".toast-success")).toBeNull();
+    // The form carries the same warning inline (Codex P2 on PR #1503): no
+    // green "changed successfully" beside the warning toast.
+    // The toast is shown before the callback resolves, so the form's own
+    // update lands a microtask later.
+    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    expect(status).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(status!.textContent).toBe(warning);
+    });
+    expect(status!.style.color).toBe("var(--yellow)");
+    expect(container.textContent).not.toContain("Password changed successfully.");
+  });
+
   it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);

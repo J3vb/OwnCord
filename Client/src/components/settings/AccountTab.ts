@@ -352,6 +352,7 @@ function buildPasswordSection(
   });
   const pwError = createElement("div", {
     style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "pw-change-status",
   });
   const pwBtn = createElement("button", { class: "ac-btn" }, "Change Password");
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
@@ -387,18 +388,31 @@ function buildPasswordSection(
       };
       void options
         .onChangePassword(oldVal, newVal)
-        .then(() => {
+        .then((outcome) => {
           oldPw.value = "";
           newPw.value = "";
           confirmPw.value = "";
-          if (pwSuccessTimer !== null) clearTimeout(pwSuccessTimer);
-          pwError.style.color = "var(--green)";
-          setText(pwError, "Password changed successfully.");
-          pwSuccessTimer = setTimeout(() => {
-            setText(pwError, "");
-            pwError.style.color = "var(--red)";
+          if (pwSuccessTimer !== null) {
+            clearTimeout(pwSuccessTimer);
             pwSuccessTimer = null;
-          }, 3000);
+          }
+          const warning = outcome?.warning;
+          if (warning !== undefined && warning !== "") {
+            // A partial success (OC-0314): the password changed, but the
+            // other sessions could not be revoked. The warning is the
+            // instruction to revoke them by hand, so it stays in the form
+            // — no green "changed successfully", no three-second fade.
+            pwError.style.color = "var(--yellow)";
+            setText(pwError, warning);
+          } else {
+            pwError.style.color = "var(--green)";
+            setText(pwError, "Password changed successfully.");
+            pwSuccessTimer = setTimeout(() => {
+              setText(pwError, "");
+              pwError.style.color = "var(--red)";
+              pwSuccessTimer = null;
+            }, 3000);
+          }
           finish();
         })
         .catch((err: unknown) => {
