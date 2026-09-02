@@ -6,13 +6,15 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
-**B4-0 opened 2026-09-01** (PR #1497 from `feat/b4-0-data-lifecycle`;
-evidence block in its section — the document, the `alphasnap` helper, no new
-advisory needed). Entry-gate items 1 and 2 met at draft; item 3's public half is
-B4-0's document, its private half stays counted-not-described. The owner
-decisions listed below block the steps that name them; B4-2 is the next
-unblocked step. _Update this line — not only the step table — as steps land;
-the [README.md](README.md) row is the status authority._
+**B4-0 merged 2026-09-02** (PR #1497 = `d8653ea`; entry-gate item 3's
+public half is its document, the private half stays counted-not-described);
+**B4-3 opened 2026-09-01** (PR #1499 from `feat/b4-3-second-factor`;
+evidence block in its section — OC-0321 closed fail-closed, S-13 persisted through the
+limiter's persister shape, emergency recovery codes built). B4-3 started
+ahead of B4-1: the "after B4-1" ordering was hot-file avoidance, and B4-1 is
+decision-blocked with no branch open. The owner decisions listed below block
+the steps that name them. _Update this line — not only the step table — as
+steps land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -441,6 +443,106 @@ step of the serial identity chain — owns `auth/` and `service/auth.go`.
 Exit: OC-0321 closed in the ledger with the regression test named; restart
 tests green under `-race`; recovery codes work end to end at the API tier;
 the stub is gone.
+
+**Evidence, 2026-09-01** — branch `feat/b4-3-second-factor` from `dev`
+`aabac60`; PR #1499 to `dev` (the squash SHA is recorded by the next step's
+PR). Code commit `39cecf3`; tests, floors and this block in follow-ups on
+the same branch. Started ahead of B4-1 (decision-blocked, no branch open),
+so no hot-file overlap occurred.
+
+- **OC-0321 (must-close):** `LoadOrGenerateTOTPKey` generates only on a
+  confirmed absence (`fs.ErrNotExist` **and** nothing at the path by
+  `Lstat` — a dangling symlink is presence), refuses every other read error
+  with the file untouched, and writes through `writeKeyFileAtomic` (temp
+  file, fsync, rename; a stale temp file is cleared). RED-first:
+  `TestLoadOrGenerateTOTPKey_ReadErrorFailsClosed` (directory at the path,
+  dangling symlink, unreadable file — skipped as root, so the EACCES case
+  runs on the unprivileged CI runner) and `_AtomicWrite`. **Revert-proof
+  pass:** with the original loader restored the test failed ("generated a
+  key … through a dangling symlink"); with the fix it passes. Ledger:
+  `fixed` 2026-09-01, `fix.commit = 39cecf3`, `revertProof = pass`.
+- **S-13 (durable second-factor state):** `auth.SecondFactorPersister` —
+  the `LockoutPersister` shape, stdlib types only (auth imports db, so db
+  cannot name auth types) — implemented by `db` over migration 032
+  (`partial_auth_challenges`, `pending_totp_enrollments`, `totp_used_codes`;
+  RFC3339 UTC text timestamps). `PartialAuthStore`, `PendingTOTPStore` and
+  `UsedTOTPCodeStore` take `WithPersister`; with one set the database is
+  the store (every read goes to it — the first draft cached in memory, and
+  `TestSecondFactor_ChallengeAndReplayWindowSurviveRestart` caught a stale
+  cache trusting a challenge another process had consumed). Rows carry
+  `HashToken` digests of the token and of `userID:code`, and AES-GCM
+  ciphertext for the pending secret (encrypted under the TOTP key like
+  `users.totp_secret` — the one row that cannot be hash-only, since the
+  secret must be recovered to confirm). Faults fail closed: no challenge is
+  issued, no enrolment staged, no code accepted on trust; the log-only
+  branches (restore, delete, unmark) are covered by a persister that reads
+  but cannot write. Sliding rate-limit windows stay in memory. The
+  maintenance tick sweeps the tables; `db.DeleteAccount` purges them
+  (`TestDeleteAccount_PurgesSecondFactorState`). Tests:
+  `TestPartialAuthStore_SurvivesRestart`, `_RestoreAndExhaustionPersist`,
+  `TestPendingTOTPStore_SurvivesRestartSealed`,
+  `TestUsedTOTPCodeStore_ReplayRejectedAcrossRestart`,
+  `TestCleanupExpiredSecondFactorState`,
+  `TestSecondFactorStores_FailClosedWhenPersisterFails` (auth); the db
+  round-trips in `db/secondfactor_queries_test.go`; at the service tier a
+  challenge issued by one `AuthService` completes in another, a spent
+  code is refused by both, and a pending enrolment confirms after a
+  restart (`TestSecondFactor_*`). Register S-13 → resolved/superseded.
+- **BPR-046 (emergency recovery codes — build, not preserve):** ten
+  `XXXXX-XXXXX` codes from a 32-symbol unambiguous alphabet (50 bits),
+  bcrypt-hashed at `min(10, bcryptCost)`; issued by `EnableTOTP` (the
+  `backup_codes` field the enable response always had) and by the new
+  `POST /api/v1/users/me/totp/recovery-codes` (password-confirmed, 2FA
+  required, `409 CONFLICT` otherwise, audit `recovery_codes_regenerated`
+  with no code in the row — `TestAuditCoverage_APIMutations` gained the
+  row); `VerifyTOTP` routes on the input's shape, spends a code by the
+  conditional update (single use under concurrency) and reports
+  `recovery_codes_remaining`; disable and erasure delete the set. A spent
+  recovery code stays spent on a lost claim (the TOTP path's unmark does
+  not apply — documented in `VerifyTOTP`). Tests:
+  `TestRecoveryCodes_EndToEnd`, `_RegenerateRequiresTOTP`,
+  `_StoredHashedOnly` (api), `TestRecoveryCodes_GenerateNormalizeMatch`,
+  `TestNormalizeRecoveryCode_RejectsOtherShapes` (auth), the service
+  restart test above. No security questions exist (pinned in
+  `docs/security.md`; the vocabulary absence test is B4-2's file family
+  and lands when the branches meet). Client untouched: it already renders a
+  non-empty `backup_codes` list; UX is B9's.
+- **Docs:** `api.md` (route index regenerated to 122 routes; prose for the
+  new endpoint, the `backup_codes` semantics and `recovery_codes_remaining`),
+  `schema.md` (table index regenerated; migration 032 in the history),
+  `security.md` (2FA section, audit list, the key-file operator rule). The
+  data-lifecycle inventory's class 4 row names the four tables once B4-0
+  (#1497) lands — the document lives on that branch.
+- **Gates (local mirror, Linux):** `go test -race ./...` 20 packages ok;
+  `go test -tags deadlock` on `auth`, `service`, `api`, `db`, `ws` ok; all
+  four build-tag variants build; `-tags otel` (`telemetry`, `api`) and
+  `-tags wazero` (`plugin`) suites ok; the pinned `golangci-lint` v2.11.3,
+  built locally with the module toolchain, reports 0 issues on the module
+  (it first caught a `gocritic` byte-compare in a new test, fixed);
+  `sqlc generate` reproducible; `gendocs` drift-free; prettier and
+  `check:docs` green. **Windows CI** on `eabbc72` then failed one subtest:
+  the mode-bit "unreadable key file" case cannot exist there (Windows keeps
+  only a read-only bit, so `0o200` still reads back), so it is
+  platform-guarded exactly like the root case; the directory-at-the-key-path
+  subtest pins the same read-error branch on every platform. **Coverage:** the first run tripped the floors for
+  `auth` (89.6% vs 90.8%) and `db` (76.2% vs 79.3%) — the new query
+  wrappers were exercised only by other packages' tests, which do not
+  count toward `db`'s own figure — so both gained in-package tests; final
+  figures aggregate 81.2%, `auth` 91.4%, `db` 79.4%, `service` 74.4%,
+  `ws` 88.0%. Ratchet: `auth` 90.8 → 91.4, `service` 71.3 → 74.3 (74.4
+  measured, minus 0.1 for the 0.1 run-to-run variance CI has shown on this
+  package), aggregate 79.8 → 80.9 (81.2 measured locally and floored at
+  81.1; once the dev merge added B4-0's `internal/alphasnap`, 47% covered,
+  to the denominator, CI measured 81.0 — the lowest Linux figure observed,
+  minus 0.1 for variance, per the ratchet rule); `db` stays 79.3 —
+  this branch measures 79.4 against `dev`'s 79.7, a 0.3-point dip from the
+  wrappers' fault branches, above the floor and disclosed; `ws` untouched.
+- **Private half:** nothing new to file — the controls added are described
+  above; the gap OC-0321 closed was already public in the ledger.
+- **After B4-0 merged (2026-09-02):** `docs/architecture/data-lifecycle.md`
+  class 4 now names the four migration-032 tables, their `ON DELETE CASCADE`
+  and their purge in `DeleteAccount`, replacing the "in memory today" note
+  B4-0 wrote before this branch existed.
 
 ## B4-4 — Atomic admission budgets for expensive authentication work
 
