@@ -114,6 +114,13 @@ type Store interface {
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
+	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
+	// Approval-mode registration (B4-1).
+	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
+	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)
+	CountPendingUsers(ctx context.Context) (int64, error)
+	ApprovePendingUser(ctx context.Context, userID int64) error
+	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error

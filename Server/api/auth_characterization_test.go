@@ -393,13 +393,15 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
 		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load registration policy")
 	})
-	t.Run("registration_open unparsable -> 500", func(t *testing.T) {
+	t.Run("registration_mode unparsable -> fails closed, 403", func(t *testing.T) {
+		// A value only a hand-edited database can hold (B4-1): treated as
+		// closed rather than as a policy outage.
 		database := newAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
 		code := seedInvite(t, database)
-		setSetting(t, database, "registration_open", "maybe")
+		setSetting(t, database, "registration_mode", "maybe")
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
-		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load registration policy")
+		wantErr(t, rr, http.StatusForbidden, "FORBIDDEN", "registration is currently closed")
 	})
 	t.Run("require_2fa unparsable -> 500", func(t *testing.T) {
 		database := newAuthTestDB(t)
@@ -409,7 +411,7 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
 		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load registration policy")
 	})
-	t.Run("settings rows absent -> defaults (open, no 2FA) -> 201", func(t *testing.T) {
+	t.Run("settings rows absent -> defaults (invite-only, no 2FA) -> 201", func(t *testing.T) {
 		database := newAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
 		code := seedInvite(t, database)
@@ -431,7 +433,7 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 	t.Run("registration closed -> 403 before any credential is read", func(t *testing.T) {
 		database := newAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
-		setSetting(t, database, "registration_open", "0")
+		setSetting(t, database, "registration_mode", "closed")
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", []byte(`{not json`))
 		wantErr(t, rr, http.StatusForbidden, "FORBIDDEN", "registration is currently closed")
 	})

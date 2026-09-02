@@ -69,7 +69,7 @@ func TestSetupWizard_FullFlow(t *testing.T) {
 		"wizard": map[string]any{
 			"server_name":         "My Cool Server",
 			"motd":                "Welcome friends!",
-			"registration_open":   true,
+			"registration_mode":   "approval",
 			"port":                9000,
 			"tls_mode":            "off",
 			"upload_max_size_mb":  250,
@@ -121,8 +121,8 @@ func TestSetupWizard_FullFlow(t *testing.T) {
 	if got := getSetting(t, database, "motd"); got != "Welcome friends!" {
 		t.Errorf("motd = %q", got)
 	}
-	if got := getSetting(t, database, "registration_open"); got != "1" {
-		t.Errorf("registration_open = %q, want 1", got)
+	if got := getSetting(t, database, "registration_mode"); got != "approval" {
+		t.Errorf("registration_mode = %q, want approval", got)
 	}
 	if got := getSetting(t, database, "max_upload_bytes"); got != "262144000" {
 		t.Errorf("max_upload_bytes = %q, want 262144000 (250 MB)", got)

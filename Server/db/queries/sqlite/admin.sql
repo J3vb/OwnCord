@@ -16,6 +16,7 @@ SELECT u.id, u.username, u.avatar, u.role_id,
        COALESCE(r.name, '') AS role_name
 FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
+WHERE u.registration_status = 'active'
 ORDER BY u.id ASC
 LIMIT ? OFFSET ?;
 

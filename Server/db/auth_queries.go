@@ -128,6 +128,125 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	return uid, nil
 }
 
+// CreateUserWithSession creates the account and its first session in one
+// transaction — open-mode registration (B4-1), where no invite is consumed.
+// Like CreateUserWithInvite, a failure at any step leaves no half-registered
+// account (OC-0376). sessionTokenHash must already be hashed.
+func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.Exec(
+		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
+		username, passwordHash, roleID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession create user: %w", err)
+	}
+	uid, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession last insert id: %w", err)
+	}
+	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip, false); err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession create session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession commit: %w", err)
+	}
+	committed = true
+	return uid, nil
+}
+
+// CreatePendingUser records an approval-mode application (B4-1): the account
+// row exists, holding the username, as registration_status = 'pending' with
+// no session, so it cannot sign in until ApprovePendingUser.
+func (d *DB) CreatePendingUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
+	res, err := d.q.CreatePendingUser(ctx, dbgen.CreatePendingUserParams{
+		Username: username,
+		Password: passwordHash,
+		RoleID:   int64(roleID),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("CreatePendingUser: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// PendingUser is one approval-mode application as the admin queue lists it.
+type PendingUser struct {
+	ID        int64
+	Username  string
+	CreatedAt string
+}
+
+// ListPendingUsers returns the approval queue, oldest application first.
+func (d *DB) ListPendingUsers(ctx context.Context, limit, offset int) ([]PendingUser, error) {
+	rows, err := d.q.ListPendingUsers(ctx, dbgen.ListPendingUsersParams{Limit: int64(limit), Offset: int64(offset)})
+	if err != nil {
+		return nil, fmt.Errorf("ListPendingUsers: %w", err)
+	}
+	out := make([]PendingUser, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PendingUser{ID: r.ID, Username: r.Username, CreatedAt: r.CreatedAt})
+	}
+	return out, nil
+}
+
+// CountPendingUsers returns the approval queue's length.
+func (d *DB) CountPendingUsers(ctx context.Context) (int64, error) {
+	n, err := d.q.CountPendingUsers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("CountPendingUsers: %w", err)
+	}
+	return n, nil
+}
+
+// ApprovePendingUser unlocks an application. ErrNotFound when the id is not a
+// pending application (already decided, or never one).
+func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
+	res, err := d.q.ApprovePendingUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("ApprovePendingUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ApprovePendingUser rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DenyPendingUser denies an application: the row is anonymised (the username
+// is released as "[denied-{id}]", the password and profile cleared) and locked
+// as 'denied' for good — the same convention DeleteAccount uses, because
+// audit rows reference the id. Only a still-pending row is touched; an
+// approved account never goes through here. ErrNotFound when nothing pending
+// matches.
+func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
+	res, err := d.q.DenyPendingUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("DenyPendingUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("DenyPendingUser rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetUserByUsername returns the user with the given username (case-insensitive),
 // or nil if not found.
 func (d *DB) GetUserByUsername(ctx context.Context, username string) (*User, error) {

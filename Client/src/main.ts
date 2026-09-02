@@ -541,6 +541,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         async onRegister(host, username, password, inviteCode) {
           api.setConfig({ host });
           const result = await api.register(username, password, inviteCode);
+          if (result.status === "pending_approval" || result.token === undefined) {
+            // Approval mode (B4-1): no session yet — an admin decides. The
+            // dedicated notice is B9's; until then the form's message line
+            // carries it.
+            connectPage.showError(
+              "Registration received. An admin has to approve your account before you can sign in.",
+            );
+            return;
+          }
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember, connectPage.getAutoConnect());

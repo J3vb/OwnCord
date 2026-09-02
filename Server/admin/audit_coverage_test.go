@@ -130,6 +130,16 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			}
 			return rec, []string{"welcome 4d0d1405", token}
 		}},
+		{"registration mode change", "registration_mode_change", func(t *testing.T) (*audittest.Recorder, []string) {
+			handler, database, token, _ := fixture(t)
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPatch, "/settings", token,
+				map[string]string{"registration_mode": "closed"})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			return rec, []string{token}
+		}},
 		{"config write (setup wizard)", "config_write", func(t *testing.T) (*audittest.Recorder, []string) {
 			database := openAdminTestDB(t)
 			cfgPath := filepath.Join(t.TempDir(), "config.yaml")

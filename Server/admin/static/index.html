@@ -450,7 +450,7 @@ function wizInit(defaults){
   wiz.data={username:'',password:'',confirm:'',
     server_name:d.server_name||'OwnCord Server',
     motd:(d.motd===undefined||d.motd===null)?'Welcome!':d.motd,
-    registration_open:!!d.registration_open,
+    registration_mode:d.registration_mode||'invite',
     port:d.port||8443,
     tls_mode:d.tls_mode||'self_signed',
     tls_domain:d.tls_domain||'',
@@ -518,13 +518,13 @@ function renderWizard(){
     case 4:
       h+='<h2>Who can join?</h2>'
         +'<p class="wiz-sub">You&#39;ll get an invite code either way — these control what happens after that.</p>'
-        +'<div class="wiz-toggle-row"><div><div class="lbl">Open registration</div><div class="wiz-hint" style="margin-top:2px">Allow new people to create accounts using invite codes. Turn off to lock the server to existing members.</div></div><button class="toggle'+(d.registration_open?' on':'')+'" id="wizReg" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Registration</div><div class="wiz-hint" style="margin-top:2px">Who can create an account. Invite-only is the default; approval holds new accounts until you approve them in Users.</div></div><select class="form-input" id="wizReg" style="width:auto">'+regModeOptions(d.registration_mode)+'</select></div>'
         +wizField('wizMotd','Welcome message','<input class="form-input" id="wizMotd" maxlength="500" value="'+esc(d.motd)+'" placeholder="Welcome!"><div class="wiz-hint">Shown to members when they connect.</div>')
         +err+nav('Next');
       break;
     case 5:{
       const secLabel={self_signed:'Self-signed HTTPS',acme:'Let&#39;s Encrypt ('+esc(d.tls_domain)+')',manual:'Manual certificates',off:'No encryption'}[d.tls_mode]||esc(d.tls_mode);
-      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(d.voice_quality)],['Open registration',d.registration_open?'Yes':'No'],['Welcome message',esc(d.motd)||'&mdash;']];
+      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(d.voice_quality)],['Registration',esc(regModeLabel(d.registration_mode))],['Welcome message',esc(d.motd)||'&mdash;']];
       h+='<h2>Review &amp; finish</h2><p class="wiz-sub">Everything look right? You can change any of this later in the admin panel.</p>';
       rows.forEach(r=>{h+='<div class="wiz-review-row"><span class="k">'+r[0]+'</span><span class="v">'+r[1]+'</span></div>'});
       if(wizNeedsRestart())h+='<div class="wiz-callout">The server will restart once to apply your connection settings, then point you to the right address.</div>';
@@ -560,7 +560,7 @@ function wizCollect(){
     case 1:d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
     case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
     case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
-    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_open=t.classList.contains('on');d.motd=(g('wizMotd')||'').trim();break}
+    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();break}
   }
 }
 
@@ -607,7 +607,7 @@ async function wizFinish(){
   const d=wiz.data;
   const body={username:d.username,password:d.password};
   if(!wiz.skip){
-    body.wizard={server_name:d.server_name,motd:d.motd,registration_open:!!d.registration_open,
+    body.wizard={server_name:d.server_name,motd:d.motd,registration_mode:d.registration_mode||'invite',
       port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),
       voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download};
     if(d.tls_mode==='acme')body.wizard.tls_domain=d.tls_domain;
@@ -792,12 +792,36 @@ async function renderDashboard(){
 }
 
 /* ═══ Users ═══ */
+
+/* Registration modes (B4-1): the four values the server accepts. */
+const REG_MODES=[['closed','Closed'],['invite','Invite-only'],['approval','Approval'],['open','Open']];
+function regModeLabel(m){const f=REG_MODES.find(x=>x[0]===m);return f?f[1]:'Invite-only'}
+function regModeOptions(cur){return REG_MODES.map(([v,l])=>'<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>').join('')}
+async function decideRegistration(id,action){
+  try{await api('POST','/registrations/'+id+'/'+action);showToast(action==='approve'?'Registration approved':'Registration denied');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
 async function renderUsers(){
   const offset=(state.usersPage-1)*PAGE_SIZE;
   let users;
   try{users=await api('GET','/users?limit='+PAGE_SIZE+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
   const totalPages=Math.max(1,Math.ceil(users.length/PAGE_SIZE));
   let html='<div class="page-title">Users</div><div class="page-desc">Manage server members</div>';
+  /* Approval-mode applications wait here until someone with MANAGE_SERVER
+     decides; the card only appears when there is something to decide. */
+  if(can(PERM.MANAGE_SERVER)){
+    let pending=[];
+    try{pending=await api('GET','/registrations')||[]}catch(e){pending=[]}
+    if(pending.length){
+      html+='<div class="section-card"><div class="section-card-header"><h3>Pending registrations ('+pending.length+')</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>User</th><th>Applied</th><th style="text-align:right">Decision</th></tr></thead><tbody>';
+      pending.forEach(p=>{
+        html+='<tr><td><strong>'+esc(p.username)+'</strong></td><td>'+esc(p.created_at)+'</td><td><div class="act-group" style="justify-content:flex-end">'
+          +'<button class="act-btn" title="Approve" onclick="decideRegistration('+p.id+',\'approve\')">'+I.check+'</button>'
+          +'<button class="act-btn danger" title="Deny" onclick="decideRegistration('+p.id+',\'deny\')">'+I.ban+'</button></div></td></tr>';
+      });
+      html+='</tbody></table></div></div>';
+    }
+  }
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Banned</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
   if(!users.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No users found</td></tr>';
   users.forEach(u=>{
@@ -1590,7 +1614,7 @@ async function renderSettings(){
   html+='</div></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Security</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('require_2fa')?'on':'')+'" id="s-require_2fa" onclick="this.classList.toggle(\'on\');markSettingsChanged()"></button></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Registration Open</div><div class="setting-desc">Allow new users to register with invite codes</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('registration_open')?'on':'')+'" id="s-registration_open" onclick="this.classList.toggle(\'on\');markSettingsChanged()"></button></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Registration</div><div class="setting-desc">Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Users until you approve them. Open: anyone can register.</div></div><div class="setting-ctrl"><select class="filter-select" id="s-registration_mode" onchange="markSettingsChanged()">'+regModeOptions(v('registration_mode')||'invite')+'</select></div></div>';
   html+='</div></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Backup</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Schedule</div></div><div class="setting-ctrl"><select class="filter-select" id="s-backup_schedule" onchange="markSettingsChanged()"><option value="off" '+(v('backup_schedule')==='off'?'selected':'')+'>Off</option><option value="daily" '+(v('backup_schedule')==='daily'?'selected':'')+'>Daily</option><option value="weekly" '+(v('backup_schedule')==='weekly'?'selected':'')+'>Weekly</option></select></div></div>';
@@ -1604,8 +1628,8 @@ function markSettingsChanged(){state.settingsChanged=true;renderNav();const btn=
 
 async function saveSettings(){
   const body={};
-  ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
-  ['require_2fa','registration_open'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
+  ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention','registration_mode'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
+  ['require_2fa'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
   const btn=document.getElementById('saveSettingsBtn');
   if(btn){if(btn.disabled)return;btn.disabled=true}
   try{

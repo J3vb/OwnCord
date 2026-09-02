@@ -24,6 +24,11 @@ type User struct {
 	// unset, and every renderer falls back to Username. Mentions still resolve
 	// against Username alone — it is the unique key.
 	DisplayName *string
+	// RegistrationStatus is 'active', 'pending' (an approval-mode
+	// application holding its username until an admin approves it — B4-1)
+	// or 'denied' (anonymised and locked for good, since audit rows keep
+	// the id).
+	RegistrationStatus string
 	// About is the optional profile bio shown in the profile popup. Nil = unset.
 	About *string
 	// CustomStatus is the optional free-text status line shown under the name.
@@ -311,3 +316,14 @@ const sessionTTL = 30 * 24 * time.Hour
 // plain text against an index, so every writer and the sweep's cutoff must
 // use exactly this layout.
 const sessionTimeLayout = "2006-01-02T15:04:05Z"
+
+// Registration statuses of a users row (B4-1).
+const (
+	RegistrationActive  = "active"
+	RegistrationPending = "pending"
+	RegistrationDenied  = "denied"
+)
+
+// PendingApproval reports an approval-mode application that no admin has
+// decided yet.
+func (u *User) PendingApproval() bool { return u.RegistrationStatus == RegistrationPending }

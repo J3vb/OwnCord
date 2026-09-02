@@ -34,7 +34,7 @@ var allowedSettingKeys = map[string]struct{}{
 	"max_upload_bytes":  {},
 	"voice_quality":     {},
 	"require_2fa":       {},
-	"registration_open": {},
+	"registration_mode": {},
 	"backup_schedule":   {},
 	"backup_retention":  {},
 }
@@ -76,11 +76,28 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
 	}
 
+	// Read the mode before the apply so the transition row can name both ends.
+	previousMode := ""
+	if _, changingMode := normalized[registrationModeKey]; changingMode {
+		mode, err := registrationModeSetting(ctx, s.st)
+		if err != nil {
+			return nil, fmt.Errorf("Patch: %w", err)
+		}
+		previousMode = string(mode)
+	}
+
 	if err := s.st.ApplySettings(ctx, normalized); err != nil {
 		return nil, fmt.Errorf("Patch: %w", err)
 	}
 	for key := range normalized {
 		slog.Info("setting changed", "actor_id", actorID, "key", key)
+		// A registration-mode transition is audited by name — old and new
+		// mode — rather than as an anonymous "updated" (B4-1, BPR-041).
+		if key == registrationModeKey && previousMode != normalized[key] {
+			db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_mode_change", "setting", 0,
+				fmt.Sprintf("registration_mode %s -> %s", previousMode, normalized[key]))
+			continue
+		}
 		db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "setting_change", "setting", 0,
 			fmt.Sprintf("%s updated", key))
 	}
@@ -93,7 +110,7 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 	for key, value := range updates {
 		normalized[key] = value
 		switch key {
-		case "require_2fa", "registration_open":
+		case "require_2fa":
 			parsed, err := parseSettingsPatchBool(value)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", key, err)
@@ -103,6 +120,12 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 			} else {
 				normalized[key] = "0"
 			}
+		case registrationModeKey:
+			mode, ok := ParseRegistrationMode(value)
+			if !ok {
+				return nil, fmt.Errorf("%s: must be one of closed, invite, approval, open", key)
+			}
+			normalized[key] = string(mode)
 		}
 	}
 	return normalized, nil
@@ -117,21 +140,32 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 		return nil
 	}
 
-	registrationOpen, err := s.targetBoolSetting(ctx, updates, "registration_open")
+	// The preconditions only matter when this request touches require_2fa
+	// or the registration mode. Without this guard, an unrelated PATCH
+	// (motd, server name, backup settings, ...) inherits require_2fa's
+	// *current* value via targetBoolSetting's DB fallback and gets rejected
+	// by a precondition about a value it never touches — wedging the whole
+	// settings page once any non-banned user without TOTP exists.
+	_, changingRequire2FA := updates["require_2fa"]
+	_, changingMode := updates[registrationModeKey]
+	if !changingRequire2FA && !changingMode {
+		return nil
+	}
+
+	// Nobody can enrol before their first login, so a server that admits new
+	// accounts cannot demand 2FA of everyone: the mode must be closed — and
+	// stays closed while require_2fa is on (B4-1).
+	mode, err := s.targetRegistrationMode(ctx, updates)
 	if err != nil {
 		return err
 	}
-	if registrationOpen {
-		return fmt.Errorf("require_2fa cannot be enabled while registration is open")
+	if mode != RegistrationClosed {
+		return fmt.Errorf("require_2fa cannot be enabled unless registration is closed")
 	}
 
 	// The enrollment count only matters when this request is actually turning
-	// require_2fa on. Without this guard, an unrelated PATCH (motd, server
-	// name, backup settings, ...) inherits require_2fa's *current* value via
-	// targetBoolSetting's DB fallback and gets rejected by a precondition
-	// about a value it never touches — wedging the whole settings page once
-	// any non-banned user without TOTP exists.
-	if _, changingRequire2FA := updates["require_2fa"]; !changingRequire2FA {
+	// require_2fa on.
+	if !changingRequire2FA {
 		return nil
 	}
 
@@ -143,6 +177,19 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 		return fmt.Errorf("require_2fa cannot be enabled until all users have 2FA enabled")
 	}
 	return nil
+}
+
+// targetRegistrationMode is the mode after this patch: the update's value
+// when it carries one (already normalized), else the live setting.
+func (s *SettingsService) targetRegistrationMode(ctx context.Context, updates map[string]string) (RegistrationMode, error) {
+	if value, ok := updates[registrationModeKey]; ok {
+		mode, ok := ParseRegistrationMode(value)
+		if !ok {
+			return "", fmt.Errorf("%s: must be one of closed, invite, approval, open", registrationModeKey)
+		}
+		return mode, nil
+	}
+	return registrationModeSetting(ctx, s.st)
 }
 
 func (s *SettingsService) targetBoolSetting(ctx context.Context, updates map[string]string, key string) (bool, error) {
