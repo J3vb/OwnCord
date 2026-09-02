@@ -32,11 +32,11 @@ records the control and closes on the owner's advisory ID);
 OC-0341 closed — a negative token lifetime is refused at the service seam both
 callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
 8–10 recorded 2026-09-02** (amendments under the questions);
-**B4-7 new-login half opened 2026-09-02** (branch `feat/b4-7-new-login`,
-PR #1507; evidence in its section — the REST-only `unseen` session flag, and
-OC-0354 closed with it); **B4-1 opened 2026-09-02** (branch
-`feat/b4-1-registration-modes`, PR #1508; evidence in its section — the four
-modes, the upgrade mapping, the audited transition, the approval queue). **B4-12
+**B4-7 new-login half merged 2026-09-02** (PR #1507 = `dc69fbb`; the
+REST-only `unseen` session flag, and OC-0354 closed with it — BG-08's server
+half complete); **B4-1 merged 2026-09-02** (PR #1508 = `8bd4212`; the four
+registration modes with the upgrade mapping, the audited transition and
+the approval queue — BG-10's server half); **B4-12
 batch (c) opened 2026-09-02** (branch `fix/b4-12c-lockout-fold`, stacked on
 B4-1; OC-0324 fixed test-first). Next B4-5 → B4-6, B4-8, HP-4, B4-9 → B4-10 →
 B4-11. _Update this line — not only the step table — as steps
