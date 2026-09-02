@@ -957,8 +957,7 @@ the authorized role; docs updated (`trust-model.md` "who can reset
 credentials" gains the honest answer).
 
 **Evidence, 2026-09-02** — branch `feat/b4-6-assisted-recovery` from B4-5's
-branch (shares the recovery service; stacked on #1512, which is stacked on
-#1511); PR to `dev` (draft, opened 2026-09-02). Owner decision 3 (owner-only,
+branch (shares the recovery service; stacked on #1512); PR #1513 to `dev`. Owner decision 3 (owner-only,
 15 minutes, single use).
 
 - **Contract:** `POST /admin/api/users/{id}/recovery-credential`, owner-only
@@ -1018,6 +1017,14 @@ branch (shares the recovery service; stacked on #1512, which is stacked on
   `trust-model.md` ("who can reset credentials" — the owner, this way, and
   nobody else), `data-lifecycle.md` (class 5), traceability BPR-045,
   `schema.md` regenerated.
+- **Review and CI fixes (2026-09-02):** Codex's three findings on the shared
+  recovery path (#1512) apply here too and are fixed the same way — the
+  admission slot is taken before an attempt is charged and covers compare
+  and hash, a malformed secret still runs the compare, the route bounds the
+  username; the admin handler no longer imports the database package (the
+  service resolves the issuing owner by id — the db-import-boundary
+  invariant); `TestAdmissionBudget_AdmitsAtMostSizeAtOnce` counts a decision
+  before signalling it.
 - **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on `db`,
   `service`, `admin`, `api`, `auth`; pinned `golangci-lint` 0 issues on them;
   `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the ledger
