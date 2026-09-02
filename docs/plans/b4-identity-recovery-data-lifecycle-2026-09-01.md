@@ -873,8 +873,7 @@ content-free; `trust-model.md` gains the kit's honest description (what the
 server stores, what it cannot recover).
 
 **Evidence, 2026-09-02** — branch `feat/b4-5-recovery-kit` from B4-1's
-branch (its `service/auth.go` owner; stacked on #1508); PR to `dev` (draft,
-opened 2026-09-02). Owner decision 2 (bypasses TOTP, one active kit, phrase +
+branch (its `service/auth.go` owner; stacked on #1508); PR #1512 to `dev`. Owner decision 2 (bypasses TOTP, one active kit, phrase +
 file, five failures lock for 15 minutes) and decision 7 (no email path).
 
 - **Contract:** `POST /api/v1/users/me/recovery-kit` (password-confirmed,
@@ -928,6 +927,14 @@ t=2, p=1`), replaced and un-spent on re-enrolment. `GET
   and what it cannot recover), `data-lifecycle.md` (class 5, O8 satisfied),
   traceability row BPR-044, `schema.md` regenerated.
 - **Client:** none (BG-09's UX is B9; the API-tier consumer is the test).
+- **Review fixes (Codex on #1512, 2026-09-02, `b8b0c1c`):** (P1) a refusal
+  for load charged the lockout budgets — the admission slot is now taken
+  before the attempt is reserved and covers both the compare and the bcrypt
+  hash of the new password (`TestRecoveryKit_AdmissionRefusalChargesNoAttempt`);
+  (P2) a malformed secret skipped the compare, which let the account-dependent
+  lookups be timed — the compare now always runs; (P2) the public route
+  bounds and normalises the username as login does before it becomes a
+  limiter key (`TestRecoverRoute_BoundsTheUsername`).
 - **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on
   `auth`, `db`, `service`, `api`, pinned `golangci-lint` 0 issues on them;
   `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the
