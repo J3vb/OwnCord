@@ -27,12 +27,15 @@ func TestAdmissionBudget_AdmitsAtMostSizeAtOnce(t *testing.T) {
 			defer done.Done()
 			<-start
 			release, ok := b.TryAcquire()
-			decided.Done()
+			// Count before signalling the decision, or decided.Wait can
+			// return while a refused goroutine has not yet added itself.
 			if !ok {
 				refused.Add(1)
+				decided.Done()
 				return
 			}
 			admitted.Add(1)
+			decided.Done()
 			<-hold
 			release()
 		}()
