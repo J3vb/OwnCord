@@ -28,11 +28,11 @@ signal half waits on owner question 8);
 **B4-4 merged 2026-09-02** (PR #1504 = `eecf99b`; one atomic admission budget
 at every bcrypt site with race and bounded-work proofs; SEC-01's register row
 records the control and closes on the owner's advisory ID);
-**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
-PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
-test-first, revert-proofs pass). The owner decisions listed below block the steps that
-name them. _Update this line — not only the step table — as steps land; the
-[README.md](README.md) row is the status authority._
+**B4-12 batch (d) merged 2026-09-02** (PR #1501 = `9515174`; OC-0340 and
+OC-0341 closed — a negative token lifetime is refused at the service seam both
+callers share, and a numeric label can be revoked). Every remaining step waits
+on an owner decision listed below. _Update this line — not only the step
+table — as steps land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
