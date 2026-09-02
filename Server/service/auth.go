@@ -380,7 +380,12 @@ func (s *AuthService) createRegisteredAccount(ctx context.Context, mode Registra
 	role := int(permissions.MemberRoleID)
 	switch mode {
 	case RegistrationApproval:
-		uid, err = s.st.CreatePendingUser(ctx, in.Username, hash, role)
+		// The cap is re-checked by the insert itself: admitRegistration's
+		// count is the cheap refusal before bcrypt, this is the guarantee.
+		uid, err = s.st.CreatePendingUser(ctx, in.Username, hash, role, maxPendingRegistrations)
+		if errors.Is(err, db.ErrPendingQueueFull) {
+			return 0, "", ErrRegistrationQueueFull
+		}
 	case RegistrationOpen:
 		token, err = newSessionToken(func(tokenHash string) (err error) {
 			uid, err = s.st.CreateUserWithSession(ctx, in.Username, hash, role, tokenHash, in.Device, in.IP)
@@ -431,6 +436,8 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		// UNIQUE constraint violation → duplicate username → 400.
 		// Any other error → 500.
 		switch {
+		case errors.Is(err, ErrRegistrationQueueFull):
+			return nil, ErrRegistrationQueueFull
 		case db.IsUniqueConstraintError(err):
 			return nil, ErrRegistrationRejected
 		case errors.Is(err, db.ErrNotFound):

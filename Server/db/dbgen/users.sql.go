@@ -79,20 +79,31 @@ func (q *Queries) CountUsersWithoutTOTP(ctx context.Context) (int64, error) {
 }
 
 const createPendingUser = `-- name: CreatePendingUser :execresult
-INSERT INTO users (username, password, role_id, registration_status) VALUES (?, ?, ?, 'pending')
+INSERT INTO users (username, password, role_id, registration_status)
+SELECT ?1, ?2, ?3, 'pending'
+WHERE (SELECT COUNT(*) FROM users AS queued WHERE queued.registration_status = 'pending') < CAST(?4 AS INTEGER)
 `
 
 type CreatePendingUserParams struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	RoleID   int64  `json:"roleId"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	RoleID     int64  `json:"roleId"`
+	MaxPending int64  `json:"maxPending"`
 }
 
 // Approval-mode registration (B4-1): the account exists from the application
 // on, as registration_status = 'pending', and cannot sign in until an admin
 // approves it. Denial anonymises the row and marks it 'denied' for good.
+// The cap is enforced in the same statement as the insert: SQLite runs the
+// writer serially, so two applications racing for the last slot cannot both
+// observe room. Zero rows affected means the queue is full.
 func (q *Queries) CreatePendingUser(ctx context.Context, arg CreatePendingUserParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createPendingUser, arg.Username, arg.Password, arg.RoleID)
+	return q.db.ExecContext(ctx, createPendingUser,
+		arg.Username,
+		arg.Password,
+		arg.RoleID,
+		arg.MaxPending,
+	)
 }
 
 const createUser = `-- name: CreateUser :execresult
@@ -112,7 +123,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 const denyPendingUser = `-- name: DenyPendingUser :execresult
 UPDATE users
 SET registration_status = 'denied',
-    username = '[denied-' || id || ']',
+    username = ?,
     password = '',
     avatar = NULL,
     display_name = NULL,
@@ -122,8 +133,13 @@ SET registration_status = 'denied',
 WHERE id = ? AND registration_status = 'pending'
 `
 
-func (q *Queries) DenyPendingUser(ctx context.Context, id int64) (sql.Result, error) {
-	return q.db.ExecContext(ctx, denyPendingUser, id)
+type DenyPendingUserParams struct {
+	Username string `json:"username"`
+	ID       int64  `json:"id"`
+}
+
+func (q *Queries) DenyPendingUser(ctx context.Context, arg DenyPendingUserParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, denyPendingUser, arg.Username, arg.ID)
 }
 
 const getUserByID = `-- name: GetUserByID :one

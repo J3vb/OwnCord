@@ -16,8 +16,13 @@ INSERT INTO users (username, password, role_id) VALUES (?, ?, ?);
 -- Approval-mode registration (B4-1): the account exists from the application
 -- on, as registration_status = 'pending', and cannot sign in until an admin
 -- approves it. Denial anonymises the row and marks it 'denied' for good.
+-- The cap is enforced in the same statement as the insert: SQLite runs the
+-- writer serially, so two applications racing for the last slot cannot both
+-- observe room. Zero rows affected means the queue is full.
 -- name: CreatePendingUser :execresult
-INSERT INTO users (username, password, role_id, registration_status) VALUES (?, ?, ?, 'pending');
+INSERT INTO users (username, password, role_id, registration_status)
+SELECT sqlc.arg(username), sqlc.arg(password), sqlc.arg(role_id), 'pending'
+WHERE (SELECT COUNT(*) FROM users AS queued WHERE queued.registration_status = 'pending') < CAST(sqlc.arg(max_pending) AS INTEGER);
 
 -- name: ListPendingUsers :many
 SELECT id, username, created_at FROM users
@@ -34,7 +39,7 @@ UPDATE users SET registration_status = 'active' WHERE id = ? AND registration_st
 -- name: DenyPendingUser :execresult
 UPDATE users
 SET registration_status = 'denied',
-    username = '[denied-' || id || ']',
+    username = ?,
     password = '',
     avatar = NULL,
     display_name = NULL,
