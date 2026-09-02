@@ -12,6 +12,7 @@ import {
 } from "livekit-client";
 import { loadPref, savePref, STORAGE_PREFIX } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
+import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "@lib/livekitSession";
 import { voiceStore } from "@stores/voice.store";
 
@@ -44,14 +45,13 @@ function userVolumeKey(userId: number): string {
 const VOLUME_NOT_SET = -1;
 
 /** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's
- *  GainNode-backed setVolume(). On a miss at the host-scoped key, reads
- *  through to the pre-scoping unscoped key once, persists the result under
- *  the scoped key and consumes the legacy key, so the migration applies to
- *  the FIRST host connected to post-upgrade and no other. User ids are
- *  per-server autoincrement integers: leaving the legacy key in place would
- *  let every later brand-new host miss its own scoped key, read through to
- *  the same legacy value and silence the unrelated user N there too
- *  (OC-0313) — the shape channel-mutes.ts fixed for OC-0288. */
+ *  GainNode-backed setVolume(). On a miss at the host-scoped key, migrates
+ *  the pre-scoping unscoped value through `migrateLegacyValue`, which moves
+ *  it under the scoped key of the FIRST host that misses and no other. User
+ *  ids are per-server autoincrement integers: a legacy value left readable
+ *  would let every later brand-new host miss its own scoped key, read
+ *  through to it and silence the unrelated user N there too (OC-0313) — the
+ *  shape channel-mutes.ts fixed for OC-0288. */
 function getSavedUserVolume(userId: number): number {
   const scopedKey = userVolumeKey(userId);
   if (currentHost === null) return loadPref<number>(scopedKey, 100);
@@ -59,14 +59,25 @@ function getSavedUserVolume(userId: number): number {
   const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);
   if (scoped !== VOLUME_NOT_SET) return scoped;
 
-  const legacyKey = `userVolume_${userId}`;
-  const legacy = loadPref<number>(legacyKey, VOLUME_NOT_SET);
-  if (legacy !== VOLUME_NOT_SET) {
-    savePref(scopedKey, legacy);
-    localStorage.removeItem(STORAGE_PREFIX + legacyKey);
-    return legacy;
+  const legacy = migrateLegacyValue(
+    `${STORAGE_PREFIX}userVolume_${userId}`,
+    STORAGE_PREFIX + scopedKey,
+  );
+  if (legacy !== null) {
+    const parsed = parseStoredVolume(legacy);
+    if (parsed !== null) return parsed;
   }
   return loadPref<number>(scopedKey, 100);
+}
+
+/** The stored form is loadPref's JSON; anything but a number is corrupt. */
+function parseStoredVolume(raw: string): number | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "number" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export class AudioElements {

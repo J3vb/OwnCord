@@ -28,11 +28,11 @@ signal half waits on owner question 8);
 **B4-4 merged 2026-09-02** (PR #1504 = `eecf99b`; one atomic admission budget
 at every bcrypt site with race and bounded-work proofs; SEC-01's register row
 records the control and closes on the owner's advisory ID);
-**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
-PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
-test-first, revert-proofs pass). The owner decisions listed below block the steps that
-name them. _Update this line — not only the step table — as steps land; the
-[README.md](README.md) row is the status authority._
+**B4-12 batch (d) merged 2026-09-02** (PR #1501 = `9515174`; OC-0340 and
+OC-0341 closed — a negative token lifetime is refused at the service seam both
+callers share, and a numeric label can be revoked). Every remaining step waits
+on an owner decision listed below. _Update this line — not only the step
+table — as steps land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -1060,6 +1060,16 @@ unrelated user N.
   (the B2-8 precedent boundary). `check:docs` counts move to 331 fixed /
   48 open on this branch (batch (d) and B4-3 move the same lines;
   whichever merges later re-derives).
+- **Post-merge review fix (Codex, 2026-09-02, PR #1505):** both migrations
+  consumed the legacy key on the strength of a scoped write that can fail
+  silently at storage quota, and a first fix that merely kept the key left
+  it readable by the next host with the same user id. Both readers now
+  migrate through `lib/legacyKeyMigration.ts`: the legacy key is removed
+  before the scoped copy is written (its bytes then fit the copy), and a copy
+  that still fails is restored under a claim naming the owning scoped key and
+  remembered in memory, so only the first host reads it and retries. Pinned
+  by `legacy-key-migration.test.ts` and the failed-write cases in
+  `audio-elements.test.ts` and `dm-profile-sidebar.test.ts`.
 
 **Evidence, 2026-09-01 — batch (b), client half, OC-0314** — branch
 `fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` #1503 (draft,

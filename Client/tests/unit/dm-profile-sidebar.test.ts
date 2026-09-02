@@ -375,4 +375,64 @@ describe("DmProfileSidebar", () => {
       localStorage.removeItem("owncord:dm-note:b.example.com:42");
     }
   });
+
+  it("still shows the legacy note and keeps its key bound to this host when the scoped copy cannot be written (Codex on PRs #1502 and #1505)", () => {
+    // Storage at quota: the scoped setItem throws. The note was read fine,
+    // so it must still show, and the legacy key must survive for a later
+    // migration attempt instead of the panel going blank for as long as
+    // the quota pressure lasts.
+    const user = makeUser({ id: 42 });
+    localStorage.setItem("owncord:dm-note:42", "Pre-existing note");
+    const realSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key.startsWith("owncord:dm-note:a.example.com:")) {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      }
+      realSetItem.call(this, key, value);
+    });
+
+    try {
+      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+      sidebarA.mount(container);
+      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElA.value).toBe("Pre-existing note");
+      sidebarA.destroy?.();
+      expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBeNull();
+      expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
+      expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBe(
+        "owncord:dm-note:a.example.com:42",
+      );
+
+      // The failed copy is bound to server A: the unrelated user 42 on
+      // server B sees no note and leaves the retained one alone.
+      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
+      sidebarB.mount(container);
+      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElB.value).toBe("");
+      sidebarB.destroy?.();
+      expect(localStorage.getItem("owncord:dm-note:b.example.com:42")).toBeNull();
+      expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
+
+      // Quota relieved: server A's next open completes the migration.
+      setItem.mockRestore();
+      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+      sidebarA2.mount(container);
+      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      expect(noteElA2.value).toBe("Pre-existing note");
+      sidebarA2.destroy?.();
+      expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
+      expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
+      expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBeNull();
+    } finally {
+      setItem.mockRestore();
+      localStorage.removeItem("owncord:dm-note:42");
+      localStorage.removeItem("owncord:dm-note:a.example.com:42");
+      localStorage.removeItem("owncord:dm-note:b.example.com:42");
+      localStorage.removeItem("owncord:legacy-claim:owncord:dm-note:42");
+    }
+  });
 });
