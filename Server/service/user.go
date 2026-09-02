@@ -361,6 +361,19 @@ func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Sess
 	return sessions, nil
 }
 
+// MarkSessionsSeen acknowledges the account's unseen logins from the
+// caller's session (B4-7's new-login signal, BG-08 server half): every other
+// session's flag clears; the caller's own stays, so the device that just
+// signed in never acknowledges itself. An API-token principal passes 0 and
+// acknowledges them all. Nothing security-sensitive changes, so no audit
+// row is written.
+func (s *UserService) MarkSessionsSeen(ctx context.Context, userID, callerSessionID int64) error {
+	if _, err := s.st.MarkSessionsSeen(ctx, userID, callerSessionID); err != nil {
+		return fmt.Errorf("%w: failed to acknowledge sessions: %w", ErrInternal, err)
+	}
+	return nil
+}
+
 // RevokeSession deletes a specific session owned by the user.
 func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64) error {
 	if err := s.st.DeleteSessionByID(ctx, sessionID, userID); err != nil {

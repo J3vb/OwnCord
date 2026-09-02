@@ -822,6 +822,20 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
   render();
 
+  // auth_ok never carries totp_enabled, so the store's value can be a stale
+  // default until the profile has been read (OC-0354). Refresh when the
+  // section opens; rebuild only if the answer differs from what is shown,
+  // so a form the user already started is not thrown away.
+  const shownEnabled = authStore.getState().user?.totp_enabled === true;
+  void options
+    .onRefreshTotpStatus()
+    .then(() => {
+      if ((authStore.getState().user?.totp_enabled === true) !== shownEnabled) render();
+    })
+    .catch(() => {
+      // Offline or refused: keep showing what the store knows.
+    });
+
   appendChildren(wrapper, separator, headerRow, contentArea);
   return wrapper;
 }

@@ -942,6 +942,9 @@ export interface MemberResponse {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Whether 2FA is enrolled. Present on the caller's own GET /users/me
+   *  response — the only place the server states it (OC-0354). */
+  readonly totp_enabled?: boolean;
   readonly display_name?: string | null;
   readonly about?: string | null;
   readonly custom_status?: string | null;

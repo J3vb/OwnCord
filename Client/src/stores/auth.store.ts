@@ -59,9 +59,17 @@ export const authStore = createStore<AuthState>(INITIAL_STATE);
 
 /** Populate auth state after a successful auth_ok message. */
 export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
-  authStore.setState(() => ({
+  authStore.setState((prev) => ({
     token,
-    user,
+    // auth_ok's user never carries totp_enabled — only GET /users/me does —
+    // so a reconnect must not wipe the value the profile fetch established
+    // for the same account (OC-0354).
+    user:
+      user.totp_enabled === undefined &&
+      prev.user?.id === user.id &&
+      prev.user.totp_enabled !== undefined
+        ? { ...user, totp_enabled: prev.user.totp_enabled }
+        : user,
     serverName,
     motd,
     isAuthenticated: true,

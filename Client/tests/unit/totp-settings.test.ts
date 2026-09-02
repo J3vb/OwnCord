@@ -70,6 +70,7 @@ function makeOptions(overrides: Partial<SettingsOverlayOptions> = {}): SettingsO
     }),
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -87,6 +88,68 @@ describe("TOTP Settings", () => {
 
   afterEach(() => {
     container.remove();
+  });
+
+  // -----------------------------------------------------------------------
+  // OC-0354: the store's totp_enabled is a stale default until the profile
+  // has been read, so the section asks the server when it opens.
+  // -----------------------------------------------------------------------
+  describe("2FA state refresh on open (OC-0354)", () => {
+    it("asks the server once and switches to the disable view when 2FA is really on", async () => {
+      mockTotpEnabled = false;
+      const options = makeOptions({
+        onRefreshTotpStatus: vi.fn(async () => {
+          updateUser({ totp_enabled: true });
+        }),
+      });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      // Rendered from the stale store first...
+      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      expect(enableBtn).not.toBeNull();
+
+      // ...then rebuilt from the server's answer.
+      await vi.waitFor(() => {
+        const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+        expect(badge.textContent).toBe("Enabled");
+      });
+      expect(container.querySelector("[data-testid='totp-disable-btn']")).not.toBeNull();
+      expect(options.onRefreshTotpStatus).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
+
+    it("keeps what it shows when the server confirms it or cannot be reached", async () => {
+      mockTotpEnabled = false;
+      const confirmed = makeOptions({ onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined) });
+      const overlay = createSettingsOverlay(confirmed);
+      overlay.mount(container);
+      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      enableBtn.click();
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
+      pwInput.value = "typed already";
+      await Promise.resolve();
+      await Promise.resolve();
+      // The form the user opened survives a refresh that changes nothing.
+      expect(
+        (container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement).value,
+      ).toBe("typed already");
+      overlay.destroy?.();
+
+      const failing = makeOptions({
+        onRefreshTotpStatus: vi.fn().mockRejectedValue(new Error("offline")),
+      });
+      const overlay2 = createSettingsOverlay(failing);
+      overlay2.mount(container);
+      await Promise.resolve();
+      await Promise.resolve();
+      const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+      expect(badge.textContent).toBe("Disabled");
+      overlay2.destroy?.();
+    });
   });
 
   // -----------------------------------------------------------------------

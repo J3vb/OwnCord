@@ -118,7 +118,7 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
 	}
-	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip); err != nil {
+	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip, false); err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite create session: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -261,20 +261,27 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 			"user_id", userID, "err", err)
 	}
 
-	return insertSession(ctx, d.q, userID, tokenHash, device, ip)
+	return insertSession(ctx, d.q, userID, tokenHash, device, ip, true)
 }
 
 // insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
 // when the row must commit with other writes (CreateUserWithInvite).
-func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string) (int64, error) {
+// unseen marks the row as a new login the account has not acknowledged yet
+// (B4-7); a registration's first session has no other device to tell.
+func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
 	deviceCopy, ipCopy := device, ip
+	var unseenFlag int64
+	if unseen {
+		unseenFlag = 1
+	}
 	res, err := q.InsertSession(ctx, dbgen.InsertSessionParams{
 		UserID:    userID,
 		Token:     tokenHash,
 		Device:    &deviceCopy,
 		IpAddress: &ipCopy,
 		ExpiresAt: expiresAt,
+		Unseen:    unseenFlag,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("CreateSession: %w", err)

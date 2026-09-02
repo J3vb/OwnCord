@@ -32,6 +32,7 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

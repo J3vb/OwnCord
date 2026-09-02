@@ -26,7 +26,7 @@ UPDATE users SET role_id = ? WHERE id = ?;
 DELETE FROM sessions WHERE user_id = ?;
 
 -- name: GetUserSessions :many
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions WHERE user_id = ?
 ORDER BY created_at DESC;
 

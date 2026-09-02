@@ -1,6 +1,6 @@
 -- name: InsertSession :execresult
-INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-VALUES (?, ?, ?, ?, ?);
+INSERT INTO sessions (user_id, token, device, ip_address, expires_at, unseen)
+VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: EvictOldestSessions :exec
 DELETE FROM sessions WHERE id IN (
@@ -10,7 +10,7 @@ DELETE FROM sessions WHERE id IN (
 );
 
 -- name: GetSessionByTokenHash :one
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions WHERE token = ?;
 
 -- name: GetSessionWithBanStatus :one
@@ -44,7 +44,13 @@ DELETE FROM sessions WHERE expires_at < ?;
 UPDATE sessions SET last_used = datetime('now') WHERE token = ?;
 
 -- name: ListUserSessions :many
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions
 WHERE user_id = ?
 ORDER BY created_at DESC;
+
+-- name: MarkSessionsSeen :execresult
+-- The new-login signal (B4-7): listing the account's sessions from one
+-- device acknowledges every other session's login. The caller's own row is
+-- left alone so a device never acknowledges itself.
+UPDATE sessions SET unseen = 0 WHERE user_id = ? AND id != ? AND unseen = 1;

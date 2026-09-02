@@ -90,6 +90,36 @@ describe("auth store", () => {
       expect(authStore.getState().serverName).toBe(TEST_SERVER_NAME);
     });
 
+    // OC-0354: auth_ok's user never carries totp_enabled; only GET /users/me
+    // does. A reconnect must not wipe the value the profile fetch set.
+    it("keeps the known totp_enabled when the same account re-authenticates without it", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ totp_enabled: true });
+
+      setAuth("next-token", TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+
+      expect(authStore.getState().user?.totp_enabled).toBe(true);
+      expect(authStore.getState().token).toBe("next-token");
+    });
+
+    it("takes the payload's totp_enabled over the remembered one", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ totp_enabled: true });
+
+      setAuth(TEST_TOKEN, { ...TEST_USER, totp_enabled: false }, TEST_SERVER_NAME, TEST_MOTD);
+
+      expect(authStore.getState().user?.totp_enabled).toBe(false);
+    });
+
+    it("does not carry totp_enabled across accounts", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ totp_enabled: true });
+
+      setAuth(TEST_TOKEN, { ...TEST_USER, id: 43, username: "other" }, TEST_SERVER_NAME, TEST_MOTD);
+
+      expect(authStore.getState().user?.totp_enabled).toBeUndefined();
+    });
+
     it("sets motd", () => {
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
       expect(authStore.getState().motd).toBe(TEST_MOTD);
