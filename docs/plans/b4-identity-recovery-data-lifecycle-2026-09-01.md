@@ -34,13 +34,15 @@ callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
 8–10 recorded 2026-09-02** (amendments under the questions);
 **B4-7 new-login half merged 2026-09-02** (PR #1507 = `dc69fbb`; the
 REST-only `unseen` session flag, and OC-0354 closed with it — BG-08's server
-half complete); **B4-1 opened 2026-09-02** (branch
-`feat/b4-1-registration-modes`, PR #1508; evidence in its section — the four
-modes, the upgrade mapping, the audited transition, the approval queue). **B4-5 opened
+half complete); **B4-1 merged 2026-09-02** (PR #1508 = `8bd4212`; the four
+registration modes with the upgrade mapping, the audited transition and
+the approval queue — BG-10's server half); **B4-8 merged 2026-09-02** (PR #1510 = `b5e9d4a`; the
+diagnostics inventory, the egress-sites invariant, the no-telemetry
+capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
+closed — the login lockout key folds like the account lookup); **B4-5 opened
 2026-09-02** (branch `feat/b4-5-recovery-kit`, stacked on B4-1; evidence in
 its section — the argon2id-verified kit, one-transaction redemption without
-the second factor, lockouts and the hygiene proof). Next OC-0324 (B4-12(c)),
-then B4-6, B4-8, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+the second factor, lockouts and the hygiene proof). Next B4-6, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1103,6 +1105,57 @@ Exit: capture green in CI; inventory published; contract written; BPR-055's
 traceability row cites the capture (its "crash/update/support workflows"
 breadth completes at B6/B10 with BG-15).
 
+**Evidence, 2026-09-02** — branch `feat/b4-8-diagnostics` from `dev`
+`a595786`; PR to `dev` #1510 (draft, opened 2026-09-02). Commit `c4de066`.
+Owner decision 10: the data contract, the inventory and the proof; the
+export endpoint and UX stay with BG-15 in B6/B9.
+
+- **Diagnostics inventory:**
+  [docs/architecture/diagnostics.md](../architecture/diagnostics.md) — the
+  health probe, connectivity diagnostics, JSON metrics, the Prometheus
+  exporter, OTLP, logs and the admin log stream, the audit log, backups and
+  the healthcheck CLI, each with who reads it and that it stays local (OTLP
+  only where an operator builds with the tag and configures an endpoint).
+- **Egress inventory, enforced:** the `egress-sites` invariant
+  (`Server/invariants/egress_sites.go`, in `Rules`) lists every production
+  file that can open an outbound connection — the updater's three files
+  (manual), the LiveKit download (configuration), the LiveKit process probes
+  and signalling proxy (loopback), the plugin `host_http` capability and the
+  GIF proxy (configuration, both empty by default), the healthcheck CLI
+  (loopback) and the OTLP exporter (tagged build + configuration) — with
+  trigger, destination and gate. An unlisted `http`/`net`/`tls`/`websocket`/
+  `grpc` request or dial constructor, `http.Client` / `http.Transport` /
+  `net.Dialer` literal, or OTLP import fails CI; a row whose file no longer
+  reaches out fails `TestEgressAllowIsLive`; `TestEgressSites_Rule` is the
+  negative control. The rule's first run found the startup banner learning
+  the machine's address by `net.Dial("udp", "8.8.8.8:80")` at every start
+  (no packet, but a capture shows the connect) — it now reads the interface
+  table — and two undocumented sites (the LiveKit proxy, `updater/assets.go`),
+  now rows.
+- **No-automatic-telemetry capture:** `TestNoAutomaticTelemetry_Capture`
+  (`Server/internal/app`) boots the real server as `main` does with the
+  compiled defaults (TLS off, no LiveKit auto-download, no telemetry, no GIF
+  key, no plugin allowlist), records every connection the default transport
+  opens and every name the resolver looks up, drives first-run setup,
+  invite registration, sign-in, a WebSocket session with the ready payload
+  and a sent message, a channel read, an upload, an idle period and a
+  graceful shutdown, and asserts nothing beyond loopback was dialled and no
+  name was resolved; a positive control proves the recorder sees a loopback
+  dial. The coverage boundary (a client on its own transport, or a bare
+  `net.Dial`) is stated on the page and closed by the static rule; B10's
+  packet-level rerun and the crash/offline flows are BG-15's.
+- **Support-bundle data contract:** on the same page — user-initiated only
+  with an audit row; nothing leaves by itself and any crash reporting is a
+  separate opt-in that records consent; the items a bundle may contain,
+  each with its data-lifecycle classes and redaction; the forbidden
+  classes; the preview-before-write step with a manifest and redaction
+  report; the tests the implementation must ship.
+- **Docs:** the page and its index row; `security.md` "Diagnostics and
+  Telemetry"; traceability row BPR-055 cites both tests.
+- **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on
+  `internal/app` and `invariants`, pinned `golangci-lint` 0 issues on both;
+  `check:docs` and the ledger check.
+
 ## HP-4 — Irreversible-data review
 
 `docs/plans/hp-4-scorecard-<date>.md`, in the HP-2/HP-3 shape. Sits after
@@ -1344,6 +1397,24 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   half):** the flag round-trips from `GET /users/me` and a same-account
   re-authentication keeps it — see B4-7's second evidence block; the ledger
   record flips in that PR, closing batch (b).
+
+**Evidence, 2026-09-02 — batch (c), OC-0324** — branch
+`fix/b4-12c-lockout-fold` from B4-1's branch (its `service/auth.go` owner;
+stacked on #1508); PR to `dev` (draft, opened 2026-09-02). Fix commit
+`9553097`; ledger record flipped on the same branch (`fix.commit = 9553097`,
+`revertProof = pass`).
+
+- **OC-0324:** the per-username lockout key folded with `strings.ToLower`
+  (full Unicode) while the account lookup folds ASCII only (`COLLATE
+NOCASE`), so two accounts differing only in non-ASCII case — two rows —
+  shared one bucket and hammering one locked the other out. The key now
+  uses `db.LowerASCII`, the lookup's fold; ASCII case variants of one
+  account still share a bucket. Test:
+  `TestLogin_LockoutKeyFoldsLikeTheAccountLookup` (written first, red on
+  the old fold: the sibling account was refused as locked).
+- **Gates:** `go vet`, `go test` on `service` and `api`, pinned
+  `golangci-lint` 0 issues; `check:docs` (337 fixed / 42 open) and the
+  ledger check.
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
 `feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,

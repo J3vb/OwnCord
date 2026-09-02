@@ -615,7 +615,11 @@ Run the destructive tests against disposable copies of real-shaped alpha data.
 - Retention removes messages and attachments consistently without bypassing
   legal/operator holds if such a mechanism is explicitly introduced.
 - Support bundles are user initiated, reviewed for secrets, and no automatic
-  telemetry traffic occurs.
+  telemetry traffic occurs. _Amended 2026-09-02 (B4 owner decision 10): B4
+  delivers the no-telemetry proof and the support-bundle data contract —
+  user initiation and secret review as binding rules; the bundle export
+  itself, and the runtime evidence that it obeys those rules, complete at
+  B6/B9 under BG-15, where this bullet's bundle half is re-checked._
 - Alpha-shaped data migrates forward and rolls back according to the declared
   boundary.
 

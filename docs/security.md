@@ -83,6 +83,18 @@ signed in. Five failed attempts lock recovery for 15 minutes. See
 
 Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
 
+## Diagnostics and Telemetry
+
+OwnCord sends no automatic product or usage telemetry (BPR-055). Every
+diagnostic surface — the health probe, connectivity diagnostics, metrics,
+logs, the audit log, backups — stays on the machine, and every outbound
+network path the server has is an action an admin or user took, a feature
+an operator switched on by configuration, or a connection to this machine
+itself. The inventory, the `egress-sites` invariant that enforces it, the
+runtime capture that proves the compiled defaults open nothing beyond
+loopback, and the data contract a future support bundle must satisfy are in
+[docs/architecture/diagnostics.md](architecture/diagnostics.md).
+
 ## Audit Logging
 
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:

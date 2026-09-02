@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -86,5 +87,42 @@ func TestRegister_InviteModeRefusesAnEmptyCodeBeforeHashing(t *testing.T) {
 	}
 	if u, _ := svc.st.GetUserByUsername(context.Background(), "codeless"); u != nil {
 		t.Fatal("an account was created without an invite in invite mode")
+	}
+}
+
+// The cap is enforced by the insert, not by admitRegistration's count: six
+// applications racing for the last slot admit exactly one.
+func TestRegister_ApprovalQueueCapHoldsUnderConcurrency(t *testing.T) {
+	svc := newRegistrationService(t, RegistrationApproval)
+	ctx := context.Background()
+	for i := range maxPendingRegistrations - 1 {
+		if _, err := svc.st.CreatePendingUser(ctx, fmt.Sprintf("queued%d", i), "hash", 4, maxPendingRegistrations); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	const racers = 6
+	svc.limiter.SetAdmissionBudget(racers) // every racer hashes at once
+	results := make(chan error, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Go(func() {
+			results <- registerFrom(svc, fmt.Sprintf("racer%d", i), fmt.Sprintf("198.51.100.%d", 10+i))
+		})
+	}
+	wg.Wait()
+	close(results)
+	admitted := 0
+	for err := range results {
+		if err == nil {
+			admitted++
+		} else if !errors.Is(err, ErrRegistrationQueueFull) {
+			t.Errorf("unexpected outcome: %v", err)
+		}
+	}
+	if admitted != 1 {
+		t.Fatalf("%d applications admitted, want exactly 1", admitted)
+	}
+	if n, _ := svc.st.CountPendingUsers(ctx); n != maxPendingRegistrations {
+		t.Fatalf("pending = %d, want the cap %d", n, maxPendingRegistrations)
 	}
 }
