@@ -36,11 +36,12 @@ callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
 REST-only `unseen` session flag, and OC-0354 closed with it — BG-08's server
 half complete); **B4-1 merged 2026-09-02** (PR #1508 = `8bd4212`; the four
 registration modes with the upgrade mapping, the audited transition and
-the approval queue — BG-10's server half); **B4-8 opened 2026-09-02** (branch
-`feat/b4-8-diagnostics`, PR #1510; evidence in its section — the diagnostics
-inventory, the `egress-sites` invariant, the no-telemetry capture, the
-support-bundle contract). Next OC-0324 (B4-12(c)), then B4-5 → B4-6, HP-4,
-B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+the approval queue — BG-10's server half); **B4-8 merged 2026-09-02** (PR #1510 = `b5e9d4a`; the
+diagnostics inventory, the egress-sites invariant, the no-telemetry
+capture and the support-bundle contract — BPR-055's server half); **B4-12
+batch (c) opened 2026-09-02** (branch `fix/b4-12c-lockout-fold`, stacked on
+B4-1; OC-0324 fixed test-first). Next B4-5 → B4-6, HP-4, B4-9 → B4-10 →
+B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1334,6 +1335,24 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   half):** the flag round-trips from `GET /users/me` and a same-account
   re-authentication keeps it — see B4-7's second evidence block; the ledger
   record flips in that PR, closing batch (b).
+
+**Evidence, 2026-09-02 — batch (c), OC-0324** — branch
+`fix/b4-12c-lockout-fold` from B4-1's branch (its `service/auth.go` owner;
+stacked on #1508); PR to `dev` (draft, opened 2026-09-02). Fix commit
+`9553097`; ledger record flipped on the same branch (`fix.commit = 9553097`,
+`revertProof = pass`).
+
+- **OC-0324:** the per-username lockout key folded with `strings.ToLower`
+  (full Unicode) while the account lookup folds ASCII only (`COLLATE
+NOCASE`), so two accounts differing only in non-ASCII case — two rows —
+  shared one bucket and hammering one locked the other out. The key now
+  uses `db.LowerASCII`, the lookup's fold; ASCII case variants of one
+  account still share a bucket. Test:
+  `TestLogin_LockoutKeyFoldsLikeTheAccountLookup` (written first, red on
+  the old fold: the sibling account was refused as locked).
+- **Gates:** `go vet`, `go test` on `service` and `api`, pinned
+  `golangci-lint` 0 issues; `check:docs` (337 fixed / 42 open) and the
+  ledger check.
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
 `feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,
