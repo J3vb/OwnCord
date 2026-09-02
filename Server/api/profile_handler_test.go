@@ -553,6 +553,68 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 	}
 }
 
+// ─── DELETE /api/v1/users/me/sessions — sign-out-everywhere (B4-7) ─────────
+
+// The two-account proof the B4 exit gate asks for: signing out everywhere
+// revokes every session of the caller — the current one included — and
+// none of another account's, with the two accounts' sessions interleaved in
+// creation order.
+func TestRevokeAllSessions_OnlyTheCallersAccount(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	ctx := context.Background()
+
+	aliceTok := profileCreateToken(t, database, "alice-everywhere", 4)
+	alice, _ := database.GetUserByUsername(ctx, "alice-everywhere")
+	bobUID, _ := database.CreateUser(ctx, "bob-bystander", mustHash(t), 4)
+	if _, err := database.CreateSession(ctx, bobUID, auth.HashToken("bob-1"), "Firefox", "10.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSession(ctx, alice.ID, auth.HashToken("alice-2"), "Phone", "10.0.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSession(ctx, bobUID, auth.HashToken("bob-2"), "Tablet", "10.0.0.3"); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := profileDelete(t, router, "/api/v1/users/me/sessions", aliceTok)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		SessionsRevoked int64 `json:"sessions_revoked"`
+		CurrentRevoked  bool  `json:"current_session_revoked"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionsRevoked != 2 || !resp.CurrentRevoked {
+		t.Fatalf("response = %+v, want 2 sessions revoked including the current one", resp)
+	}
+
+	aliceLeft, _ := database.ListUserSessions(ctx, alice.ID)
+	if len(aliceLeft) != 0 {
+		t.Fatalf("alice still has %d session(s)", len(aliceLeft))
+	}
+	bobLeft, _ := database.ListUserSessions(ctx, bobUID)
+	if len(bobLeft) != 2 {
+		t.Fatalf("bob has %d session(s), want 2 untouched", len(bobLeft))
+	}
+
+	// The caller's own token is dead from here on.
+	if rr := getWithToken(t, router, "/api/v1/users/me/sessions", aliceTok); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked caller token answered %d, want 401", rr.Code)
+	}
+}
+
+func TestRevokeAllSessions_Unauthorized(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	if rr := profileDelete(t, router, "/api/v1/users/me/sessions", "badtoken"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
 // ─── PATCH /api/v1/users/me — identity_public_key (F3 voice E2EE TOFU) ───────
 
 func TestUpdateProfile_PublishIdentityKey(t *testing.T) {

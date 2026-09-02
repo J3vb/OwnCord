@@ -94,6 +94,7 @@ type Querier interface {
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DeleteUsedTOTPCode(ctx context.Context, arg DeleteUsedTOTPCodeParams) error
+	DeleteUserSessions(ctx context.Context, userID int64) (sql.Result, error)
 	DisablePlugin(ctx context.Context, id int64) error
 	// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 	// already carry (OC-0284): an edit that races a delete must not rewrite a

@@ -233,6 +233,23 @@ func (h *Hub) DisconnectUser(userID int64) {
 	h.kickClient(c)
 }
 
+// DisconnectRevokedUser drops the live connection of a user whose sessions
+// were just revoked (sign-out-everywhere, B4-7): the socket authenticated on
+// a session that no longer exists, and the revoked-session sweep would only
+// notice on its next tick. No frame precedes the close — the same treatment
+// the sweep gives a revoked session — so the client's reconnect meets the
+// 401 that tells it to sign in again. No-op if the user is not connected.
+func (h *Hub) DisconnectRevokedUser(userID int64) {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
+	h.kickClient(c)
+}
+
 // BroadcastUserUpdate sends a user_update message to all connected clients
 // when a user changes their profile (username, avatar, display name, about,
 // identity key).

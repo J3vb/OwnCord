@@ -30,6 +30,9 @@ DELETE FROM sessions WHERE id = ? AND user_id = ?;
 -- name: DeleteOtherSessions :execresult
 DELETE FROM sessions WHERE user_id = ? AND id != ?;
 
+-- name: DeleteUserSessions :execresult
+DELETE FROM sessions WHERE user_id = ?;
+
 -- name: DeleteExpiredSessions :exec
 -- Sargable text comparison against idx_sessions_expires_at (migration 031).
 -- expires_at is stored as RFC3339 UTC ("2006-01-02T15:04:05Z") and the
