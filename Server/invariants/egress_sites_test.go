@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -23,27 +24,35 @@ func serverRoot(t *testing.T) string {
 // a row nothing needs any more is a lie about where the server can reach.
 func TestEgressAllowIsLive(t *testing.T) {
 	root := serverRoot(t)
-	for rel := range EgressAllow {
+	for rel, entry := range EgressAllow {
 		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
 			t.Errorf("EgressAllow lists %s, which does not exist: %v", rel, err)
 			continue
 		}
 		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, rel, src, parser.ImportsOnly|parser.ParseComments)
+		f, err := parser.ParseFile(fset, rel, src, parser.ParseComments)
 		if err != nil {
 			t.Errorf("parse %s: %v", rel, err)
 			continue
 		}
-		// ImportsOnly is enough for the OTLP row; every other row needs bodies.
-		if len(egressHits(f, fset)) == 0 {
-			f, err = parser.ParseFile(fset, rel, src, parser.ParseComments)
-			if err != nil {
-				t.Errorf("parse %s: %v", rel, err)
-				continue
+		hits := egressHits(f, fset)
+		if len(hits) == 0 {
+			t.Errorf("EgressAllow lists %s, but it no longer opens an outbound path — drop the row", rel)
+			continue
+		}
+		// Every inventoried site still reaches out, and nothing outside the
+		// inventoried sites does: the row describes exactly the file's egress.
+		live := map[string]bool{}
+		for _, h := range hits {
+			live[h.site] = true
+			if !slices.Contains(entry.Sites, h.site) {
+				t.Errorf("%s:%d %s in %s is not among the row's sites %v", rel, h.line, h.what, h.site, entry.Sites)
 			}
-			if len(egressHits(f, fset)) == 0 {
-				t.Errorf("EgressAllow lists %s, but it no longer opens an outbound path — drop the row", rel)
+		}
+		for _, site := range entry.Sites {
+			if !live[site] {
+				t.Errorf("EgressAllow lists %s in %s, but that site no longer opens an outbound path — drop it", site, rel)
 			}
 		}
 	}
@@ -71,12 +80,25 @@ func f() { c := &nh.Client{}; _ = c }
 import "net"
 func f() { d := net.Dialer{}; _, _ = d.Dial("tcp", "example.invalid:443") }
 `
+	listedSite := `package x
+import "net/http"
+func NewUpdater() { _, _ = http.Get("https://example.invalid/") }
+`
+	listedMethod := `package x
+import "net/http"
+type Updater struct{}
+func (u *Updater) fetchLatestRelease() { _, _ = http.Get("https://example.invalid/") }
+`
 	cases := []struct {
 		name, rel, src string
 		want           int
 	}{
 		{"unlisted http.Get", "service/reach.go", reach, 1},
-		{"listed file", "updater/updater.go", reach, 0},
+		// A listed file exempts only its inventoried sites: a dial added to
+		// another function of the same file is a new egress path.
+		{"listed file, unlisted function", "updater/updater.go", reach, 1},
+		{"listed file, inventoried function", "updater/updater.go", listedSite, 0},
+		{"listed file, inventoried method", "updater/updater.go", listedMethod, 0},
 		{"handler only", "api/serve.go", serve, 0},
 		{"otlp import", "telemetry/x.go", otlp, 1},
 		{"aliased client literal", "service/x.go", aliased, 1},
