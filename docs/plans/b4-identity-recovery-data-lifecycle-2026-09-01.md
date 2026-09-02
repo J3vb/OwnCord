@@ -1092,6 +1092,14 @@ export endpoint and UX stay with BG-15 in B6/B9.
   `internal/app` and `invariants`, pinned `golangci-lint` 0 issues on both;
   `check:docs` and the ledger check.
 
+- **Review fixes (Codex on #1510, 2026-09-02, follow-up PR):** the inventory
+  is per site — each row names the functions that may reach out, the rule
+  flags a dial anywhere else in a listed file and `TestEgressAllowIsLive`
+  checks every site both ways; the two LiveKit rows are `config`, not
+  `loopback`, because `voice.livekit_url` may name a remote LiveKit and then
+  the probes and each session's signalling leave the machine; the startup
+  banner brackets an IPv6 address (`TestWSURL_BracketsIPv6`).
+
 ## HP-4 — Irreversible-data review
 
 `docs/plans/hp-4-scorecard-<date>.md`, in the HP-2/HP-3 shape. Sits after
@@ -1122,14 +1130,6 @@ Questions the scorecard answers with commands:
 
 Owner signs. Acceptance authorises B4-9, B4-10, B4-11 (and may relax
 B4-10 ∥ B4-11). Pre-squash SHAs of the chain's PRs are recorded here.
-
-- **Review fixes (Codex on #1510, 2026-09-02, follow-up PR):** the inventory
-  is per site — each row names the functions that may reach out, the rule
-  flags a dial anywhere else in a listed file and `TestEgressAllowIsLive`
-  checks every site both ways; the two LiveKit rows are `config`, not
-  `loopback`, because `voice.livekit_url` may name a remote LiveKit and then
-  the probes and each session's signalling leave the machine; the startup
-  banner brackets an IPv6 address (`TestWSURL_BracketsIPv6`).
 
 **Evidence, 2026-09-02** — branch `docs/hp-4-scorecard` from `dev` `b5e9d4a`;
 PR to `dev` (draft). [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md)
