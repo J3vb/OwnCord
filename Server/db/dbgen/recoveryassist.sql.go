@@ -11,18 +11,21 @@ import (
 )
 
 const consumeRecoveryAssist = `-- name: ConsumeRecoveryAssist :execresult
-DELETE FROM recovery_assists WHERE user_id = ? AND expires_at > ?
+DELETE FROM recovery_assists WHERE user_id = ? AND verifier = ? AND expires_at > ?
 `
 
 type ConsumeRecoveryAssistParams struct {
 	UserID    int64  `json:"userId"`
+	Verifier  string `json:"verifier"`
 	ExpiresAt string `json:"expiresAt"`
 }
 
-// The consume deletes only a live credential, so the affected row count is
-// what tells two concurrent redemptions, and an expired credential, apart.
+// The consume deletes only the live credential whose verifier the caller
+// compared against, so the affected row count is what tells two concurrent
+// redemptions, an expired credential, and a credential replaced since the
+// compare apart.
 func (q *Queries) ConsumeRecoveryAssist(ctx context.Context, arg ConsumeRecoveryAssistParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, consumeRecoveryAssist, arg.UserID, arg.ExpiresAt)
+	return q.db.ExecContext(ctx, consumeRecoveryAssist, arg.UserID, arg.Verifier, arg.ExpiresAt)
 }
 
 const deleteRecoveryAssist = `-- name: DeleteRecoveryAssist :exec

@@ -75,10 +75,12 @@ func (d *DB) DeleteRecoveryAssist(ctx context.Context, userID int64) error {
 // RedeemRecoveryAssist is RedeemRecoveryKit for an owner-issued credential:
 // the live credential is deleted, the password replaced, every session of
 // the account revoked and the audit row written in one transaction, or none
-// of it. The consume is conditional on the credential being live, so two
-// concurrent redemptions admit at most one and an expired credential admits
-// none; the loser gets ErrRecoveryAssistSpent.
-func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
+// of it. The consume is conditional on the credential being live and on it
+// being the very row the caller verified (its verifier), so two concurrent
+// redemptions admit at most one, an expired credential admits none, and a
+// credential replaced between the compare and the redeem cannot spend its
+// replacement; the loser gets ErrRecoveryAssistSpent.
+func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryAssist begin: %w", err)
@@ -92,7 +94,7 @@ func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, newPassword
 	q := d.q.WithTx(tx)
 
 	now := time.Now().UTC().Format(sessionTimeLayout)
-	res, err := q.ConsumeRecoveryAssist(ctx, dbgen.ConsumeRecoveryAssistParams{UserID: userID, ExpiresAt: now})
+	res, err := q.ConsumeRecoveryAssist(ctx, dbgen.ConsumeRecoveryAssistParams{UserID: userID, Verifier: verifier, ExpiresAt: now})
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryAssist consume: %w", err)
 	}

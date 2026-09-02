@@ -15,10 +15,12 @@ ON CONFLICT(user_id) DO UPDATE SET verifier = excluded.verifier,
 SELECT user_id, verifier, issued_by, verification, created_at, expires_at
 FROM recovery_assists WHERE user_id = ?;
 
--- The consume deletes only a live credential, so the affected row count is
--- what tells two concurrent redemptions, and an expired credential, apart.
+-- The consume deletes only the live credential whose verifier the caller
+-- compared against, so the affected row count is what tells two concurrent
+-- redemptions, an expired credential, and a credential replaced since the
+-- compare apart.
 -- name: ConsumeRecoveryAssist :execresult
-DELETE FROM recovery_assists WHERE user_id = ? AND expires_at > ?;
+DELETE FROM recovery_assists WHERE user_id = ? AND verifier = ? AND expires_at > ?;
 
 -- name: DeleteRecoveryAssist :exec
 DELETE FROM recovery_assists WHERE user_id = ?;

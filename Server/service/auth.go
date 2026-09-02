@@ -10,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -277,6 +278,8 @@ var (
 // from api/auth_handler.go and api/totp_handler.go at 71d867cb; B3-1's
 // characterization rows pin the behaviour.
 type AuthService struct {
+	// issueMu serializes the two-budget reservation of IssueRecoveryAssist.
+	issueMu syncutil.Mutex
 	st          Store
 	limiter     *auth.RateLimiter
 	partial     *auth.PartialAuthStore

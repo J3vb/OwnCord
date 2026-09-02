@@ -322,3 +322,67 @@ func TestRecoveryAssist_IssuanceIsBudgeted(t *testing.T) {
 		t.Fatalf("%d further issuances succeeded, want %d (the owner's budget less the three spent)", issued, recoveryAssistIssueLimit-recoveryAssistTargetLimit)
 	}
 }
+
+// The two issuance budgets are reserved atomically (Codex on #1513): a
+// concurrent burst across targets cannot slip past the owner's limit.
+func TestRecoveryAssist_IssuanceBudgetHoldsUnderConcurrency(t *testing.T) {
+	ctx := context.Background()
+	svc, owner, _, database := newAssistFixture(t, false)
+	const racers = 8
+	targets := make([]int64, 0, racers)
+	for i := range racers {
+		uid, err := database.CreateUser(ctx, fmt.Sprintf("target%d", i), "hash", 4)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		targets = append(targets, uid)
+	}
+	svc.limiter.SetAdmissionBudget(racers)
+	results := make(chan error, racers)
+	var wg sync.WaitGroup
+	for _, uid := range targets {
+		wg.Go(func() {
+			_, err := svc.IssueRecoveryAssist(ctx, owner.ID, uid, "in_person")
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	issued := 0
+	for err := range results {
+		if err == nil {
+			issued++
+		} else if !errors.Is(err, ErrRateLimited) {
+			t.Errorf("unexpected outcome: %v", err)
+		}
+	}
+	if issued != recoveryAssistIssueLimit {
+		t.Fatalf("%d credentials issued concurrently, want exactly the owner's budget %d", issued, recoveryAssistIssueLimit)
+	}
+}
+
+// A refusal for load charges no issuance budget (Codex on #1513).
+func TestRecoveryAssist_AdmissionRefusalChargesNoIssuance(t *testing.T) {
+	ctx := context.Background()
+	svc, owner, user, _ := newAssistFixture(t, false)
+	svc.limiter.SetAdmissionBudget(1)
+	release, admitted := svc.limiter.Admission().TryAcquire()
+	if !admitted {
+		t.Fatal("could not hold the only slot")
+	}
+	for i := range recoveryAssistTargetLimit + 2 {
+		if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); err != ErrAuthBusy { //nolint:errorlint // the sentinel itself, not its kind
+			t.Fatalf("attempt %d under load = %v, want ErrAuthBusy", i+1, err)
+		}
+	}
+	release()
+	// The account's whole budget is still there.
+	for i := range recoveryAssistTargetLimit {
+		if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); err != nil {
+			t.Fatalf("issuance %d after the busy period = %v, want success", i+1, err)
+		}
+	}
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("over the per-target budget = %v, want rate limited", err)
+	}
+}

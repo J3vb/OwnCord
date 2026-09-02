@@ -223,7 +223,7 @@ func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*Aut
 	if err != nil {
 		return nil, err
 	}
-	return s.completeRecovery(ctx, in, target.user, kind, newHash, at)
+	return s.completeRecovery(ctx, in, target, kind, newHash, at)
 }
 
 // recoverAdmitted is the admitted part of an attempt: the reservation, the
@@ -317,13 +317,16 @@ func (s *AuthService) compareRecoverySecret(target recoveryTarget, secret string
 // the already hashed new password and signs the holder in without the
 // second factor (owner decisions 2 and 3): the credential is the proof of
 // possession this path accepts.
-func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, user *db.User, kind auth.RecoverySecretKind, newHash string, at recoveryAttempt) (*AuthResult, error) {
+func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, target recoveryTarget, kind auth.RecoverySecretKind, newHash string, at recoveryAttempt) (*AuthResult, error) {
+	user := target.user
 	var err error
 	var revoked int64
 	via := "kit"
 	if kind == auth.RecoverySecretAssist {
 		via = "owner_credential"
-		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, newHash, "recovery_assist_used",
+		// Consume exactly the credential the compare verified: one issued
+		// meanwhile is a different row and stays.
+		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
 			"account recovered with an owner-issued credential; every session revoked")
 	} else {
 		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
@@ -414,27 +417,22 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 	if target.ID == actor.ID || auth.IsEffectivelyBanned(target) || target.PendingApproval() || strings.HasPrefix(target.Username, "[") {
 		return nil, ErrRecoveryAssistUnusable
 	}
-	actorKey := fmt.Sprintf("recovery_assist_issue:%d", actor.ID)
-	targetKey := fmt.Sprintf("recovery_assist_target:%d", target.ID)
-	// Peek both budgets before spending either, so a refusal on one does
-	// not consume the other; the spend itself is then unconditional.
-	if !s.limiter.Check(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow) ||
-		!s.limiter.Check(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow) {
-		return nil, ErrRecoveryAssistBudget
-	}
-	s.limiter.Allow(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow)
-	s.limiter.Allow(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow)
-
-	shown, canonical, err := auth.GenerateRecoveryAssistSecret()
-	if err != nil {
-		return nil, ErrRecoveryAssistFailed
-	}
+	// The argon2id hash of the credential takes an admission slot (B4-4),
+	// taken before the issuance budgets are spent: a refusal for load
+	// charges nothing.
 	release, admitted := s.limiter.Admission().TryAcquire()
 	if !admitted {
 		return nil, ErrAuthBusy
 	}
+	defer release()
+	if !s.reserveIssuance(actor.ID, target.ID) {
+		return nil, ErrRecoveryAssistBudget
+	}
+	shown, canonical, err := auth.GenerateRecoveryAssistSecret()
+	if err != nil {
+		return nil, ErrRecoveryAssistFailed
+	}
 	verifier, err := auth.HashRecoveryKitSecret(canonical)
-	release()
 	if err != nil {
 		return nil, ErrRecoveryAssistFailed
 	}
@@ -452,4 +450,22 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 		Username:     target.Username,
 		Verification: verification,
 	}, nil
+}
+
+// reserveIssuance spends one slot of the owner's and the account's issuance
+// budgets, both or neither: the peek and the spend run under one lock, so
+// concurrent issuances cannot slip past either limit and a refusal on one
+// budget never consumes the other.
+func (s *AuthService) reserveIssuance(actorID, targetID int64) bool {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+	actorKey := fmt.Sprintf("recovery_assist_issue:%d", actorID)
+	targetKey := fmt.Sprintf("recovery_assist_target:%d", targetID)
+	if !s.limiter.Check(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow) ||
+		!s.limiter.Check(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow) {
+		return false
+	}
+	s.limiter.Allow(actorKey, recoveryAssistIssueLimit, recoveryAssistIssueWindow)
+	s.limiter.Allow(targetKey, recoveryAssistTargetLimit, recoveryAssistIssueWindow)
+	return true
 }

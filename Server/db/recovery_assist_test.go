@@ -46,7 +46,7 @@ func TestRecoveryAssist_IssueReplacesAndRedeemConsumes(t *testing.T) {
 		t.Fatalf("credential after replacement = %+v", a)
 	}
 
-	revoked, err := database.RedeemRecoveryAssist(ctx, uid, "newhash", "recovery_assist_used", "recovered")
+	revoked, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$second", "newhash", "recovery_assist_used", "recovered")
 	if err != nil || revoked != 2 {
 		t.Fatalf("RedeemRecoveryAssist = %d, %v; want 2 sessions revoked", revoked, err)
 	}
@@ -65,7 +65,7 @@ func TestRecoveryAssist_IssueReplacesAndRedeemConsumes(t *testing.T) {
 		t.Errorf("audit rows = %d, %v; want 1", audits, err)
 	}
 	// Single use: a replay finds nothing and changes nothing.
-	if _, err := database.RedeemRecoveryAssist(ctx, uid, "third", "recovery_assist_used", "again"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$second", "third", "recovery_assist_used", "again"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
 		t.Fatalf("replay = %v, want ErrRecoveryAssistSpent", err)
 	}
 	if u, _ = database.GetUserByID(ctx, uid); u.PasswordHash != "newhash" {
@@ -83,7 +83,7 @@ func TestRedeemRecoveryAssist_RefusesAnExpiredCredential(t *testing.T) {
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a == nil || a.Live(time.Now()) {
 		t.Fatalf("credential = %+v, want present but expired", a)
 	}
-	if _, err := database.RedeemRecoveryAssist(ctx, uid, "newhash", "recovery_assist_used", "late"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$v", "newhash", "recovery_assist_used", "late"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
 		t.Fatalf("expired redeem = %v, want ErrRecoveryAssistSpent", err)
 	}
 	u, _ := database.GetUserByID(ctx, uid)
@@ -109,7 +109,7 @@ func TestRedeemRecoveryAssist_RollsBackAsAWhole(t *testing.T) {
 		"CREATE TRIGGER fault_delete_sessions BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'injected fault'); END"); err != nil {
 		t.Fatalf("install fault: %v", err)
 	}
-	if _, err := database.RedeemRecoveryAssist(ctx, uid, "newhash", "recovery_assist_used", "recovered"); err == nil {
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$second", "newhash", "recovery_assist_used", "recovered"); err == nil {
 		t.Fatal("redeem succeeded through an injected session-delete failure")
 	}
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a == nil || !a.Live(time.Now()) {
@@ -178,7 +178,7 @@ func TestDeleteRecoveryAssist_WithdrawsTheCredential(t *testing.T) {
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {
 		t.Fatalf("credential after withdrawal = %+v, want none", a)
 	}
-	if _, err := database.RedeemRecoveryAssist(ctx, uid, "newhash", "recovery_assist_used", "late"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$v", "newhash", "recovery_assist_used", "late"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
 		t.Fatalf("redeem after withdrawal = %v, want ErrRecoveryAssistSpent", err)
 	}
 	// A row whose expiry cannot be parsed is not live either.
@@ -202,5 +202,35 @@ func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
 	}
 	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "gone"); !errors.Is(err, db.ErrRecoveryKitSpent) {
 		t.Fatalf("redeem after deletion = %v, want ErrRecoveryKitSpent", err)
+	}
+}
+
+// The consume names the verifier the caller compared against (Codex on
+// #1513): a credential replaced between the compare and the redeem cannot
+// spend its replacement.
+func TestRedeemRecoveryAssist_OnlyConsumesTheCredentialItVerified(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid := seedRecoveringUser(t, database, "reissued")
+	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$old", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
+		t.Fatalf("UpsertRecoveryAssist: %v", err)
+	}
+	// The owner re-issues after the old credential was compared but before
+	// its redeem ran.
+	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$new", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
+		t.Fatalf("UpsertRecoveryAssist (replacement): %v", err)
+	}
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$old", "newhash", "recovery_assist_used", "stale"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
+		t.Fatalf("redeem with the replaced credential = %v, want ErrRecoveryAssistSpent", err)
+	}
+	a, _ := database.GetRecoveryAssist(ctx, uid)
+	if a == nil || a.Verifier != "$argon2id$new" {
+		t.Fatalf("the replacement was consumed by the stale redeem: %+v", a)
+	}
+	if u, _ := database.GetUserByID(ctx, uid); u.PasswordHash != "oldhash" {
+		t.Fatalf("a refused redeem changed the password to %q", u.PasswordHash)
+	}
+	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$new", "newhash", "recovery_assist_used", "fresh"); err != nil {
+		t.Fatalf("redeem with the replacement = %v, want success", err)
 	}
 }

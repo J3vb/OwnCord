@@ -33,8 +33,10 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
-	// The consume deletes only a live credential, so the affected row count is
-	// what tells two concurrent redemptions, and an expired credential, apart.
+	// The consume deletes only the live credential whose verifier the caller
+	// compared against, so the affected row count is what tells two concurrent
+	// redemptions, an expired credential, and a credential replaced since the
+	// compare apart.
 	ConsumeRecoveryAssist(ctx context.Context, arg ConsumeRecoveryAssistParams) (sql.Result, error)
 	// The consume is conditional: only an unspent kit is spent, and the affected
 	// row count is what tells two concurrent redemptions apart.
