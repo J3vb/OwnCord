@@ -25,13 +25,14 @@ the user; OC-0354 waits on owner question 8);
 `DELETE /api/v1/users/me/sessions` with its explicit response, the
 `session_revoke_all` audit row and the two-account proof; the new-login
 signal half waits on owner question 8);
-**B4-4 opened 2026-09-02** (branch `feat/b4-4-admission-budget`, PR #1504;
-evidence
-block in its section — one atomic admission budget at every bcrypt site,
-race and bounded-work proofs; SEC-01's register row records the control and
-closes on the owner's advisory ID). The owner decisions listed below block
-the steps that name them. _Update this line — not only the step table — as
-steps land; the [README.md](README.md) row is the status authority._
+**B4-4 merged 2026-09-02** (PR #1504 = `eecf99b`; one atomic admission budget
+at every bcrypt site with race and bounded-work proofs; SEC-01's register row
+records the control and closes on the owner's advisory ID);
+**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
+PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
+test-first, revert-proofs pass). The owner decisions listed below block the steps that
+name them. _Update this line — not only the step table — as steps land; the
+[README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -1096,6 +1097,40 @@ undefined` and hand back the 200 body; `showChangeOutcomeToast`
   keeps the warning inline (yellow, no three-second fade) on a partial
   success — the fields clear either way, because the password did change.
   Pinned in `settings-overlay.test.ts` and the MainPage-level test.
+
+**Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
+`feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,
+opened 2026-09-01). Fix commit `190344e`; ledger records flipped in
+`fac3d88` on the same branch (`fix.commit = 190344e`, `revertProof = pass`).
+Both findings had moved since they were filed: B3-8 put the CLI's logic
+behind `TokenService`, so OC-0340's hole was `Create` folding a negative
+lifetime into "never" (the admin route refused it at its edge; the CLI did
+not), and OC-0341's was still the CLI's revoke committing to the id branch.
+
+- **OC-0340:** `TokenService.Create` refuses `lifetime < 0` as
+  `ErrBadRequest` — the seam both callers share, so the CLI's
+  `--expires -1h` now exits 2 with the reason and mints nothing; zero stays
+  the documented "never" (`TestTokenService_CreateStoresOnlyTheHash` keeps
+  pinning that). Tests: the negative cases in
+  `TestTokenService_CreateRefusesUnusableInput`;
+  `TestTokenCreate_NegativeExpiryIsRefused` at the CLI (also that no-expiry
+  and a positive window still mint). Revert-proof: both fail with the
+  original `Create`.
+- **OC-0341:** `tokenRevoke` tries an all-digit argument as an id first and,
+  on `ErrNotFound`, as a label; id precedence is kept and now stated in the
+  usage text — the ambiguity the ledger noted ("a token with id 2024 would
+  be revoked instead") is the documented rule, not a silent surprise.
+  Test: `TestTokenRevoke_NumericLabelFallsThroughToLabel` — a label
+  `2024` revokes; an argument matching a live id revokes that token first;
+  once it is gone the same argument reaches the label; nothing left exits 1.
+  Revert-proof: fails with the original `tokenRevoke`.
+- **Gates:** `gofmt`, `go vet`, `go test -race` on `.` (the `main`
+  package, its first tests) and `service` green; pinned `golangci-lint`
+  v2.11.3 0 issues; `gendocs` drift-free (no route or config change);
+  `check:docs` counts moved to 331 fixed / 48 open on this branch (the
+  count-bearing documents are edited together with the ledger; B4-3's
+  branch moves the same lines for OC-0321 — whichever merges second
+  re-derives).
 
 ## Exit gate
 

@@ -125,6 +125,15 @@ func TestTokenService_CreateRefusesUnusableInput(t *testing.T) {
 		t.Errorf("Create at exactly the cap: %v", err)
 	}
 
+	// A negative lifetime is refused, not folded into "never" (OC-0340): the
+	// caller asked for a bounded credential and must not receive a permanent
+	// one behind a success message. Zero stays the documented "never".
+	for _, lifetime := range []time.Duration{-time.Nanosecond, -time.Hour, -720 * time.Hour} {
+		if _, err := svc.Create(ctx, 1, "", "went-negative", lifetime); !errors.Is(err, ErrBadRequest) {
+			t.Errorf("Create(lifetime=%v): err = %v, want ErrBadRequest", lifetime, err)
+		}
+	}
+
 	// Nothing is written for any refusal.
 	list, err := svc.List(ctx)
 	if err != nil {
