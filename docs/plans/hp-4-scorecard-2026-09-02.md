@@ -5,7 +5,7 @@
 §HP-4 (roadmap
 [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md), B4)
 **Commits reviewed:** the identity chain's squash merges on `dev` (table
-below) and the pull requests still open at measurement
+below); every step of the chain has merged since measurement
 **Measured at:** `dev` `b5e9d4a` (#1510, B4-8), branch `docs/hp-4-scorecard`
 **Measured:** 2026-09-02
 **Evidence base:** [data-lifecycle.md](../architecture/data-lifecycle.md)
@@ -45,7 +45,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1509 | B4-12(c) — OC-0324                                                                                        | `fc4c562` (merged after measurement) |
 | #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair | open — ready, auto-merge armed       |
 | #1512 | B4-5 — recovery kit                                                                                       | `52f3df7` (merged after measurement) |
-| #1513 | B4-6 — owner-assisted recovery                                                                            | open — draft, stacked on #1512       |
+| #1513 | B4-6 — owner-assisted recovery                                                                            | `33f82a8` (merged after measurement) |
 | #1514 | B4-8 review fixes                                                                                         | open — ready, auto-merge armed       |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is

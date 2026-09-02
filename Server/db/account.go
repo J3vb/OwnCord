@@ -69,6 +69,7 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		// The recovery kit's verifier (B4-5, class 5): a spent or live kit is
 		// a credential the anonymised row must not keep.
 		{"recovery_kits", `DELETE FROM recovery_kits WHERE user_id = ?`},
+		{"recovery_assists", `DELETE FROM recovery_assists WHERE user_id = ?`},
 	}
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {

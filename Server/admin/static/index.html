@@ -843,6 +843,7 @@ async function renderUsers(){
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     if(can(PERM.MANAGE_ROLES))html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
     if(can(PERM.KICK_MEMBERS))html+='<button class="act-btn" title="Force Logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
+    if(isOwner()&&!banned&&uid!==(state.me&&state.me.id))html+='<button class="act-btn" title="Issue recovery credential" onclick="openIssueRecovery('+uid+',\''+jsq(uname)+'\')">'+I.lock+'</button>';
     if(can(PERM.BAN_MEMBERS)){
       if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
       else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
@@ -887,6 +888,19 @@ async function saveUserRole(uid){
 
 function openBanUser(uid,uname){
   openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:white">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
+}
+
+function openIssueRecovery(uid,uname){
+  openModal('<div class="modal-header"><h3>Issue Recovery Credential</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Give <strong style="color:white">'+esc(uname)+'</strong> a one-time credential to get back in. Redeeming it sets a new password, signs out every device and skips two-factor. It works once and expires in 15 minutes. Make sure you know who you are talking to first.</p><div class="form-group"><label class="form-label">How did you verify them?</label><select class="form-input" id="recoveryVerification"><option value="in_person">In person</option><option value="voice_call">Voice call</option><option value="video_call">Video call</option><option value="trusted_contact">Through a trusted contact</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="confirmIssueRecovery('+uid+')">Issue credential</button></div>');
+}
+
+async function confirmIssueRecovery(uid){
+  const verification=document.getElementById('recoveryVerification')?.value||'';
+  try{
+    const r=await api('POST','/users/'+uid+'/recovery-credential',{verification});
+    const until=r.expires_at?new Date(r.expires_at).toLocaleTimeString():'15 minutes from now';
+    openModal('<div class="modal-header"><h3>Recovery Credential</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Hand this to <strong style="color:white">'+esc(r.username)+'</strong> over the channel you verified them on. It is shown once and expires at '+esc(until)+'.</p><code style="display:block;font-size:18px;letter-spacing:1px;padding:12px;background:var(--bg-tertiary);border-radius:6px;user-select:all;text-align:center">'+esc(r.credential)+'</code><p style="color:var(--text-faint);font-size:12px;margin-top:10px">They enter it with their username and a new password in the client\u2019s account-recovery form (POST /api/v1/auth/recover). Issuing another one replaces this credential.</p></div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>');
+  }catch(e){showToast(e.message,'error')}
 }
 
 async function confirmBan(uid){

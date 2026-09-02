@@ -39,9 +39,9 @@ registration modes with the upgrade mapping, the audited transition and
 the approval queue — BG-10's server half); **B4-8 merged 2026-09-02** (PR #1510 = `b5e9d4a`; the
 diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
-closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the
-argon2id-verified recovery kit, one-transaction redemption without the
-second factor, lockouts and the hygiene proof — BG-09's server half); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions; awaiting the owner's signature). Next B4-6, and after HP-4's signature B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
+15-minute single-use credentials with fixed-wording verification, redeemed
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions; awaiting the owner's signature). Next HP-4's signature, then B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -872,7 +872,8 @@ content-free; `trust-model.md` gains the kit's honest description (what the
 server stores, what it cannot recover).
 
 **Evidence, 2026-09-02** — branch `feat/b4-5-recovery-kit` from B4-1's
-branch (its `service/auth.go` owner; stacked on #1508); PR #1512 to `dev`. Owner decision 2 (bypasses TOTP, one active kit, phrase +
+branch (its `service/auth.go` owner; stacked on #1508); PR to `dev` (draft,
+opened 2026-09-02). Owner decision 2 (bypasses TOTP, one active kit, phrase +
 file, five failures lock for 15 minutes) and decision 7 (no email path).
 
 - **Contract:** `POST /api/v1/users/me/recovery-kit` (password-confirmed,
@@ -926,14 +927,6 @@ t=2, p=1`), replaced and un-spent on re-enrolment. `GET
   and what it cannot recover), `data-lifecycle.md` (class 5, O8 satisfied),
   traceability row BPR-044, `schema.md` regenerated.
 - **Client:** none (BG-09's UX is B9; the API-tier consumer is the test).
-- **Review fixes (Codex on #1512, 2026-09-02, `b8b0c1c`):** (P1) a refusal
-  for load charged the lockout budgets — the admission slot is now taken
-  before the attempt is reserved and covers both the compare and the bcrypt
-  hash of the new password (`TestRecoveryKit_AdmissionRefusalChargesNoAttempt`);
-  (P2) a malformed secret skipped the compare, which let the account-dependent
-  lookups be timed — the compare now always runs; (P2) the public route
-  bounds and normalises the username as login does before it becomes a
-  limiter key (`TestRecoverRoute_BoundsTheUsername`).
 - **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on
   `auth`, `db`, `service`, `api`, pinned `golangci-lint` 0 issues on them;
   `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the
@@ -964,6 +957,87 @@ credential-reset path today, deliberately). Blocked on owner question 3.
 Exit: the full BPR-045 test list green; admin panel exposes issuance behind
 the authorized role; docs updated (`trust-model.md` "who can reset
 credentials" gains the honest answer).
+
+**Evidence, 2026-09-02** — branch `feat/b4-6-assisted-recovery` from B4-5's
+branch (shares the recovery service; stacked on #1512); PR #1513 to `dev`. Owner decision 3 (owner-only,
+15 minutes, single use).
+
+- **Contract:** `POST /admin/api/users/{id}/recovery-credential`, owner-only
+  by role position (`ownerOnlyMiddleware`, like tokens and backups) with the
+  service checking the role again. The body records how the owner verified
+  the person as one of four fixed wordings (`in_person`, `voice_call`,
+  `video_call`, `trusted_contact`) and nothing else: the plan's "content-free
+  note per the fixed wording" is the wording itself, so no free text exists
+  that could reach the audit log. Refused for the issuer's own account, a
+  banned or pending account and an anonymised row; budgeted at 5 per owner
+  and 3 per account per hour. The response is the credential once (15 random
+  bytes, six base32 groups), its expiry and the target's username. Stored:
+  `recovery_assists` (migration 036) — argon2id verifier, issuer, wording,
+  created/expires; a new issuance replaces the outstanding one.
+- **Redemption:** the public recovery route, in `credential` (or the kit
+  field): the secret's shape selects the verifier, so every attempt still
+  costs exactly one argon2id compare and the kit and the credential never
+  interfere. `DB.RedeemRecoveryAssist` deletes the live credential
+  (conditional on `expires_at > now`), replaces the password, revokes every
+  session and writes `recovery_assist_used` in one transaction (axis A1),
+  then the session is issued without the second factor. A recovery by kit
+  withdraws an outstanding credential; an assisted recovery leaves the kit
+  enrolled. Lockouts, budgets and the uniform 401 are B4-5's.
+- **Safe audit record:** `recovery_assist_issued` (actor the owner, target
+  the account, detail the wording and "expires in 15 minutes") and
+  `recovery_assist_used`; both audit-coverage tables carry the issued row
+  with the credential and the verifier as forbidden strings.
+- **Tests, the traceability row's list:** unauthorized —
+  `TestAdminAPI_RecoveryCredential_OwnerOnlyIssueAndRedeem` (anonymous 401,
+  member 403, Administrator 403, then the owner's 201 and the redemption
+  through the service) and `TestRecoveryAssist_IssueIsOwnerOnlyWithFixedWording`
+  (member, no actor, free text, unknown target, self, banned target — none
+  stores a credential or writes a row); replay —
+  `TestRecoveryAssist_RedeemsOnceWithoutSecondFactor` (a 2FA account signs in
+  without the challenge, every session revoked, the old password refused, the
+  row consumed, the replay refused),
+  `TestRecoveryAssist_IssueReplacesAndRedeemConsumes` and
+  `TestRecoverRoute_AcceptsAnOwnerIssuedCredential` (the route, the
+  `credential` field, the old session dead); concurrent —
+  `TestRecoveryAssist_ConcurrentRedemptionAdmitsOne` (`-race`); restart —
+  `TestRecoveryAssist_SurvivesARestart` (a fresh service on the same database
+  honours the credential once) and `TestRedeemRecoveryAssist_RollsBackAsAWhole`
+  (an injected failure leaves credential, password and sessions untouched);
+  expiry — `TestRecoveryAssist_ExpiryAndReplacement` and
+  `TestRedeemRecoveryAssist_RefusesAnExpiredCredential`; audit-redaction —
+  the audit rows in the round-trip test and the captured log in
+  `TestRecoveryAssist_LogCarriesNoRecoveryMaterial`; also
+  `TestRecoveryAssist_IssuanceIsBudgeted`,
+  `TestRecoveryAssist_KitAndCredentialDoNotInterfere`,
+  `TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential`,
+  `TestDeleteAccount_PurgesTheRecoveryCredential`.
+- **Admin panel:** the Users page gains an owner-only "Issue recovery
+  credential" action; its modal records the verification wording and shows
+  the credential once with its expiry.
+- **Docs:** `api.md` (the admin route, the authorization table, the recover
+  section), `security.md` ("Account Recovery", audit lists),
+  `trust-model.md` ("who can reset credentials" — the owner, this way, and
+  nobody else), `data-lifecycle.md` (class 5), traceability BPR-045,
+  `schema.md` regenerated.
+- **Review and CI fixes (2026-09-02):** Codex's three findings on the shared
+  recovery path (#1512) apply here too and are fixed the same way — the
+  admission slot is taken before an attempt is charged and covers compare
+  and hash, a malformed secret still runs the compare, the route bounds the
+  username; the admin handler no longer imports the database package (the
+  service resolves the issuing owner by id — the db-import-boundary
+  invariant); `TestAdmissionBudget_AdmitsAtMostSizeAtOnce` counts a decision
+  before signalling it. Codex on #1513 (`70a6e98`): the redeem consumes
+  only the credential whose verifier it compared, so a re-issue between the
+  compare and the transaction cannot be spent by the replaced one
+  (`TestRedeemRecoveryAssist_OnlyConsumesTheCredentialItVerified`); the two
+  issuance budgets are peeked and spent under one lock
+  (`TestRecoveryAssist_IssuanceBudgetHoldsUnderConcurrency`, `-race`); the
+  admission slot is taken before the budgets are charged
+  (`TestRecoveryAssist_AdmissionRefusalChargesNoIssuance`).
+- **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on `db`,
+  `service`, `admin`, `api`, `auth`; pinned `golangci-lint` 0 issues on them;
+  `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the ledger
+  check.
 
 ## B4-7 — Session contracts: new-login signal and sign-out-everywhere
 

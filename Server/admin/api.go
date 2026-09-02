@@ -169,6 +169,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
 		r.With(requirePerm(permissions.KickMembers)).
 			Delete("/users/{id}/sessions", handleForceLogout(mod))
+		r.Post("/users/{id}/recovery-credential", ownerOnlyMiddleware(handleIssueRecoveryCredential(svc.Auth)).ServeHTTP) // B4-6, owner-only
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).
