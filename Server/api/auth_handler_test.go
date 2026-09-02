@@ -136,7 +136,7 @@ func TestRegister_RegistrationClosed(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = '0' WHERE key = 'registration_open'`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `INSERT OR REPLACE INTO settings (key, value) VALUES ('registration_mode', 'closed')`); err != nil {
 		t.Fatalf("close registration: %v", err)
 	}
 
@@ -890,8 +890,8 @@ func TestLogin_Require2FASettingRejectsUsersWithoutEnrollment(t *testing.T) {
 	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
 		t.Fatalf("enable require_2fa: %v", err)
 	}
-	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'false' WHERE key = 'registration_open'`); err != nil {
-		t.Fatalf("disable registration_open: %v", err)
+	if _, err := database.ExecContext(context.Background(), `INSERT OR REPLACE INTO settings (key, value) VALUES ('registration_mode', 'closed')`); err != nil {
+		t.Fatalf("close registration: %v", err)
 	}
 
 	hash, _ := auth.HashPassword("correctPass1")

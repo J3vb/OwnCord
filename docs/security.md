@@ -62,7 +62,7 @@ OwnCord supports TOTP-based 2FA:
   atomic. Back the key file up beside the database — a backup does not contain
   it.
 - Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
-- `require_2fa` requires all users to have 2FA enabled and registration to be closed
+- `require_2fa` requires all users to have 2FA enabled and `registration_mode` to be `closed`; while it is on, the mode cannot be reopened
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
 - Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); an over-budget attempt is refused with `429 RATE_LIMITED`, runs no bcrypt and counts as no failed attempt
@@ -78,7 +78,7 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
-- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `plugin_install`, `plugin_uninstall`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
@@ -147,7 +147,7 @@ The Tauri desktop client implements the following security measures:
 ## Security Hardening Checklist for Operators
 
 - [ ] Enable TLS (self-signed is the default; custom certs recommended for production)
-- [ ] Keep invite-only registration enabled (default)
+- [ ] Keep registration invite-only (the default) or closed; `approval` holds new accounts until you approve them in the admin panel, `open` admits anyone
 - [ ] Set a strong admin password
 - [ ] Configure rate limits (defaults are sensible but review for your use case)
 - [ ] Run regular backups via the admin panel

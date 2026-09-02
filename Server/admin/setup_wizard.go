@@ -34,9 +34,11 @@ type SetupOptions struct {
 // Every field is a pointer: absent means "keep the current/default value".
 type setupWizardRequest struct {
 	// Stored in the settings table (read live, no restart needed).
-	ServerName       *string `json:"server_name"`
-	Motd             *string `json:"motd"`
-	RegistrationOpen *bool   `json:"registration_open"`
+	ServerName *string `json:"server_name"`
+	Motd       *string `json:"motd"`
+	// RegistrationMode is closed / invite / approval / open (B4-1); the
+	// wizard defaults to invite.
+	RegistrationMode *string `json:"registration_mode"`
 
 	// Stored in config.yaml (consumed at startup — changes need a restart).
 	Port            *int    `json:"port"`
@@ -55,7 +57,7 @@ type setupWizardRequest struct {
 type setupDefaults struct {
 	ServerName        string `json:"server_name"`
 	Motd              string `json:"motd"`
-	RegistrationOpen  bool   `json:"registration_open"`
+	RegistrationMode  string `json:"registration_mode"`
 	Port              int    `json:"port"`
 	TLSMode           string `json:"tls_mode"`
 	TLSDomain         string `json:"tls_domain"`
@@ -107,6 +109,13 @@ func validateWizard(wr *setupWizardRequest) error {
 // identical treatment of the username field, and service.SanitizeText's doc
 // comment.
 func wizardValidateIdentity(wr *setupWizardRequest) error {
+	if wr.RegistrationMode != nil {
+		mode, ok := service.ParseRegistrationMode(*wr.RegistrationMode)
+		if !ok {
+			return fmt.Errorf("registration_mode must be one of closed, invite, approval, open")
+		}
+		*wr.RegistrationMode = string(mode)
+	}
 	if wr.ServerName != nil {
 		name := strings.TrimSpace(service.SanitizeText(*wr.ServerName))
 		if name == "" {
@@ -202,7 +211,7 @@ func validateHostname(h string) error {
 // ─── Applying the wizard ─────────────────────────────────────────────────────
 
 // wizardSettingUpdates maps the wizard payload onto the settings rows it
-// writes. server_name, motd and registration_open are read live by the server;
+// writes. server_name, motd and registration_mode are read live by the server;
 // max_upload_bytes and voice_quality are written so the Settings page shows
 // values consistent with what the wizard put in config.yaml.
 //
@@ -217,12 +226,8 @@ func wizardSettingUpdates(wr *setupWizardRequest) map[string]string {
 	if wr.Motd != nil {
 		updates["motd"] = *wr.Motd
 	}
-	if wr.RegistrationOpen != nil {
-		if *wr.RegistrationOpen {
-			updates["registration_open"] = "1"
-		} else {
-			updates["registration_open"] = "0"
-		}
+	if wr.RegistrationMode != nil {
+		updates["registration_mode"] = *wr.RegistrationMode
 	}
 	if wr.UploadMaxSizeMB != nil {
 		updates["max_upload_bytes"] = strconv.Itoa(*wr.UploadMaxSizeMB * 1024 * 1024)

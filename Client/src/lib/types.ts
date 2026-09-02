@@ -840,8 +840,11 @@ export interface AuthResponse {
 
 /** POST /api/auth/register response. */
 export interface RegisterResponse {
-  readonly user: { readonly id: number; readonly username: string };
-  readonly token: string;
+  readonly user?: { readonly id: number; readonly username: string };
+  readonly token?: string;
+  /** Approval-mode registration (B4-1): the server answered 202 — the
+   *  account exists but cannot sign in until an admin approves it. */
+  readonly status?: "pending_approval";
 }
 
 /**

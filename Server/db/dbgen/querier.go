@@ -21,6 +21,7 @@ type Querier interface {
 	// moderator was never authorized against (OC-0005). :execresult so the
 	// caller can tell a real no-op (target moved) from a normal apply.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
+	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
@@ -37,6 +38,7 @@ type Querier interface {
 	CountActiveMessages(ctx context.Context) (int64, error)
 	CountChannels(ctx context.Context) (int64, error)
 	CountDMParticipants(ctx context.Context, channelID int64) (int64, error)
+	CountPendingUsers(ctx context.Context) (int64, error)
 	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
 	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -58,6 +60,10 @@ type Querier interface {
 	CreateEmoji(ctx context.Context, arg CreateEmojiParams) (CreateEmojiRow, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
+	// Approval-mode registration (B4-1): the account exists from the application
+	// on, as registration_status = 'pending', and cannot sign in until an admin
+	// approves it. Denial anonymises the row and marks it 'denied' for good.
+	CreatePendingUser(ctx context.Context, arg CreatePendingUserParams) (sql.Result, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
 	DeleteChannel(ctx context.Context, id int64) error
@@ -95,6 +101,7 @@ type Querier interface {
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DeleteUsedTOTPCode(ctx context.Context, arg DeleteUsedTOTPCodeParams) error
 	DeleteUserSessions(ctx context.Context, userID int64) (sql.Result, error)
+	DenyPendingUser(ctx context.Context, id int64) (sql.Result, error)
 	DisablePlugin(ctx context.Context, id int64) error
 	// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 	// already carry (OC-0284): an edit that races a delete must not rewrite a
@@ -247,6 +254,7 @@ type Querier interface {
 	// signal, leaving those users unrenderable and unmentionable on the client
 	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
+	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes
 	// them, but creating a role inserts just below the actor and may tie with an

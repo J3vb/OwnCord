@@ -67,6 +67,7 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 			d := &setupDefaults{
 				ServerName:        cfg.Server.Name,
 				Motd:              "Welcome!",
+				RegistrationMode:  string(service.DefaultRegistrationMode),
 				Port:              cfg.Server.Port,
 				TLSMode:           cfg.TLS.Mode,
 				TLSDomain:         cfg.TLS.Domain,
@@ -102,8 +103,10 @@ func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsServi
 	if v, err := settings.Setting(r.Context(), "motd"); err == nil {
 		d.Motd = v
 	}
-	if v, err := settings.Setting(r.Context(), "registration_open"); err == nil {
-		d.RegistrationOpen = v == "1" || strings.EqualFold(v, "true")
+	if v, err := settings.Setting(r.Context(), "registration_mode"); err == nil {
+		if mode, ok := service.ParseRegistrationMode(v); ok {
+			d.RegistrationMode = string(mode)
+		}
 	}
 }
 

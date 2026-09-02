@@ -54,50 +54,101 @@ func TestSettings_PatchRejectsUnknownKeyWritingNothing(t *testing.T) {
 
 func TestSettings_PatchNormalizesBooleans(t *testing.T) {
 	svc, database := newSettingsService(t)
+	// require_2fa's preconditions hold on a closed, user-less server.
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
-		"registration_open": "TRUE",
+		"registration_mode": "closed",
+		"require_2fa":       "TRUE",
 	}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
-	got, err := database.GetSetting(context.Background(), "registration_open")
+	got, err := database.GetSetting(context.Background(), "require_2fa")
 	if err != nil || got != "1" {
-		t.Fatalf("registration_open = %q, %v; want \"1\"", got, err)
+		t.Fatalf("require_2fa = %q, %v; want \"1\"", got, err)
 	}
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
-		"registration_open": "false",
+		"require_2fa": "false",
 	}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
-	got, _ = database.GetSetting(context.Background(), "registration_open")
+	got, _ = database.GetSetting(context.Background(), "require_2fa")
 	if got != "0" {
-		t.Fatalf("registration_open = %q, want \"0\"", got)
+		t.Fatalf("require_2fa = %q, want \"0\"", got)
+	}
+}
+
+func TestSettings_PatchNormalizesRegistrationMode(t *testing.T) {
+	svc, database := newSettingsService(t)
+	if _, err := svc.Patch(context.Background(), 1, map[string]string{
+		"registration_mode": "  APPROVAL ",
+	}); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	got, err := database.GetSetting(context.Background(), "registration_mode")
+	if err != nil || got != "approval" {
+		t.Fatalf("registration_mode = %q, %v; want \"approval\"", got, err)
 	}
 }
 
 func TestSettings_PatchRejectsInvalidBoolean(t *testing.T) {
 	svc, _ := newSettingsService(t)
 	_, err := svc.Patch(context.Background(), 1, map[string]string{
-		"registration_open": "maybe",
+		"require_2fa": "maybe",
 	})
 	if !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("err = %v, want ErrBadRequest", err)
 	}
-	if want := `registration_open: invalid boolean value "maybe"`; !strings.Contains(err.Error(), want) {
+	if want := `require_2fa: invalid boolean value "maybe"`; !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %q, want it to contain %q", err, want)
 	}
 }
 
-func TestSettings_Require2FARejectedWhileRegistrationOpen(t *testing.T) {
-	svc, _ := newSettingsService(t)
+func TestSettings_PatchRejectsUnknownRegistrationMode(t *testing.T) {
+	svc, database := newSettingsService(t)
+	before, _ := database.GetSetting(context.Background(), "registration_mode")
 	_, err := svc.Patch(context.Background(), 1, map[string]string{
-		"require_2fa":       "1",
-		"registration_open": "1",
+		"registration_mode": "sometimes",
 	})
 	if !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("err = %v, want ErrBadRequest", err)
 	}
-	if want := "require_2fa cannot be enabled while registration is open"; !strings.Contains(err.Error(), want) {
+	if want := "registration_mode: must be one of closed, invite, approval, open"; !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %q, want it to contain %q", err, want)
+	}
+	if after, _ := database.GetSetting(context.Background(), "registration_mode"); after != before {
+		t.Fatalf("registration_mode changed to %q despite the rejected value", after)
+	}
+}
+
+func TestSettings_Require2FARejectedUnlessRegistrationClosed(t *testing.T) {
+	svc, _ := newSettingsService(t)
+	for _, mode := range []string{"invite", "approval", "open"} {
+		_, err := svc.Patch(context.Background(), 1, map[string]string{
+			"require_2fa":       "1",
+			"registration_mode": mode,
+		})
+		if !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("mode %s: err = %v, want ErrBadRequest", mode, err)
+		}
+		if want := "require_2fa cannot be enabled unless registration is closed"; !strings.Contains(err.Error(), want) {
+			t.Fatalf("mode %s: err = %q, want it to contain %q", mode, err, want)
+		}
+	}
+}
+
+func TestSettings_RegistrationCannotReopenWhileRequire2FAOn(t *testing.T) {
+	svc, database := newSettingsService(t)
+	if _, err := svc.Patch(context.Background(), 1, map[string]string{
+		"registration_mode": "closed",
+		"require_2fa":       "1",
+	}); err != nil {
+		t.Fatalf("enable require_2fa: %v", err)
+	}
+	_, err := svc.Patch(context.Background(), 1, map[string]string{"registration_mode": "invite"})
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("err = %v, want ErrBadRequest", err)
+	}
+	if got, _ := database.GetSetting(context.Background(), "registration_mode"); got != "closed" {
+		t.Fatalf("registration_mode = %q, want it still closed", got)
 	}
 }
 
@@ -107,7 +158,7 @@ func TestSettings_Require2FARejectedUntilAllEnrolled(t *testing.T) {
 
 	_, err := svc.Patch(context.Background(), 1, map[string]string{
 		"require_2fa":       "1",
-		"registration_open": "0",
+		"registration_mode": "closed",
 	})
 	if !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("err = %v, want ErrBadRequest", err)
@@ -121,7 +172,7 @@ func TestSettings_Require2FAAllowedWithNoUnenrolledUsers(t *testing.T) {
 	svc, database := newSettingsService(t)
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
 		"require_2fa":       "1",
-		"registration_open": "0",
+		"registration_mode": "closed",
 	}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}

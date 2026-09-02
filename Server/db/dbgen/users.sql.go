@@ -10,6 +10,14 @@ import (
 	"database/sql"
 )
 
+const approvePendingUser = `-- name: ApprovePendingUser :execresult
+UPDATE users SET registration_status = 'active' WHERE id = ? AND registration_status = 'pending'
+`
+
+func (q *Queries) ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, approvePendingUser, id)
+}
+
 const banUser = `-- name: BanUser :exec
 UPDATE users SET banned = 1, ban_reason = ?, ban_expires = ? WHERE id = ?
 `
@@ -23,6 +31,17 @@ type BanUserParams struct {
 func (q *Queries) BanUser(ctx context.Context, arg BanUserParams) error {
 	_, err := q.db.ExecContext(ctx, banUser, arg.BanReason, arg.BanExpires, arg.ID)
 	return err
+}
+
+const countPendingUsers = `-- name: CountPendingUsers :one
+SELECT COUNT(*) FROM users WHERE registration_status = 'pending'
+`
+
+func (q *Queries) CountPendingUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countUsers = `-- name: CountUsers :one
@@ -42,6 +61,7 @@ WHERE (banned = 0
        OR (ban_expires IS NOT NULL
            AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
   AND totp_secret IS NULL
+  AND registration_status = 'active'
 `
 
 // A lapsed temporary ban must not hide a TOTP-less user from this count: the
@@ -58,6 +78,23 @@ func (q *Queries) CountUsersWithoutTOTP(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createPendingUser = `-- name: CreatePendingUser :execresult
+INSERT INTO users (username, password, role_id, registration_status) VALUES (?, ?, ?, 'pending')
+`
+
+type CreatePendingUserParams struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	RoleID   int64  `json:"roleId"`
+}
+
+// Approval-mode registration (B4-1): the account exists from the application
+// on, as registration_status = 'pending', and cannot sign in until an admin
+// approves it. Denial anonymises the row and marks it 'denied' for good.
+func (q *Queries) CreatePendingUser(ctx context.Context, arg CreatePendingUserParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, createPendingUser, arg.Username, arg.Password, arg.RoleID)
+}
+
 const createUser = `-- name: CreateUser :execresult
 INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)
 `
@@ -72,10 +109,27 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 	return q.db.ExecContext(ctx, createUser, arg.Username, arg.Password, arg.RoleID)
 }
 
+const denyPendingUser = `-- name: DenyPendingUser :execresult
+UPDATE users
+SET registration_status = 'denied',
+    username = '[denied-' || id || ']',
+    password = '',
+    avatar = NULL,
+    display_name = NULL,
+    about = NULL,
+    custom_status = NULL,
+    status = 'offline'
+WHERE id = ? AND registration_status = 'pending'
+`
+
+func (q *Queries) DenyPendingUser(ctx context.Context, id int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, denyPendingUser, id)
+}
+
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status
+       display_name, about, custom_status, registration_status
 FROM users WHERE id = ?
 `
 
@@ -99,6 +153,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.DisplayName,
 		&i.About,
 		&i.CustomStatus,
+		&i.RegistrationStatus,
 	)
 	return i, err
 }
@@ -106,7 +161,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status
+       display_name, about, custom_status, registration_status
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
@@ -130,6 +185,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.DisplayName,
 		&i.About,
 		&i.CustomStatus,
+		&i.RegistrationStatus,
 	)
 	return i, err
 }
@@ -140,6 +196,7 @@ SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_ke
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
+  AND u.registration_status = 'active'
 ORDER BY u.username ASC
 `
 
@@ -178,6 +235,47 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 			&i.DisplayName,
 			&i.CustomStatus,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingUsers = `-- name: ListPendingUsers :many
+SELECT id, username, created_at FROM users
+WHERE registration_status = 'pending'
+ORDER BY created_at ASC, id ASC
+LIMIT ? OFFSET ?
+`
+
+type ListPendingUsersParams struct {
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type ListPendingUsersRow struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	CreatedAt string `json:"createdAt"`
+}
+
+func (q *Queries) ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingUsers, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingUsersRow{}
+	for rows.Next() {
+		var i ListPendingUsersRow
+		if err := rows.Scan(&i.ID, &i.Username, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
