@@ -51,6 +51,10 @@ type AuthService interface {
 	// DisableTOTP confirms the password, refuses while the server requires
 	// 2FA, clears the secret and revokes the caller's other sessions.
 	DisableTOTP(ctx context.Context, p service.Principal, password string) (*service.TOTPChangeResult, error)
+	// The recovery kit (B4-5).
+	EnrolRecoveryKit(ctx context.Context, p service.Principal, password, clientSecret string) (*service.RecoveryKitIssue, error)
+	RecoveryKitStatus(ctx context.Context, p service.Principal) (*service.RecoveryKitStatus, error)
+	RecoverWithKit(ctx context.Context, in service.RecoverInput) (*service.AuthResult, error)
 }
 
 // The production implementation satisfies the interface it was extracted for.

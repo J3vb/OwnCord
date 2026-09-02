@@ -66,6 +66,9 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		{"pending_totp_enrollments", `DELETE FROM pending_totp_enrollments WHERE user_id = ?`},
 		{"totp_used_codes", `DELETE FROM totp_used_codes WHERE user_id = ?`},
 		{"totp_recovery_codes", `DELETE FROM totp_recovery_codes WHERE user_id = ?`},
+		// The recovery kit's verifier (B4-5, class 5): a spent or live kit is
+		// a credential the anonymised row must not keep.
+		{"recovery_kits", `DELETE FROM recovery_kits WHERE user_id = ?`},
 	}
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {

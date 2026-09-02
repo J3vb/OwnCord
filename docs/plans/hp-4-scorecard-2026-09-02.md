@@ -44,7 +44,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1510 | B4-8 — diagnostics inventory, egress-sites, no-telemetry capture                                          | `b5e9d4a`                            |
 | #1509 | B4-12(c) — OC-0324                                                                                        | `fc4c562` (merged after measurement) |
 | #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair | open — ready, auto-merge armed       |
-| #1512 | B4-5 — recovery kit                                                                                       | open — draft, stacked on #1511       |
+| #1512 | B4-5 — recovery kit                                                                                       | `52f3df7` (merged after measurement) |
 | #1513 | B4-6 — owner-assisted recovery                                                                            | open — draft, stacked on #1512       |
 | #1514 | B4-8 review fixes                                                                                         | open — ready, auto-merge armed       |
 

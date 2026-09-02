@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TEXT    NOT NULL,
     unseen     INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
 CREATE TABLE IF NOT EXISTS channels (
