@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/diskutil"
@@ -21,7 +22,7 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
 
 	localIP := getOutboundIP()
 	port := cfg.Server.Port
-	baseURL := fmt.Sprintf("%s://%s:%d", scheme, localIP, port)
+	baseURL := scheme + "://" + net.JoinHostPort(localIP, strconv.Itoa(port))
 	adminURL := baseURL + "/admin"
 
 	tlsStatus := "disabled"
@@ -62,7 +63,9 @@ func wsURL(httpScheme, ip string, port int) string {
 	if httpScheme == "https" {
 		ws = "wss"
 	}
-	return fmt.Sprintf("%s://%s:%d", ws, ip, port)
+	// JoinHostPort brackets an IPv6 literal, so the URL stays valid on an
+	// IPv6-only host.
+	return ws + "://" + net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
 // Free-space thresholds for the boot-time disk warning. /health uses its own

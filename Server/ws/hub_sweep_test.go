@@ -20,11 +20,14 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 	release := make(chan struct{})
 
 	sweep := func() {
+		// runs first, then active: the test waits on active, so by the time
+		// it sees the sweep in flight the run is already counted — counting
+		// after would let a preemption between the two stores read runs = 0.
+		runs.Add(1)
 		cur := active.Add(1)
 		if cur > maxActive.Load() {
 			maxActive.Store(cur)
 		}
-		runs.Add(1)
 		<-release
 		active.Add(-1)
 	}
