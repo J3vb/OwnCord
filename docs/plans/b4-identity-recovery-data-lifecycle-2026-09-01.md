@@ -30,9 +30,11 @@ at every bcrypt site with race and bounded-work proofs; SEC-01's register row
 records the control and closes on the owner's advisory ID);
 **B4-12 batch (d) merged 2026-09-02** (PR #1501 = `9515174`; OC-0340 and
 OC-0341 closed — a negative token lifetime is refused at the service seam both
-callers share, and a numeric label can be revoked). Every remaining step waits
-on an owner decision listed below. _Update this line — not only the step
-table — as steps land; the [README.md](README.md) row is the status authority._
+callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
+8–10 recorded 2026-09-02** (amendments under the questions): next B4-7's
+new-login half with OC-0354, then B4-1 with OC-0324, B4-5 → B4-6, B4-8, HP-4,
+B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -253,6 +255,47 @@ BPR-032).
     redaction rules, user-initiation requirement); the export endpoint and
     operator/client UX land in B6/B9 under BG-15. Confirm, or pull the
     endpoint into B4-8.
+
+**Decisions recorded 2026-09-02** (owner answers — each the option the plan
+proposed; the steps they name are unblocked from this date):
+
+1. Registration (B4-1): the mode set, the invite-only default and the
+   upgrade mapping stand. Approval mode creates the account up front with
+   the applicant's credentials and holds it locked until an admin approves
+   it in the admin panel — nothing is sent to the applicant; a denied
+   application removes the locked account, audited. `approval` and `open`
+   get a per-IP creation limit and a queue-size cap.
+2. Recovery kit (B4-5): using the kit bypasses TOTP (it means "I lost my
+   devices") and forces a password reset; one active kit per account,
+   regeneration invalidates the old; the client presents a word phrase and
+   a downloadable file (B9 formats the same secret); five failed kit
+   attempts lock recovery for 15 minutes, audited.
+3. Admin-assisted recovery (B4-6): owner only; the credential lives 15
+   minutes and is single-use; the audit row is `recovery_assist_issued`
+   with category, actor id, subject id and the recorded verification
+   decision — nothing else.
+4. Retention (B4-11): minimum window one day; a channel policy overrides
+   the server policy in either direction; pinned messages are exempt;
+   server and channel scope only, DMs untouched.
+5. Holds: no hold mechanism in beta — retention is absolute, and the exit
+   gate's hold rule does not apply. A hold, if ever wanted, is its own
+   later step.
+6. Answered by B4-0 (PR #1497): no owner-side material existed; the
+   document was written as specified.
+7. Confirmed: no email or SMTP path in B4; optional SMTP recovery is a
+   post-B4 decision revisited at B9.
+8. New-login signal (B4-7's second half): REST-only — sessions gain an
+   `unseen` flag the client surfaces on its next fetch; no protocol change.
+   OC-0354's `totp_enabled` goes on the `GET /users/me` profile response.
+9. Erasure (B4-9): erased users' messages are hard-deleted rows; channel
+   history shows nothing where they were.
+10. Support bundle (B4-8): the data contract, the local-diagnostics
+    inventory and the no-telemetry proof only; the export endpoint and the
+    UX land in B6/B9 under BG-15.
+
+Build order from here: B4-7's new-login half with OC-0354, then B4-1 with
+the OC-0324 batch behind it, then B4-5 → B4-6 (serial on `service/auth.go`)
+with B4-8 beside them, then HP-4 and B4-9 → B4-10 → B4-11.
 
 ## B4-0 — Destructive-operation failure/threat models and data-class inventory
 
