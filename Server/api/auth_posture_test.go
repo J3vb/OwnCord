@@ -37,6 +37,7 @@ var publicSurface = map[string]string{
 	"POST /api/v1/auth/login":       "the credential entry point; rate-limited and lockout-guarded (TestLogin_*)",
 	"POST /api/v1/auth/register":    "the invite-gated account entry point (TestRegister_*); registration_mode is B4-1's",
 	"POST /api/v1/auth/verify-totp": "second step of login; consumes a partial-auth token in-band (TestVerifyTOTP_*)",
+	"POST /api/v1/auth/recover":     "account recovery with the locally held kit (B4-5); uniform 401s, rate-limited and lockout-guarded like login (TestRecoveryKit_*)",
 
 	"GET /api/v1/client-update/{target}/{current_version}": "the desktop updater's manifest; unauthenticated, per-IP rate-limited, signature checked client-side",
 

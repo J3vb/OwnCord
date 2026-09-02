@@ -36,8 +36,11 @@ callers share, and a numeric label can be revoked). **Owner decisions 1–5 and
 REST-only `unseen` session flag, and OC-0354 closed with it — BG-08's server
 half complete); **B4-1 opened 2026-09-02** (branch
 `feat/b4-1-registration-modes`, PR #1508; evidence in its section — the four
-modes, the upgrade mapping, the audited transition, the approval queue). Next
-OC-0324 (B4-12(c)), then B4-5 → B4-6, B4-8, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+modes, the upgrade mapping, the audited transition, the approval queue). **B4-5 opened
+2026-09-02** (branch `feat/b4-5-recovery-kit`, stacked on B4-1; evidence in
+its section — the argon2id-verified kit, one-transaction redemption without
+the second factor, lockouts and the hygiene proof). Next OC-0324 (B4-12(c)),
+then B4-6, B4-8, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -866,6 +869,67 @@ owner question 2.
 Exit: enrolment/recovery/rotation green with the abuse suite; audit rows
 content-free; `trust-model.md` gains the kit's honest description (what the
 server stores, what it cannot recover).
+
+**Evidence, 2026-09-02** — branch `feat/b4-5-recovery-kit` from B4-1's
+branch (its `service/auth.go` owner; stacked on #1508); PR to `dev` (draft,
+opened 2026-09-02). Owner decision 2 (bypasses TOTP, one active kit, phrase +
+file, five failures lock for 15 minutes) and decision 7 (no email path).
+
+- **Contract:** `POST /api/v1/users/me/recovery-kit` (password-confirmed,
+  the `pw_confirm` lockout family) issues the kit: with a client-generated
+  secret in the body the server stores its verifier and echoes nothing; with
+  none it generates 20 random bytes, shown as eight base32 groups, and
+  returns them once. Either way `recovery_kits` (migration 035) holds one
+  argon2id verifier per account (PHC string, parameters recorded, `m=19456,
+t=2, p=1`), replaced and un-spent on re-enrolment. `GET
+/api/v1/users/me/recovery-kit` is the account's own "enrolled or spent"
+  (O8 axis A3). `POST /api/v1/auth/recover` redeems: `DB.RedeemRecoveryKit`
+  spends the kit (conditional on `used_at IS NULL` — axis A4), replaces the
+  password, deletes every session and writes the `recovery_kit_used` row in
+  one transaction (axis A1), then a fresh session is issued without the
+  second factor. `DeleteAccount` purges the row (data-lifecycle class 5).
+- **Abuse controls:** the argon2id compare and the new-password hash each
+  take an admission slot (B4-4); every failure — unknown account, no kit,
+  spent kit, wrong secret — is the same 401 and runs the same compare
+  (against a verifier nobody holds when there is none); five failures per
+  account or per address lock recovery for 15 minutes, the per-account
+  lockout audited as `recovery_kit_locked`; the public route is limited like
+  login.
+- **Tests:** `auth`: `TestRecoveryKitSecret_ShapeAndNormalization`,
+  `TestRecoveryKitVerifier_RoundTrip` (the verifier never contains the
+  secret, salts differ), `TestRecoveryKitVerifier_ParametersComeFromTheVerifier`
+  (a verifier made under other parameters still verifies; malformed ones
+  never). `db`: `TestRecoveryKit_UpsertReplacesAndUnspends`,
+  `TestRedeemRecoveryKit_IsOneTransaction`,
+  `TestRedeemRecoveryKit_RollsBackAsAWhole` (an injected failure inside the
+  redeem leaves kit, password and sessions untouched — the restart case),
+  `TestDeleteAccount_PurgesTheRecoveryKit`. `service`:
+  `TestRecoveryKit_EnrolRecoverRotate` (a 2FA-enrolled account recovers
+  without a challenge, every session revoked, the old password refused, the
+  spent kit refused, re-enrolment rotates; the captured log and the audit
+  rows contain neither secret nor verifier — the secret-hygiene proof),
+  `TestRecoveryKit_ClientGeneratedSecret`,
+  `TestRecoveryKit_UniformRefusalsAndLockout`,
+  `TestRecoveryKit_ConcurrentRedemptionAdmitsOne` (`-race`),
+  `TestRecoveryKit_AdmissionBudgetRefusesWithoutWork`; the audit-coverage
+  rows `recovery_kit_issued` and `recovery_kit_locked` (the `used` row is
+  written inside the transaction and checked in the round-trip test).
+  `api`: `TestRecoveryKitRoutes_EnrolStatusRecover` (anonymous enrolment
+  401, wrong password 400, weak new password 400, wrong secret 401, the old
+  session dead after recovery, the new password signs in, the spent kit
+  refused); `POST /api/v1/auth/recover` joins the posture walk's declared
+  public surface with its reason (B4-2's `publicSurface`), so the walk still
+  proves every other route answers the uniform 401. Recovery is loopback REST
+  only — no mail, no outbound network (BPR-043/044).
+- **Docs:** `api.md` (three routes), `security.md` ("Account Recovery",
+  audit list), `trust-model.md` ("Account recovery": what the server stores
+  and what it cannot recover), `data-lifecycle.md` (class 5, O8 satisfied),
+  traceability row BPR-044, `schema.md` regenerated.
+- **Client:** none (BG-09's UX is B9; the API-tier consumer is the test).
+- **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on
+  `auth`, `db`, `service`, `api`, pinned `golangci-lint` 0 issues on them;
+  `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the
+  ledger check.
 
 ## B4-6 — Administrator-assisted recovery
 

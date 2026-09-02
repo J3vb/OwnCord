@@ -314,6 +314,26 @@ against a modified server needs authenticated membership or the client
 refusing unrecognised participants; neither exists in beta (see "What beta
 does not claim").
 
+## Account recovery
+
+- The recovery kit (`POST /api/v1/users/me/recovery-kit`, B4-5) is 20 random
+  bytes the account holder keeps offline. The server stores an argon2id
+  verifier of it in `recovery_kits` (`Server/db/recovery_kit.go`) and nothing
+  else: it cannot show the secret again, and a database or backup holds no
+  usable kit.
+- Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
+  every session, spends the kit and writes the audit row in one transaction
+  (`DB.RedeemRecoveryKit`), then issues a session **without** the second
+  factor — by owner decision, since the kit exists for lost devices. Two
+  concurrent redemptions admit at most one; a spent kit never works again.
+- What the server cannot recover: a lost kit, a lost password with no kit,
+  or an account whose devices and kit are both gone. Those are the
+  administrator-assisted path (B4-6) or nothing.
+- Five failed attempts against an account, or from one address, lock
+  recovery for 15 minutes; the per-account lockout is audited. Every
+  failure reads the same and costs the same compare, so a recovery attempt
+  reveals nothing about whether an account or a kit exists.
+
 ## Multi-device sessions
 
 - A user may hold up to 25 sessions; the 26th evicts the oldest
