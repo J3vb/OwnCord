@@ -65,7 +65,7 @@ func TestRegister_InviteFreeModesAreBudgetedPerAddress(t *testing.T) {
 func TestRegister_ApprovalQueueIsCapped(t *testing.T) {
 	svc := newRegistrationService(t, RegistrationApproval)
 	for i := range maxPendingRegistrations {
-		if _, err := svc.st.CreatePendingUser(context.Background(), fmt.Sprintf("queued%d", i), "hash", 4); err != nil {
+		if _, err := svc.st.CreatePendingUser(context.Background(), fmt.Sprintf("queued%d", i), "hash", 4, 100); err != nil {
 			t.Fatalf("CreatePendingUser %d: %v", i, err)
 		}
 	}

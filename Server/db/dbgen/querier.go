@@ -63,6 +63,9 @@ type Querier interface {
 	// Approval-mode registration (B4-1): the account exists from the application
 	// on, as registration_status = 'pending', and cannot sign in until an admin
 	// approves it. Denial anonymises the row and marks it 'denied' for good.
+	// The cap is enforced in the same statement as the insert: SQLite runs the
+	// writer serially, so two applications racing for the last slot cannot both
+	// observe room. Zero rows affected means the queue is full.
 	CreatePendingUser(ctx context.Context, arg CreatePendingUserParams) (sql.Result, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
@@ -101,7 +104,7 @@ type Querier interface {
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DeleteUsedTOTPCode(ctx context.Context, arg DeleteUsedTOTPCodeParams) error
 	DeleteUserSessions(ctx context.Context, userID int64) (sql.Result, error)
-	DenyPendingUser(ctx context.Context, id int64) (sql.Result, error)
+	DenyPendingUser(ctx context.Context, arg DenyPendingUserParams) (sql.Result, error)
 	DisablePlugin(ctx context.Context, id int64) error
 	// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 	// already carry (OC-0284): an edit that races a delete must not rewrite a

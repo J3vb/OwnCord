@@ -100,7 +100,7 @@ func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 	if _, err := database.CreateUser(ctx, "member", "hash", 4); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	pendingID, err := database.CreatePendingUser(ctx, "applicant", "hash", 4)
+	pendingID, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 	}
 
 	// Denying anonymises and locks the row for good and releases the name.
-	deniedID, err := database.CreatePendingUser(ctx, "denied", "hash", 4)
+	deniedID, err := database.CreatePendingUser(ctx, "denied", "hash", 4, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
 	}
