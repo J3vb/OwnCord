@@ -536,6 +536,10 @@ so no hot-file overlap occurred.
   wrappers' fault branches, above the floor and disclosed; `ws` untouched.
 - **Private half:** nothing new to file — the controls added are described
   above; the gap OC-0321 closed was already public in the ledger.
+- **After B4-0 merged (2026-09-02):** `docs/architecture/data-lifecycle.md`
+  class 4 now names the four migration-032 tables, their `ON DELETE CASCADE`
+  and their purge in `DeleteAccount`, replacing the "in memory today" note
+  B4-0 wrote before this branch existed.
 
 ## B4-4 — Atomic admission budgets for expensive authentication work
 
