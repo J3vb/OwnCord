@@ -422,6 +422,22 @@ describe("API Client", () => {
       expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
     });
 
+    it("changePassword resolves undefined on 204 and hands back the partial-success body on 200", async () => {
+      // Server contract (profile_handler.go): when the password changed but
+      // the other sessions could not be revoked, the answer is 200 with a
+      // warning the user must see — a Promise<void> threw that away (OC-0314).
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.changePassword("oldpw", "newpw")).resolves.toBeUndefined();
+
+      const partial = {
+        warning:
+          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
+        sessions_revoked: 0,
+      };
+      mockFetch.mockResolvedValue(jsonResponse(partial));
+      await expect(api.changePassword("oldpw", "newpw")).resolves.toEqual(partial);
+    });
+
     it("getSessions calls correct endpoint", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
@@ -485,6 +501,23 @@ describe("API Client", () => {
       expect(fetchCallOpts().method).toBe("DELETE");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ password: "mypassword" });
+    });
+
+    it("confirmTotp and disableTotp hand back the partial-success body on 200 (OC-0314)", async () => {
+      // totp_handler.go answers 204 normally and 200 + warning when 2FA was
+      // enabled/disabled but the other sessions could not be revoked.
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.confirmTotp("mypassword", "123456")).resolves.toBeUndefined();
+      await expect(api.disableTotp("mypassword")).resolves.toBeUndefined();
+
+      const partial = {
+        warning:
+          "2FA enabled, but other sessions could not be revoked; revoke them from the sessions list",
+        sessions_revoked: 1,
+      };
+      mockFetch.mockResolvedValue(jsonResponse(partial));
+      await expect(api.confirmTotp("mypassword", "123456")).resolves.toEqual(partial);
+      await expect(api.disableTotp("mypassword")).resolves.toEqual(partial);
     });
 
     it("enableTotp throws ApiClientError on bad password", async () => {

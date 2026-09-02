@@ -414,8 +414,8 @@ describe("SettingsOverlay", () => {
     let resolveChange: (() => void) | null = null;
     const onChangePassword = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          resolveChange = resolve;
+        new Promise<undefined>((resolve) => {
+          resolveChange = () => resolve(undefined);
         }),
     );
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
@@ -470,6 +470,41 @@ describe("SettingsOverlay", () => {
       expect((inputs[1] as HTMLInputElement).value).toBe("");
       expect((inputs[2] as HTMLInputElement).value).toBe("");
     });
+
+    overlay.destroy?.();
+  });
+
+  it("keeps a partial-success warning in the form instead of the green success (OC-0314)", async () => {
+    // The server answers 200 + warning when the password changed but the
+    // other sessions could not be revoked; the form must carry that
+    // instruction, not clear the fields under an unqualified green
+    // "changed successfully" beside the warning toast.
+    const warning =
+      "password changed, but other sessions could not be revoked; revoke them from the sessions list";
+    const onChangePassword = vi.fn().mockResolvedValue({ warning, sessions_revoked: 0 });
+    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "oldpass123";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
+    changePwBtn.click();
+
+    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    expect(status).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(status!.textContent).toBe(warning);
+    });
+    expect(status!.style.color).toBe("var(--yellow)");
+    // The password did change, so the fields are cleared like any success.
+    expect((inputs[0] as HTMLInputElement).value).toBe("");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+    expect(container.textContent).not.toContain("Password changed successfully.");
 
     overlay.destroy?.();
   });
