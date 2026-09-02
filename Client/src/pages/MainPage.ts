@@ -492,6 +492,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     root.appendChild(app);
 
     // Settings overlay
+    // Bumped by every local 2FA change so an in-flight profile refresh
+    // cannot overwrite it with an older answer.
+    let totpEpoch = 0;
     const settingsOverlay = createSettingsOverlay({
       onClose: () => closeSettings(),
       onChangePassword: async (oldPassword, newPassword) => {
@@ -559,6 +562,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onConfirmTotp: async (password, code) => {
         try {
           const outcome = await api.confirmTotp(password, code);
+          totpEpoch++;
           updateUser({ totp_enabled: true });
           showChangeOutcomeToast(outcome, "Two-factor authentication enabled");
         } catch (err) {
@@ -570,6 +574,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDisableTotp: async (password) => {
         try {
           const outcome = await api.disableTotp(password);
+          totpEpoch++;
           updateUser({ totp_enabled: false });
           showChangeOutcomeToast(outcome, "Two-factor authentication disabled");
         } catch (err) {
@@ -580,10 +585,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRefreshTotpStatus: async () => {
         // GET /users/me is the only response that states totp_enabled;
-        // auth_ok never does (OC-0354). A failed read changes nothing.
+        // auth_ok never does (OC-0354). A failed read changes nothing, and
+        // a read that lands after the user enabled or disabled 2FA in the
+        // meantime is discarded: the local change is newer than the answer.
+        const epoch = totpEpoch;
         try {
           const me = await api.getMe();
-          if (typeof me.totp_enabled === "boolean") {
+          if (epoch === totpEpoch && typeof me.totp_enabled === "boolean") {
             updateUser({ totp_enabled: me.totp_enabled });
           }
         } catch (err) {

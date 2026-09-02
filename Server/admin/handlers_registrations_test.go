@@ -16,11 +16,11 @@ func TestAdminAPI_Registrations_ListApproveDeny(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
-	first, err := database.CreatePendingUser(ctx, "applicant-one", "hash", 3)
+	first, err := database.CreatePendingUser(ctx, "applicant-one", "hash", 3, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
 	}
-	second, err := database.CreatePendingUser(ctx, "applicant-two", "hash", 3)
+	second, err := database.CreatePendingUser(ctx, "applicant-two", "hash", 3, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestAdminAPI_Registrations_RequireManageServer(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	createAdminUser(t, database)
 	member := createUserWithRole(t, database, "plain-member", 3)
-	pending, err := database.CreatePendingUser(context.Background(), "applicant", "hash", 3)
+	pending, err := database.CreatePendingUser(context.Background(), "applicant", "hash", 3, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
 	}

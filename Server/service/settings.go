@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // SettingsService owns the server-settings policy the admin panel writes and
@@ -17,6 +18,7 @@ import (
 // server identity through it instead of the raw handle.
 type SettingsService struct {
 	st Store
+	mu syncutil.Mutex
 }
 
 // NewSettingsService creates a SettingsService.
@@ -57,6 +59,11 @@ func (s *SettingsService) Setting(ctx context.Context, key string) (string, erro
 // it). Validation failures return ErrBadRequest with the reason; nothing is
 // written unless every key passes.
 func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[string]string) (map[string]string, error) {
+	// One patch at a time: the registration-mode transition row names the
+	// value it replaced, which is only true if nobody applied another value
+	// between the read below and the apply.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Validate all keys against the whitelist before writing anything so the
 	// operation is atomic from the caller's perspective. The %.0w verb wraps
 	// ErrBadRequest without adding its text: the admin surface's response
