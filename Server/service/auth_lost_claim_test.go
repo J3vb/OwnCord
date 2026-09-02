@@ -54,9 +54,9 @@ func TestVerifyTOTP_LostClaimReleasesTheCode(t *testing.T) {
 		svc   *AuthService
 		token string
 	)
-	st := &lostClaimStore{Store: database, beforeUserRead: func() { svc.partial.Consume(token) }}
+	st := &lostClaimStore{Store: database, beforeUserRead: func() { svc.partial.Consume(ctx, token) }}
 	svc = NewAuthService(st, auth.NewRateLimiter(), key, nil)
-	token, err = svc.partial.Issue(uid, "device", "203.0.113.9")
+	token, err = svc.partial.Issue(ctx, uid, "device", "203.0.113.9")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestVerifyTOTP_LostClaimReleasesTheCode(t *testing.T) {
 	if _, err := svc.VerifyTOTP(ctx, token, code); !errors.Is(err, ErrTOTPChallengeInvalid) {
 		t.Fatalf("VerifyTOTP error = %v, want ErrTOTPChallengeInvalid (the claim lost)", err)
 	}
-	if !svc.usedCodes.MarkUsed(uid, code) {
+	if !svc.usedCodes.MarkUsed(ctx, uid, code) {
 		t.Fatal("the losing claim left its code marked as used")
 	}
 }
