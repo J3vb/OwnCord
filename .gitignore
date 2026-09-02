@@ -82,6 +82,8 @@ Client/src/generated/
 
 # Node modules
 node_modules/
+# A symlink named node_modules is not a directory to the rule above; ignore that form too.
+node_modules
 
 # AI tooling
 .gstack/

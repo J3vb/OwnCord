@@ -107,7 +107,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		}},
 		{"registration approve", "registration_approve", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
-			uid, err := database.CreatePendingUser(context.Background(), "applicant-a", "hash", 4)
+			uid, err := database.CreatePendingUser(context.Background(), "applicant-a", "hash", 4, 100)
 			if err != nil {
 				t.Fatalf("CreatePendingUser: %v", err)
 			}
@@ -119,7 +119,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		}},
 		{"registration deny", "registration_deny", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
-			uid, err := database.CreatePendingUser(context.Background(), "applicant-d", "hash", 4)
+			uid, err := database.CreatePendingUser(context.Background(), "applicant-d", "hash", 4, 100)
 			if err != nil {
 				t.Fatalf("CreatePendingUser: %v", err)
 			}

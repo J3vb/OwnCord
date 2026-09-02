@@ -25,7 +25,10 @@ func ValidateUsername(username string) error {
 	// long as they held the name. Reserve the whole namespace, not just the
 	// exact "[deleted-<digits>]" form, so the collision-fallback names
 	// DeleteAccount generates are unavailable too.
-	if lower := strings.ToLower(username); strings.HasPrefix(lower, "[deleted-") && strings.HasSuffix(lower, "]") {
+	// "[denied-<id>]" is the same shape for a refused approval-mode
+	// application (db.DenyPendingUser), reserved for the same reason.
+	if lower := strings.ToLower(username); strings.HasSuffix(lower, "]") &&
+		(strings.HasPrefix(lower, "[deleted-") || strings.HasPrefix(lower, "[denied-")) {
 		return fmt.Errorf("username is reserved")
 	}
 	n := len([]rune(username))
