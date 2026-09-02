@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // SettingsService owns the server-settings policy the admin panel writes and
@@ -18,7 +18,7 @@ import (
 // server identity through it instead of the raw handle.
 type SettingsService struct {
 	st Store
-	mu sync.Mutex
+	mu syncutil.Mutex
 }
 
 // NewSettingsService creates a SettingsService.

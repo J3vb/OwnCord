@@ -79,6 +79,16 @@ kit cannot be recovered by the server; the holder issues a new one while
 signed in. Five failed attempts lock recovery for 15 minutes. See
 [docs/trust-model.md](trust-model.md).
 
+Owner-assisted recovery (B4-6): only the server owner can issue a recovery
+credential for an account, after verifying the person out of band — recorded
+as one of four fixed wordings (`in_person`, `voice_call`, `video_call`,
+`trusted_contact`); no free text is accepted. The credential is single-use,
+expires in 15 minutes, is stored only as an argon2id verifier, and redeems
+through the same route with the same consequences (new password, every
+session revoked, no second factor). No administrator below the owner can
+reset anyone's credentials. Issuance and use are audited
+(`recovery_assist_issued`, `recovery_assist_used`).
+
 ## Account Deletion
 
 Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
@@ -87,9 +97,9 @@ Users can delete their own account via `DELETE /api/v1/auth/account` with passwo
 
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
 
-- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
-- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `plugin_install`, `plugin_uninstall`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`

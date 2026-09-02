@@ -32,8 +32,11 @@ type recoveryKitStatusResponse struct {
 }
 
 type recoverRequest struct {
-	Username    string `json:"username"`
-	KitSecret   string `json:"kit_secret"`
+	Username  string `json:"username"`
+	KitSecret string `json:"kit_secret"`
+	// Credential is an owner-issued recovery credential (B4-6); either
+	// field carries the secret, told apart by shape.
+	Credential  string `json:"credential"`
 	NewPassword string `json:"new_password"`
 }
 
@@ -76,8 +79,9 @@ func handleRecoveryKitStatus(svc AuthService) http.HandlerFunc {
 	}
 }
 
-// handleRecover processes POST /api/v1/auth/recover: the kit secret plus a
-// new password sign the account holder in without the second factor.
+// handleRecover processes POST /api/v1/auth/recover: a recovery secret — the
+// kit's, or an owner-issued credential (B4-6) — plus a new password sign the
+// account holder in without the second factor.
 func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,8 +90,12 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed request body"})
 			return
 		}
-		if req.Username == "" || req.KitSecret == "" || req.NewPassword == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username, kit_secret and new_password are required"})
+		secret := req.KitSecret
+		if secret == "" {
+			secret = req.Credential
+		}
+		if req.Username == "" || secret == "" || req.NewPassword == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username, kit_secret (or credential) and new_password are required"})
 			return
 		}
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
@@ -96,7 +104,7 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 		}
 		res, err := svc.RecoverWithKit(r.Context(), service.RecoverInput{
 			Username:    req.Username,
-			KitSecret:   req.KitSecret,
+			KitSecret:   secret,
 			NewPassword: req.NewPassword,
 			Device:      truncateDevice(r.Header.Get("User-Agent")),
 			IP:          clientIPWithProxies(r, proxyNets),

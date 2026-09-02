@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 129 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 130 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -87,6 +87,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/updates/apply`                                           |
 | GET     | `/admin/api/users`                                                   |
 | PATCH   | `/admin/api/users/{id}`                                              |
+| POST    | `/admin/api/users/{id}/recovery-credential`                          |
 | DELETE  | `/admin/api/users/{id}/sessions`                                     |
 | GET     | `/api/v1/admin/plugins/`                                             |
 | POST    | `/api/v1/admin/plugins/install`                                      |
@@ -288,17 +289,22 @@ application is anonymised and locked, and its username is released.
 
 ### POST /api/v1/auth/recover
 
-Recover an account with its recovery kit (B4-5, BPR-044; owner decision 2).
-Using the kit means "I lost my devices": on success the password is replaced
-by `new_password`, every existing session is revoked, the kit is spent and a
-`recovery_kit_used` audit row is written — all in one transaction — and a
-fresh session is issued **without** the second factor, so an account with
-2FA enrolled signs in from this response and can disable or re-enrol 2FA in
-Settings. A spent kit is worthless; the holder issues a new one while signed
-in.
+Recover an account with its recovery kit (B4-5, BPR-044; owner decision 2)
+in `kit_secret`, or with an owner-issued credential (B4-6, BPR-045; owner
+decision 3) in `credential` — the two are told apart by shape (32 and 24
+characters), so one compare per attempt runs against the right verifier and
+the paths never interfere. Using either means "I lost my devices": on success
+the password is replaced by `new_password`, every existing session is
+revoked, the kit is spent (or the credential consumed) and a
+`recovery_kit_used` / `recovery_assist_used` audit row is written — all in
+one transaction — and a fresh session is issued **without** the second
+factor, so an account with 2FA enrolled signs in from this response and can
+disable or re-enrol 2FA in Settings. A spent kit is worthless; the holder
+issues a new one while signed in. A kit recovery withdraws an outstanding
+credential; a credential recovery leaves the kit enrolled.
 
-Every failure — unknown account, no kit, a spent kit, a wrong secret — is
-the same `401` and costs the same argon2id compare. Five failures against an
+Every failure — unknown account, no live kit or credential, a wrong secret —
+is the same `401` and costs the same argon2id compare. Five failures against an
 account or from one address lock recovery for 15 minutes; the per-account
 lockout is audited (`recovery_kit_locked`).
 
@@ -311,18 +317,28 @@ lockout is audited (`recovery_kit_locked`).
 { "username": "alex", "kit_secret": "K7QF-3M2X-…-ZB5A", "new_password": "N3w-Str0ng!Pass" }
 ```
 
+or, with an owner-issued credential:
+
+```json
+{
+  "username": "alex",
+  "credential": "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y",
+  "new_password": "N3w-Str0ng!Pass"
+}
+```
+
 #### Response 200 OK
 
 The login shape: `token` and `user`, `requires_2fa` false.
 
 #### Errors
 
-| Status | Code                  | Cause                                               |
-| ------ | --------------------- | --------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | A field missing, or a weak new password             |
-| 401    | `INVALID_CREDENTIALS` | Unknown account, no kit, spent kit, or wrong secret |
-| 403    | `FORBIDDEN`           | The account is banned                               |
-| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full      |
+| Status | Code                  | Cause                                                       |
+| ------ | --------------------- | ----------------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
+| 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
+| 403    | `FORBIDDEN`           | The account is banned                                       |
+| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full              |
 
 ---
 
@@ -1905,6 +1921,7 @@ Authorization is two-layered:
 | `GET /admin/api/users`                                                                      | perimeter only                                                                               |
 | `PATCH /admin/api/users/{id}`                                                               | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
 | `DELETE /admin/api/users/{id}/sessions`                                                     | `KICK_MEMBERS`                                                                               |
+| `POST /admin/api/users/{id}/recovery-credential`                                            | Owner role position (`>= 100`), not a bit — B4-6                                             |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                          | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                  | `VIEW_AUDIT_LOG`                                                                             |
@@ -2125,6 +2142,53 @@ is audited.
 **Auth:** `KICK_MEMBERS`
 
 #### Response 204 No Content
+
+---
+
+### POST /admin/api/users/{id}/recovery-credential
+
+Owner-assisted recovery (B4-6, BPR-045; owner decision 3). The server owner,
+having verified the person out of band, receives a **15-minute, single-use**
+recovery credential for the account, shown once. The user redeems it at
+[`POST /api/v1/auth/recover`](#post-apiv1authrecover) in the `credential`
+field: the password is replaced, every session revoked and a session issued
+without the second factor. Only an argon2id verifier is stored; issuing again
+replaces the outstanding credential, and a recovery by kit withdraws it.
+Refused for the caller's own account, a banned or pending account and an
+anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
+Audited as `recovery_assist_issued` with the verification wording only.
+
+**Auth:** Owner role (position `>= 100`); `ADMINISTRATOR` does not substitute
+
+#### Request
+
+`verification` is one of `in_person`, `voice_call`, `video_call`,
+`trusted_contact` — fixed wording, never free text, so nothing about the
+person exists to leak into the audit log.
+
+```json
+{ "verification": "in_person" }
+```
+
+#### Response 201 Created
+
+```json
+{
+  "credential": "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y",
+  "expires_at": "2026-09-02T19:15:00Z",
+  "username": "alex",
+  "verification": "in_person"
+}
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                        |
+| ------ | -------------- | ------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`  | Unknown verification wording, or an account this cannot help |
+| 403    | `FORBIDDEN`    | Not the owner                                                |
+| 404    | `NOT_FOUND`    | No such account                                              |
+| 429    | `RATE_LIMITED` | Issuance budget spent, or the admission budget full          |
 
 ---
 

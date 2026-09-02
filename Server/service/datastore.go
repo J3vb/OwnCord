@@ -119,6 +119,10 @@ type Store interface {
 	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
 	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
 	RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (int64, error)
+	// Owner-issued recovery credential (B4-6).
+	UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error
+	GetRecoveryAssist(ctx context.Context, userID int64) (*db.RecoveryAssist, error)
+	RedeemRecoveryAssist(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (int64, error)
 	// Approval-mode registration (B4-1).
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)

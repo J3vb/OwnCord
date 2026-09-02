@@ -326,9 +326,17 @@ does not claim").
   (`DB.RedeemRecoveryKit`), then issues a session **without** the second
   factor — by owner decision, since the kit exists for lost devices. Two
   concurrent redemptions admit at most one; a spent kit never works again.
-- What the server cannot recover: a lost kit, a lost password with no kit,
-  or an account whose devices and kit are both gone. Those are the
-  administrator-assisted path (B4-6) or nothing.
+- **Who can reset credentials:** the server owner, and only this way —
+  `POST /admin/api/users/{id}/recovery-credential` (B4-6) issues a 15-minute,
+  single-use credential after the owner verified the person out of band,
+  recorded as one of four fixed wordings; no free text is accepted, so no
+  note about the person exists anywhere. The server stores the credential's
+  argon2id verifier in `recovery_assists` (`Server/db/recovery_assist.go`)
+  and deletes the row when it is redeemed; a kit recovery withdraws it. No
+  administrator below the owner, and no support path, can reset a password
+  or clear a second factor. What stays unrecoverable: an account whose
+  holder the owner cannot verify, or a lost kit on a server whose owner will
+  not issue a credential.
 - Five failed attempts against an account, or from one address, lock
   recovery for 15 minutes; the per-account lockout is audited. Every
   failure reads the same and costs the same compare, so a recovery attempt

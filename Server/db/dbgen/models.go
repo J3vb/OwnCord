@@ -194,6 +194,15 @@ type ReadState struct {
 	MentionCount  int64 `json:"mentionCount"`
 }
 
+type RecoveryAssist struct {
+	UserID       int64  `json:"userId"`
+	Verifier     string `json:"verifier"`
+	IssuedBy     int64  `json:"issuedBy"`
+	Verification string `json:"verification"`
+	CreatedAt    string `json:"createdAt"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
 type RecoveryKit struct {
 	UserID    int64   `json:"userId"`
 	Verifier  string  `json:"verifier"`

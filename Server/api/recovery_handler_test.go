@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // The recovery kit's routes (B4-5): enrolment and status under /users/me,
@@ -101,4 +103,36 @@ func issueSessionToken(t *testing.T, database interface {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return token
+}
+
+// An owner-issued credential (B4-6) is redeemed through the same public
+// route, in the credential field, and signs the holder in likewise.
+func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
+	ctx := context.Background()
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+	uid := seedUser(t, database, "assisted", "AssistedPass1!", 4)
+	oldToken := issueSessionToken(t, database, uid)
+	oid := seedUser(t, database, "owner", "OwnerPass1!", int(permissions.OwnerRoleID))
+	owner, _ := database.GetUserByID(ctx, oid)
+	issue, err := service.NewAuthService(database, limiter, nil, nil).IssueRecoveryAssist(ctx, owner, uid, "voice_call")
+	if err != nil {
+		t.Fatalf("IssueRecoveryAssist: %v", err)
+	}
+
+	rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", "new_password": "N3w-Str0ng!Pass"})
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong credential = %d, want 401; body = %s", rr.Code, rr.Body.String())
+	}
+	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": issue.Credential, "new_password": "N3w-Str0ng!Pass"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("credential = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", oldToken); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("the old session is still alive: %d", rr.Code)
+	}
+	if rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": issue.Credential, "new_password": "N3w-Str0ng!Pass2"}); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed credential = %d, want 401", rr.Code)
+	}
 }

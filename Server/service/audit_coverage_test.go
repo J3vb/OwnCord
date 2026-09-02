@@ -106,6 +106,16 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, []string{raw, hash}
 		}},
+		{"recovery credential issued", "recovery_assist_issued", func(t *testing.T) (*audittest.Recorder, []string) {
+			svc, owner, user, database := newAssistFixture(t, false)
+			rec := audittest.Install(t, database)
+			issue, err := svc.IssueRecoveryAssist(context.Background(), owner, user.ID, "in_person")
+			if err != nil {
+				t.Fatalf("IssueRecoveryAssist: %v", err)
+			}
+			stored, _ := database.GetRecoveryAssist(context.Background(), user.ID)
+			return rec, []string{issue.Credential, stored.Verifier}
+		}},
 		{"recovery kit issued", "recovery_kit_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
 			rec := audittest.Install(t, svc.st.(*db.DB))
