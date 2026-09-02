@@ -67,12 +67,12 @@ Open ledger, re-verified 2026-08-29; counts re-derived 2026-08-31 after B3-9
 (PR #1454) closed `OC-0345`, `OC-0346`, `OC-0376`, `OC-0377`, `OC-0378`, the
 2026-08-31 post-merge audit recorded `OC-0379` fixed on arrival, the B3-8
 role family closed `OC-0374`, and its message/read-state family closed
-`OC-0323`, `OC-0357` and `OC-0358`:
+`OC-0323`, `OC-0357` and `OC-0358`; B4-3 closed `OC-0321`:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 329     |
-| open      | **50**  |
+| fixed     | 330     |
+| open      | **49**  |
 | declined  | 3       |
 | duplicate | 1       |
 | **total** | **383** |

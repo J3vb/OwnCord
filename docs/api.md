@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 122 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 123 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -140,6 +140,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/users/me/totp`                                              |
 | POST    | `/api/v1/users/me/totp/confirm`                                      |
 | POST    | `/api/v1/users/me/totp/enable`                                       |
+| POST    | `/api/v1/users/me/totp/recovery-codes`                               |
 | GET     | `/api/v1/ws`                                                         |
 | GET     | `/health`                                                            |
 | CONNECT | `/livekit/*`                                                         |
@@ -325,6 +326,12 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
 **Auth:** Required with the `partial_token` from the login response
 **Rate limit:** 10 requests/minute per IP, plus a 5-attempt budget per partial challenge
 
+`code` is a six-digit authenticator code, or one of the account's emergency
+recovery codes (`XXXXX-XXXXX`, case-insensitive, separator optional). A
+recovery code is accepted once; the success response then carries
+`recovery_codes_remaining` so the client can prompt for regeneration. Either
+kind counts against the same attempt budget when wrong.
+
 #### Request
 
 ```json
@@ -449,7 +456,13 @@ Account deleted successfully. All sessions, messages (soft-deleted), and associa
 
 ### POST /api/v1/users/me/totp/enable
 
-Start TOTP enrollment for the authenticated user. The secret is not persisted until `/api/v1/users/me/totp/confirm` succeeds.
+Start TOTP enrollment for the authenticated user. The secret is not persisted until `/api/v1/users/me/totp/confirm` succeeds; the pending enrollment survives a server restart for its ten-minute lifetime.
+
+`backup_codes` are the account's ten emergency recovery codes, shown here and
+nowhere else again: the server keeps bcrypt hashes only. They become usable
+the moment `confirm` succeeds, each once, in place of a TOTP code at
+`POST /api/v1/auth/verify-totp`. Calling `enable` again replaces the set;
+disabling 2FA removes it.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -467,7 +480,7 @@ Start TOTP enrollment for the authenticated user. The secret is not persisted un
 ```json
 {
   "qr_uri": "otpauth://totp/OwnCord:alex?...",
-  "backup_codes": []
+  "backup_codes": ["7KQ3M-RX2WN", "…nine more…"]
 }
 ```
 
@@ -495,7 +508,7 @@ Confirm a pending TOTP enrollment.
 
 ### DELETE /api/v1/users/me/totp
 
-Disable TOTP for the authenticated user.
+Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -509,6 +522,34 @@ Disable TOTP for the authenticated user.
 ```
 
 #### Response 204 No Content
+
+---
+
+### POST /api/v1/users/me/totp/recovery-codes
+
+Replace the account's emergency recovery codes with a fresh set. The
+previous set is invalid the moment the new one is stored. Requires 2FA to be
+enabled (`409 CONFLICT` otherwise) and writes a `recovery_codes_regenerated`
+audit row that carries no code.
+
+**Auth:** Required
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass"
+}
+```
+
+#### Response 200 OK
+
+```json
+{
+  "backup_codes": ["7KQ3M-RX2WN", "…nine more…"]
+}
+```
 
 ---
 

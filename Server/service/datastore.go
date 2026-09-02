@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -17,6 +18,17 @@ import (
 // permissions.NewChecker takes its own narrower interface (permissions.DB),
 // which *db.DB and this Store both satisfy.
 type Store interface {
+	// ── Second-factor state (B4-3) ──
+	// The durable backend behind the auth service's partial-auth, pending
+	// enrolment and used-code stores, plus the recovery-code rows; stdlib
+	// types only, because auth cannot import db back.
+	auth.SecondFactorPersister
+	ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes []string) error
+	ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []int64, hashes []string, err error)
+	MarkRecoveryCodeUsed(ctx context.Context, id int64) (consumed bool, err error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int, error)
+	DeleteRecoveryCodes(ctx context.Context, userID int64) error
+
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
 	CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*db.Message, error)

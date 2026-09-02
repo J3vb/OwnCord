@@ -68,6 +68,26 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			}
 			return rec, []string{password, token, secret, code}
 		}},
+		{"recovery codes regenerate", "recovery_codes_regenerated", func(t *testing.T) (*audittest.Recorder, []string) {
+			database := newAuthTestDB(t)
+			router := buildAuthRouter(database, auth.NewRateLimiter())
+			token := loginAndGetToken(t, router, database, "totpregen", 4)
+			secret, code := enrolTOTP(t, router, token)
+			rec := audittest.Install(t, database)
+			rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/recovery-codes", token,
+				map[string]string{"password": password})
+			if rr.Code != http.StatusOK {
+				t.Fatalf("regenerate: status = %d; body = %s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				BackupCodes []string `json:"backup_codes"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			// The codes are secrets: the audit row must not carry them.
+			return rec, append([]string{password, token, secret, code}, resp.BackupCodes...)
+		}},
 		{"account delete", "account_deleted", func(t *testing.T) (*audittest.Recorder, []string) {
 			database := newAuthTestDB(t)
 			router := buildAuthRouter(database, auth.NewRateLimiter())
