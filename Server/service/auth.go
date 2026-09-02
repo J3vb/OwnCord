@@ -528,7 +528,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
 	// NOCASE) before keying the lockout, so case variants of one account
 	// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
-	unameKey := strings.ToLower(in.Username)
+	// NOCASE folds ASCII A-Z only, so the key must too (db.LowerASCII, not
+	// strings.ToLower): two accounts that differ only in non-ASCII case are
+	// two rows, and must never share a bucket (OC-0324).
+	unameKey := db.LowerASCII(in.Username)
 	userLockKey := "login_user_lock:" + unameKey
 	if s.limiter.IsLockedOut(userLockKey) {
 		return nil, ErrLockedOut
