@@ -39,7 +39,7 @@ registration modes with the upgrade mapping, the audited transition and
 the approval queue — BG-10's server half); **B4-8 merged 2026-09-02** (PR #1510 = `b5e9d4a`; the
 diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
-closed — the login lockout key folds like the account lookup); **B4-6 opened 2026-09-02** (branch `feat/b4-6-assisted-recovery`, stacked on B4-5; evidence in its section — owner-only issuance with fixed-wording verification, the shared redemption path, expiry and single use in one transaction). Next B4-8, HP-4, B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 opened 2026-09-02** (branch `feat/b4-6-assisted-recovery`, stacked on B4-5; evidence in its section — owner-only issuance with fixed-wording verification, the shared redemption path, expiry and single use in one transaction). Next HP-4's signature, then B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
