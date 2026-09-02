@@ -463,6 +463,16 @@ route off the public surface already answered the uniform 401.
   `go vet -tags otel,wazero ./api/`; `go test -race ./api/` (whole package,
   green, ~113 s); `go test -tags otel -race -run 'TestAuthPosture|TestAbsenceContract' ./api/`
   green; `npx prettier --check .` and `npm run check:docs` green.
+- **Review fixes (2026-09-02, Codex on #1498, both valid):** `mailPattern`
+  had no rule for the bare word `mail`, so `go-mail`, `mail_address` or
+  `/mail/recovery` would have passed every scanner — it now matches `mail`
+  at a name boundary (pinned by `TestAbsenceContract_MailPatternBoundaries`,
+  with the non-matches that keep it honest); and only the import and column
+  scanners had negative controls, so the go.mod, config-key and route scans
+  were extracted into functions and each got one (a planted `go-mail`
+  requirement, a planted `mail_address` key, a planted `/mail/recovery`
+  route), making the traceability row's "each with a negative control"
+  true. Tests green under the default and `otel` tags; lint 0 issues.
 
 ## B4-3 — TOTP key-file fail-closed, durable second-factor state, emergency recovery codes
 

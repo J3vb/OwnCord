@@ -29,10 +29,14 @@ import (
 // decides optional SMTP recovery is in scope (B4 plan, owner question 7),
 // the dependency is added deliberately and this file changes with it.
 //
-// mailPattern names a transport or a mailbox, not the word "mail" alone: the
-// tree legitimately mentions mailboxes nowhere, but a future "mailer" or an
-// SES client would match, and "e-mail" / "email" catches a column or a key.
-var mailPattern = regexp.MustCompile(`(?i)smtp|sendgrid|mailgun|postmark|sendmail|gomail|mailer|e-?mail|/ses$`)
+// mailPattern names a transport, a mailbox, or the word "mail" itself at a
+// name boundary: "e-mail" / "email" catch a column or a key, the vendor names
+// catch the usual clients, and the bare word catches conventional transport
+// and path names — "go-mail", "mail_address", "/mail/recovery" — without
+// matching words that merely contain the letters. Nothing in the tree
+// collides today; a legitimate collision is allowlisted by name here, never
+// by loosening the pattern.
+var mailPattern = regexp.MustCompile(`(?i)smtp|sendgrid|mailgun|postmark|sendmail|gomail|mailer|e-?mail|/ses$|(?:^|[^a-z0-9])mail(?:[^a-z0-9]|$)`)
 
 // scanImports parses every production .go file under root (tests and the
 // generated sqlc layer excluded) and returns how many it read and the import
@@ -134,18 +138,48 @@ func TestAbsenceContract_NoMailTransportImport(t *testing.T) {
 	}
 }
 
+// scanModuleLines returns the go.mod lines matching mailPattern, trimmed.
+func scanModuleLines(gomod string) []string {
+	var hits []string
+	for line := range strings.SplitSeq(gomod, "\n") {
+		if mailPattern.MatchString(line) {
+			hits = append(hits, strings.TrimSpace(line))
+		}
+	}
+	return hits
+}
+
+// scanConfigKeys returns the configuration keys matching mailPattern, as
+// "config key <key>".
+func scanConfigKeys(keys []string) []string {
+	var hits []string
+	for _, k := range keys {
+		if mailPattern.MatchString(k) {
+			hits = append(hits, "config key "+k)
+		}
+	}
+	return hits
+}
+
+// scanRoutes walks routes and returns how many it saw and the ones matching
+// mailPattern, as "route <METHOD> <pattern>".
+func scanRoutes(routes chi.Routes) (total int, hits []string, err error) {
+	err = chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		total++
+		if mailPattern.MatchString(route) {
+			hits = append(hits, "route "+method+" "+route)
+		}
+		return nil
+	})
+	return total, hits, err
+}
+
 func TestAbsenceContract_NoMailModuleRequirement(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "go.mod"))
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	var hits []string
-	for line := range strings.SplitSeq(string(raw), "\n") {
-		if mailPattern.MatchString(line) {
-			hits = append(hits, strings.TrimSpace(line))
-		}
-	}
-	if len(hits) > 0 {
+	if hits := scanModuleLines(string(raw)); len(hits) > 0 {
 		t.Fatalf("go.mod lines matching %q must not exist (BPR-043):\n  %s", mailPattern, strings.Join(hits, "\n  "))
 	}
 }
@@ -155,28 +189,18 @@ func TestAbsenceContract_NoMailConfigKeyOrRoute(t *testing.T) {
 	if len(keys) < 30 {
 		t.Fatalf("collected only %d config keys; expected the full config surface (>= 30)", len(keys))
 	}
-	var hits []string
-	for _, k := range keys {
-		if mailPattern.MatchString(k) {
-			hits = append(hits, "config key "+k)
-		}
-	}
+	hits := scanConfigKeys(keys)
 
 	handler := fullRouter(t)
 	routes, ok := handler.(chi.Routes)
 	if !ok {
 		t.Fatalf("NewRouter returned %T, want a chi.Routes", handler)
 	}
-	var total int
-	if err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		total++
-		if mailPattern.MatchString(route) {
-			hits = append(hits, "route "+method+" "+route)
-		}
-		return nil
-	}); err != nil {
+	total, routeHits, err := scanRoutes(routes)
+	if err != nil {
 		t.Fatalf("chi.Walk: %v", err)
 	}
+	hits = append(hits, routeHits...)
 	if total < 100 {
 		t.Fatalf("walked only %d routes; expected the full production router (>= 100)", total)
 	}
@@ -240,5 +264,51 @@ func TestAbsenceContract_ColumnScannerNegativeControl(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0] != "contacts.email" {
 		t.Fatalf("negative control: hits=%v, want the planted contacts.email column reported once", hits)
+	}
+}
+
+func TestAbsenceContract_ModuleScannerNegativeControl(t *testing.T) {
+	// A conventional transport name that carries neither "smtp" nor a vendor
+	// name — exactly what the bare-word boundary rule in mailPattern is for.
+	gomod := "module example.com/probe\n\ngo 1.26\n\nrequire (\n\tgithub.com/go-chi/chi/v5 v5.2.0\n\tgithub.com/wneessen/go-mail v0.6.2\n)\n"
+	hits := scanModuleLines(gomod)
+	if len(hits) != 1 || hits[0] != "github.com/wneessen/go-mail v0.6.2" {
+		t.Fatalf("negative control: hits=%v, want the planted go-mail requirement reported once", hits)
+	}
+}
+
+func TestAbsenceContract_ConfigKeyScannerNegativeControl(t *testing.T) {
+	hits := scanConfigKeys([]string{"server.port", "auth.mail_address", "storage.dir"})
+	if len(hits) != 1 || hits[0] != "config key auth.mail_address" {
+		t.Fatalf("negative control: hits=%v, want the planted mail_address key reported once", hits)
+	}
+}
+
+func TestAbsenceContract_RouteScannerNegativeControl(t *testing.T) {
+	r := chi.NewRouter()
+	noContent := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	r.Get("/api/v1/health", noContent)
+	r.Post("/api/v1/auth/mail/recovery", noContent)
+	total, hits, err := scanRoutes(r)
+	if err != nil {
+		t.Fatalf("scanRoutes: %v", err)
+	}
+	if total != 2 || len(hits) != 1 || hits[0] != "route POST /api/v1/auth/mail/recovery" {
+		t.Fatalf("negative control: total=%d hits=%v, want the planted mail route reported once", total, hits)
+	}
+}
+
+func TestAbsenceContract_MailPatternBoundaries(t *testing.T) {
+	// The bare word matches at name boundaries only; the vendor and mailbox
+	// terms carry the rest. Pinned so a later edit cannot quietly drop either.
+	for _, s := range []string{"github.com/wneessen/go-mail", "mail_address", "/mail/recovery", "net/mail", "MAIL", "email", "e-mail", "net/smtp", "mailer", "gomail"} {
+		if !mailPattern.MatchString(s) {
+			t.Errorf("%q must match mailPattern", s)
+		}
+	}
+	for _, s := range []string{"server.port", "/api/v1/messages", "airmail_free", "domain", "mailbox_unused_letters_in_mailman"} {
+		if mailPattern.MatchString(s) {
+			t.Errorf("%q must not match mailPattern", s)
+		}
 	}
 }
