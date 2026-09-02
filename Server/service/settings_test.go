@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/db/audittest"
 )
 
 // The settings family's service-level characterization (B3-8). The admin
@@ -236,5 +239,65 @@ func TestSettings_SettingWrapsErrNotFound(t *testing.T) {
 	name, err := svc.Setting(context.Background(), "server_name")
 	if err != nil || name == "" {
 		t.Fatalf("Setting(server_name) = %q, %v", name, err)
+	}
+}
+
+// Patches run one at a time, so the registration_mode_change rows chain:
+// each row's new mode is the next row's old mode, from the migrated default
+// to the value that finally stuck — whatever order the racers landed in.
+func TestSettings_ModeTransitionsChainUnderConcurrency(t *testing.T) {
+	svc, database := newSettingsService(t)
+	rec := audittest.Install(t, database)
+	ctx := context.Background()
+	modes := []string{"closed", "approval", "open", "invite", "closed", "approval", "open", "closed"}
+	var wg sync.WaitGroup
+	for _, m := range modes {
+		wg.Go(func() {
+			if _, err := svc.Patch(ctx, 1, map[string]string{"registration_mode": m}); err != nil {
+				t.Errorf("Patch(%s): %v", m, err)
+			}
+		})
+	}
+	wg.Wait()
+	final, err := database.GetSetting(ctx, "registration_mode")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+
+	// The audit writer may flush asynchronously: wait until the chain
+	// reaches the stored value.
+	var rows []db.AuditEntry
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rows = rows[:0]
+		for _, e := range rec.Entries() {
+			if e.Action == "registration_mode_change" {
+				rows = append(rows, e)
+			}
+		}
+		if n := len(rows); n > 0 && strings.HasSuffix(rows[n-1].Detail, " -> "+final) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("audit rows never reached the stored mode %q: %d row(s)", final, len(rows))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	prev := "invite" // the migrated default
+	for i, row := range rows {
+		from, to, ok := strings.Cut(strings.TrimPrefix(row.Detail, "registration_mode "), " -> ")
+		if !ok {
+			t.Fatalf("row %d detail = %q, want 'registration_mode X -> Y'", i, row.Detail)
+		}
+		if from != prev {
+			t.Fatalf("row %d reads %s -> %s, but the previous row ended at %s: the transitions do not chain", i, from, to, prev)
+		}
+		if from == to {
+			t.Fatalf("row %d records a no-op transition %s -> %s", i, from, to)
+		}
+		prev = to
+	}
+	if prev != final {
+		t.Fatalf("the chain ends at %s, the setting reads %s", prev, final)
 	}
 }
