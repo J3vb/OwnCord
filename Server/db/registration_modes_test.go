@@ -3,8 +3,10 @@ package db_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -196,5 +198,82 @@ func TestCreateUserWithSession_CommitsBothOrNeither(t *testing.T) {
 	}
 	if sess, _ := database.GetSessionByTokenHash(ctx, "sess-dup"); sess != nil {
 		t.Error("a session row survived the rolled-back registration")
+	}
+}
+
+// The approval-queue cap lives in the insert statement itself (a Codex
+// finding on #1508): a burst of applications against the last free slots
+// admits exactly that many, because the count and the insert are one
+// statement, not a check followed by a write.
+func TestCreatePendingUser_CapIsEnforcedByTheInsert(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	for i := range 2 {
+		if _, err := database.CreatePendingUser(ctx, fmt.Sprintf("queued%d", i), "hash", 4, 2); err != nil {
+			t.Fatalf("CreatePendingUser %d: %v", i, err)
+		}
+	}
+	if _, err := database.CreatePendingUser(ctx, "one-too-many", "hash", 4, 2); !errors.Is(err, db.ErrPendingQueueFull) {
+		t.Fatalf("over the cap = %v, want ErrPendingQueueFull", err)
+	}
+	if u, _ := database.GetUserByUsername(ctx, "one-too-many"); u != nil {
+		t.Fatal("a refused application left a row behind")
+	}
+	if n, _ := database.CountPendingUsers(ctx); n != 2 {
+		t.Fatalf("pending = %d, want 2", n)
+	}
+
+	const room = 5 // two are queued already: three slots left
+	const racers = 8
+	results := make(chan error, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Go(func() {
+			_, err := database.CreatePendingUser(ctx, fmt.Sprintf("burst%d", i), "hash", 4, room)
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	admitted := 0
+	for err := range results {
+		if err == nil {
+			admitted++
+		} else if !errors.Is(err, db.ErrPendingQueueFull) {
+			t.Errorf("unexpected outcome: %v", err)
+		}
+	}
+	if admitted != room-2 {
+		t.Fatalf("the burst admitted %d applications, want %d", admitted, room-2)
+	}
+	if n, _ := database.CountPendingUsers(ctx); n != room {
+		t.Fatalf("pending after the burst = %d, want %d", n, room)
+	}
+}
+
+// Denial anonymises the row to "[denied-<id>]"; when that name is already
+// taken (a row from before the namespace was reserved at registration),
+// denial falls back to a suffixed name instead of failing and leaving the
+// application pending.
+func TestDenyPendingUser_FallsBackWhenTheDeniedNameIsTaken(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	id, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)
+	if err != nil {
+		t.Fatalf("CreatePendingUser: %v", err)
+	}
+	if _, err := database.CreateUser(ctx, fmt.Sprintf("[denied-%d]", id), "hash", 4); err != nil {
+		t.Fatalf("CreateUser(squatter): %v", err)
+	}
+	if err := database.DenyPendingUser(ctx, id); err != nil {
+		t.Fatalf("DenyPendingUser with the anonymised name taken: %v", err)
+	}
+	u, _ := database.GetUserByID(ctx, id)
+	if u == nil || !strings.HasPrefix(u.Username, fmt.Sprintf("[denied-%d-", id)) || u.RegistrationStatus != "denied" {
+		t.Fatalf("denied row = %+v, want a suffixed [denied-%d-…] name with status denied", u, id)
+	}
+	// The username is released either way.
+	if _, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100); err != nil {
+		t.Fatalf("the denied username was not released: %v", err)
 	}
 }
