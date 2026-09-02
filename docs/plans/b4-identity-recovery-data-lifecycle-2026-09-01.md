@@ -1024,7 +1024,14 @@ branch (shares the recovery service; stacked on #1512); PR #1513 to `dev`. Owner
   username; the admin handler no longer imports the database package (the
   service resolves the issuing owner by id — the db-import-boundary
   invariant); `TestAdmissionBudget_AdmitsAtMostSizeAtOnce` counts a decision
-  before signalling it.
+  before signalling it. Codex on #1513 (`70a6e98`): the redeem consumes
+  only the credential whose verifier it compared, so a re-issue between the
+  compare and the transaction cannot be spent by the replaced one
+  (`TestRedeemRecoveryAssist_OnlyConsumesTheCredentialItVerified`); the two
+  issuance budgets are peeked and spent under one lock
+  (`TestRecoveryAssist_IssuanceBudgetHoldsUnderConcurrency`, `-race`); the
+  admission slot is taken before the budgets are charged
+  (`TestRecoveryAssist_AdmissionRefusalChargesNoIssuance`).
 - **Gates:** four build-tag builds, `go vet ./...`, `go test -race` on `db`,
   `service`, `admin`, `api`, `auth`; pinned `golangci-lint` 0 issues on them;
   `sqlc generate` no diff; `gendocs` regenerated; `check:docs` and the ledger
