@@ -33,6 +33,9 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
+	// The consume is conditional: only an unspent kit is spent, and the affected
+	// row count is what tells two concurrent redemptions apart.
+	ConsumeRecoveryKit(ctx context.Context, arg ConsumeRecoveryKitParams) (sql.Result, error)
 	CountActiveCameras(ctx context.Context, channelID int64) (int64, error)
 	CountActiveInvites(ctx context.Context) (int64, error)
 	CountActiveMessages(ctx context.Context) (int64, error)
@@ -99,6 +102,7 @@ type Querier interface {
 	DeletePartialAuthChallenge(ctx context.Context, tokenHash string) (sql.Result, error)
 	DeletePendingTOTPEnrollment(ctx context.Context, userID int64) error
 	DeleteRecoveryCodes(ctx context.Context, userID int64) error
+	DeleteRecoveryKit(ctx context.Context, userID int64) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
@@ -198,6 +202,7 @@ type Querier interface {
 	// UPSERT when the row is already correct, keeping no-op focus events off the
 	// single writer connection.
 	GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error)
+	GetRecoveryKit(ctx context.Context, userID int64) (RecoveryKit, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
 	// collation, so this is the lookup that agrees with the constraint.
@@ -347,6 +352,10 @@ type Querier interface {
 	// v1.30.0 miscounts multi-byte characters and truncates the next query.
 	UpsertPartialAuthChallenge(ctx context.Context, arg UpsertPartialAuthChallengeParams) error
 	UpsertPendingTOTPEnrollment(ctx context.Context, arg UpsertPendingTOTPEnrollmentParams) error
+	// Recovery kits (B4-5): one verifier per account, replaced on enrolment,
+	// spent by a successful recovery. The verifier is an argon2id PHC string;
+	// no query ever returns anything else about the kit.
+	UpsertRecoveryKit(ctx context.Context, arg UpsertRecoveryKitParams) error
 	UseInviteAtomic(ctx context.Context, code string) (sql.Result, error)
 	UserCount(ctx context.Context) (int64, error)
 }

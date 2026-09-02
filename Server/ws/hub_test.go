@@ -1458,6 +1458,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TEXT    NOT NULL,
     unseen     INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -89,6 +89,16 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 	r.With(requireAuth,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/recovery-codes", handleRegenerateRecoveryCodes(svc))
+
+	// The recovery kit (B4-5): enrolment and status beside the credential
+	// routes, redemption public and budgeted like login.
+	r.With(requireAuth,
+		RateLimitMiddleware(limiter, "kit:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
+		Post("/api/v1/users/me/recovery-kit", handleEnrolRecoveryKit(svc))
+	r.With(requireAuth).
+		Get("/api/v1/users/me/recovery-kit", handleRecoveryKitStatus(svc))
+	r.With(RateLimitMiddleware(limiter, "recover:", scaledAuthLimit(loginRateLimitPerMinute), time.Minute, trustedProxies)).
+		Post("/api/v1/auth/recover", handleRecover(svc, trustedProxies))
 }
 
 // handleRegister processes POST /api/v1/auth/register.

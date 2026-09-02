@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -104,6 +105,29 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 				t.Fatalf("RevokeSession: %v", err)
 			}
 			return rec, []string{raw, hash}
+		}},
+		{"recovery kit issued", "recovery_kit_issued", func(t *testing.T) (*audittest.Recorder, []string) {
+			svc, user, _ := newKitService(t, false)
+			rec := audittest.Install(t, svc.st.(*db.DB))
+			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			if err != nil {
+				t.Fatalf("EnrolRecoveryKit: %v", err)
+			}
+			kit, _ := svc.st.GetRecoveryKit(context.Background(), user.ID)
+			return rec, []string{issue.Secret, kit.Verifier, kitPassword}
+		}},
+		{"recovery kit locked", "recovery_kit_locked", func(t *testing.T) (*audittest.Recorder, []string) {
+			svc, user, _ := newKitService(t, false)
+			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			if err != nil {
+				t.Fatalf("EnrolRecoveryKit: %v", err)
+			}
+			rec := audittest.Install(t, svc.st.(*db.DB))
+			wrong, _, _ := auth.GenerateRecoveryKitSecret()
+			for i := range recoveryKitFailureThreshold {
+				_, _ = recoverWith(svc, "kitholder", wrong, fmt.Sprintf("203.0.113.%d", 70+i))
+			}
+			return rec, []string{issue.Secret, wrong, kitPassword}
 		}},
 		{"registration approve", "registration_approve", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)

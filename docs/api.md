@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 126 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 129 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -97,6 +97,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/auth/login`                                                 |
 | POST    | `/api/v1/auth/logout`                                                |
 | GET     | `/api/v1/auth/me`                                                    |
+| POST    | `/api/v1/auth/recover`                                               |
 | POST    | `/api/v1/auth/register`                                              |
 | POST    | `/api/v1/auth/verify-totp`                                           |
 | GET     | `/api/v1/blocks/`                                                    |
@@ -137,6 +138,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | PUT     | `/api/v1/users/me/password`                                          |
+| GET     | `/api/v1/users/me/recovery-kit`                                      |
+| POST    | `/api/v1/users/me/recovery-kit`                                      |
 | DELETE  | `/api/v1/users/me/sessions`                                          |
 | GET     | `/api/v1/users/me/sessions`                                          |
 | DELETE  | `/api/v1/users/me/sessions/{id}`                                     |
@@ -280,6 +283,46 @@ application is anonymised and locked, and its username is released.
 | 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required                                                 |
 | 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP; in `approval`/`open` mode, 5 per address per day or a full approval queue |
 | 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                                                                  |
+
+---
+
+### POST /api/v1/auth/recover
+
+Recover an account with its recovery kit (B4-5, BPR-044; owner decision 2).
+Using the kit means "I lost my devices": on success the password is replaced
+by `new_password`, every existing session is revoked, the kit is spent and a
+`recovery_kit_used` audit row is written — all in one transaction — and a
+fresh session is issued **without** the second factor, so an account with
+2FA enrolled signs in from this response and can disable or re-enrol 2FA in
+Settings. A spent kit is worthless; the holder issues a new one while signed
+in.
+
+Every failure — unknown account, no kit, a spent kit, a wrong secret — is
+the same `401` and costs the same argon2id compare. Five failures against an
+account or from one address lock recovery for 15 minutes; the per-account
+lockout is audited (`recovery_kit_locked`).
+
+**Auth:** None (public)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{ "username": "alex", "kit_secret": "K7QF-3M2X-…-ZB5A", "new_password": "N3w-Str0ng!Pass" }
+```
+
+#### Response 200 OK
+
+The login shape: `token` and `user`, `requires_2fa` false.
+
+#### Errors
+
+| Status | Code                  | Cause                                               |
+| ------ | --------------------- | --------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | A field missing, or a weak new password             |
+| 401    | `INVALID_CREDENTIALS` | Unknown account, no kit, spent kit, or wrong secret |
+| 403    | `FORBIDDEN`           | The account is banned                               |
+| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full      |
 
 ---
 
@@ -575,6 +618,56 @@ audit row that carries no code.
 {
   "backup_codes": ["7KQ3M-RX2WN", "…nine more…"]
 }
+```
+
+---
+
+### POST /api/v1/users/me/recovery-kit
+
+Issue the account's recovery kit (B4-5, BPR-044), replacing any previous
+one. The server stores only an argon2id verifier of the kit secret. With no
+`kit_secret` in the body the server generates the secret and returns it
+**once**; with one, the client generated it locally (32 base32 characters,
+any grouping or case) and the response never echoes it. Writes a
+`recovery_kit_issued` audit row that carries no secret.
+
+**Auth:** Required
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{ "password": "MyStr0ng!Pass" }
+```
+
+#### Response 200 OK
+
+```json
+{ "kit_secret": "K7QF-3M2X-…-ZB5A", "created_at": "2026-09-02T18:00:00Z" }
+```
+
+`kit_secret` is absent when the client supplied the secret.
+
+#### Errors
+
+| Status | Code            | Cause                                                       |
+| ------ | --------------- | ----------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape       |
+| 429    | `RATE_LIMITED`  | Password-confirmation lockout, or the admission budget full |
+
+---
+
+### GET /api/v1/users/me/recovery-kit
+
+Whether the account holds an unspent kit — what a client needs to decide to
+(re-)enrol, never the verifier.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "enrolled": true, "created_at": "2026-09-02T18:00:00Z", "used_at": null }
 ```
 
 ---

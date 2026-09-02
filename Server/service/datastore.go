@@ -115,6 +115,10 @@ type Store interface {
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
 	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
+	// Recovery kit (B4-5).
+	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
+	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
+	RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (int64, error)
 	// Approval-mode registration (B4-1).
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)
