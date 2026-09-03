@@ -24,3 +24,10 @@ Applied so far: `erasure_jobs` landed as `Server/migrations/037_erasure_jobs.sql
 the rollback. `040_erasure_replay_purge.sql` (#1517) adds
 `erasure_jobs.replay_purged` and the `idx_messages_reply_to` index the erasure's
 cascade needed — its own migration, so upgraded installations get both.
+`audit_unlinking` landed as `Server/migrations/038_audit_unlinking.sql`
+(B4-10, 2026-09-03), verbatim. `deletion_markers` is applied by the server on
+the marker file itself (`Server/db/markers.go`, `OpenMarkerStore`), not by the
+migrations, with one addition to the draft: a `state` column
+(`pending`/`recorded`) for the two-phase write around the erasure transaction
+(`docs/schema.md`, "The deletion-marker file"); its `down` file is the
+rollback for that file.

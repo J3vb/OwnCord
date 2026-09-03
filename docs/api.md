@@ -2167,7 +2167,8 @@ Erase the target account (B4-9): the same erasure as
 administrator. The hierarchy rule (actor outranks target) is enforced in the
 moderation service, the actor cannot erase its own account here, the last
 admin-class account cannot be erased, and the action is audited as
-`account_deleted` with the actor. Connected clients receive `member_ban`.
+`account_deleted` with the actor and the target unlinked to the deletion
+marker's token (B4-10). Connected clients receive `member_ban`.
 
 **Auth:** `ADMINISTRATOR`
 
@@ -2255,6 +2256,10 @@ Array of:
   "created_at": "2026-08-04T12:00:00Z"
 }
 ```
+
+Rows about an erased account (B4-10) carry `"subject_token"` — the deletion
+marker's token in place of the id — with `actor_id` and/or `target_id` at
+`0` and `detail` cleared; the field is omitted on every other row.
 
 ---
 

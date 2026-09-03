@@ -1,0 +1,193 @@
+package db
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func testMarkerKey(b byte) []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = b
+	}
+	return key
+}
+
+func openTestMarkers(t *testing.T, key []byte) *MarkerStore {
+	t.Helper()
+	m, err := OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), key)
+	if err != nil {
+		t.Fatalf("OpenMarkerStore: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	return m
+}
+
+func TestMarkerStore_TokenIsKeyedAndUnlinkable(t *testing.T) {
+	a := openTestMarkers(t, testMarkerKey(1))
+	b := openTestMarkers(t, testMarkerKey(2))
+	tok := a.SubjectToken(42)
+	if len(tok) != 64 || tok != a.SubjectToken(42) {
+		t.Fatalf("token = %q, want a stable 64-hex digest", tok)
+	}
+	if tok == b.SubjectToken(42) {
+		t.Error("the same id under another key yields the same token; the key does not bind it")
+	}
+	if strings.Contains(tok, "42") && a.SubjectToken(420)[:10] == tok[:10] {
+		t.Error("token leaks the id")
+	}
+	if a.SubjectToken(42) == a.SubjectToken(43) {
+		t.Error("two subjects share a token")
+	}
+	if _, err := OpenMarkerStore(":memory:", []byte("short")); err == nil {
+		t.Error("a short key was accepted")
+	}
+}
+
+func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
+	ctx := context.Background()
+	m := openTestMarkers(t, testMarkerKey(3))
+	tok, created, err := m.RecordPendingAccount(ctx, 7)
+	if err != nil || !created || tok != m.SubjectToken(7) {
+		t.Fatalf("RecordPendingAccount = %q, %v, %v", tok, created, err)
+	}
+	if _, again, err := m.RecordPendingAccount(ctx, 7); err != nil || again {
+		t.Fatalf("second RecordPendingAccount created = %v, %v; want false", again, err)
+	}
+	markers, err := m.Markers(ctx)
+	if err != nil || len(markers) != 1 || markers[0].State != MarkerPending || markers[0].Scope != MarkerScopeAccount {
+		t.Fatalf("markers = %+v, %v", markers, err)
+	}
+	if err := m.DiscardPending(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	if markers, _ := m.Markers(ctx); len(markers) != 0 {
+		t.Fatalf("discard left %+v", markers)
+	}
+	if _, _, err := m.RecordPendingAccount(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	markers, _ = m.Markers(ctx)
+	if len(markers) != 1 || markers[0].State != MarkerRecorded {
+		t.Fatalf("after confirm: %+v", markers)
+	}
+	// A recorded marker is not discarded by DiscardPending.
+	if err := m.DiscardPending(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	if markers, _ := m.Markers(ctx); len(markers) != 1 {
+		t.Fatalf("DiscardPending removed a recorded marker")
+	}
+	// The file survives a reopen with the same key and refuses nothing.
+	path := m.Path()
+	_ = m.Close()
+	reopened, err := OpenMarkerStore(path, testMarkerKey(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if markers, _ := reopened.Markers(ctx); len(markers) != 1 {
+		t.Fatalf("markers after reopen = %+v", markers)
+	}
+}
+
+// ReplayAccounts on an in-memory database: a recorded marker whose account
+// is present erases it again; a pending marker resolves by the account's
+// existence; markers for absent accounts do nothing.
+func TestMarkerStore_ReplayAccounts(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemoryInternal(t)
+	m := openTestMarkers(t, testMarkerKey(4))
+	owner, _ := database.CreateUser(ctx, "replay-owner", "hash", 1)
+	resurrected, _ := database.CreateUser(ctx, "resurrected", "hash", 4)
+	crashedBefore, _ := database.CreateUser(ctx, "crashed-before-commit", "hash", 4)
+	gone, _ := database.CreateUser(ctx, "crashed-after-commit", "hash", 4)
+	if _, err := database.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, gone); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{resurrected} {
+		tok, _, _ := m.RecordPendingAccount(ctx, id)
+		_ = m.ConfirmAccount(ctx, tok)
+	}
+	_, _, _ = m.RecordPendingAccount(ctx, crashedBefore)
+	_, _, _ = m.RecordPendingAccount(ctx, gone)
+	_ = owner
+
+	var erased []int64
+	rep, err := m.ReplayAccounts(ctx, database, func(ctx context.Context, userID int64, token string) error {
+		if token != m.SubjectToken(userID) {
+			t.Errorf("erase called with token %q for %d", token, userID)
+		}
+		erased = append(erased, userID)
+		_, err := database.EraseAccount(ctx, userID, token)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("ReplayAccounts: %v", err)
+	}
+	if rep.Erased != 1 || rep.Confirmed != 1 || rep.Discarded != 1 {
+		t.Errorf("report = %+v, want 1 erased, 1 confirmed, 1 discarded", rep)
+	}
+	if len(erased) != 1 || erased[0] != resurrected {
+		t.Errorf("erased = %v, want [%d]", erased, resurrected)
+	}
+	if u, _ := database.GetUserByID(ctx, resurrected); u != nil {
+		t.Error("the resurrected account survived the replay")
+	}
+	if u, _ := database.GetUserByID(ctx, crashedBefore); u == nil {
+		t.Error("an account whose erasure never committed was erased by its pending marker")
+	}
+	markers, _ := m.Markers(ctx)
+	byTok := map[string]DeletionMarker{}
+	for _, mk := range markers {
+		byTok[mk.SubjectToken] = mk
+	}
+	if mk := byTok[m.SubjectToken(resurrected)]; mk.Replays != 1 || mk.LastReplay == nil {
+		t.Errorf("replayed marker = %+v, want replays 1", mk)
+	}
+	if mk, ok := byTok[m.SubjectToken(gone)]; !ok || mk.State != MarkerRecorded {
+		t.Errorf("marker for the account gone before confirm = %+v, want recorded", mk)
+	}
+	if _, ok := byTok[m.SubjectToken(crashedBefore)]; ok {
+		t.Error("the discarded pending marker is still there")
+	}
+	// A second replay finds nothing to do.
+	rep, err = m.ReplayAccounts(ctx, database, func(context.Context, int64, string) error { t.Error("erase called again"); return nil })
+	if err != nil || rep != (ReplayReport{}) {
+		t.Errorf("second replay = %+v, %v", rep, err)
+	}
+}
+
+func openMigratedMemoryInternal(t *testing.T) *DB {
+	t.Helper()
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	return database
+}
+
+func TestMarkerStore_FileLivesOutsideTheDatabase(t *testing.T) {
+	dir := t.TempDir()
+	m, err := OpenMarkerStore(filepath.Join(dir, "data", "erasure", "markers.sqlite"), testMarkerKey(6))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if _, _, err := m.RecordPendingAccount(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data", "erasure", "markers.sqlite")); err != nil {
+		t.Errorf("marker file not created: %v", err)
+	}
+}

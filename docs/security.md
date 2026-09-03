@@ -61,6 +61,12 @@ OwnCord supports TOTP-based 2FA:
   replace the key (which would orphan every stored secret), and the write is
   atomic. Back the key file up beside the database — a backup does not contain
   it.
+- The erasure marker key (`data/erasure.key`, or `OWNCORD_ERASURE_KEY`) follows
+  the same rule (B4-10): generated only when confirmed absent, any other read
+  error refuses to start, atomic write. Deletion markers in
+  `data/erasure/markers.sqlite` name erased accounts only as an HMAC under
+  it; back up both beside the database — a restore with them missing cannot
+  recognise, and erase again, an account the backup resurrects.
 - Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
 - `require_2fa` requires all users to have 2FA enabled and `registration_mode` to be `closed`; while it is on, the mode cannot be reopened
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
@@ -109,12 +115,20 @@ loopback, and the data contract a future support bundle must satisfy are in
 
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
 
-- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`, `account_erasure_replayed`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
 - **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
+
+Rows about an erased account are unlinked by the erasure (B4-10): they keep
+action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
+and `subject_token` carries the deletion marker's token — HMAC-SHA256 of the
+user id under `data/erasure.key` — so the trail re-identifies the subject only
+to whoever holds the key. The erasure's own `account_deleted` row is written
+that way from the start, and `account_erasure_replayed` records a start-up
+that erased a restored backup's copy of the account again.
 
 Note: `backup_restore` is written synchronously to the live database _before_
 the pre-restore safety copy is taken, so the row survives inside the

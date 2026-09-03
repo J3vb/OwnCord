@@ -953,8 +953,11 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	}
 
 	slog.Info("account deleted", "user_id", user.ID, "ip", ip)
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "account_deleted", "user", user.ID,
-		"account self-deleted from "+ip)
+	// The row is written unlinked from the start (B4-10): no id, no IP, the
+	// deletion marker's token in their place.
+	db.WriteAuditEntry(context.WithoutCancel(ctx), s.st, db.AuditEntry{
+		Action: "account_deleted", TargetType: "user", Detail: "account self-erased", SubjectToken: s.erasure.SubjectToken(user.ID),
+	})
 
 	// The erasure left the subject in the state an admin ban does for every
 	// other client (gone from the roster, sessions revoked) — broadcast the

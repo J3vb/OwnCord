@@ -61,7 +61,7 @@ func TestAdminAPI_DeleteUser_ErasesTheAccount(t *testing.T) {
 	}
 	var audits int
 	if err := database.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = ? AND target_id = ?`, ownerID, targetID).Scan(&audits); err != nil || audits != 1 {
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = ? AND target_id = 0`, ownerID).Scan(&audits); err != nil || audits != 1 {
 		t.Errorf("audit rows = %d (%v), want 1", audits, err)
 	}
 

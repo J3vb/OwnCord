@@ -103,7 +103,7 @@ func pickSubject(t *testing.T, database *DB) (int64, string) {
 // every inventory class is zero except the audit history B4-10 unlinks.
 func runD1(t *testing.T, database *DB, uid int64, uname string, before map[string]int) map[string]int {
 	t.Helper()
-	job, err := database.EraseAccount(context.Background(), uid)
+	job, err := database.EraseAccount(context.Background(), uid, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -172,31 +172,68 @@ func backupTo(t *testing.T, database *DB, name string) string {
 	return path
 }
 
-// D2 — Resurrection, the negative control for B4-10: a backup from before
-// the erasure brings the account back in full, and nothing in the restored
-// file records that it happened.
-func TestHP4_D2_RestoreResurrectsADeletedAccount(t *testing.T) {
+// D2 — Resurrection, then the B4-10 post-restore proof (plan §B4-10 item
+// 3, the roadmap's required evidence): a backup from before the erasure
+// brings the account back in full — the negative control HP-4 recorded —
+// and replaying the deletion markers erases it again before anything
+// serves, so the lineage checklist finds zero subject data afterwards.
+func TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure(t *testing.T) {
 	database, dbPath := drillCopy(t)
+	ctx := context.Background()
 	uid, uname := pickSubject(t, database)
 	before := takeInventory(t, database, uid, uname)
-	backup := backupTo(t, database, "before-o1.db")
-	runD1(t, database, uid, uname, before)
+	backup := backupTo(t, database, "before-erasure.db")
+	m := openTestMarkers(t, testMarkerKey(5))
+
+	tok, _, err := m.RecordPendingAccount(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.EraseAccount(ctx, uid, tok); err != nil {
+		t.Fatalf("EraseAccount: %v", err)
+	}
+	if err := m.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
 
 	restored := restoreOver(t, database, dbPath, backup)
-	after := takeInventory(t, restored, uid, uname)
-	logInventory(t, fmt.Sprintf("D2 — subject %d (%s), after restore", uid, uname), before, after)
+	back := takeInventory(t, restored, uid, uname)
+	logInventory(t, fmt.Sprintf("D2 — subject %d, after restore (resurrected)", uid), before, back)
 	for _, c := range SubjectInventory {
-		if after[c.Key] != before[c.Key] {
-			t.Errorf("%s after restore = %d, want %d (resurrected)", c.Key, after[c.Key], before[c.Key])
+		if back[c.Key] != before[c.Key] {
+			t.Errorf("%s after restore = %d, want %d (resurrected)", c.Key, back[c.Key], before[c.Key])
 		}
 	}
 	var username string
-	_ = restored.QueryRowContext(context.Background(), `SELECT username FROM users WHERE id = ?`, uid).Scan(&username)
+	_ = restored.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, uid).Scan(&username)
 	if username != uname {
 		t.Errorf("username after restore = %q, want %q", username, uname)
 	}
-	if n := countQ(t, restored, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND target_id = ?`, uid); n != 0 {
-		t.Errorf("%d account_deleted rows survived the restore; the backup predates the deletion", n)
+	if n := countQ(t, restored, `SELECT COUNT(*) FROM audit_log WHERE subject_token = ?`, tok); n != 0 {
+		t.Errorf("%d rows carry the token inside the restored file; the backup predates the erasure", n)
+	}
+
+	rep, err := m.ReplayAccounts(ctx, restored, func(ctx context.Context, userID int64, token string) error {
+		_, err := restored.EraseAccount(ctx, userID, token)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("ReplayAccounts: %v", err)
+	}
+	if rep.Erased != 1 {
+		t.Fatalf("replay report = %+v, want the subject erased again", rep)
+	}
+	after := takeInventory(t, restored, uid, uname)
+	logInventory(t, fmt.Sprintf("D2 — subject %d, after the markers replayed", uid), back, after)
+	for _, c := range SubjectInventory {
+		if after[c.Key] != 0 {
+			t.Errorf("%s after the replayed erasure = %d, want 0", c.Key, after[c.Key])
+		}
+	}
+	if before["21 audit rows"] > 0 {
+		if n := countQ(t, restored, `SELECT COUNT(*) FROM audit_log WHERE subject_token = ?`, tok); n != before["21 audit rows"] {
+			t.Errorf("audit rows carrying the token after the replay = %d, want %d (unlinked, not deleted)", n, before["21 audit rows"])
+		}
 	}
 }
 

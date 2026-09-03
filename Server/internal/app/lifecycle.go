@@ -52,6 +52,7 @@ func (a *App) stages() []stage {
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
 		{"migrate", a.startMigrate},
+		{"erasure-markers", a.startErasureMarkers},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
 		{"hub", a.startHub},
@@ -175,6 +176,19 @@ func (a *App) startMigrate() error {
 	return initDatabase(a.log, a.cfg, a.database, a.deps.Restart)
 }
 
+// startErasureMarkers opens the deletion-marker file and replays it against
+// the migrated database before anything can serve (B4-10): what a restored
+// backup brought back is erased again here. Its close releases the file.
+func (a *App) startErasureMarkers() error {
+	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database)
+	if err != nil {
+		return err
+	}
+	a.markers = markers
+	a.onClose("erasure-markers", func(context.Context) error { return markers.Close() })
+	return nil
+}
+
 // startTelemetry initialises OpenTelemetry. Its shutdown is bounded by its
 // own 5s budget inside the returned step.
 func (a *App) startTelemetry() error {
@@ -216,6 +230,10 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
+	// The routes' erasures record markers in the file start-up just replayed.
+	if rt.Services != nil && rt.Services.Erasure != nil {
+		rt.Services.Erasure.SetMarkers(a.markers)
+	}
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)
 		return nil

@@ -11,7 +11,7 @@ import (
 // eraseAccount runs EraseAccount for the rows that only care about the
 // outcome, not the file journal.
 func eraseAccount(ctx context.Context, database *db.DB, userID int64) error {
-	_, err := database.EraseAccount(ctx, userID)
+	_, err := database.EraseAccount(ctx, userID, "")
 	return err
 }
 
@@ -113,7 +113,7 @@ func TestEraseAccount_RemovesTheUserRow(t *testing.T) {
 	userID := seedUser(t, database, "alice")
 	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET', display_name = 'A', about = 'bio', custom_status = 'busy', identity_public_key = 'key' WHERE id = ?", userID) //nolint:errcheck
 
-	job, err := database.EraseAccount(context.Background(), userID)
+	job, err := database.EraseAccount(context.Background(), userID, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEraseAccount_HardDeletesMessages(t *testing.T) {
 		t.Fatalf("precondition: FTS hits = %d, want 1", n)
 	}
 
-	if _, err := database.EraseAccount(context.Background(), userID); err != nil {
+	if _, err := database.EraseAccount(context.Background(), userID, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 
@@ -266,7 +266,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 func TestEraseAccount_NonexistentUser(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	_, err := database.EraseAccount(context.Background(), 999999)
+	_, err := database.EraseAccount(context.Background(), 999999, "")
 	if !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("EraseAccount(nonexistent) = %v, want ErrNotFound", err)
 	}
@@ -300,7 +300,7 @@ func TestEraseAccount_DeletesAPITokenRows(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	if _, err := database.EraseAccount(context.Background(), uid); err != nil {
+	if _, err := database.EraseAccount(context.Background(), uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 
@@ -497,7 +497,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 
 	// userA is now the last participant; the erasure empties and
 	// hard-deletes the channel.
-	job, err := database.EraseAccount(ctx, userA)
+	job, err := database.EraseAccount(ctx, userA, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}

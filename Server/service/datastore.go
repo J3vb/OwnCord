@@ -141,7 +141,9 @@ type Store interface {
 	// Account erasure (B4-9): the database half in one transaction, the
 	// file half journaled in erasure_jobs and resumed until every file is
 	// gone; ReferencedStoredFiles serves the storage reconciliation pass.
-	EraseAccount(ctx context.Context, userID int64) (*db.ErasureJob, error)
+	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	ListUserIDs(ctx context.Context) ([]int64, error)
+	LogAuditEntry(ctx context.Context, e db.AuditEntry) error
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error

@@ -295,6 +295,7 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
 	LogAudit(ctx context.Context, arg LogAuditParams) error
+	LogAuditEntry(ctx context.Context, arg LogAuditEntryParams) error
 	// Mark-read that computes its own watermark inside the writer statement.
 	// Passing a snapshot read moments earlier is what destroyed a mention raised
 	// during the round trip (OC-0323): the clear zeroed mention_count while

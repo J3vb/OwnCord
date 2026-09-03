@@ -216,6 +216,27 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 	return nil
 }
 
+// LogAuditEntry inserts an audit entry with every field, the subject token
+// included (B4-10); LogAudit is the token-less form the rest of the server
+// writes.
+func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
+	var token *string
+	if e.SubjectToken != "" {
+		token = &e.SubjectToken
+	}
+	if err := d.q.LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
+		ActorID:      e.ActorID,
+		Action:       e.Action,
+		TargetType:   e.TargetType,
+		TargetID:     e.TargetID,
+		Detail:       e.Detail,
+		SubjectToken: token,
+	}); err != nil {
+		return fmt.Errorf("LogAuditEntry: %w", err)
+	}
+	return nil
+}
+
 // PersistAudits inserts a batch of audit entries in a single transaction with
 // one prepared insert, so the audit writer's flush pays for one fsync instead
 // of one per entry. Only the LogAudit-shaped fields are written — ID, ActorName
@@ -236,7 +257,7 @@ func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, erro
 	persisted := 0
 	var firstErr error
 	for _, e := range entries {
-		if err := d.LogAudit(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+		if err := d.LogAuditEntry(ctx, e); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -255,7 +276,7 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 		return fmt.Errorf("PersistAudits begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))`,
 	)
 	if err != nil {
 		_ = tx.Rollback()
@@ -263,7 +284,7 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 	}
 	defer func() { _ = stmt.Close() }()
 	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)
 		}
@@ -286,14 +307,15 @@ func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, 
 	entries := make([]AuditEntry, 0, len(rows))
 	for _, r := range rows {
 		entries = append(entries, AuditEntry{
-			ID:         r.ID,
-			ActorID:    r.ActorID,
-			ActorName:  r.ActorName,
-			Action:     r.Action,
-			TargetType: r.TargetType,
-			TargetID:   r.TargetID,
-			Detail:     r.Detail,
-			CreatedAt:  r.CreatedAt,
+			ID:           r.ID,
+			ActorID:      r.ActorID,
+			ActorName:    r.ActorName,
+			Action:       r.Action,
+			TargetType:   r.TargetType,
+			TargetID:     r.TargetID,
+			Detail:       r.Detail,
+			SubjectToken: r.SubjectToken,
+			CreatedAt:    r.CreatedAt,
 		})
 	}
 	return entries, nil

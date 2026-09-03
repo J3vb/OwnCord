@@ -35,9 +35,13 @@ ORDER BY created_at DESC;
 INSERT INTO audit_log (actor_id, action, target_type, target_id, detail)
 VALUES (?, ?, ?, ?, ?);
 
+-- name: LogAuditEntry :exec
+INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token)
+VALUES (?, ?, ?, ?, ?, ?);
+
 -- name: GetAuditLog :many
 SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
-       a.target_type, a.target_id, a.detail, a.created_at
+       a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
 ORDER BY a.id DESC

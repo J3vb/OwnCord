@@ -48,3 +48,39 @@ func WriteAudit(ctx context.Context, a Auditor, actorID int64, action, targetTyp
 		)
 	}
 }
+
+// EntryAuditor is the whole-entry form of Auditor, which *DB and the
+// service Store satisfy; WriteAuditEntry needs it for the subject token.
+type EntryAuditor interface {
+	LogAuditEntry(ctx context.Context, e AuditEntry) error
+}
+
+// AsyncEntryAuditor is AsyncAuditor's whole-entry form.
+type AsyncEntryAuditor interface {
+	EnqueueAuditEntry(e AuditEntry) bool
+}
+
+// WriteAuditEntry is WriteAudit for an entry that carries a subject token
+// (B4-10): an erasure's own rows name the subject by token, never by id.
+// Same best-effort policy, same async fast path when a writer is installed;
+// an Auditor without the entry forms gets the token-less write.
+func WriteAuditEntry(ctx context.Context, a Auditor, e AuditEntry) {
+	if aa, ok := a.(AsyncEntryAuditor); ok && aa.EnqueueAuditEntry(e) {
+		return
+	}
+	var err error
+	if ea, ok := a.(EntryAuditor); ok {
+		err = ea.LogAuditEntry(ctx, e)
+	} else {
+		err = a.LogAudit(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail)
+	}
+	if err != nil {
+		slog.Error("audit log write failed",
+			"action", e.Action,
+			"actor_id", e.ActorID,
+			"target_type", e.TargetType,
+			"target_id", e.TargetID,
+			"error", err,
+		)
+	}
+}

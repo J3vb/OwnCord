@@ -41,7 +41,7 @@ diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
-through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). Next B4-10 → B4-11. _Update this line — not only the step table — as steps
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 opened 2026-09-03** (PR #1520, branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). Next B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1341,7 +1341,7 @@ green; `trust-model.md:345`'s "No secure deletion" paragraph rewritten to
 the new truth (backup caveat remains until B4-10).
 
 **Evidence, 2026-09-03** — branch `feat/b4-9-account-erasure` from `dev`
-`9598c51` (HP-4 accepted); PR #1516 to `dev`, merged as `c9f06da`; the Codex review fix follows as #1517. Owner decision 9 and HP-4
+`9598c51` (HP-4 accepted); PR #1516 to `dev`, merged as `c9f06da`; the Codex review fix followed as #1517, merged as `7907c16`. Owner decision 9 and HP-4
 decisions 1–2.
 
 - **Erasure (`db.EraseAccount`, `Server/db/erasure.go`):** one transaction
@@ -1394,13 +1394,14 @@ decisions 1–2.
   `TestEventRingBuffer_RemoveWhere`, `TestErasureService_HubBroadcastsThenPurges`,
   `TestDeleteEventsForUser_MatchesEveryEnvelopeShape`) — Codex's two
   findings on #1516, both confirmed and fixed. Its review of #1517 added
-  three more, also fixed there: the purge is a journaled job step
+  four more, also fixed there (`2f48505`): the purge is a journaled job step
   (`erasure_jobs.replay_purged`, migration 040) retried until it succeeds;
   a producer that reaches the hub after the purge with a frame naming the
   erased user is dropped (the hub's tombstone set); and a client resuming
   from before the purge takes the full ready (a replay-purge watermark in
-  `mustFullResync`, and a ring replay crossing a cleared slot returns nil)
-  — `TestErasure_PurgeForcesFullResyncAndDropsLateFrames`,
+  `mustFullResync`, and a ring replay crossing a cleared slot returns nil); and migration 037 is again byte for byte what `dev` shipped, the
+  reply index moving to 040 beside `replay_purged` —
+  `TestErasure_PurgeForcesFullResyncAndDropsLateFrames`,
   `TestErasureService_ReplayPurgeIsRetriedFromTheJournal`; the
   `idx_messages_reply_to` index moved to migration 040 so upgraded
   installations get it.
@@ -1471,6 +1472,74 @@ drafts.
 
 Exit: unlinkability and non-resurrection tests green on alpha copies;
 `trust-model.md` backup caveat updated; BPR-053 row satisfied.
+
+**Evidence, 2026-09-03** — branch `feat/b4-10-deletion-markers`, stacked on
+#1517 (B4-9's review fix) until that merged as `7907c16` and was cascaded in;
+PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
+
+- **The key and the file:** `auth.LoadOrGenerateErasureKey`
+  (`Server/auth/erasure_key.go`) — `OWNCORD_ERASURE_KEY`, else
+  `data/erasure.key`, generated only on a confirmed absence, atomic write,
+  every other read error fails closed (the OC-0321 rule, shared with the
+  TOTP key). `db.MarkerStore` (`Server/db/markers.go`) is
+  `data/erasure/markers.sqlite`: its own SQLite file, schema applied on
+  open — the `deletion_markers` draft plus a `state` column. A marker names
+  its subject as `SubjectToken` = HMAC-SHA256(key, `account:<id>`); the
+  file names nobody without the key.
+- **Two-phase write around the erasure:** `ErasureService.Erase` records
+  the marker `pending`, runs `db.EraseAccount` with the token, then
+  confirms it `recorded`; a refused erasure discards the pending marker it
+  created, a replay leaves an existing one alone. A pending marker left by
+  a crash is resolved on the next open by whether the account exists — gone
+  means the commit happened (confirm), present means it did not (discard) —
+  so a crash can neither lose an erasure's marker nor erase an account
+  whose erasure never committed.
+- **Replay on every open:** the `erasure-markers` start-up stage
+  (`Server/internal/app/erasure.go`, between `migrate` and `telemetry`,
+  before the hub, the router and any listener) loads the key, opens the
+  file and runs `MarkerStore.ReplayAccounts`: every account whose id hashes
+  to a recorded marker is erased again through the full runner — rows,
+  audit unlinking, files — with an `account_erasure_replayed` audit row
+  carrying the token; `replays`/`last_replay` count it. A restore restarts
+  the process (`handleRestoreBackup`), so "after every restore" is this
+  stage. The routes' runner gets the same store (`SetMarkers`) so their
+  erasures record into it.
+- **Unlinkable audit history (migration 038, the `audit_unlinking` draft
+  verbatim):** inside the erasure transaction every audit row the subject
+  appears in — as actor, or as a `user` target — keeps its action, time and
+  position, gets `actor_id`/`target_id` = 0 and `detail = ''`, and carries
+  `subject_token`. The erasure's own `account_deleted` row is written
+  unlinked from the start (`db.WriteAuditEntry`: actor 0 for self-service,
+  the administrator for the admin route, the target the token, no IP); the
+  async audit writer carries the token. `GET /admin/api/audit-log` returns
+  `subject_token` on those rows. Inventory class 21 (rows naming the id) is
+  zero after an erasure, so `InventoryKeptByErasure` is empty.
+- **Deviation recorded:** the plan's bullet 1 asked that two retained rows
+  about one erased subject "cannot be linked to each other"; HP-4 decision
+  4, which amended it, keeps one token per subject on purpose — the token
+  is what lets a restore recognise the subject — so rows about one subject
+  are linkable to each other and to the identity only by whoever holds
+  `erasure.key`. `trust-model.md` says so.
+- **Tests:** post-restore proof —
+  `TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure` (alpha copy:
+  erase with a marker, restore the older backup, the account is back in
+  full, replay, zero in every class, the audit rows unlinked by token) and
+  `TestErasureService_ReplayMarkersErasesAResurrectedAccount` (file-backed
+  database, files restored too, erased again with the audit row);
+  markers — `TestMarkerStore_TokenIsKeyedAndUnlinkable`,
+  `TestMarkerStore_PendingConfirmDiscard`, `TestMarkerStore_ReplayAccounts`
+  (recorded + present erased, pending + gone confirmed, pending + present
+  discarded, a second replay idle), `TestMarkerStore_FileLivesOutsideTheDatabase`,
+  `TestErasureService_RecordsAndConfirmsTheMarker` (a refused erasure leaves
+  no marker); audit — `TestEraseAccount_UnlinksAuditHistory`; the key —
+  `TestLoadOrGenerateErasureKey_*`; the stage —
+  `TestOpenMarkers_ReplaysAgainstTheOpenedDatabase`.
+- **Docs:** `trust-model.md` (the backup caveat closed, the token and the
+  operator's two duties stated), `security.md` (the key, the unlinked rows,
+  `account_erasure_replayed`), `data-lifecycle.md` (O1 A5, O4 A3/A5,
+  classes 21, 24 and the new 27, drill D2, the appendix), `api.md`,
+  `schema.md` (038 regenerated; the marker file's schema), the drafts README,
+  this block, the README row, the scorecard.
 
 ## B4-11 — Retention policies and attachment cleanup
 

@@ -17,9 +17,10 @@ func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 
 // SubjectInventory is the data-class inventory of data-lifecycle.md as
 // queries, keyed by class number. It is the generated lineage checklist B4-9
-// walks after an erasure (every count must be zero, except class 21, which
-// B4-10 unlinks rather than deletes) and the before/after table the HP-4
-// drills paste. uname is the username before erasure, for the lockout keys.
+// walks after an erasure (every count must be zero; class 21 counts audit
+// rows that still carry the id, which B4-10's unlinking takes to zero while
+// the rows themselves stay) and the before/after table the HP-4 drills
+// paste. uname is the username before erasure, for the lockout keys.
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
 	{"2 sessions", `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, inventoryByUID},
@@ -51,9 +52,10 @@ var SubjectInventory = []InventoryClass{
 	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, inventoryBothIDs},
 }
 
-// InventoryKeptByErasure names the classes an erasure leaves on purpose:
-// audit history, which B4-10 unlinks rather than deletes.
-var InventoryKeptByErasure = map[string]bool{"21 audit rows": true}
+// InventoryKeptByErasure names the classes an erasure leaves on purpose.
+// Empty since B4-10: the audit history stays, but unlinked, so no class
+// still counts the subject.
+var InventoryKeptByErasure = map[string]bool{}
 
 // TakeInventory runs SubjectInventory for one subject and returns the count
 // per class key.
