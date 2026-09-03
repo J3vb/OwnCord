@@ -1341,7 +1341,7 @@ green; `trust-model.md:345`'s "No secure deletion" paragraph rewritten to
 the new truth (backup caveat remains until B4-10).
 
 **Evidence, 2026-09-03** — branch `feat/b4-9-account-erasure` from `dev`
-`9598c51` (HP-4 accepted); PR #1516 to `dev`, merged as `c9f06da`; the Codex review fix follows as #1517. Owner decision 9 and HP-4
+`9598c51` (HP-4 accepted); PR #1516 to `dev`, merged as `c9f06da`; the Codex review fix followed as #1517, merged as `7907c16`. Owner decision 9 and HP-4
 decisions 1–2.
 
 - **Erasure (`db.EraseAccount`, `Server/db/erasure.go`):** one transaction
@@ -1394,13 +1394,14 @@ decisions 1–2.
   `TestEventRingBuffer_RemoveWhere`, `TestErasureService_HubBroadcastsThenPurges`,
   `TestDeleteEventsForUser_MatchesEveryEnvelopeShape`) — Codex's two
   findings on #1516, both confirmed and fixed. Its review of #1517 added
-  three more, also fixed there: the purge is a journaled job step
+  four more, also fixed there (`2f48505`): the purge is a journaled job step
   (`erasure_jobs.replay_purged`, migration 040) retried until it succeeds;
   a producer that reaches the hub after the purge with a frame naming the
   erased user is dropped (the hub's tombstone set); and a client resuming
   from before the purge takes the full ready (a replay-purge watermark in
-  `mustFullResync`, and a ring replay crossing a cleared slot returns nil)
-  — `TestErasure_PurgeForcesFullResyncAndDropsLateFrames`,
+  `mustFullResync`, and a ring replay crossing a cleared slot returns nil); and migration 037 is again byte for byte what `dev` shipped, the
+  reply index moving to 040 beside `replay_purged` —
+  `TestErasure_PurgeForcesFullResyncAndDropsLateFrames`,
   `TestErasureService_ReplayPurgeIsRetriedFromTheJournal`; the
   `idx_messages_reply_to` index moved to migration 040 so upgraded
   installations get it.
@@ -1473,7 +1474,8 @@ Exit: unlinkability and non-resurrection tests green on alpha copies;
 `trust-model.md` backup caveat updated; BPR-053 row satisfied.
 
 **Evidence, 2026-09-03** — branch `feat/b4-10-deletion-markers`, stacked on
-#1517 (B4-9's review fix); PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
+#1517 (B4-9's review fix) until that merged as `7907c16` and was cascaded in;
+PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
 
 - **The key and the file:** `auth.LoadOrGenerateErasureKey`
   (`Server/auth/erasure_key.go`) — `OWNCORD_ERASURE_KEY`, else
