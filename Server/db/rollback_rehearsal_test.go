@@ -387,3 +387,79 @@ func TestMarkerFileRollback(t *testing.T) {
 		t.Error("a marker survived the marker-file rollback")
 	}
 }
+
+// TestReversalFilesAreOperatorSafe pins the two properties the documented
+// operator command depends on (Server/rollback/README.md, "Running one").
+//
+// An operator runs a reversal by piping it to the sqlite3 CLI wrapped in
+// BEGIN/COMMIT, because the CLI otherwise commits each statement as it reads
+// it. That wrapping is only valid while no reversal carries transaction
+// control of its own, and the wrap is only worth having while the
+// schema_versions delete is last: -bail stops at the first error, and a file
+// that cleared its tracker row before its schema change would leave the next
+// start re-applying the migration onto a half-reversed schema.
+//
+// applyReversal above runs each file in one transaction, which is the same
+// shape, so the rehearsal exercises the path the README documents.
+// sqlText drops the -- comment lines a statement carries, so the checks below
+// read the SQL rather than the prose explaining it.
+func sqlText(stmt string) string {
+	var kept []string
+	for line := range strings.SplitSeq(stmt, "\n") {
+		if code, _, found := strings.Cut(line, "--"); found {
+			line = code
+		}
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+	return collapseSpace.ReplaceAllString(strings.TrimSpace(strings.Join(kept, " ")), " ")
+}
+
+func TestReversalFilesAreOperatorSafe(t *testing.T) {
+	txnControl := []string{"begin", "commit", "rollback", "savepoint", "release", "end"}
+
+	for _, name := range append(slices.Clone(rollback.Order), rollback.MarkerFile) {
+		raw, err := rollback.FS.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		stmts := splitStatements(string(raw))
+		if len(stmts) == 0 {
+			t.Errorf("%s has no statements", name)
+			continue
+		}
+
+		code := make([]string, 0, len(stmts))
+		for _, stmt := range stmts {
+			code = append(code, sqlText(stmt))
+		}
+
+		for _, stmt := range code {
+			first, _, _ := strings.Cut(strings.ToLower(stmt), " ")
+			if slices.Contains(txnControl, strings.TrimSuffix(first, ";")) {
+				t.Errorf("%s carries its own transaction control (%q) — the operator wraps the file in one", name, first)
+			}
+		}
+
+		if name == rollback.MarkerFile {
+			// The marker file is not a migration and has no tracker row.
+			for _, stmt := range code {
+				if strings.Contains(stmt, "schema_versions") {
+					t.Errorf("%s touches schema_versions, but the marker file is not a migration", name)
+				}
+			}
+			continue
+		}
+
+		want := "DELETE FROM schema_versions WHERE version = '" + rollback.Migration(name) + "'"
+		if last := code[len(code)-1]; last != want {
+			t.Errorf("%s ends with %q, want %q as its last statement", name, last, want)
+		}
+		for _, stmt := range code[:len(code)-1] {
+			if strings.Contains(stmt, "schema_versions") {
+				t.Errorf("%s touches schema_versions before its last statement: %q", name, stmt)
+			}
+		}
+	}
+}

@@ -14,8 +14,32 @@ the committed alpha snapshot on every CI run.
 ## Running one
 
 ```sh
-sqlite3 data/owncord.db < Server/rollback/043_setup_completed.down.sql
+DB=data/chatserver.db   # your server's database.path -- check yours
+test -f "$DB" || { echo "no database at $DB" >&2; exit 1; }
+
+{ echo 'BEGIN;'; cat Server/rollback/043_setup_completed.down.sql; echo 'COMMIT;'; } |
+  sqlite3 -bail "$DB"
 ```
+
+Every part of that command is load-bearing:
+
+- **The path is the configured one, and it is checked first.** `sqlite3`
+  creates the database when the file does not exist, so a wrong path does not
+  fail — it reverses a brand-new empty database, reports success, and leaves
+  the live one untouched. `data/chatserver.db` is only the shipped default
+  (`Server/config/config.go`, `Database.Path`); read your own `database.path`
+  rather than trusting it.
+- **`-bail` stops at the first error.** Without it the CLI prints the error
+  and carries on to the rest of the file, including the `schema_versions`
+  delete at the end — clearing the tracker for a reversal that did not finish,
+  so the next start would re-apply the migration onto a half-reversed schema.
+- **The wrapping transaction makes the file all-or-nothing.** Fed on stdin the
+  CLI otherwise commits each statement as it reads it, so a failure halfway
+  through leaves the earlier drops committed. No reversal here contains
+  transaction control of its own, precisely so this wrapping is valid, and
+  `TestReversalFilesAreOperatorSafe` keeps it that way — as it keeps the
+  `schema_versions` delete last, so an aborted run cannot clear the tracker
+  before the schema change lands.
 
 Newest first, and contiguous: to get from 043 back to 040 run 043, 042, 041,
 040 in that order. Skipping one in the middle is not a supported state.
