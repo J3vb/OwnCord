@@ -378,18 +378,28 @@ does not claim").
   resists an operator who reads. A modified server controls call membership
   and can add a participant it holds the keys for; pins do not cover a member
   that was never a known peer. Authenticated membership is not in beta.
-- **Deletion does not reach backups yet.** Account erasure (B4-9,
-  `Server/db/erasure.go`; `TestHP4_D1_ErasureLeavesNoClass`) hard-deletes
-  every row attributable to the account — the account itself, its messages
-  and their search-index entries, reactions, mentions, uploads and their
-  files, DM state, invites, blocks, credentials, sessions and replay events —
-  in one transaction run with SQLite's `secure_delete` on, and truncates the
-  write-ahead log after it, so the live database file keeps no trace in
-  freed pages or the WAL. What it does not reach is a backup taken before
-  the erasure: restoring one brings the account back in full, and nothing in
-  the restored file records that an erasure happened. B4-10's deletion
-  markers, kept outside the database file and replayed on every open and
-  restore, close that; until then the operator's backups are the disclosure.
+- **Erasure is not undone by a restore, but the audit trail keeps a
+  token.** Account erasure (B4-9, `Server/db/erasure.go`;
+  `TestHP4_D1_ErasureLeavesNoClass`) hard-deletes every row attributable to
+  the account — the account itself, its messages and their search-index
+  entries, reactions, mentions, uploads and their files, DM state, invites,
+  blocks, credentials, sessions and replay events — in one transaction run
+  with SQLite's `secure_delete` on, and truncates the write-ahead log after
+  it, so the live database file keeps no trace in freed pages or the WAL.
+  A backup taken before the erasure still holds the account; what stops it
+  coming back is the deletion marker (B4-10, `Server/db/markers.go`):
+  `data/erasure/markers.sqlite`, outside the file a restore overwrites,
+  replayed on every start-up before anything serves, so a restored backup
+  is erased again (`TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure`).
+  A marker names its subject only as HMAC-SHA256 of the id under
+  `data/erasure.key`, generated beside `totp.key`; the audit rows the
+  subject appeared in keep their action, time and order with that token in
+  place of the id (`audit_log.subject_token`), so the rows about one erased
+  subject remain linkable to each other, and to the identity only by whoever
+  holds the key — the operator. Two operator duties follow: back up
+  `erasure.key` and the marker file beside the database (a restore with
+  either missing has nothing to replay), and treat the key as the thing that
+  re-identifies an erased account's audit trail.
 - **No browser client yet**, and when there is one it will not pin
   certificates.
 - **No stable plugin API** — [architecture/plugins.md](architecture/plugins.md).

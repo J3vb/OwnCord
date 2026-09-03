@@ -33,13 +33,14 @@ type Attachment struct {
 }
 
 type AuditLog struct {
-	ID         int64  `json:"id"`
-	ActorID    int64  `json:"actorId"`
-	Action     string `json:"action"`
-	TargetType string `json:"targetType"`
-	TargetID   int64  `json:"targetId"`
-	Detail     string `json:"detail"`
-	CreatedAt  string `json:"createdAt"`
+	ID           int64   `json:"id"`
+	ActorID      int64   `json:"actorId"`
+	Action       string  `json:"action"`
+	TargetType   string  `json:"targetType"`
+	TargetID     int64   `json:"targetId"`
+	Detail       string  `json:"detail"`
+	CreatedAt    string  `json:"createdAt"`
+	SubjectToken *string `json:"subjectToken"`
 }
 
 type Channel struct {

@@ -70,6 +70,7 @@ type App struct {
 	persister   *ws.EventPersister
 	prunerDone  <-chan struct{}
 	auditWriter *db.AuditWriter
+	markers     *db.MarkerStore
 	serveCtx    context.Context
 
 	closers []closeStep

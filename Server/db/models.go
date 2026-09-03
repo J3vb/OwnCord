@@ -289,7 +289,11 @@ type AuditEntry struct {
 	TargetType string `json:"target_type"`
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
-	CreatedAt  string `json:"created_at"`
+	// SubjectToken is the deletion-marker token of an erased subject the row
+	// was about (B4-10): set by the erasure on rows that lost their ids, and
+	// on the erasure's own rows. Empty on every other row.
+	SubjectToken string `json:"subject_token,omitempty"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // Emoji represents a row in the emoji table: one server-wide custom emoji.

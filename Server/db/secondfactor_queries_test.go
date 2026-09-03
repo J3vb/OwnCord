@@ -235,7 +235,7 @@ func TestEraseAccount_PurgesSecondFactorState(t *testing.T) {
 		}
 	}
 
-	if _, err := database.EraseAccount(ctx, uid); err != nil {
+	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	count := func(q string, id int64) int {

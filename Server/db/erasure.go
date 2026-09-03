@@ -57,9 +57,14 @@ const (
 // transaction: the returned job is the only handle left on the blobs, and
 // the caller removes them (a missing file counts as removed).
 //
+// subjectToken is the deletion marker's token for the subject (B4-10): the
+// audit rows the subject appears in keep their action, time and order but
+// lose the id — actor_id / target_id become 0, detail is cleared — and carry
+// the token instead. An empty token unlinks the rows without one.
+//
 // Returns ErrLastAdmin when the subject is the last admin-class account and
 // ErrNotFound when no such user exists. Nothing is logged here by username.
-func (d *DB) EraseAccount(ctx context.Context, userID int64) (*ErasureJob, error) {
+func (d *DB) EraseAccount(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
 	conn, err := d.writer.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount conn: %w", err)
@@ -81,7 +86,7 @@ func (d *DB) EraseAccount(ctx context.Context, userID int64) (*ErasureJob, error
 		}
 	}()
 
-	job, err := eraseAccountTx(ctx, conn, userID)
+	job, err := eraseAccountTx(ctx, conn, userID, subjectToken)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +105,7 @@ func (d *DB) EraseAccount(ctx context.Context, userID int64) (*ErasureJob, error
 }
 
 // eraseAccountTx is EraseAccount's transaction.
-func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64) (*ErasureJob, error) {
+func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string) (*ErasureJob, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
@@ -143,6 +148,9 @@ func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64) (*Erasure
 	}
 	files = append(files, assetFiles...)
 	if err := deleteAccountCloseDMChannels(ctx, tx, userID, dmChannelIDs); err != nil {
+		return nil, err
+	}
+	if err := erasureUnlinkAudit(ctx, tx, userID, subjectToken); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
@@ -229,6 +237,28 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 		return 0, fmt.Errorf("DeleteEventsForUser RowsAffected: %w", err)
 	}
 	return n, nil
+}
+
+// erasureUnlinkAudit is the unlinkable integrity history (B4-10, BPR-053):
+// every audit row the subject appears in — as actor, or as a user target —
+// keeps its action, time and position but loses the id and its free-text
+// detail, and carries the deletion marker's token instead (NULL when the
+// erasure ran without a marker store). "An erasure happened, by this actor
+// class, at this time" survives; "of whom" needs the erasure key.
+func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
+	var token any
+	if subjectToken != "" {
+		token = subjectToken
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE audit_log SET actor_id = 0, detail = '', subject_token = ? WHERE actor_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink audit actor: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE audit_log SET target_id = 0, detail = '', subject_token = ? WHERE target_type = 'user' AND target_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink audit target: %w", err)
+	}
+	return nil
 }
 
 // erasureCollectFiles lists the stored_as names of every attachment the

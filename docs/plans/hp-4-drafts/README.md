@@ -20,5 +20,12 @@ The scorecard ([hp-4-scorecard-2026-09-02.md](../hp-4-scorecard-2026-09-02.md))
 records the decisions the shapes encode.
 
 Applied so far: `erasure_jobs` landed as `Server/migrations/037_erasure_jobs.sql`
-(B4-9, 2026-09-03), byte-for-byte the `up` draft; its `down` file stays here
-as the rollback.
+(B4-9, 2026-09-03), byte-for-byte the `up` draft plus the `idx_messages_reply_to`
+index the erasure's cascade needed (#1517); its `down` file stays here as the
+rollback. `audit_unlinking` landed as `Server/migrations/038_audit_unlinking.sql`
+(B4-10, 2026-09-03), verbatim. `deletion_markers` is applied by the server on
+the marker file itself (`Server/db/markers.go`, `OpenMarkerStore`), not by the
+migrations, with one addition to the draft: a `state` column
+(`pending`/`recorded`) for the two-phase write around the erasure transaction
+(`docs/schema.md`, "The deletion-marker file"); its `down` file is the
+rollback for that file.

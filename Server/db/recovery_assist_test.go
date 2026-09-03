@@ -157,7 +157,7 @@ func TestEraseAccount_PurgesTheRecoveryCredential(t *testing.T) {
 	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatalf("UpsertRecoveryAssist: %v", err)
 	}
-	if _, err := database.EraseAccount(ctx, uid); err != nil {
+	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {

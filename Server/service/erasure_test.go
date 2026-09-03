@@ -120,7 +120,7 @@ func TestErasureService_RestartResumesTheFileHalf(t *testing.T) {
 	uid, files := seedErasureMember(t, database, dir)
 
 	// The database half commits; the process is gone before any unlink.
-	if _, err := database.EraseAccount(context.Background(), uid); err != nil {
+	if _, err := database.EraseAccount(context.Background(), uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	if err := database.Close(); err != nil {
@@ -439,8 +439,12 @@ func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
 		t.Errorf("member_ban broadcasts = %v, want [%d]", bcast.banned, uid)
 	}
 	var audits int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = ? AND target_id = ?`, uid, uid).Scan(&audits); err != nil || audits != 1 {
-		t.Errorf("account_deleted audit rows = %d (%v), want 1", audits, err)
+	// Unlinked from the start (B4-10): no actor id, no target id, no IP.
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = 0 AND target_id = 0 AND detail NOT LIKE '%203.0.113.9%'`).Scan(&audits); err != nil || audits != 1 {
+		t.Errorf("unlinked account_deleted audit rows = %d (%v), want 1", audits, err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, uid, uid).Scan(&audits); err != nil || audits != 0 {
+		t.Errorf("audit rows still naming the subject = %d (%v), want 0", audits, err)
 	}
 }
 
@@ -511,8 +515,8 @@ func TestModerationService_EraseUser(t *testing.T) {
 		}
 	}
 	var audits int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = ? AND target_id = ?`, owner.ID, member).Scan(&audits); err != nil || audits != 1 {
-		t.Errorf("account_deleted audit rows by the owner = %d (%v), want 1", audits, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND actor_id = ? AND target_id = 0`, owner.ID).Scan(&audits); err != nil || audits != 1 {
+		t.Errorf("account_deleted audit rows by the owner (target unlinked) = %d (%v), want 1", audits, err)
 	}
 
 	unwired := NewModerationService(database, svc.Permissions)
@@ -575,5 +579,153 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 	all.Erasure.SetHub(hub)
 	if !all.Moderation.ErasureBroadcastsMemberBan() {
 		t.Error("ErasureBroadcastsMemberBan with a hub")
+	}
+}
+
+func newTestMarkers(t *testing.T) *db.MarkerStore {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = 9
+	}
+	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), key)
+	if err != nil {
+		t.Fatalf("OpenMarkerStore: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	return m
+}
+
+// With a marker store the erasure records the marker pending, confirms it
+// after the commit, and the audit rows carry its token; a refused erasure
+// leaves no marker behind.
+func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	if svc.SubjectToken(uid) != "" {
+		t.Fatal("SubjectToken without markers")
+	}
+	svc.SetMarkers(markers)
+	tok := svc.SubjectToken(uid)
+	if tok != markers.SubjectToken(uid) {
+		t.Fatalf("SubjectToken = %q", tok)
+	}
+
+	// Refused: the sole owner is the last admin-class account.
+	owner, _ := database.GetUserByUsername(ctx, "erasure-owner")
+	if err := svc.Erase(ctx, owner.ID); !errors.Is(err, db.ErrLastAdmin) {
+		t.Fatalf("Erase(owner) = %v, want ErrLastAdmin", err)
+	}
+	if m, _ := markers.Markers(ctx); len(m) != 0 {
+		t.Fatalf("a refused erasure left a marker: %+v", m)
+	}
+
+	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: uid, Action: "user_login", TargetType: "user", TargetID: uid, Detail: "ip"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	m, err := markers.Markers(ctx)
+	if err != nil || len(m) != 1 || m[0].SubjectToken != tok || m[0].State != db.MarkerRecorded {
+		t.Fatalf("markers after erasure = %+v, %v; want one recorded marker for the subject", m, err)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token = ? AND actor_id = 0 AND target_id = 0`, tok).Scan(&n); err != nil || n != 1 {
+		t.Errorf("unlinked audit rows carrying the token = %d (%v), want 1", n, err)
+	}
+	// Erasing again finds nothing; the marker is not duplicated or lost.
+	if err := svc.Erase(ctx, uid); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("second Erase = %v", err)
+	}
+	if m, _ := markers.Markers(ctx); len(m) != 1 || m[0].State != db.MarkerRecorded {
+		t.Errorf("markers after the refused repeat = %+v", m)
+	}
+}
+
+// ReplayMarkers is the start-up pass: an account a restore brought back is
+// erased again, files included, and the audit row names the replay by token.
+func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, files := seedErasureMember(t, database, dir)
+	backup := filepath.Join(t.TempDir(), "older.db")
+	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
+		t.Fatal(err)
+	}
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The restore: the older file over the live one, the files back on disk
+	// (uploads are not in a backup, but a subject's files may well be — the
+	// operator restored the upload directory too).
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restored.Close() })
+	if err := db.Migrate(restored); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := restored.GetUserByID(ctx, uid); u == nil {
+		t.Fatal("the restore did not resurrect the account")
+	}
+
+	fresh := NewErasureService(restored)
+	fresh.SetFiles(newTestStorage(t, dir))
+	if rep, err := fresh.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("ReplayMarkers without markers = %+v, %v; want nothing", rep, err)
+	}
+	fresh.SetMarkers(markers)
+	rep, err := fresh.ReplayMarkers(ctx)
+	if err != nil {
+		t.Fatalf("ReplayMarkers: %v", err)
+	}
+	if rep.Erased != 1 {
+		t.Fatalf("report = %+v, want 1 erased", rep)
+	}
+	if u, _ := restored.GetUserByID(ctx, uid); u != nil {
+		t.Error("the resurrected account survived the replay")
+	}
+	for _, f := range files {
+		if fileExists(t, filepath.Join(dir, f)) {
+			t.Errorf("%s still on disk after the replayed erasure", f)
+		}
+	}
+	var n int
+	if err := restored.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_erasure_replayed' AND subject_token = ? AND actor_id = 0 AND target_id = 0`, markers.SubjectToken(uid)).Scan(&n); err != nil || n != 1 {
+		t.Errorf("account_erasure_replayed rows = %d (%v), want 1", n, err)
 	}
 }

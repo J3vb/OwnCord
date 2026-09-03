@@ -120,7 +120,7 @@ func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
 	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
 		t.Fatalf("UpsertRecoveryKit: %v", err)
 	}
-	if _, err := database.EraseAccount(ctx, uid); err != nil {
+	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {

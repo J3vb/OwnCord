@@ -86,8 +86,11 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 	}
 
 	// Audit rows must survive a request canceled after the erasure committed.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "account_deleted", "user", targetID,
-		"account erased by administrator")
+	// The actor stays; the target is the marker's token, never the id (B4-10).
+	db.WriteAuditEntry(context.WithoutCancel(ctx), s.st, db.AuditEntry{
+		ActorID: actorID, Action: "account_deleted", TargetType: "user", Detail: "account erased by administrator",
+		SubjectToken: s.erasure.SubjectToken(targetID),
+	})
 
 	slog.Info("account erased by administrator", "actor_id", actorID, "target_id", targetID)
 	return nil

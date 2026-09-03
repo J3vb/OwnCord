@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);

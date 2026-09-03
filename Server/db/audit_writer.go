@@ -28,11 +28,12 @@ type AuditStore interface {
 // pendingAudit is a single audit entry waiting to be flushed to the store.
 // Fields mirror LogAudit's parameters.
 type pendingAudit struct {
-	actorID    int64
-	action     string
-	targetType string
-	targetID   int64
-	detail     string
+	actorID      int64
+	action       string
+	targetType   string
+	targetID     int64
+	detail       string
+	subjectToken string
 }
 
 // AuditWriter batches audit entries and writes them to an AuditStore.
@@ -106,9 +107,15 @@ func (w *AuditWriter) Start(ctx context.Context) {
 // and logged with the same identifying fields WriteAudit uses for a
 // synchronous failure. The detail string is intentionally not logged.
 func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID int64, detail string) {
+	w.EnqueueEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
+}
+
+// EnqueueEntry is Enqueue for a whole entry, subject token included (B4-10).
+func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	if w == nil {
 		return
 	}
+	actorID, action, targetType, targetID, detail := e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail
 	// run() stops reading w.queue the instant it exits, but the channel keeps
 	// its buffer and keeps accepting sends — without this check a caller that
 	// enqueues after Stop has returned (main.go closes the DB right after)
@@ -127,7 +134,7 @@ func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID
 	default:
 	}
 	select {
-	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail}:
+	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail, subjectToken: e.SubjectToken}:
 	default:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: queue full",
@@ -211,11 +218,12 @@ func (w *AuditWriter) run(ctx context.Context) {
 		rows = rows[:0]
 		for _, a := range batch {
 			rows = append(rows, AuditEntry{
-				ActorID:    a.actorID,
-				Action:     a.action,
-				TargetType: a.targetType,
-				TargetID:   a.targetID,
-				Detail:     a.detail,
+				ActorID:      a.actorID,
+				Action:       a.action,
+				TargetType:   a.targetType,
+				TargetID:     a.targetID,
+				Detail:       a.detail,
+				SubjectToken: a.subjectToken,
 			})
 		}
 		// One transaction per flush instead of one autocommit write per entry.
@@ -288,10 +296,16 @@ func (d *DB) SetAuditWriter(w *AuditWriter) {
 // EnqueueAudit implements AsyncAuditor. It reports false when no writer is
 // installed so WriteAudit falls back to the synchronous path.
 func (d *DB) EnqueueAudit(actorID int64, action, targetType string, targetID int64, detail string) bool {
+	return d.EnqueueAuditEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
+}
+
+// EnqueueAuditEntry implements AsyncEntryAuditor: the whole-entry form of
+// EnqueueAudit, carrying the subject token (B4-10).
+func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	w := d.auditWriter.Load()
 	if w == nil {
 		return false
 	}
-	w.Enqueue(actorID, action, targetType, targetID, detail)
+	w.EnqueueEntry(e)
 	return true
 }

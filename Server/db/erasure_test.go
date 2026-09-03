@@ -90,7 +90,7 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 		}
 	}
 
-	job, err := database.EraseAccount(ctx, sub.id)
+	job, err := database.EraseAccount(ctx, sub.id, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
-	job, err := database.EraseAccount(ctx, sub.id)
+	job, err := database.EraseAccount(ctx, sub.id, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
 		t.Fatalf("install fault: %v", err)
 	}
 
-	_, err = database.EraseAccount(ctx, sub.id)
+	_, err = database.EraseAccount(ctx, sub.id, "")
 	if err == nil {
 		t.Fatal("EraseAccount succeeded through the fault")
 	}
@@ -249,7 +249,7 @@ func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `DROP TRIGGER fault_full`); err != nil {
 		t.Fatalf("drop fault: %v", err)
 	}
-	if _, err := database.EraseAccount(ctx, sub.id); err != nil {
+	if _, err := database.EraseAccount(ctx, sub.id, ""); err != nil {
 		t.Fatalf("retry after the fault cleared: %v", err)
 	}
 }
@@ -265,7 +265,7 @@ func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('solo', 'emoji-solo', ?)`, uid); err != nil {
 		t.Fatalf("seed emoji: %v", err)
 	}
-	job, err := database.EraseAccount(ctx, uid)
+	job, err := database.EraseAccount(ctx, uid, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestEraseAccount_LockoutSuffixIsExact(t *testing.T) {
 			t.Fatalf("seed %s: %v", k, err)
 		}
 	}
-	if _, err := database.EraseAccount(ctx, uid); err != nil {
+	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	rows, err := database.QueryContext(ctx, `SELECT key FROM rate_lockouts ORDER BY key`)
@@ -381,5 +381,82 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	var left int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 4 {
 		t.Errorf("rows left = %d (%v), want the 4 naming nobody or someone else", left, err)
+	}
+}
+
+// B4-10: the audit rows the subject appears in survive with their action,
+// time and order, lose the id and the free text, and carry the marker's
+// token — while rows about other people keep everything.
+func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sub := seedEraseSubject(t, database)
+	rows := []db.AuditEntry{
+		{ActorID: sub.id, Action: "user_login", TargetType: "user", TargetID: sub.id, Detail: "from 203.0.113.9"},
+		{ActorID: sub.other, Action: "user_ban", TargetType: "user", TargetID: sub.id, Detail: "spam by Subject_User"},
+		{ActorID: sub.id, Action: "channel_create", TargetType: "channel", TargetID: 5, Detail: "named by the subject"},
+		{ActorID: sub.other, Action: "setting_change", TargetType: "server", TargetID: 0, Detail: "motd"},
+		{ActorID: sub.other, Action: "user_login", TargetType: "user", TargetID: sub.other, Detail: "from 198.51.100.7"},
+	}
+	for _, r := range rows {
+		if err := database.LogAuditEntry(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if _, err := database.EraseAccount(ctx, sub.id, token); err != nil {
+		t.Fatalf("EraseAccount: %v", err)
+	}
+	got, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byAction := map[string][]db.AuditEntry{}
+	for _, e := range got {
+		byAction[e.Action] = append(byAction[e.Action], e)
+	}
+	if len(got) < len(rows) {
+		t.Fatalf("audit rows = %d, want at least the %d seeded (unlinked, never deleted)", len(got), len(rows))
+	}
+	check := func(e db.AuditEntry, actor, target int64, detail, tok string) {
+		t.Helper()
+		if e.ActorID != actor || e.TargetID != target || e.Detail != detail || e.SubjectToken != tok {
+			t.Errorf("%s: actor %d target %d detail %q token %q; want %d %d %q %q", e.Action, e.ActorID, e.TargetID, e.Detail, e.SubjectToken, actor, target, detail, tok)
+		}
+	}
+	// The subject's own login: both ids gone, detail (an IP) gone, token set.
+	for _, e := range byAction["user_login"] {
+		if e.Detail == "from 198.51.100.7" || e.ActorID == sub.other {
+			check(e, sub.other, sub.other, "from 198.51.100.7", "")
+		} else {
+			check(e, 0, 0, "", token)
+		}
+	}
+	// Banned by another: the actor stays, the target is the token.
+	check(byAction["user_ban"][0], sub.other, 0, "", token)
+	// Acting on a channel: the actor is the token, the channel target stays.
+	check(byAction["channel_create"][0], 0, 5, "", token)
+	// Nothing to do with the subject: untouched.
+	check(byAction["setting_change"][0], sub.other, 0, "motd", "")
+	// Order and time survive: ids still descend, created_at is set.
+	for i := 1; i < len(got); i++ {
+		if got[i-1].ID <= got[i].ID {
+			t.Errorf("audit order broken at %d", i)
+		}
+	}
+	// Erasing without a marker store unlinks without a token.
+	other2 := seedUser(t, database, "second-subject")
+	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: other2, Action: "user_login", TargetType: "user", TargetID: other2, Detail: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.EraseAccount(ctx, other2, ""); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR target_id = ?`, other2, other2).Scan(&n); err != nil || n != 0 {
+		t.Errorf("rows still naming the second subject = %d (%v)", n, err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token IS NULL AND actor_id = 0 AND target_id = 0 AND action = 'user_login'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("token-less unlinked rows = %d (%v), want 1", n, err)
 	}
 }

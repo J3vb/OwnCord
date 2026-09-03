@@ -51,6 +51,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1515 | HP-4 — this scorecard                                                                                             | `9598c51` (merged after measurement) |
 | #1516 | B4-9 — complete account erasure                                                                                   | `c9f06da` (merged after measurement) |
 | —     | B4-9 review fix — the replay-pipeline purge and the persisted-envelope predicate (#1517, `fix/b4-9-replay-purge`) | open — draft                         |
+| —     | B4-10 — deletion markers and unlinkable audit history (`feat/b4-10-deletion-markers`, stacked on #1517)           | open — draft                         |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is
 serialized as the plan required; #1512 and #1513 carry #1511's commits until
@@ -294,11 +295,11 @@ Recorded as B4-9, B4-10 and B4-11 land; each step's pre-squash commits
 survive on its PR ref (`refs/pull/<n>/head`). The already-merged steps' PR
 refs are in the chain table above.
 
-| Step  | Branch                      | Pre-squash head                                                                                                          | PR    |
-| ----- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----- |
-| B4-9  | `feat/b4-9-account-erasure` | `8032d70` → squash `c9f06da`; Codex's two findings fixed in `9880604`, which landed after the merge and follows as #1517 | #1516 |
-| B4-10 | —                           | —                                                                                                                        | —     |
-| B4-11 | —                           | —                                                                                                                        | —     |
+| Step  | Branch                        | Pre-squash head                                                                                                          | PR     |
+| ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------ |
+| B4-9  | `feat/b4-9-account-erasure`   | `8032d70` → squash `c9f06da`; Codex's two findings fixed in `9880604`, which landed after the merge and follows as #1517 | #1516  |
+| B4-10 | `feat/b4-10-deletion-markers` | _recorded when the PR is opened_                                                                                         | _open_ |
+| B4-11 | —                             | —                                                                                                                        | —      |
 
 **Signed:** Accepted 2026-09-03 — the owner merged this scorecard as #1515
 (`9598c51`) with all six decisions standing; recorded by B4-9's PR, not

@@ -95,7 +95,7 @@ Generated from the migrated schema by `cd Server && go run -tags otel,wazero ./c
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `api_tokens`               | `id INTEGER PK`, `user_id INTEGER NOT NULL`, `token_hash TEXT NOT NULL`, `label TEXT NOT NULL`, `created_at TEXT NOT NULL`, `last_used_at TEXT`, `expires_at TEXT`, `revoked_at TEXT`                                                                                                                                                                                                                | `idx_api_tokens_user`, `sqlite_autoindex_api_tokens_1`                                                                  |
 | `attachments`              | `id TEXT PK`, `message_id INTEGER`, `filename TEXT NOT NULL`, `stored_as TEXT NOT NULL`, `mime_type TEXT NOT NULL`, `size INTEGER NOT NULL`, `uploaded_at TEXT NOT NULL`, `width INTEGER`, `height INTEGER`, `uploader_id INTEGER`                                                                                                                                                                   | `idx_attachments_message`, `idx_attachments_uploader`, `sqlite_autoindex_attachments_1`                                 |
-| `audit_log`                | `id INTEGER PK`, `actor_id INTEGER NOT NULL`, `action TEXT NOT NULL`, `target_type TEXT NOT NULL`, `target_id INTEGER NOT NULL`, `detail TEXT NOT NULL`, `created_at TEXT NOT NULL`                                                                                                                                                                                                                  | `idx_audit_log_actor`, `idx_audit_timestamp`                                                                            |
+| `audit_log`                | `id INTEGER PK`, `actor_id INTEGER NOT NULL`, `action TEXT NOT NULL`, `target_type TEXT NOT NULL`, `target_id INTEGER NOT NULL`, `detail TEXT NOT NULL`, `created_at TEXT NOT NULL`, `subject_token TEXT`                                                                                                                                                                                            | `idx_audit_log_actor`, `idx_audit_log_subject_token`, `idx_audit_timestamp`                                             |
 | `channel_overrides`        | `id INTEGER PK`, `channel_id INTEGER NOT NULL`, `role_id INTEGER NOT NULL`, `allow INTEGER NOT NULL`, `deny INTEGER NOT NULL`                                                                                                                                                                                                                                                                        | `idx_channel_overrides_role`, `sqlite_autoindex_channel_overrides_1`                                                    |
 | `channel_user_overrides`   | `channel_id INTEGER NOT NULL PK`, `user_id INTEGER NOT NULL PK`, `allow INTEGER NOT NULL`, `deny INTEGER NOT NULL`                                                                                                                                                                                                                                                                                   | `idx_channel_user_overrides_user`, `sqlite_autoindex_channel_user_overrides_1`                                          |
 | `channels`                 | `id INTEGER PK`, `name TEXT NOT NULL`, `type TEXT NOT NULL`, `category TEXT`, `topic TEXT`, `position INTEGER NOT NULL`, `slow_mode INTEGER NOT NULL`, `archived INTEGER NOT NULL`, `created_at TEXT NOT NULL`, `voice_max_users INTEGER NOT NULL`, `voice_quality TEXT`, `mixing_threshold INTEGER`, `voice_max_video INTEGER NOT NULL`, `nsfw INTEGER NOT NULL`, `is_group INTEGER NOT NULL`       | `idx_channels_dm_group`                                                                                                 |
@@ -134,6 +134,33 @@ Generated from the migrated schema by `cd Server && go run -tags otel,wazero ./c
 | `voice_states`             | `user_id INTEGER PK`, `channel_id INTEGER NOT NULL`, `muted INTEGER NOT NULL`, `deafened INTEGER NOT NULL`, `speaking INTEGER NOT NULL`, `joined_at TEXT NOT NULL`, `camera INTEGER NOT NULL`, `screenshare INTEGER NOT NULL`, `server_muted INTEGER NOT NULL`, `server_deafened INTEGER NOT NULL`                                                                                                   | `idx_voice_states_channel`                                                                                              |
 
 <!-- gendocs:schema:end -->
+
+## The deletion-marker file (`data/erasure/markers.sqlite`)
+
+A second SQLite database, applied by the server itself on open
+(`Server/db/markers.go`, not by the migrations), kept outside the file a
+backup restore overwrites so its markers survive the restore they defend
+against (B4-10, BPR-053). `subject_token` is HMAC-SHA256 of the user id under
+`data/erasure.key`; the file names nobody without the key.
+
+```sql
+CREATE TABLE IF NOT EXISTS deletion_markers (
+    subject_token TEXT    PRIMARY KEY,
+    scope         TEXT    NOT NULL CHECK (scope IN ('account', 'messages')),
+    channel_id    INTEGER,
+    cutoff        TEXT,
+    state         TEXT    NOT NULL DEFAULT 'recorded' CHECK (state IN ('pending', 'recorded')),
+    erased_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    replays       INTEGER NOT NULL DEFAULT 0,
+    last_replay   TEXT
+);
+```
+
+`state` is the erasure's two-phase protocol: `pending` is written before the
+erasure transaction and becomes `recorded` after its commit; a pending marker
+left by a crash is resolved on the next open by whether the account still
+exists. `scope = messages` with `channel_id` and `cutoff` is B4-11's
+retention marker. `replays` counts the restores the marker undid.
 
 ---
 
