@@ -1591,7 +1591,12 @@ decisions 3 and 4.
   `account_deleted` or `account_erasure_replayed` audit row — the three an
   account must have existed to produce
   (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`, with the
-  maintenance loop's own rows as the negative control).
+  maintenance loop's own rows as the negative control). A security pass over
+  the branch added one hardening on top: `0` is the only value that opens
+  setup, so a corrupted or unrecognised flag refuses rather than falling
+  through to the user count
+  (`TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses`). The key is not in the
+  settings PATCH allowlist, so no authenticated route can write it.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and

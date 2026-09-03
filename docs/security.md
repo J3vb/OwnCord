@@ -129,7 +129,11 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 ```
 
 The next `POST /admin/api/setup` then creates a new Owner and sets the flag
-again.
+again. `0` is the only value that opens setup: the gate stands in front of an
+unauthenticated endpoint, so a missing, corrupted or unrecognised flag is
+treated as closed. The key is deliberately not in the settings PATCH
+allowlist, so no authenticated route can write it — only the operator, with
+access to the database file.
 
 ### Erasure marker sequence floors
 
