@@ -1620,8 +1620,9 @@ resurrect messages the policy already deleted — same marker question
 resolved at HP-4, or window-based re-sweep on restore).
 
 **Evidence, 2026-09-03** — branch `feat/b4-11-retention`, stacked on #1520
-(B4-10) until it merged as `87ad997`, then carrying #1522 (B4-10's review
-fixes) until that merges; PR #1521 to `dev`, marked ready 2026-09-03. Owner decisions 4 and 5; HP-4 decisions 5
+(B4-10) until it merged as `87ad997`; PR #1521 to `dev`, merged as `607fd4d`
+(at `ac24eb7`, before the review fixes below landed on the branch — the
+replay-tiers fix `c815593` follows in #1522 together with B4-10's fixes). Owner decisions 4 and 5; HP-4 decisions 5
 and 6.
 
 - **Policy model (migration 039, the `retention` draft with its comment
