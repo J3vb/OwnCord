@@ -14,7 +14,7 @@ import (
 
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
-func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, settings *service.SettingsService, erasure *service.ErasureService) func() {
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, settings *service.SettingsService, erasure *service.ErasureService, retention *service.RetentionService) func() {
 	// Periodically purge expired sessions and orphaned attachments.
 	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if fileStorageErr != nil {
@@ -26,10 +26,13 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 	if erasure != nil && fileStorage != nil && !erasure.HasFiles() {
 		erasure.SetFiles(fileStorage)
 	}
+	if retention != nil && fileStorage != nil {
+		retention.SetFiles(fileStorage)
+	}
 
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	go maintenanceLoop(bgCtx, log, database, fileStorage, settings, erasure, stopMaintenance, maintenanceDone)
+	go maintenanceLoop(bgCtx, log, database, fileStorage, settings, erasure, retention, stopMaintenance, maintenanceDone)
 
 	return func() {
 		// Backstop for early returns below (see hub.GracefulStop defer above),
@@ -47,7 +50,7 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 
 // maintenanceLoop is the periodic maintenance goroutine started by
 // startMaintenanceLoop.
-func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService, stopMaintenance, maintenanceDone chan struct{}) {
+func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService, retention *service.RetentionService, stopMaintenance, maintenanceDone chan struct{}) {
 	defer close(maintenanceDone)
 	// Erasure jobs interrupted by the last shutdown (files journaled, not
 	// yet removed) finish now, not fifteen minutes from now (B4-9).
@@ -67,7 +70,7 @@ func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 				continue
 			}
 
-			if maintenanceTick(bgCtx, log, database, fileStorage, settings, erasure) {
+			if maintenanceTick(bgCtx, log, database, fileStorage, settings, erasure, retention) {
 				consecutiveFailures++
 			} else {
 				consecutiveFailures = 0
@@ -80,7 +83,7 @@ func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 
 // maintenanceTick runs one maintenance pass and reports whether any step
 // of it failed.
-func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService) bool {
+func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService, retention *service.RetentionService) bool {
 	tickFailed := false
 	if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 		log.Warn("failed to delete expired sessions", "error", err)
@@ -124,6 +127,16 @@ func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 				}
 			}
 			log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+		}
+	}
+
+	// Message retention (B4-11): one bounded sweep per tick over every
+	// channel with an effective window; indefinite by default, so a server
+	// without a policy does nothing here.
+	if retention != nil {
+		if rep, err := retention.Tick(bgCtx); err != nil {
+			log.Warn("retention sweep failed", "error", err, "messages", rep.Messages)
+			tickFailed = true
 		}
 	}
 

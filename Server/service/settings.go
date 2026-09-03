@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -39,6 +40,9 @@ var allowedSettingKeys = map[string]struct{}{
 	"registration_mode": {},
 	"backup_schedule":   {},
 	"backup_retention":  {},
+	// The server-wide message-retention window in days (B4-11): 0 keeps
+	// everything, anything else is at least RetentionMinDays.
+	db.RetentionDaysKey: {},
 }
 
 // List returns every setting as a key→value map.
@@ -92,6 +96,15 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 		}
 		previousMode = string(mode)
 	}
+	// Same for the retention window: the policy change is audited old -> new.
+	previousRetention := ""
+	if _, changing := normalized[db.RetentionDaysKey]; changing {
+		days, err := s.st.ServerRetentionDays(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("Patch: %w", err)
+		}
+		previousRetention = strconv.Itoa(days)
+	}
 
 	if err := s.st.ApplySettings(ctx, normalized); err != nil {
 		return nil, fmt.Errorf("Patch: %w", err)
@@ -103,6 +116,11 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 		if key == registrationModeKey && previousMode != normalized[key] {
 			db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_mode_change", "setting", 0,
 				fmt.Sprintf("registration_mode %s -> %s", previousMode, normalized[key]))
+			continue
+		}
+		if key == db.RetentionDaysKey {
+			db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "retention_policy_change", "setting", 0,
+				fmt.Sprintf("retention_days %s -> %s", previousRetention, normalized[key]))
 			continue
 		}
 		db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "setting_change", "setting", 0,
@@ -133,6 +151,12 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 				return nil, fmt.Errorf("%s: must be one of closed, invite, approval, open", key)
 			}
 			normalized[key] = string(mode)
+		case db.RetentionDaysKey:
+			days, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || days < 0 || (days != 0 && days < RetentionMinDays) || days > RetentionMaxDays {
+				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, RetentionMinDays, RetentionMaxDays)
+			}
+			normalized[key] = strconv.Itoa(days)
 		}
 	}
 	return normalized, nil

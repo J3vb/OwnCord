@@ -78,3 +78,52 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 		t.Errorf("markers after start-up = %+v, want one marker replayed once", list)
 	}
 }
+
+// The same stage replays the retention markers: messages past a recorded
+// cutoff — a restored backup's — are removed before anything serves.
+func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
+	t.Setenv("OWNCORD_ERASURE_KEY", "")
+	dataDir := filepath.Join(t.TempDir(), "data")
+	cfg := &config.Config{}
+	cfg.Server.DataDir = dataDir
+	cfg.Upload.StorageDir = filepath.Join(dataDir, "uploads")
+	cfg.Upload.MaxSizeMB = 1
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	uid, _ := database.CreateUser(ctx, "markers-owner", "hash", 1)
+	chID, err := database.CreateChannel(ctx, "swept", "text", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ts := range []string{"2026-01-01 00:00:00", "2026-08-01 00:00:00"} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, 'm', ?)`, chID, uid, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	markers, err := openMarkers(ctx, log, cfg, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	_ = markers.Close()
+	reopened, err := openMarkers(ctx, log, cfg, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var left int
+	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, chID).Scan(&left)
+	if left != 1 {
+		t.Errorf("messages after start-up = %d, want 1 (the one past the recorded cutoff removed)", left)
+	}
+}
