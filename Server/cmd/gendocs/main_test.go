@@ -191,3 +191,59 @@ func TestDocSectionsScansOnlyTheHandWrittenReference(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrationHistoryFilesOnlyCountsTheHistorySection pins the two properties
+// the migration gate rests on: a filename counts only when it is named under
+// "### Migration History", and the generated table index — which lives under a
+// later "## " heading and names no migration files at all — can never stand in
+// for a real row. Without the section bound, any mention of a migration
+// anywhere in schema.md would satisfy the gate and it would catch nothing.
+func TestMigrationHistoryFilesOnlyCountsTheHistorySection(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Schema",
+		"",
+		"## Overview",
+		"",
+		"Prose that happens to mention `001_initial_schema.sql` outside the table.",
+		"",
+		"## Migrations",
+		"",
+		"### Migration History",
+		"",
+		"| File | Description |",
+		"| ---- | ----------- |",
+		"| `002_voice_states.sql` | Adds `voice_states` |",
+		"| `003_audit_log.sql` | Recreates `audit_log` |",
+		"",
+		"### Some other subsection",
+		"",
+		"| `004_not_history.sql` | under a different ### heading |",
+		"",
+		"## Table index (generated)",
+		"",
+		"| `005_after_the_section.sql` | under a later ## heading |",
+		"",
+	}, "\n")
+
+	got := migrationHistoryFiles(doc)
+	want := []string{"002_voice_states.sql", "003_audit_log.sql"}
+
+	keys := make([]string, 0, len(got))
+	for k := range got {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	if !slices.Equal(keys, want) {
+		t.Errorf("migrationHistoryFiles = %v, want %v", keys, want)
+	}
+	for _, unwanted := range []string{
+		"001_initial_schema.sql",    // prose before the section
+		"004_not_history.sql",       // a sibling ### subsection
+		"005_after_the_section.sql", // the generated block, its own evidence
+	} {
+		if got[unwanted] {
+			t.Errorf("migrationHistoryFiles counted %q, which is outside the history section", unwanted)
+		}
+	}
+}
