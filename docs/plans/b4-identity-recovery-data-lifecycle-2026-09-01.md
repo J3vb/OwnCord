@@ -41,7 +41,7 @@ diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
-through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 opened 2026-09-03** (branch `feat/b4-9-account-erasure` from `dev` `9598c51`; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). Next B4-10 → B4-11. _Update this line — not only the step table — as steps
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 opened 2026-09-03** (PR #1516, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). Next B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1341,7 +1341,7 @@ green; `trust-model.md:345`'s "No secure deletion" paragraph rewritten to
 the new truth (backup caveat remains until B4-10).
 
 **Evidence, 2026-09-03** — branch `feat/b4-9-account-erasure` from `dev`
-`9598c51` (HP-4 accepted); PR to `dev` (draft). Owner decision 9 and HP-4
+`9598c51` (HP-4 accepted); PR #1516 to `dev` (draft). Owner decision 9 and HP-4
 decisions 1–2.
 
 - **Erasure (`db.EraseAccount`, `Server/db/erasure.go`):** one transaction
