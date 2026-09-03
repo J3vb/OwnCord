@@ -36,10 +36,12 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 
 	runner := service.NewErasureService(database)
 	runner.SetMarkers(markers)
-	if files, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB); storeErr != nil {
+	var files service.FileRemover
+	if store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB); storeErr != nil {
 		log.Warn("erasure markers: upload storage unavailable at start-up; a replayed erasure journals its files", "error", storeErr)
 	} else {
-		runner.SetFiles(files)
+		files = store
+		runner.SetFiles(store)
 	}
 	report, err := runner.ReplayMarkers(ctx)
 	if err != nil {
@@ -48,6 +50,19 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	}
 	if report.Erased > 0 || report.Confirmed > 0 || report.Discarded > 0 {
 		log.Warn("erasure markers replayed", "erased_again", report.Erased, "confirmed", report.Confirmed, "discarded", report.Discarded)
+	}
+	// The retention markers (B4-11): messages a restored backup holds past a
+	// channel's recorded cutoff go again, before anything serves.
+	retention := service.NewRetentionService(database)
+	retention.SetMarkers(markers)
+	if files != nil {
+		retention.SetFiles(files)
+	}
+	if removed, err := retention.ReplayMarkers(ctx); err != nil {
+		_ = markers.Close()
+		return nil, fmt.Errorf("replaying retention markers: %w", err)
+	} else if removed > 0 {
+		log.Warn("retention markers replayed", "messages_removed", removed)
 	}
 	return markers, nil
 }

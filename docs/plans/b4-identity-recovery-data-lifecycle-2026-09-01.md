@@ -41,7 +41,7 @@ diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
-through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 opened 2026-09-03** (PR #1520, branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). Next B4-11. _Update this line — not only the step table — as steps
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 opened 2026-09-03** (PR #1520, branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). **B4-11 opened 2026-09-03** (PR #1521, branch `feat/b4-11-retention`, stacked on #1520; indefinite by default, server and per-channel windows, pinned exempt, no DMs, no holds, a bounded restart-safe sweep with a file journal and a `messages` marker per channel replayed on open, the effect preview and the audited policy). B4 chain complete pending merges; next HP-5 / B4 exit. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1581,6 +1581,54 @@ default-indefinite proven for fresh + upgraded (alpha copy) servers; holds
 per decision; backup/restore interplay tested (a restore does not
 resurrect messages the policy already deleted — same marker question
 resolved at HP-4, or window-based re-sweep on restore).
+
+**Evidence, 2026-09-03** — branch `feat/b4-11-retention`, stacked on #1520
+(B4-10); PR #1521 to `dev` (draft). Owner decisions 4 and 5; HP-4 decisions 5
+and 6.
+
+- **Policy model (migration 039, the `retention` draft with its comment
+  semicolons turned into commas):** `settings.retention_days` (`0` = keep
+  forever, seeded by the migration, so a fresh and an upgraded server
+  delete nothing — `TestRetention_IndefiniteByDefault`, in-memory and on the
+  alpha copy), `channel_retention` (a per-channel override in either
+  direction, `0` keeps the channel forever), `RetentionMinDays` = 1,
+  `RetentionMaxDays` = 3650, pinned exempt, DMs never listed
+  (`DB.RetentionWindows`, `TestRetentionWindows_ServerAndChannelPrecedence`).
+  The settings patch validates the window and audits
+  `retention_policy_change` old → new
+  (`TestSettings_RetentionDaysValidatedAndAudited`); the channel routes
+  audit `channel_retention_change`.
+- **Clock and sweep (`RetentionService.Tick`, `DB.SweepRetention`):** the
+  maintenance tick sweeps every channel with an effective window in batches
+  of 500 under a 5,000-message budget, each batch one transaction with the
+  purge mechanics — mention-count reversal (OC-0294), attachment rows
+  deleted and their files returned, the FTS trigger, `reply_to` set NULL —
+  the cutoff computed in UTC against the UTC timestamps
+  (`TestSweepRetention_RemovesOnlyPastWindowUnpinned`: exactly-at-window
+  stays, pinned stays, fresh stays, mentions reversed, files listed). The
+  run is journaled in `retention_runs` before any unlink and resumed on the
+  next tick; a failing unlink records the attempt
+  (`TestRetention_BudgetAndResume`); a budgeted channel records no marker
+  and continues (`TestRetention_TickAppliesTheEffectivePolicy`).
+- **Holds:** none — retention is absolute (owner decision 5); nothing in
+  the schema or the code models one, and this block is the record.
+- **Backup/restore interplay (HP-4 decision 6):** a channel swept clean to
+  its cutoff records a `messages`-scoped marker (`MarkerStore.RecordMessagesSweep`,
+  the cutoff only moving forward); the `erasure-markers` start-up stage
+  replays them (`RetentionService.ReplayMarkers`), so a restored backup
+  loses the past-cutoff messages again, files included
+  (`TestRetention_ReplayMarkersResweepsARestoredBackup`,
+  `TestOpenMarkers_ReplaysRetentionMarkers`,
+  `TestMarkerStore_MessagesMarkersMoveForwardAndReplay`). No `account`
+  marker is written for a retention deletion.
+- **Audit + preview:** `GET /admin/api/retention`,
+  `GET /admin/api/retention/preview` ("would delete N" per channel),
+  `PUT`/`DELETE /admin/api/channels/{id}/retention`, all `MANAGE_SERVER`
+  (`TestAdminAPI_Retention_PolicyPreviewAndOverrides`); UI stays B9.
+- **Docs:** `data-lifecycle.md` (O9 with its failure model; classes 8, 12,
+  27), `api.md` (the routes, the settings key, the authorization table),
+  `security.md` (the audit actions), `schema.md` (039 regenerated), the
+  drafts README, this block, the README row, the scorecard.
 
 ## B4-12 — The B4-tagged findings
 

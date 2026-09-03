@@ -32,6 +32,9 @@ type Services struct {
 	// route alike (B4-9); the composition root installs the upload storage
 	// on it and the maintenance loop resumes its unfinished jobs.
 	Erasure *ErasureService
+	// Retention is the message-retention policy and sweep (B4-11); the
+	// composition root installs the upload storage and the marker store.
+	Retention *RetentionService
 	// Auth is set by the composition root once the hub exists; the admin
 	// panel's owner-only recovery issuance (B4-6) shares it.
 	Auth *AuthService
@@ -46,6 +49,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	moderation.erasure = erasure
 	return &Services{
 		Erasure:     erasure,
+		Retention:   NewRetentionService(st),
 		Messages:    NewMessageService(st, permSvc, limiter),
 		Channels:    NewChannelService(st, permSvc),
 		Permissions: permSvc,

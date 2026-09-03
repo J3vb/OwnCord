@@ -69,6 +69,13 @@ type ChannelOverride struct {
 	Deny      int64 `json:"deny"`
 }
 
+type ChannelRetention struct {
+	ChannelID int64  `json:"channelId"`
+	Days      int64  `json:"days"`
+	UpdatedBy int64  `json:"updatedBy"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 type ChannelUserOverride struct {
 	ChannelID int64 `json:"channelId"`
 	UserID    int64 `json:"userId"`
@@ -223,6 +230,17 @@ type RecoveryKit struct {
 	Verifier  string  `json:"verifier"`
 	CreatedAt string  `json:"createdAt"`
 	UsedAt    *string `json:"usedAt"`
+}
+
+type RetentionRun struct {
+	ID              int64   `json:"id"`
+	StartedAt       string  `json:"startedAt"`
+	FinishedAt      *string `json:"finishedAt"`
+	Channels        int64   `json:"channels"`
+	MessagesDeleted int64   `json:"messagesDeleted"`
+	Files           string  `json:"files"`
+	FilesRemoved    int64   `json:"filesRemoved"`
+	LastError       *string `json:"lastError"`
 }
 
 type Role struct {

@@ -234,6 +234,9 @@ func (a *App) startHub() error {
 	if rt.Services != nil && rt.Services.Erasure != nil {
 		rt.Services.Erasure.SetMarkers(a.markers)
 	}
+	if rt.Services != nil && rt.Services.Retention != nil {
+		rt.Services.Retention.SetMarkers(a.markers)
+	}
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)
 		return nil
@@ -284,7 +287,7 @@ func (a *App) startAuditWriter() error {
 // in-flight tick (which can hold the writer — scheduled backups run VACUUM
 // INTO) is not still using the database when the handle closes.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services.Settings, a.runtime.Services.Erasure)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services.Settings, a.runtime.Services.Erasure, a.runtime.Services.Retention)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil

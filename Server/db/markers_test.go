@@ -191,3 +191,55 @@ func TestMarkerStore_FileLivesOutsideTheDatabase(t *testing.T) {
 		t.Errorf("marker file not created: %v", err)
 	}
 }
+
+func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
+	ctx := context.Background()
+	m := openTestMarkers(t, testMarkerKey(7))
+	if m.MessagesToken(5) == m.SubjectToken(5) || m.MessagesToken(5) == m.MessagesToken(6) {
+		t.Fatal("messages tokens collide with account tokens or each other")
+	}
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	// An older cutoff never moves the marker back.
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	markers, _ := m.Markers(ctx)
+	if len(markers) != 1 || markers[0].Scope != MarkerScopeMessages || *markers[0].ChannelID != 5 || *markers[0].Cutoff != "2026-09-02 00:00:00" {
+		t.Fatalf("markers = %+v", markers)
+	}
+	calls := map[int64]string{}
+	n, err := m.ReplayMessages(ctx, func(_ context.Context, ch int64, cutoff string) (int, error) {
+		calls[ch] = cutoff
+		return 3, nil
+	})
+	if err != nil || n != 3 || calls[5] != "2026-09-02 00:00:00" {
+		t.Fatalf("ReplayMessages = %d, %v, calls %v", n, err, calls)
+	}
+	markers, _ = m.Markers(ctx)
+	if markers[0].Replays != 1 {
+		t.Errorf("replays = %d, want 1", markers[0].Replays)
+	}
+	// Account markers are not handed to the messages sweep.
+	tok, _, _ := m.RecordPendingAccount(ctx, 9)
+	_ = m.ConfirmAccount(ctx, tok)
+	n, err = m.ReplayMessages(ctx, func(_ context.Context, ch int64, _ string) (int, error) {
+		if ch != 5 {
+			t.Errorf("unexpected channel %d", ch)
+		}
+		return 0, nil
+	})
+	if err != nil || n != 0 {
+		t.Errorf("second replay = %d, %v", n, err)
+	}
+	markers, _ = m.Markers(ctx)
+	for _, mk := range markers {
+		if mk.Scope == MarkerScopeMessages && mk.Replays != 1 {
+			t.Errorf("an idle replay counted: %+v", mk)
+		}
+	}
+}

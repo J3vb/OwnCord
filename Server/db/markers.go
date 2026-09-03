@@ -239,6 +239,61 @@ func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, er
 	return rep, nil
 }
 
+// MessagesToken is the unlinkable name of a channel's retention marker:
+// hex of HMAC-SHA256(key, "messages:" || decimal channel id).
+func (m *MarkerStore) MessagesToken(channelID int64) string {
+	mac := hmac.New(sha256.New, m.key)
+	mac.Write([]byte("messages:"))
+	mac.Write([]byte(strconv.FormatInt(channelID, 10)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// RecordMessagesSweep records that retention removed everything older than
+// cutoff in channelID (B4-11): one marker per channel, its cutoff only ever
+// moving forward, so a restore of an older backup re-sweeps to the newest
+// cutoff the policy reached. cutoff is stored in SQLite's UTC layout.
+func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string) error {
+	if _, err := m.sqlDB.ExecContext(ctx,
+		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state)
+		 VALUES (?, 'messages', ?, ?, 'recorded')
+		 ON CONFLICT(subject_token) DO UPDATE SET cutoff = MAX(cutoff, excluded.cutoff), erased_at = datetime('now')`,
+		m.MessagesToken(channelID), channelID, cutoff); err != nil {
+		return fmt.Errorf("marker store: record messages sweep: %w", err)
+	}
+	return nil
+}
+
+// ReplayMessages re-applies every messages marker: sweep is called with the
+// channel and the marker's cutoff and must remove everything older than it
+// (the retention sweep, pinned exempt), returning how many rows went. A
+// marker for a channel that no longer exists is skipped. Returns the number
+// of messages removed across all markers.
+func (m *MarkerStore) ReplayMessages(ctx context.Context, sweep func(ctx context.Context, channelID int64, cutoff string) (int, error)) (int, error) {
+	markers, err := m.Markers(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, mk := range markers {
+		if mk.Scope != MarkerScopeMessages || mk.ChannelID == nil || mk.Cutoff == nil {
+			continue
+		}
+		n, err := sweep(ctx, *mk.ChannelID, *mk.Cutoff)
+		if err != nil {
+			return total, fmt.Errorf("marker store: replay messages for channel %d: %w", *mk.ChannelID, err)
+		}
+		if n > 0 {
+			slog.Warn("retention marker: messages present past the recorded cutoff, removed again", "channel_id", *mk.ChannelID, "messages", n)
+			if _, err := m.sqlDB.ExecContext(ctx,
+				`UPDATE deletion_markers SET replays = replays + 1, last_replay = datetime('now') WHERE subject_token = ?`, mk.SubjectToken); err != nil {
+				return total, fmt.Errorf("marker store: count replay: %w", err)
+			}
+		}
+		total += n
+	}
+	return total, nil
+}
+
 // UserIDLister lists every users.id; *DB satisfies it.
 type UserIDLister interface {
 	ListUserIDs(ctx context.Context) ([]int64, error)

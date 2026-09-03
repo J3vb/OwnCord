@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 131 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 135 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -63,6 +63,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
+| DELETE  | `/admin/api/channels/{id}/retention`                                 |
+| PUT     | `/admin/api/channels/{id}/retention`                                 |
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | POST    | `/admin/api/logs/ticket`                                             |
@@ -70,6 +72,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/registrations`                                           |
 | POST    | `/admin/api/registrations/{id}/approve`                              |
 | POST    | `/admin/api/registrations/{id}/deny`                                 |
+| GET     | `/admin/api/retention`                                               |
+| GET     | `/admin/api/retention/preview`                                       |
 | GET     | `/admin/api/roles`                                                   |
 | POST    | `/admin/api/roles`                                                   |
 | PATCH   | `/admin/api/roles/reorder`                                           |
@@ -1928,22 +1932,23 @@ Authorization is two-layered:
    _position_ (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
    substitutes for being the owner.
 
-| Route                                                                                       | Requires                                                                                     |
-| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                         | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                      | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                      | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                               | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `DELETE /admin/api/users/{id}/sessions`                                                     | `KICK_MEMBERS`                                                                               |
-| `DELETE /admin/api/users/{id}`                                                              | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                            | Owner role position (`>= 100`), not a bit — B4-6                                             |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                          | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                  | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                             | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                 | `ADMINISTRATOR`                                                                              |
-| `/api/v1/admin/plugins…`                                                                    | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                        | Owner role (position 100)                                                                    |
+| Route                                                                                                           | Requires                                                                                     |
+| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /admin/api/me`                                                                                             | perimeter only                                                                               |
+| `GET /admin/api/stats`                                                                                          | perimeter only                                                                               |
+| `GET /admin/api/users`                                                                                          | perimeter only                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                   | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role position (`>= 100`), not a bit — B4-6                                             |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`)                     | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
+| `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
+| `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (position 100)                                                                    |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -2233,6 +2238,94 @@ person exists to leak into the audit log.
 
 ## Audit Log
 
+### GET /admin/api/retention
+
+The message-retention policy (B4-11): the server window and every channel
+override.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+{
+  "server_days": 30,
+  "channels": [
+    { "channel_id": 4, "days": 0, "updated_by": 1, "updated_at": "2026-09-03 12:00:00" },
+    { "channel_id": 7, "days": 7, "updated_by": 1, "updated_at": "2026-09-03 12:01:00" }
+  ]
+}
+```
+
+`days` on a channel overrides the server window in either direction; `0`
+keeps that channel forever.
+
+---
+
+### GET /admin/api/retention/preview
+
+The owner-facing effect preview: per channel with an effective window, the
+cutoff the next sweep uses and how many messages it would remove.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "channel_id": 1,
+    "channel_name": "general",
+    "days": 30,
+    "source": "server",
+    "cutoff": "2026-08-04T12:00:00Z",
+    "would_delete": 1284
+  }
+]
+```
+
+---
+
+### PUT /admin/api/channels/{id}/retention
+
+Set a channel's retention window. `days` is `0` (keep forever, even under a
+server window) or between 1 and 3650. Refused for direct-message channels.
+Audited as `channel_retention_change` with the old and new window.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+```json
+{ "days": 14 }
+```
+
+#### Response 200 OK
+
+The channel's policy row (`channel_id`, `days`, `updated_by`, `updated_at`).
+
+#### Errors
+
+| Status | Code          | Cause                                           |
+| ------ | ------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id or days, or a direct-message channel |
+| 404    | `NOT_FOUND`   | Channel not found                               |
+
+---
+
+### DELETE /admin/api/channels/{id}/retention
+
+Remove a channel's override so the server window applies again. Audited as
+`channel_retention_change`.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+`404 NOT_FOUND` when the channel has no override.
+
+---
+
 ### GET /admin/api/audit-log
 
 Read the audit trail, newest first.
@@ -2354,7 +2447,8 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
-`registration_mode`, `backup_schedule`, `backup_retention`. Boolean settings
+`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`.
+Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
 lower-case); a change of mode is audited as `registration_mode_change`
@@ -2364,6 +2458,14 @@ leave `closed`.
 `backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
 enforced by the server's maintenance loop — see the Backup Strategy section
 of `docs/deployment.md` for the exact semantics.
+
+`retention_days` (B4-11) is the server-wide message-retention window: `0`
+(the default) keeps everything, otherwise between 1 and 3650 days; a change
+is audited as `retention_policy_change` naming the old and new value. The
+maintenance loop removes past-window messages and their attachments per
+channel (pinned messages exempt, direct messages never in scope); a
+per-channel override in either direction is
+[`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
 Three keys are accepted and stored but have **no runtime effect**:
 `server_icon` (reserved for a future release), `max_upload_bytes` (the real
