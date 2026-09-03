@@ -586,3 +586,6 @@ func (rb *EventRingBuffer) AllFramesForTest() [][]byte {
 	}
 	return out
 }
+
+// CurrentSeqForTest returns the hub's sequence counter.
+func (h *Hub) CurrentSeqForTest() uint64 { return atomic.LoadUint64(&h.seq) }

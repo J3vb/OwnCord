@@ -305,6 +305,7 @@ type Querier interface {
 	// every message committed after it finds IncrementMentionCounts' own
 	// `last_message_id < msgID` guard true, so its mention survives.
 	MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelReadAtLatestParams) error
+	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
 	MarkRecoveryCodeUsed(ctx context.Context, arg MarkRecoveryCodeUsedParams) (sql.Result, error)
 	// The new-login signal (B4-7): listing the account's sessions from one
 	// device acknowledges every other session's login. The caller's own row is

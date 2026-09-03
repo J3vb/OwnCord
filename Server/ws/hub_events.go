@@ -81,21 +81,60 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 // most recent channel-visibility change and therefore cannot converge via
 // replay.
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
-	w := h.visibilityChangeSeq.Load()
-	return w > 0 && lastSeq <= w
+	if w := h.visibilityChangeSeq.Load(); w > 0 && lastSeq <= w {
+		return true
+	}
+	// An erasure's replay purge cleared slots up to this watermark — the
+	// seq of the last frame sequenced before it, the member_ban included —
+	// so a client that has not acked that far may have missed the ban and
+	// cannot be served the range around it; one that has, saw everything.
+	w := h.replayPurgeSeq.Load()
+	return w > 0 && lastSeq < w
+}
+
+// bumpReplayPurgeWatermark ratchets replayPurgeSeq up to the current seq,
+// never down (bumpVisibilityWatermark's CAS-max pattern).
+func (h *Hub) bumpReplayPurgeWatermark() {
+	for {
+		cur := h.replayPurgeSeq.Load()
+		next := atomic.LoadUint64(&h.seq)
+		if next <= cur {
+			return
+		}
+		if h.replayPurgeSeq.CompareAndSwap(cur, next) {
+			return
+		}
+	}
+}
+
+// dropsForPurgedUser reports whether msg names an erased user and must not
+// be sequenced: a producer that read its rows before the erasure committed
+// can still hand the hub a frame after the purge barrier. Caller holds
+// seqMu. Cheap until the first purge: an empty set parses nothing.
+func (h *Hub) dropsForPurgedUser(msg []byte) bool {
+	if len(h.purgedUsers) == 0 {
+		return false
+	}
+	for id := range h.purgedUsers {
+		if eventNamesUser(msg, id) {
+			slog.Info("hub: dropped a frame naming an erased user", "user_id", id)
+			return true
+		}
+	}
+	return false
 }
 
 // PurgeUserFromReplay takes every frame naming userID out of the replay
 // pipeline after an account erasure (data-lifecycle O5, HP-4 decision 1),
-// in the order the pipeline runs: the persister is flushed so a frame queued
-// before the erasure — or the member_ban the erasure itself broadcast — is
-// on disk rather than in flight, the ring buffer's copies are dropped, and
-// the persisted rows are deleted again. A reconnect whose last_seq predates
-// a removed row meets an interior gap and falls back to a full ready
-// (reconnectVetColdTail), which is the convergence an erasure wants. Runs
-// under seqMu between the flush and the delete so no broadcast is sequenced
-// in between. Returns the first error; the frames a failed step left are
-// what the next erasure or the pruner takes.
+// in the order the pipeline runs: the dispatch loop is drained so the
+// member_ban the erasure broadcast is sequenced, the persister is flushed so
+// a frame queued before the erasure is on disk rather than in flight, then
+// under seqMu — so no broadcast is sequenced in between — the user joins
+// the tombstone set (a frame naming them that any producer sequences from
+// now on is dropped, dropsForPurgedUser), the replay-purge watermark moves
+// to the current seq (a client resuming from before it takes the full
+// ready), the ring buffer's copies are dropped and the persisted rows are
+// deleted. Idempotent and retried from the erasure journal on failure.
 func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 	if err := h.awaitDispatch(ctx); err != nil {
 		return fmt.Errorf("purge replay: %w", err)
@@ -107,6 +146,11 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 	}
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
+	if h.purgedUsers == nil {
+		h.purgedUsers = make(map[int64]struct{})
+	}
+	h.purgedUsers[userID] = struct{}{}
+	h.bumpReplayPurgeWatermark()
 	dropped := h.replayBuf.RemoveWhere(func(data []byte) bool { return eventNamesUser(data, userID) })
 	var rows int64
 	if h.db != nil {

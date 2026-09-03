@@ -26,6 +26,10 @@ type ErasureJob struct {
 	FilesRemoved int
 	Attempts     int
 	LastError    string
+	// ReplayPurged records that the subject's frames were taken out of the
+	// replay pipeline after the member_ban broadcast; false keeps the job
+	// listed for Resume even once its files are gone.
+	ReplayPurged bool
 }
 
 // Erasure job states.
@@ -396,7 +400,7 @@ func (d *DB) ListUnfinishedErasureJobs(ctx context.Context) ([]ErasureJob, error
 	}
 	jobs := make([]ErasureJob, 0, len(rows))
 	for _, r := range rows {
-		job, err := erasureJobFromRow(r.ID, r.UserID, r.State, r.Files, r.FilesRemoved, r.Attempts, r.LastError)
+		job, err := erasureJobFromRow(r.ID, r.UserID, r.State, r.Files, r.FilesRemoved, r.Attempts, r.LastError, r.ReplayPurged)
 		if err != nil {
 			return nil, err
 		}
@@ -414,15 +418,23 @@ func (d *DB) GetErasureJob(ctx context.Context, id int64) (*ErasureJob, error) {
 		}
 		return nil, fmt.Errorf("GetErasureJob: %w", err)
 	}
-	job, err := erasureJobFromRow(r.ID, r.UserID, r.State, r.Files, r.FilesRemoved, r.Attempts, r.LastError)
+	job, err := erasureJobFromRow(r.ID, r.UserID, r.State, r.Files, r.FilesRemoved, r.Attempts, r.LastError, r.ReplayPurged)
 	if err != nil {
 		return nil, err
 	}
 	return &job, nil
 }
 
-func erasureJobFromRow(id, userID int64, state, files string, removed, attempts int64, lastErr *string) (ErasureJob, error) {
-	job := ErasureJob{ID: id, UserID: userID, State: state, FilesRemoved: int(removed), Attempts: int(attempts)}
+// MarkErasureJobReplayPurged records that the job's replay purge succeeded.
+func (d *DB) MarkErasureJobReplayPurged(ctx context.Context, id int64) error {
+	if err := d.q.MarkErasureJobReplayPurged(ctx, id); err != nil {
+		return fmt.Errorf("MarkErasureJobReplayPurged: %w", err)
+	}
+	return nil
+}
+
+func erasureJobFromRow(id, userID int64, state, files string, removed, attempts int64, lastErr *string, replayPurged int64) (ErasureJob, error) {
+	job := ErasureJob{ID: id, UserID: userID, State: state, FilesRemoved: int(removed), Attempts: int(attempts), ReplayPurged: replayPurged != 0}
 	if err := json.Unmarshal([]byte(files), &job.Files); err != nil {
 		return ErasureJob{}, fmt.Errorf("erasure job %d: decode files: %w", id, err)
 	}

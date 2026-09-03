@@ -189,29 +189,135 @@ func TestEventRingBuffer_RemoveWhere(t *testing.T) {
 	for i := uint64(1); i <= 6; i++ {
 		rb.Push(i, 0, []byte{byte(i)})
 	}
-	removed := rb.RemoveWhere(func(data []byte) bool { return data[0]%2 == 0 })
-	if removed != 3 {
-		t.Fatalf("removed = %d, want 3 (seq 2, 4 and 6)", removed)
+	removed := rb.RemoveWhere(func(data []byte) bool { return data[0] == 4 })
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1 (seq 4)", removed)
 	}
-	// EventsSince is strictly after its argument and refuses the oldest
-	// slot itself, so replay from seq 2.
-	got := rb.EventsSince(2)
-	if len(got) != 2 || got[0][0] != 3 || got[1][0] != 5 {
-		t.Errorf("EventsSince(2) = %v, want [3 5]", got)
+	// A range crossing the cleared slot cannot be replayed: nil, the full
+	// ready. A range entirely after it still replays.
+	if got := rb.EventsSince(2); got != nil {
+		t.Errorf("EventsSince(2) across the cleared slot = %v, want nil", got)
+	}
+	if got := rb.EventsSinceFiltered(2, map[int64]bool{}); got != nil {
+		t.Errorf("EventsSinceFiltered(2) across the cleared slot = %v, want nil", got)
+	}
+	got := rb.EventsSince(4)
+	if len(got) != 2 || got[0][0] != 5 || got[1][0] != 6 {
+		t.Errorf("EventsSince(4) = %v, want [5 6]", got)
 	}
 	if rb.OldestSeq() != 1 || rb.NewestSeq() != 6 {
 		t.Errorf("coverage window = %d..%d, want 1..6 (slots keep their seq)", rb.OldestSeq(), rb.NewestSeq())
 	}
-	if filtered := rb.EventsSinceFiltered(2, map[int64]bool{}); len(filtered) != 2 {
-		t.Errorf("EventsSinceFiltered = %d frames, want 2", len(filtered))
+	if all := rb.AllFramesForTest(); len(all) != 5 {
+		t.Errorf("frames held = %d, want 5", len(all))
 	}
-	if all := rb.AllFramesForTest(); len(all) != 3 {
-		t.Errorf("frames held = %d, want 3", len(all))
+	if rb.RemoveWhere(func([]byte) bool { return true }) != 5 {
+		t.Errorf("second RemoveWhere should drop the remaining 5")
 	}
-	if rb.RemoveWhere(func([]byte) bool { return true }) != 3 {
-		t.Errorf("second RemoveWhere should drop the remaining 3")
+	if got := rb.EventsSince(6); got == nil || len(got) != 0 {
+		t.Errorf("EventsSince(newest) after emptying = %v, want an empty replay (caught up)", got)
 	}
-	if got := rb.EventsSince(2); len(got) != 0 {
-		t.Errorf("EventsSince after emptying = %v, want none", got)
+}
+
+// After a purge, a client that has not acked past the purge watermark takes
+// the full ready: the ring replay over the cleared slot returns nil and
+// mustFullResync reports true — the erased member never lingers on a
+// reconnecting client. And a producer that reaches the hub after the purge
+// with a frame naming the erased user is dropped, not sequenced.
+func TestErasure_PurgeForcesFullResyncAndDropsLateFrames(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc})
+	persister := ws.NewEventPersister(database, 256, 64, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	persister.Start(ctx)
+	t.Cleanup(func() { persister.Stop(context.Background()) })
+	hub.SetEventPersister(persister)
+	hub.SetEventStore(database)
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+	svc.Erasure.SetHub(hub)
+
+	if _, err := database.CreateUser(ctx, "resync-other-owner", "hash", 1); err != nil {
+		t.Fatal(err)
+	}
+	subject := seedCoverageOwner(t, database, "resync-subject")
+	observer := seedCoverageOwner(t, database, "resync-observer")
+	chID := seedTestChannel(t, database, "resync-chan")
+	subjectSend := make(chan []byte, 64)
+	observerSend := make(chan []byte, 64)
+	sc := ws.NewTestClientWithUser(hub, subject, chID, subjectSend)
+	oc := ws.NewTestClientWithUser(hub, observer, chID, observerSend)
+	hub.Register(sc)
+	hub.Register(oc)
+	waitRegistered(t, hub, sc)
+	waitRegistered(t, hub, oc)
+
+	chat := func(c *ws.Client, content string) {
+		raw, _ := json.Marshal(map[string]any{"type": "chat_send", "payload": map[string]any{"channel_id": chID, "content": content}})
+		hub.HandleMessageForTest(c, raw)
+	}
+	chat(oc, "observer before")
+	chat(oc, "observer again")
+	waitFor(t, waitTimeout, func() bool { return namedInRing(hub, observer.ID) >= 2 }, "the observer's frames in the ring")
+	// A client that acked the observer's frames but not the subject's.
+	// (EventsSince is strictly after its argument and refuses the oldest
+	// slot itself, so the ack sits on the second frame.)
+	lastSeq := hub.CurrentSeqForTest()
+	chat(sc, "subject before")
+	waitFor(t, waitTimeout, func() bool { return namedInRing(hub, subject.ID) > 0 }, "the subject's frame in the ring")
+	if hub.MustFullResyncForTest(lastSeq) {
+		t.Fatal("full resync forced before any purge")
+	}
+	if got := hub.ReplayBuffer().EventsSince(lastSeq); got == nil {
+		t.Fatal("replay from the oldest slot unavailable before the purge")
+	}
+
+	if err := svc.Erasure.Erase(ctx, subject.ID); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	waitFor(t, waitTimeout, func() bool { return sawType(observerSend, "member_ban") }, "member_ban at the observer")
+
+	if !hub.MustFullResyncForTest(lastSeq) {
+		t.Error("a client resuming from before the purge is not forced to a full ready")
+	}
+	if hub.MustFullResyncForTest(hub.CurrentSeqForTest()) {
+		t.Error("a client caught up past the purge is forced to a full ready")
+	}
+	if got := hub.ReplayBuffer().EventsSince(lastSeq); got != nil {
+		t.Errorf("replay across the cleared slot = %d frames, want nil", len(got))
+	}
+	if got := hub.ReplayBuffer().EventsSinceFiltered(lastSeq, map[int64]bool{chID: true}); got != nil {
+		t.Errorf("filtered replay across the cleared slot = %d frames, want nil", len(got))
+	}
+
+	// The late producer: a frame naming the erased user arrives after the
+	// purge. It must not be sequenced, buffered or persisted.
+	before := hub.CurrentSeqForTest()
+	late, _ := json.Marshal(map[string]any{"type": "chat_message", "payload": map[string]any{"channel_id": chID, "user": map[string]any{"id": subject.ID}, "content": "late"}})
+	hub.BroadcastToAll(late)
+	harmless, _ := json.Marshal(map[string]any{"type": "typing", "payload": map[string]any{"channel_id": chID, "user_id": observer.ID}})
+	hub.BroadcastToAll(harmless)
+	waitFor(t, waitTimeout, func() bool { return hub.CurrentSeqForTest() > before }, "the harmless frame to be sequenced")
+	if hub.CurrentSeqForTest() != before+1 {
+		t.Errorf("seq advanced by %d, want 1 (the late frame naming the erased user must not take a seq)", hub.CurrentSeqForTest()-before)
+	}
+	if n := namedInRing(hub, subject.ID); n != 0 {
+		t.Errorf("ring holds %d frames naming the erased user after the late broadcast", n)
+	}
+	if err := persister.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countEventsNaming(t, database, subject.ID); n != 0 {
+		t.Errorf("events table holds %d rows naming the erased user after the late broadcast", n)
 	}
 }
