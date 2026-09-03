@@ -42,6 +42,7 @@ type ErasureStore interface {
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	FlushAudits(ctx context.Context) error
 	CountAdminClassAccounts(ctx context.Context) (int, error)
+	CloseSetupGate(ctx context.Context) error
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	RaiseSequences(ctx context.Context, floors map[string]int64) error
 	ListUserIDs(ctx context.Context) ([]int64, error)
@@ -261,7 +262,33 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 	if err := s.st.RaiseSequences(ctx, floors); err != nil {
 		return db.ReplayReport{}, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
+	// An account marker proves this installation was set up and an account
+	// erased. It lives outside the database, so it is the only evidence left
+	// when a backup taken before the first owner is restored: that rolls the
+	// users table and the setup flag back to their fresh state together, and
+	// the replay itself finds nothing to erase, since the marked account is
+	// absent. Closing the gate from here is what keeps the unauthenticated
+	// setup endpoint shut across that restore.
+	if err := s.closeSetupGateForMarkers(ctx); err != nil {
+		return db.ReplayReport{}, err
+	}
 	return s.markers.ReplayAccounts(ctx, s.st, s.eraseForReplay)
+}
+
+// closeSetupGateForMarkers records that the server was set up when the
+// marker file says so, whatever the restored database says.
+func (s *ErasureService) closeSetupGateForMarkers(ctx context.Context) error {
+	marked, err := s.markers.HasAccountMarkers(ctx)
+	if err != nil {
+		return err
+	}
+	if !marked {
+		return nil
+	}
+	if err := s.st.CloseSetupGate(ctx); err != nil {
+		return fmt.Errorf("erasure: setup gate: %w", err)
+	}
+	return nil
 }
 
 // ErrSequenceFloorUnresolved is the refusal when a marker names an id the

@@ -131,7 +131,16 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 The next `POST /admin/api/setup` then creates a new Owner and sets the flag
 again. `0` is the only value that opens setup: the gate stands in front of an
 unauthenticated endpoint, so a missing, corrupted or unrecognised flag is
-treated as closed. The key is deliberately not in the settings PATCH
+treated as closed.
+
+The flag lives in the database, so a restore rolls it back with everything
+else — including a backup taken before the server was ever set up, which the
+scheduled-backup loop will happily have made. The deletion markers close that
+hole: they live outside the database, and an account marker proves an account
+existed here and was erased, so the start-up replay sets the flag closed
+whenever the marker file holds one, whatever the restored database says. A
+marker file with only retention markers leaves a genuinely fresh server
+alone. The key is deliberately not in the settings PATCH
 allowlist, so no authenticated route can write it — only the operator, with
 access to the database file.
 

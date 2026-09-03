@@ -40,6 +40,22 @@ const (
 	SetupClosed       = "1"
 )
 
+// CloseSetupGate records that this installation has been set up, whatever
+// the users table says. The erasure markers call it at start-up: a marker
+// proves an account existed here, it lives outside the database a restore
+// overwrites, and a backup taken before the first owner rolls both the users
+// table and the flag back to their fresh state — which would otherwise
+// reopen the unauthenticated setup endpoint. Idempotent.
+func (d *DB) CloseSetupGate(ctx context.Context) error {
+	if _, err := d.writer.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?1, ?2)
+		 ON CONFLICT(key) DO UPDATE SET value = ?2 WHERE settings.value <> ?2`,
+		SetupCompletedKey, SetupClosed); err != nil {
+		return fmt.Errorf("CloseSetupGate: %w", err)
+	}
+	return nil
+}
+
 // CreateOwnerIfEmpty atomically checks that no users exist and inserts the
 // first owner in a single transaction. Returns ErrConflict if any user already
 // exists, closing the TOCTOU race in the setup endpoint (BUG-119).

@@ -419,6 +419,24 @@ func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, er
 	return rep, nil
 }
 
+// HasAccountMarkers reports whether the file holds any account marker. One
+// is proof that this installation was set up and an account erased, and it
+// lives outside the database a restore overwrites — which is what makes it
+// the only evidence that survives a restore of a backup taken before the
+// first owner existed (ErasureService.ReplayMarkers).
+func (m *MarkerStore) HasAccountMarkers(ctx context.Context) (bool, error) {
+	var one int
+	err := m.sqlDB.QueryRowContext(ctx,
+		`SELECT 1 FROM deletion_markers WHERE scope = ? LIMIT 1`, MarkerScopeAccount).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("marker store: account markers: %w", err)
+	}
+	return true, nil
+}
+
 // MessagesToken is the unlinkable name of a channel's retention marker:
 // hex of HMAC-SHA256(key, "messages:" || decimal channel id).
 func (m *MarkerStore) MessagesToken(channelID int64) string {
