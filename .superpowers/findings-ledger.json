@@ -1,5 +1,5 @@
 {
-  "nextId": 415,
+  "nextId": 416,
   "findings": [
     {
       "id": "OC-0001",
@@ -7357,14 +7357,20 @@
       "severity": "medium",
       "why": "The mid-call PTT arming block writes `pttOwnsMute = true` synchronously, but the mute it is describing (`setMuted(true)`) is applied inside a `void import(...).then(...)` callback that runs a microtask *later*. `setPttGated(true)` on the line above schedules voiceStore's notification microtask first, and the subscriber registered in `initPtt` (`if (!s.localMuted) pttOwnsMute = false`) still observes `localMuted === false` and resets the latch. When `setMuted(true)` finally runs, the mic is PTT-muted while `pttOwnsMute` is false, so every subsequent press takes the \"never lift a mute the user asked for\" early return.",
       "repro": "User is in a voice call, unmuted, with no PTT key bound (`localMuted=false`, `pttGated=false`, `isPttPollingLive()===true`). They open Settings -> Keybinds and bind a PTT key, which calls `updatePttKey(0x20)`.\n\nExecution order:\n1. `updatePttKey` -> `await initPtt()` registers `pttStoreUnsubscribe = voiceStore.subscribe(s => { if (!s.localMuted) pttOwnsMute = false; })` (ptt.ts:163-165).\n2. ptt.ts:277 destructures `localMuted === false`.\n3. ptt.ts:279 `setPttGated(true)` -> `voiceStore.setState` applies state synchronously and queues the notify microtask (store.ts:132-155). No prior notify was scheduled (initPtt writes no store state), so this microtask is fresh.\n4. ptt.ts:283-285 `void import(\"./livekitSession\").then(({setMuted}) => setMuted(true))` — the `.then` callback is queued *after* the dynamic-import promise resolves, i.e. strictly after the microtask queued in step 3.\n5. ptt.ts:286 `pttOwnsMute = !localMuted` -> `true`.\n6. Microtask from step 3 runs: subscriber sees `s.localMuted === false` (setMuted has not run yet) -> `pttOwnsMute = false`.\n7. Microtask from step 4 runs: `setMuted(true)` -> `setLocalMuted(true)` (livekitSession.ts:1597), mic muted.\n\nEnd state: mic muted by PTT, `pttOwnsMute === false`.\n\nUser presses the PTT key: the ptt-state handler (ptt.ts:203) evaluates `localMuted && !pttOwnsMute` -> `true && true` -> returns with \"PTT pressed — staying muted\". The mic never opens. On release, ptt.ts:216 recomputes `pttOwnsMute = !localMuted = !true = false`, so the latch stays false forever: every press for the rest of the voice session is refused and the user is stuck muted with a non-functional PTT key, until they manually unmute via the voice widget.\n\nNot test-locked: tests/unit/ptt.test.ts mocks `@stores/voice.store` with a stub `setPttGated` and a hand-driven `subscribe`, so the real store's microtask notification never fires during the OC-0162 arming tests (tests/unit/ptt.test.ts:512-608).",
-      "evidence": "ptt.ts:277-287\n      const { currentChannelId, pttGated, localMuted } = voiceStore.getState();\n      if (currentChannelId !== null && isPttPollingLive() && pttGated !== true) {\n        setPttGated(true);\n        // Muting is always safe (mirrors the ptt-state release handler\n        // below) — record whether this is what muted the mic so the next\n        // press may lift it (v006: never lift a mute the user asked for).\n        void import(\"./livekitSession\")\n          .then(({ setMuted }) => setMuted(true))\n          .catch((e) => log.warn(\"Failed to gate mic after binding PTT key mid-call\", e));\n        pttOwnsMute = !localMuted;\n      }\n\nptt.ts:163-165 (the clobbering subscriber)\n    pttStoreUnsubscribe = voiceStore.subscribe((s) => {\n      if (!s.localMuted) pttOwnsMute = false;\n    });\n\nContrast with the ptt-state release handler (ptt.ts:215-216), which is correct because setMuted runs *synchronously before* the latch write:\n          setMuted(true);\n          pttOwnsMute = !localMuted;",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "client-state",
       "suggestedFix": "Move the latch write into the callback so it lands after setMuted, mirroring the release handler at ptt.ts:215-216: replace lines 283-286 with `void import(\"./livekitSession\").then(({ setMuted }) => { setMuted(true); pttOwnsMute = !localMuted; }).catch((e) => log.warn(\"Failed to gate mic after binding PTT key mid-call\", e));` — one edit in updatePttKey, no change to the subscriber or to any caller.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0313",
@@ -7529,14 +7535,20 @@
       "severity": "medium",
       "why": "serverDownloadAssetName keys only on runtime.GOOS and hardcodes the amd64 tarball; runtime.GOARCH is never consulted anywhere in the updater package. The signature/manifest/checksum chain all validate (they correctly describe the amd64 artifact), so nothing fails closed, and the sibling downloader Server/ws/livekit_download.go:49 shows the intended arch gate that is missing here.",
       "repro": "On a linux/arm64 server built from source (docs/contributing.md:13 lists Linux ARM64 server as supported; README.md:48 says no ARM64 binary is published, so source build is the documented path), the operator clicks Apply Update in the admin panel:\n1. fetchLatestRelease sets downloadURL to the release's chatserver-linux-amd64.tar.gz; hasRequiredServerAssetsFor(\"linux\", ...) (updater.go:299) returns true, so UpdateInfo.UpdateAvailable is true and handleApplyUpdate (Server/admin/update_handlers.go:84-95) proceeds.\n2. DownloadAndVerify succeeds end to end: parseChecksumFileAny matches the bare `chatserver-linux-amd64.tar.gz` checksum line, VerifyReleaseManifest binds that same asset name, the minisign signature on the manifest verifies, and the tarball SHA256 matches. Nothing rejects the wrong architecture.\n3. extractChatserverFromTarGz writes the amd64 ELF to exePath+\".new\" and chmods it 0755.\n4. applyStagedUpdate (update_handlers.go:198-212) renames the working arm64 binary to exePath+\".old\" and commits the amd64 file to exePath; os.SameFile passes because it is the verified file.\n5. performRestartHandoff (Server/restart.go:183) calls SpawnDetached(exePath, os.Args[1:]), which fails with `fork/exec ...: exec format error`; it logs \"spawning the replacement process FAILED — manual restart required\" and the process exits.\nResult: server is down, exePath holds an unrunnable foreign-arch binary, and recovery requires manually restoring chatserver.old on the host. Expected: the update check should refuse (RequiredAssetsPresent=false / an explicit unsupported-architecture error) the way livekitAssetName does. No test locks the current behavior — updater_test.go:462 asserts only the GOOS->name mapping.",
-      "evidence": "Server/updater/download.go:252-260\n\tfunc serverDownloadAssetName(goos string) string {\n\t\tswitch goos {\n\t\tcase \"windows\":\n\t\t\treturn windowsServerBinary\n\t\tcase \"linux\":\n\t\t\treturn linuxServerArchive   // const = \"chatserver-linux-amd64.tar.gz\"\n\t\tdefault:\n\t\t\treturn \"\"\n\nServer/updater/updater.go:256\n\twantBinary := serverDownloadAssetName(runtime.GOOS)   // no GOARCH\n\nServer/updater/verify.go:48-56 checksumEntryNamesForGOOS(goos) likewise hardcodes\n\t\"linux/chatserver-linux-amd64.tar.gz\", \"chatserver-linux-amd64.tar.gz\"\n\nContrast, Server/ws/livekit_download.go:49-57 (fails closed on arch):\n\tfunc livekitAssetName(version, goos, goarch string) (string, error) {\n\t\tswitch goarch {\n\t\tcase \"amd64\", \"arm64\": arch = goarch\n\t\tcase \"arm\": arch = \"armv7\"\n\t\tdefault: return \"\", fmt.Errorf(\"livekit auto-download does not support architecture %s ...\")",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-1",
       "suggestedFix": "Give serverDownloadAssetName a goarch parameter and fail closed on anything the release does not actually ship, so the empty downloadURL makes hasRequiredServerAssetsFor return false and the apply endpoint answers MISSING_ASSETS instead of installing a foreign-arch binary. In Server/updater/download.go:252: `func serverDownloadAssetName(goos, goarch string) string { if goarch != \"amd64\" { return \"\" }; switch goos { ... } }`, and pass runtime.GOARCH at Server/updater/updater.go:256. That single gate is sufficient — no other call site chooses the asset — though mirroring it in checksumEntryNamesForGOOS (Server/updater/verify.go:48) keeps the two name tables consistent when an arm64 tarball is eventually published.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0321",
@@ -7637,14 +7649,20 @@
       "severity": "low",
       "why": "`r.timestamp` is `messages.timestamp` verbatim (db/models.go:168, populated by the raw column in SearchMessages), i.e. \"2026-08-22 15:00:00\" — UTC with no zone designator. `new Date(ts)` interprets that as local wall-clock, shifting the rendered time by the viewer's UTC offset. The message list renders the identical string through `parseTimestamp()` (message-list/formatting.ts:25), which appends \"Z\" — so the two surfaces disagree about the same message.",
       "repro": "Viewer in UTC-5. A message is sent at 10:00 local (15:00 UTC); the server stores \"2026-08-22 15:00:00\". The message list shows \"10:00 AM\". Search for that message in the Search overlay: `new Date(\"2026-08-22 15:00:00\")` parses as 15:00 local → the result row is labelled \"Aug 22 03:00 PM\". Clicking through jumps to a message the list says was sent at 10:00 AM.",
-      "evidence": "55:  function formatTimestamp(ts: string): string {\n56:    try {\n57:      const d = new Date(ts);\n58:      return (\n59:        d.toLocaleDateString(undefined, { month: \"short\", day: \"numeric\" }) +\n60:        \" \" +\n61:        d.toLocaleTimeString(undefined, { hour: \"2-digit\", minute: \"2-digit\" })",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "ordering-boundary",
       "suggestedFix": "Use the shared helper in formatTimestamp: `const d = parseTimestamp(ts);` (import { parseTimestamp } from \"@components/message-list/formatting\") in place of `new Date(ts)` at SearchOverlay.ts:57.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0326",
@@ -7654,14 +7672,20 @@
       "severity": "low",
       "why": "`msg.timestamp` comes from `GetPinnedMessages` → `MessageAPIResponse.Timestamp`, the raw SQLite \"YYYY-MM-DD HH:MM:SS\" UTC string. `new Date(iso)` reads it as local wall-clock rather than UTC (the project's `parseTimestamp()` helper exists for exactly this), and because only the *date* is rendered, any message whose UTC time and local time fall on different calendar days is labelled with the wrong day.",
       "repro": "Viewer in UTC-5. A message is sent at 20:00 local on Aug 21, i.e. 01:00 UTC on Aug 22; the server stores \"2026-08-22 01:00:00\". The message list (via parseTimestamp) groups it under Aug 21. Open the pinned-messages panel: `new Date(\"2026-08-22 01:00:00\")` is Aug 22 01:00 local, so the pin is labelled \"Aug 22, 2026\" — one day later than the same message's day divider in the channel.",
-      "evidence": "26:function formatPinTime(iso: string): string {\n27:  const d = new Date(iso);\n28:  if (isNaN(d.getTime())) return iso;\n29:  return d.toLocaleDateString(undefined, { month: \"short\", day: \"numeric\", year: \"numeric\" });",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "ordering-boundary",
       "suggestedFix": "Replace `const d = new Date(iso);` at PinnedMessages.ts:27 with `const d = parseTimestamp(iso);` (import { parseTimestamp } from \"@components/message-list/formatting\"); the existing isNaN guard still covers a malformed string.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0327",
@@ -7671,14 +7695,20 @@
       "severity": "low",
       "why": "MuteParticipantAudio documents itself as muting \"every microphone track the participant publishes\", but its filter is `t.Type != livekit.TrackType_AUDIO` — which admits screen-share audio as well as the microphone. livekit.TrackInfo carries a Source field (TrackSource_MICROPHONE = 2 vs TrackSource_SCREEN_SHARE_AUDIO = 4) that is never consulted, and the client publishes screen-share audio under exactly that source (Client/src/lib/screenShare.ts:373, `source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio`). The client's own mute/deafen implementation states and enforces the opposite rule in two places — audioElements.ts:121-127 (`publication.source !== Track.Source.ScreenShareAudio` before refusing to attach while deafened) and audioElements.ts:216 (`if (publication.source === Track.Source.ScreenShareAudio) continue;`), both commented \"Screen-share/stream audio is exempt: muting or deafening yourself gates voices, not the content someone is streaming\". So the server's moderator mute silently reaches past the voice channel it is scoped to and kills a live screen share's audio for every viewer.",
       "repro": "User B joins voice channel #10 and starts a screen share with audio (screenShare.ts publishes the tab/system audio track as Track.Source.ScreenShareAudio). Users A and C are listening to the shared content. A moderator sends {\"type\":\"voice_mod_mute\",\"payload\":{\"channel_id\":10,\"user_id\":B,\"muted\":true}} intending to silence B's microphone. Server: ApplyVoiceServerMute sets server_muted=1/muted=1, then MuteParticipantAudio iterates p.Tracks and calls MutePublishedTrack on BOTH B's microphone SID and B's screen-share-audio SID (both are TrackType_AUDIO). B's client receives RemoteMute for the screen-share-audio publication and calls pub.mute() — A and C abruptly lose the shared application's audio while the video keeps playing, and nothing in the OwnCord UI shows why (B's screen-share tile has no publisher-side audio mute control). Symmetrically, when the moderator clears the mute, MuteParticipantAudio(muted=false) force-unmutes that screen-share-audio publication again. The same happens via voice_mod_deafen, which passes c.Deafened() into the identical call. Expected per the function's own doc comment and the client's stated policy (audioElements.ts:118-120): only the microphone track (t.Source == livekit.TrackSource_MICROPHONE) should be affected.",
-      "evidence": "Server/ws/livekit.go:186-217\n\n// MuteParticipantAudio mutes or unmutes every microphone track the participant\n// publishes, so a moderator's server mute holds at the SFU instead of relying\n// on the target's client to honor it.\nfunc (c *LiveKitClient) MuteParticipantAudio(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {\n\t...\n\tfor _, t := range p.Tracks {\n\t\tif t.Type != livekit.TrackType_AUDIO {\n\t\t\tcontinue\n\t\t}\n\t\tif _, mErr := c.roomSvc.MutePublishedTrack(ctx, &livekit.MuteRoomTrackRequest{\n\t\t\tRoom: roomName, Identity: identity, TrackSid: t.Sid, Muted: muted,\n\t\t}); mErr != nil { ... }\n\t}\n\nCallers: Server/ws/voice_moderation.go:237 (voice_mod_mute -> MuteParticipant(..., c.Muted())) and Server/ws/voice_moderation.go:306 (voice_mod_deafen -> MuteParticipant(..., c.Deafened())).\n\nDelivery on the target's side: node_modules/livekit-client/src/room/participant/LocalParticipant.ts:248-256 —\n  this.engine.on(EngineEvent.RemoteMute, (trackSid, muted) => {\n    const pub = this.trackPublications.get(trackSid);\n    if (!pub || !pub.track) return;\n    if (muted) pub.mute(); else pub.unmute();\n  });",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "flow-voice",
       "suggestedFix": "Skip screen-share audio explicitly rather than whitelisting the microphone, so audio tracks that report TrackSource_UNKNOWN (0) still get muted: in Server/ws/livekit.go:206 change the filter to `if t.Type != livekit.TrackType_AUDIO || t.Source == livekit.TrackSource_SCREEN_SHARE_AUDIO { continue }`. One guard in the shared function covers both the voice_mod_mute and voice_mod_deafen call sites.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0328",
@@ -7734,14 +7764,20 @@
       "severity": "low",
       "why": "mapToPinnedMessage flattens the pinned message's author to `msg.user.username` before handing it to PinnedMessages, which renders that string verbatim (PinnedMessages.ts:54). Because the user id is discarded in the mapping, the panel cannot resolve the live membersStore nickname the way every other author surface does, so a renamed/nicknamed user is labelled differently in the pinned panel than in the message list the panel jumps into. The avatar colour is also hashed from the raw username (line 80), so the letter and colour disagree with the message row's avatar too.",
       "repro": "1. Give user `bob` the nickname \"Bobby\" (membersStore.displayName). 2. Pin one of bob's messages. 3. The message row in the channel reads \"Bobby\"; open the pin panel (pin button in the chat header) and the same pinned message is attributed to \"bob\". 4. Jump from the pin to the message and the name changes under you.",
-      "evidence": "OverlayManagers.ts:73-81\n  return {\n    id: msg.id,\n    author: msg.user.username,\n    content: msg.content,\n    timestamp: msg.created_at ?? msg.timestamp ?? \"\",\n    avatarColor: pickPinAvatarColor(msg.user.username),\n  };\n\nPinnedMessages.ts:54\n  const authorEl = createElement(\"span\", { class: \"pinned-msg__author\" }, msg.author);\n\nmembers.store.ts:182 `memberDisplayName()` and avatar.ts:51 `resolveDisplayName()` are the shared resolvers every other surface uses; neither is reachable from here because `PinnedMessage` carries no id.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Fix in the shared mapper only: widen the param to `user: { id: number; username: string; avatar?: string|null; display_name?: string|null }` and set `author: resolveDisplayName(resolveAuthor(msg.user))` (imports from @lib/avatar and @components/message-list/formatting). Keep `pickPinAvatarColor(msg.user.username)` so the hue stays stable across renames. Existing tests still pass — resolveAuthor falls back to the payload/username when the member is not in the store.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0331",
@@ -7751,14 +7787,20 @@
       "severity": "low",
       "why": "`api_tokens.created_at` defaults to SQLite `datetime('now')` and `last_used_at` is written with `datetime('now')` — both produce \"YYYY-MM-DD HH:MM:SS\" in UTC with no zone suffix, and both reach the panel as plain strings (db/models.go:80-81, dbgen ListAPITokensRow.CreatedAt is `string`). `new Date(\"2026-03-19 08:29:41\")` is a non-ISO form that V8 parses as LOCAL time, so the rendered clock time is wrong by the browser's UTC offset. The `expires_at` column in the very same row is correct, because CreateAPIToken formats it with an explicit `Z` (db/apitoken_queries.go:27) — so one column in the table is right and two are wrong.",
       "repro": "Run the server with a browser in UTC+02:00. Mint an API token at 10:29 local (08:29 UTC). Open Admin → API Tokens: the Created column reads \"08:29:41 AM\" (parsed as local) instead of \"10:29:41 AM\". Use the token once and Last Used is wrong by the same two hours, while the Expires column for the same row — stored with a trailing Z — renders correctly, so the table contradicts itself.",
-      "evidence": "Server/admin/static/index.html:1679-1681\n    html+='<td>'+(t.created_at?new Date(t.created_at).toLocaleString():'')+'</td>';\n    html+='<td>'+(t.last_used?new Date(t.last_used).toLocaleString():'<span ...>never</span>')+'</td>';\n    html+='<td>'+(t.expires_at?new Date(t.expires_at).toLocaleString():'<span ...>never</span>')+'</td>';\n\nServer/migrations/018_api_tokens.sql:19  created_at TEXT NOT NULL DEFAULT (datetime('now')),\nServer/db/queries/sqlite/apitokens.sql:34  UPDATE api_tokens SET last_used_at = datetime('now') ...\nServer/db/apitoken_queries.go:27  s := expiresAt.UTC().Format(\"2006-01-02T15:04:05Z\")   // <- the one that is right",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Add one helper next to fmtBytes and use it at the three token-table sites: `function utcDate(s){return new Date(/[Zz]|[+-]\\d\\d:?\\d\\d$/.test(s)?s:s.replace(' ','T')+'Z')}` then `utcDate(t.created_at).toLocaleString()` and `utcDate(t.last_used).toLocaleString()`. Passing expires_at through the same helper is a no-op (it already ends in Z) and keeps the column consistent. Server-side alternative — formatting created_at/last_used_at with an explicit Z like CreateAPIToken does — would need a migration for existing rows.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0332",
@@ -7785,14 +7827,20 @@
       "severity": "low",
       "why": "The sidebar's only voice repaint trigger is `unsubVoiceStructure`, whose signature string covers channel id, mute/deafen/camera/screenshare/serverMuted/serverDeafened and E2EE verification — but not the participant's username or display name. The row label at line 431 is resolved from `membersStore` via `memberDisplayName`, and ChannelSidebar subscribes to `membersStore` nowhere at all (it imports it only for one-shot `getState()` reads). So the store writes that a rename performs — `updateMemberProfile` (bumps `roleRevision`, which only MessageList watches) and `updateVoiceUserProfile` (voice.store.ts:262, whose doc comment says it exists so \"a rename [doesn't] leave the voice roster showing the old name for the rest of the call\") — produce no re-render here. The same defect shape as the already-fixed OC finding at ChannelSidebar.ts:943 (signature omitted sessionFingerprint), on the field the roster is actually named by.",
       "repro": "Alice and Bob are both in voice channel #general; the sidebar shows both rows. Alice opens Settings → Account and sets her nickname to \"Ali\" (or renames her username). The server broadcasts `user_update`; dispatcher.ts:929-950 patches membersStore, dmStore and voiceStore. `structSig` is unchanged (no identity field is in it), so `renderChannels()` never runs: Bob's voice sidebar keeps showing \"Alice\" indefinitely, while his member list, message rows and DM sidebar all show \"Ali\". It only corrects if some unrelated event (someone mutes, joins, leaves, or a channel changes) happens to re-render the sidebar.",
-      "evidence": "structSig += `:${uid}${u.muted ? \"m\" : \"\"}${u.deafened ? \"d\" : \"\"}${u.camera ? \"c\" : \"\"}${u.screenshare ? \"s\" : \"\"}${u.serverMuted === true ? \"M\" : \"\"}${u.serverDeafened === true ? \"D\" : \"\"}${verif ? `@${verif.status}/${verif.safetyNumber ?? \"\"}/${verif.sessionFingerprint ?? \"\"}` : \"\"}`;\n// line 430-431, the label this signature is supposed to keep fresh:\nconst member = membersStore.getState().members.get(user.userId);\nconst label = (member !== undefined ? memberDisplayName(member) : user.username) || \"Unknown\";",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Add one subscription next to the existing voice ones in ChannelSidebar's setup: `unsubscribers.push(membersStore.subscribeSelector((s) => s.roleRevision ?? 0, () => renderChannels()));`. updateMemberProfile bumps roleRevision on every USER_UPDATE (members.store.ts:154) and always runs before updateVoiceUserProfile in the dispatcher, so this single hook covers both the displayName and username rename paths without touching structSig.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0334",
@@ -7802,14 +7850,20 @@
       "severity": "low",
       "why": "`ptt_listen_for_key`'s allowlist includes VK 0x1B (Escape), and the capture UI has no cancel path and no aborted-signal guard — while the Rust poll is blocking for up to 10s, pressing Escape closes the Settings overlay (SettingsOverlay.ts:362-369, which even labels ESC as the close affordance) *and* resolves the capture with 0x1B, so `updatePttKey(0x1B)` runs against a torn-down tab and permanently rebinds push-to-talk to Escape without the user ever seeing the result.",
       "repro": "1. Open Settings → Keybinds. 2. Click the \"Push to Talk\" chip; it reads \"Press a supported key...\" and the Rust poll starts. 3. Press Escape to back out. 4. The Settings overlay closes (Escape handler) and, on key release, `ptt_listen_for_key` returns 0x1B, so `updatePttKey(0x1B)` persists Escape as the PTT binding — no visible confirmation, since the tab is gone. 5. From then on the mic is gated closed in every voice call and every Escape keypress anywhere in the OS un-gates it; if step 2-3 is done while already in a call, the mic is muted immediately by `updatePttKey`'s mid-call gate.",
-      "evidence": "KeybindsTab.ts:49-62 — `void captureKeyPress().then((vk) => { ... if (vk === 0) { restore; return; } currentVk = vk; setText(pttValue, vkName(vk)); ... void updatePttKey(vk); })` (no `signal.aborted` check, no cancel button).\nsrc-tauri/src/ptt.rs:34-63 `is_allowed_ptt_capture_vk` — `matches!(vk, 0x1B | // Escape\\n 0x20 | ...)`.\nSettingsOverlay.ts:360-369 — `document.addEventListener(\"keydown\", (e) => { if (e.key === \"Escape\" && root?.classList.contains(\"open\")) options.onClose(); })`.\nlib/ptt.ts:262-289 `updatePttKey` — persists `pttVk`, calls `ptt_set_key`, starts the poller and, when a call is live, immediately `setMuted(true)` + `setPttGated(true)`.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-pages",
       "suggestedFix": "Treat Escape as cancel in one place, in Rust: drop `0x1B` from `is_allowed_ptt_capture_vk` (Client/src-tauri/src/ptt.rs:48) and, in both capture loops of `ptt_listen_for_key` (~ptt.rs:477 and ~ptt.rs:502), `return 0` when the detected vk is 0x1B. The existing `vk === 0` branch in KeybindsTab.ts:53-57 then restores the previous binding with no client change and no per-caller guard.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0335",
@@ -7819,14 +7873,20 @@
       "severity": "low",
       "why": "`handleAddServer` builds a fresh overlay on every click and wires six listeners to the ConnectPage-lifetime `signal`. `closeModal()` only does `overlay.remove()` — it never aborts anything — so each abandoned modal stays reachable from that signal's abort-listener list for the life of the connect page, along with its inputs and the closure state.",
       "repro": "On the connect page click \"+ Add Server\" and Cancel ten times. Ten complete modal subtrees (overlay + two inputs + four buttons) are still retained through `signal`'s abort-listener list; only navigating away from the connect page (login) releases them. The correct shape is a per-modal AbortController aborted by `closeModal`, as `createModal`/`modalFactory` does elsewhere.",
-      "evidence": "ServerPanel.ts:300-347 — inside `handleAddServer`: `function closeModal(): void { overlay.remove(); }` and then `closeBtn.addEventListener(\"click\", closeModal, { signal }); cancelBtn.addEventListener(...,{ signal }); saveBtn.addEventListener(...,{ signal }); overlay.addEventListener(\"click\", ..., { signal }); modal.addEventListener(\"click\", ..., { signal }); hostAddrInput.addEventListener(\"keydown\", ..., { signal });`\n`signal` comes from ConnectPage.ts:66-67 (`const abortController = new AbortController(); const { signal } = abortController;`) and is only aborted in `destroy()` (ConnectPage.ts:288).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-pages",
       "suggestedFix": "Inside `handleAddServer`, mint `const modalAc = new AbortController();`, pass `{ signal: modalAc.signal }` to all six registrations, and make `closeModal()` call `modalAc.abort()` before `overlay.remove()`. Chain it to the page signal with `signal.addEventListener(\"abort\", () => modalAc.abort(), { once: true, signal: modalAc.signal })` so page teardown still tears down an open modal without itself accumulating.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0336",
@@ -7836,14 +7896,20 @@
       "severity": "low",
       "why": "`renderServerProfiles` clears `serverListEl` and rebuilds every row, attaching up to three listeners per row to the ConnectPage-lifetime `signal`. Nothing aborts the previous generation, so each re-render — and it is re-rendered on profile load, add, delete and every auto-login toggle — permanently pins the whole discarded row set. Same defect class as the already-fixed MemberList/SearchOverlay/QuickSwitcher/EmojiPicker re-render leaks.",
       "repro": "On the connect page with 5 saved servers, click the auto-login (zap) toggle five times. Each click calls `refreshProfiles`, which rebuilds all 5 rows and adds 15 more listener registrations to the same never-aborted `signal`; the 25 previously-detached row elements stay reachable until the connect page itself is destroyed. A per-render AbortController (aborted at the top of `renderServerProfiles`) is the fix used by the sibling components already corrected for this.",
-      "evidence": "ServerPanel.ts:122-124 — `function renderServerProfiles(profiles) { clearChildren(serverListEl); healthElements.clear(); for (const profile of profiles) { ... } }`\nServerPanel.ts:173-181 `autoLoginBtn.addEventListener(\"click\", ..., { signal })`, :193-201 `deleteBtn.addEventListener(\"click\", ..., { signal })`, :206-224 `item.addEventListener(\"click\", ..., { signal })` — all inside that loop.\nCallers: main.ts:590, :597, :602 and :659 all call `connectPage.refreshProfiles(getProfileList())`, which is `serverPanel.renderProfiles` (ConnectPage.ts:326-328 → ServerPanel.ts:362).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-pages",
       "suggestedFix": "Mirror MemberList.ts:475-483: hold `let renderAc: AbortController | null = null;` in the factory, and at the top of `renderServerProfiles` do `renderAc?.abort(); renderAc = new AbortController();`, then use `renderAc.signal` for the three per-row registrations (the footer/add-button listener at :115 stays on the page signal). Abort `renderAc` from a page-signal `abort` handler registered once at construction.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0337",
@@ -7899,14 +7965,20 @@
       "severity": "low",
       "why": "`unknownFileKeys` compares the file's flattened leaf keys against the defaults layer's flattened leaf keys. A YAML section header whose children are all commented out parses to a nil value, and koanf's maps.Flatten emits it as a *leaf* key (bare `voice`, `telemetry`, ...). The defaults layer only ever contains the dotted child paths (`voice.quality`, ...), never the bare section name, so every such section is reported as an unrecognised typo whose value has no effect — which is false, and which the shipped defaultYAML actively teaches operators to produce by commenting out a section's children.",
       "repro": "Given a config.yaml such as:\n\n  server:\n    port: 8443\n  voice:\n    # livekit_url: \"ws://localhost:7880\"\n    # quality: \"medium\"\n\nthe YAML parses to map[\"voice\"] = nil, Flatten emits the leaf key \"voice\", and knownKeys holds only \"voice.livekit_api_key\", \"voice.quality\", ... — never \"voice\". Startup therefore logs:\n\n  WARN config: unknown key ignored — value has NO effect (typo?) key=voice file=config.yaml\n\nThe operator is told a real, fully supported section is a typo. The same fires for any commented-out-children section (telemetry:, plugins:, gif:, event_persistence:, github:).",
-      "evidence": "Server/config/config.go:488-491 (allowlist = defaults-layer leaf keys only)\n  knownKeys := make(map[string]struct{}, len(k.Keys()))\n  for _, key := range k.Keys() { knownKeys[key] = struct{}{} }\n\nServer/config/config.go:519-522\n  for _, key := range unknownFileKeys(cfgPath, knownKeys) {\n      slog.Warn(\"config: unknown key ignored — value has NO effect (typo?)\", \"key\", key, \"file\", cfgPath)\n  }\n\nServer/config/config.go:596-599 (fileK.Keys() is the flattened leaf set)\n  for _, key := range fileK.Keys() {\n      if _, ok := knownKeys[key]; !ok { unknown = append(unknown, key) }\n  }\n\nkoanf v2@v2.3.6 koanf.go:128-137 — Keys() ranges over confMapFlat, i.e. the maps.Flatten output.\nkoanf/maps@v0.1.2 maps.go:43-59 — flatten()'s type switch only recurses for `map[string]interface{}`; a nil section value falls to `default:` and is emitted as a leaf key (`out[\"voice\"] = nil`).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-1",
       "suggestedFix": "Suppress bare section names in unknownFileKeys (Server/config/config.go:596-600) rather than at the call site, so both the warning and any future caller agree. Smallest precise form — a bare key that is a prefix of a real dotted key is a known section, not a typo:\n\n\tfor _, key := range fileK.Keys() {\n\t\tif _, ok := knownKeys[key]; ok {\n\t\t\tcontinue\n\t\t}\n\t\tif isKnownSection(knownKeys, key+\".\") { // some known key starts with key+\".\"\n\t\t\tcontinue\n\t\t}\n\t\tunknown = append(unknown, key)\n\t}\n\nThis keeps reporting a genuinely misspelled bare header (`databsae:`), which the blunter alternative (`if fileK.Get(key) == nil { continue }`) would silently swallow.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0340",
@@ -7962,14 +8034,20 @@
       "severity": "low",
       "why": "The voice participant row builds its avatar initial and background colour from `user.username`, then eleven lines later resolves the label through `memberDisplayName`. Every other avatar in the app goes through `createAvatarElement`/`avatarInitial`, which prefer `displayName` (lib/avatar.ts:50-60), so a nicknamed user's voice row shows a letter that matches no other avatar of that user anywhere in the client — including the member list rendered directly above it.",
       "repro": "Account `alice` sets nickname `Zoe`, then joins a voice channel. The sidebar voice row under that channel draws a circle containing `A`, coloured from the hash of \"alice\", immediately to the left of the text `Zoe`. The MemberList row for the same user (MemberList.ts:201-204 → createAvatarElement → avatarInitial) draws `Z`. Changing the nickname to something starting with a different letter never changes the voice row's letter or colour, because neither reads `member.displayName` at all.",
-      "evidence": "ChannelSidebar.ts:420-432\n      const initial = user.username.length > 0 ? user.username.charAt(0).toUpperCase() : \"?\";\n      const avatar = createElement(\"div\", { class: \"vu-avatar\" }, initial);\n      avatar.style.background = pickAvatarColor(user.username);\n      ...\n      const member = membersStore.getState().members.get(user.userId);\n      const label = (member !== undefined ? memberDisplayName(member) : user.username) || \"Unknown\";\n\nlib/avatar.ts:50-60\n  export function resolveDisplayName(subject: AvatarSubject): string { ... return subject.username; }\n  export function avatarInitial(subject: AvatarSubject): string { ... return resolveDisplayName(subject).charAt(0).toUpperCase() || \"?\"; }",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Resolve the name once, before the \"Unknown\" fallback, and drive all three of letter, colour and label from it: `const member = membersStore.getState().members.get(user.userId); const resolved = member !== undefined ? memberDisplayName(member) : user.username; const initial = resolved.length > 0 ? resolved.charAt(0).toUpperCase() : \"?\"; avatar.style.background = pickAvatarColor(resolved); const label = resolved || \"Unknown\";` — moving the members-store lookup above line 420. Keeping the initial derived from `resolved` rather than from `label` preserves the empty-username \"?\" assertion at channel-sidebar.test.ts:889-906.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0343",
@@ -7979,14 +8057,20 @@
       "severity": "low",
       "why": "`toggle_window_visibility` decides show-vs-hide purely from `window.is_visible()`, but on both shipped platforms a minimized window still reports visible (tao Windows: `IsWindowVisible`, which stays TRUE for an iconified window because WS_VISIBLE is not cleared; tao GTK: `gtk_widget_get_visible`, TRUE for an iconified GtkWindow). So the branch taken for a minimized window is the *hide* branch, and neither branch ever calls `unminimize()`. The same file's sibling recovery path in `lib.rs:52-58` (the single-instance handler) gets this right — it does `unminimize(); show(); set_focus();` — which is direct in-repo evidence of the intended sequence.",
       "repro": "On Windows or Linux: launch OwnCord, click the window's minimize button, then left-click the OwnCord tray icon expecting the window back. `is_visible()` returns true (minimized != hidden), so the handler takes `window.hide()` — the app disappears from the taskbar entirely instead of being restored. A second tray click now takes the else branch: `show()` maps the window again but it is still iconified (Win32 `ShowWindow(SW_SHOW)` restores it to its current, minimized state) and `set_focus()`/`SetForegroundWindow` does not deiconify, so on Windows the user gets back only a minimized taskbar button and must click that to actually see the app. Fix is to mirror lib.rs: check `is_minimized()` first, or call `unminimize()` before `show()`/`set_focus()` in the else branch.",
-      "evidence": "tray.rs:65-74\n    fn toggle_window_visibility<R: Runtime>(app: &tauri::AppHandle<R>) {\n        if let Some(window) = app.get_webview_window(\"main\") {\n            if window.is_visible().unwrap_or(false) {\n                let _ = window.hide();\n            } else {\n                let _ = window.show();\n                let _ = window.set_focus();\n            }\n        }\n    }\n\ncontrast — lib.rs:52-58 (single-instance handler, same app, same window):\n    if let Some(window) = app.get_webview_window(\"main\") {\n        let _ = window.unminimize();\n        let _ = window.show();\n        let _ = window.set_focus();\n    }\n\nReachability: tauri.conf.json declares the main window with `\"decorations\": true, \"resizable\": true`, so the OS minimize button exists; bundle targets are nsis (Windows) + appimage/deb (Linux), i.e. exactly the two platforms where `is_visible()` is true while minimized. No Rust test covers tray.rs (src-tauri/tests does not exist, and tray.rs has no `mod tests`).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-2",
       "suggestedFix": "Consult is_minimized() in the shared toggle so a minimized window takes the restore arm, and mirror lib.rs's sequence there. In Client/src-tauri/src/tray.rs:65-74:\n\n    fn toggle_window_visibility<R: Runtime>(app: &tauri::AppHandle<R>) {\n        if let Some(window) = app.get_webview_window(\"main\") {\n            let minimized = window.is_minimized().unwrap_or(false);\n            if window.is_visible().unwrap_or(false) && !minimized {\n                let _ = window.hide();\n            } else {\n                let _ = window.unminimize();\n                let _ = window.show();\n                let _ = window.set_focus();\n            }\n        }\n    }\n\nOne guard in the shared function fixes both callers (tray left-click at tray.rs:54 and the Show/Hide menu item at tray.rs:78). No capability change is needed — Rust-side window calls do not go through capabilities/default.json.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0344",
@@ -7996,14 +8080,20 @@
       "severity": "low",
       "why": "loadACME builds the fallback redirect as `\"https://\" + cfg.Domain + r.URL.RequestURI()` with no port. config.TLSConfig carries no port field, and the HTTPS listener actually binds `:cfg.Server.Port` (Server/main.go:190 `addr := fmt.Sprintf(\":%d\", cfg.Server.Port)`), whose default and documented value is 8443 (Server/config/config.go:293 `Port: 8443`, defaultYAML line 367, docs/deployment.md:482 \"8443 | TCP | HTTPS server\"). ACME mode is documented alongside that default (docs/deployment.md:238-240), and HTTP-01 validation only needs :80, so acme + 8443 is a supported deployment. The redirect therefore sends browsers to https://<domain>:443 where nothing listens. The existing test only asserts the Location prefix (Server/auth/tls_test.go:294 `strings.HasPrefix(loc, \"https://chat.example.com/\")`), so nothing pins the port.",
       "repro": "Deploy the documented ACME configuration: `server: {port: 8443}` (the default) plus `tls: {mode: \"acme\", domain: \"chat.example.com\"}`. runStartACME (Server/main.go:509) serves tlsResult.HTTPHandler on :80; the HTTPS server binds :8443. `curl -i http://chat.example.com/` returns `301 Moved Permanently` with `Location: https://chat.example.com/` — implicit port 443, where no listener exists — so following it gives connection refused. Because it is a 301, browsers cache the broken target. The ACME challenge path itself still works (autocert.Manager.HTTPHandler intercepts /.well-known/acme-challenge/ before the fallback), so the failure is silent at cert-issuance time and only bites real visitors. loadACME needs the HTTPS port (or should use r.Host's hostname plus the configured port) to build the target.",
-      "evidence": "Server/auth/tls.go:196-201\n\t// HTTP handler serves ACME HTTP-01 challenges on port 80 and redirects\n\t// all other traffic to HTTPS.\n\tredirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\ttarget := \"https://\" + cfg.Domain + r.URL.RequestURI()\n\t\thttp.Redirect(w, r, target, http.StatusMovedPermanently)\n\t})\n\nServer/main.go:190-191\n\taddr := fmt.Sprintf(\":%d\", cfg.Server.Port)\n\tsrv := &http.Server{ Addr: addr, ... }\n\nServer/config/config.go:293  Port: 8443",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-3",
       "suggestedFix": "Plumb the HTTPS port into loadACME rather than guessing: add a non-koanf field (e.g. `HTTPSPort int`) to config.TLSConfig set from cfg.Server.Port at the single LoadOrGenerate call site in Server/main.go, then in the redirect handler build the host with `host := cfg.Domain; if p := cfg.HTTPSPort; p != 0 && p != 443 { host = net.JoinHostPort(cfg.Domain, strconv.Itoa(p)) }` and use `\"https://\" + host + r.URL.RequestURI()`. One guard in the shared handler covers every deployment.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0345",
@@ -8059,14 +8149,20 @@
       "severity": "low",
       "why": "render() resolves a DM call's header name with `dmStore.getState().channels.find(...)` + `dmDisplayName(dm)`, but mount() registers exactly three subscriptions — voiceStore (a fixed-field selector that excludes voiceUsers), uiStore.connectionStatus and channelsStore.channels. None of them fires when dmStore changes, and a DM rename/nickname change only ever touches dmStore (`updateDmParticipant`, dm.store.ts:246) plus voiceStore.voiceUsers (excluded from the selector). The label is therefore painted once at join and can never be corrected.",
       "repro": "Start a DM call with Bob; the widget header reads \"Bob\". Bob renames himself or sets a nickname: the server sends user_update, dispatcher.ts:941 calls `updateDmParticipant(bob, { username/displayName })`, dmStore updates, the DM sidebar row and the chat header both repaint (ChannelController.ts:632-637 subscribes to dmStore). The VoiceWidget header still says \"Bob\" until the call ends. Same path leaves the header on the fallback \"Voice Channel\" if the dmStore row for the call's channel arrives after the join, since no later dmStore change can trigger a re-render.",
-      "evidence": "const channel = channelsStore.getState().channels.get(channelId);\nconst dm = dmStore.getState().channels.find((c) => c.channelId === channelId);\nsetText(\n  channelNameEl,\n  dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? \"Voice Channel\"),\n);\n// ... mount(): unsubs.push(voiceStore.subscribeSelector(...)), uiStore.subscribeSelector((s) => s.connectionStatus, ...), channelsStore.subscribeSelector((s) => s.channels, ...) — no dmStore.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "In VoiceWidget.mount(), alongside the existing three subscriptions, add `unsubs.push(dmStore.subscribeSelector((s) => s.channels, () => render()));` — dmStore replaces the channels array on every participant patch, so the default identity comparison already fires only on real changes.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0348",
@@ -8076,14 +8172,20 @@
       "severity": "low",
       "why": "`getOnlineMembers()` filters on `status !== \"offline\"`, so \"invisible\" counts as online. Every other surface deliberately groups invisible with offline — MemberList's `statusPriority` (line 129-135) and `isAwayStatus` (line 155-157) both fold invisible into offline, with a comment saying that is where the user appears \"to everybody — including, in this list, to themselves\". Only the signed-in user can ever carry \"invisible\" locally (the server maps it to offline for everyone else), so the header over-counts by exactly one whenever you go invisible.",
       "repro": "Sign in with two members online (you + Bob). Header reads \"2 online\". Set your own status to Invisible via the UserBar picker: membersStore keeps your entry at status \"invisible\" (the server's self-frame), the member list moves your row into the away/offline group and greys it, but SidebarArea.ts:262's `getOnlineMembers().length` still returns 2, so the header keeps claiming \"2 online\" while the list shows one.",
-      "evidence": "for (const member of s.members.values()) {\n  if (member.status !== \"offline\") {\n    result.push(member);\n  }\n}",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Tighten the single shared selector rather than its caller — in members.store.ts getOnlineMembers, change the predicate to `if (member.status !== \"offline\" && member.status !== \"invisible\")`, matching MemberList's isAwayStatus.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0349",
@@ -8093,14 +8195,20 @@
       "severity": "low",
       "why": "voiceJoinComplete writes voice_token (voice_join.go:445), each existing participant’s voice_state (:523), the peers’ voice_e2ee_announce relays (sendVoicePeerKeys, :531) and voice_config (:546) straight into the joiner’s send queue with c.sendMsg, but the joiner’s OWN voice_state goes through h.broadcastVoiceEvent (:498), which hub_broadcast.go:95-168 enqueues on the buffered h.broadcast channel for the broadcast goroutine to fan out later. The joiner is part of that audience (channelReadAudience), so nothing orders its own sequenced voice_state against the four direct frames: it can land before voice_token, between the existing participants’ states, or after voice_config, depending on how backed up the broadcast goroutine is. The B2-1 fixture capture could not pin the join burst and had to document the order as unspecified (docs/protocol.md:927-929) and exclude that one frame from the epoch-1 transcript’s ordered comparison (protocol_epoch1_contract_test.go:69-75, 636-648). A client that treats the reply as an ordered burst — e.g. takes its own voice_state as the signal that the roster before it is complete, or that the join finished before voice_config — reads a state that is right most of the time and wrong under load.",
       "repro": "cd Server && go test -tags deadlock ./ws -run TestEpoch1Fixtures -count=30 at 1fe3df79 with the voice-join journey’s own-voice_state exclusion removed (protocol_epoch1_contract_test.go:636-648): roughly 1 run in 30 records the joiner’s own voice_state after the existing participants’ states or after voice_config instead of directly after voice_token; the default build reorders less often but is not immune. Equivalently, keep the broadcast goroutine busy (a burst of chat_send into another channel from a second client) while a client sends voice_join and watch the joiner’s own voice_state trail voice_config on its socket.",
-      "evidence": "Server/ws/voice_join.go:445  c.sendMsg(buildVoiceToken(channelID, token, \"/livekit\", h.livekit.URL(), isKeyHolder))   // direct\nServer/ws/voice_join.go:498  h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))                           // hub queue, joiner in audience\nServer/ws/voice_join.go:523  c.sendMsg(buildVoiceState(vs))                                                         // direct, per existing participant\nServer/ws/voice_join.go:531  h.sendVoicePeerKeys(c, channelID)                                                      // direct\nServer/ws/voice_join.go:546  c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))                      // direct\nServer/ws/hub_broadcast.go:95-168  broadcastVoiceEvent -> h.broadcast <- bm (buffered channel; deliverBroadcast fans out on the hub goroutine)\ndocs/protocol.md:927-929  \"Items 1, 3 and 4 are written directly and keep that relative order; item 2 travels through the hub’s broadcast queue, so its position relative to the other three on the joiner’s own socket is not guaranteed.\"\nServer/ws/protocol_epoch1_contract_test.go:69-75, 636-648  the epoch-1 transcript deliberately records the joiner’s own voice_state out of the ordered comparison because under -tags deadlock it was observed arriving after the direct frames.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-28",
       "hunt": "b2-1-fixture-capture-2026-08-28",
       "lens": "ordering-boundary",
       "suggestedFix": "Write the joiner’s own voice_state to the joiner directly (c.sendMsg, in program order at :498, so the whole burst on the joiner’s socket is one goroutine’s program order) and broadcast it to everyone except the joiner — broadcastVoiceEventWithLeaver already carries an exclude-user path in hub_broadcast.go, so the fix is one call-site change plus a helper, not a new fan-out. Check the seq contract first: deliverBroadcast is where the sequenced copy is stamped and appended to the replay buffer, so the joiner’s direct copy must carry the same seq (or be documented as the unsequenced form like the relayed existing states) rather than double-stamping. Behaviour change within epoch 1 (same frame set, deterministic position): regenerate the epoch-1 fixture in the same PR (`go test ./ws -run TestEpoch1Fixtures -update`), drop the contract test’s exclusion so the order is asserted, and tighten docs/protocol.md:927-929.",
       "confidence": "high",
-      "finder": "fable"
+      "finder": "fable",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0350",
@@ -8110,14 +8218,20 @@
       "severity": "high",
       "why": "POST /api/v1/auth/login answers a TOTP-enabled account with HTTP 200 and `{\"partial_token\":…,\"requires_2fa\":true}` and NO `token`. The admin panel's sign-in handler only checks `res.ok`, then assigns `d.token` (undefined) and proceeds. There is no `requires_2fa` branch and no call to `/auth/verify-totp` anywhere in the file, so the panel can never complete a 2FA login.",
       "repro": "1. Owner account enables 2FA from the desktop client (POST /users/me/totp/enable + confirm).\n2. Open https://server/admin and sign in with the correct username + password.\n3. Server returns 200 `{\"partial_token\":\"…\",\"requires_2fa\":true}`. The handler sets `state.token = undefined` and writes the literal string \"undefined\" into localStorage['admin_token'].\n4. `enterApp()` → `api('GET','/me')` sends `Authorization: Bearer undefined` → adminAuthMiddleware 401 → `handleSessionExpired()` clears the token and shows the login overlay with \"Your session expired — sign in again.\"\n5. Every retry repeats this. The admin panel is unreachable for that account, with no error explaining why.\n\nAggravating case: docs/security.md:41 advertises the `require_2fa` server setting, and Server/admin/handlers_settings.go:148 refuses to enable it until *every* user has TOTP enrolled — so following the documented hardening path locks every principal out of the admin panel at once.",
-      "evidence": "Server/admin/static/index.html:650-661\n  document.getElementById('loginBtn').onclick=async()=>{\n    ...\n    try{const r=await fetch('/api/v1/auth/login',{...});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');\n      state.token=d.token;localStorage.setItem('admin_token',state.token);await enterApp();\n    }catch(e){err.textContent=e.message}\n\nServer/api/auth_handler.go:363-377\n  if user.TOTPSecret != nil {\n      partialToken, err := partialStore.Issue(...)\n      ...\n      writeJSON(w, http.StatusOK, authSuccessResponse{\n          PartialToken: partialToken,\n          Requires2FA:  true,\n      })\n      return\n  }\n\nServer/api/auth_handler.go:67-72  Token is `json:\"token,omitempty\"` — omitted entirely on the 2FA branch.\n\n`grep -n \"verify-totp|partial_token|requires_2fa\" Server/admin/static/index.html` → no matches.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-admin-static",
       "suggestedFix": "Add the missing 2FA branch at the single shared login handler (Server/admin/static/index.html:659). After parsing `d`, before assigning the token: if `d.requires_2fa && d.partial_token`, show a code prompt and complete the login with `POST /api/v1/auth/verify-totp` sending `Authorization: Bearer <d.partial_token>` and body `{code}` (the contract handleVerifyTOTP expects, totp_handler.go:41-66), then use the `token` from that 200 response. As a one-line stopgap for the same spot, guard `if(!d.token) throw new Error(d.requires_2fa?'This account has two-factor authentication enabled; the admin panel cannot complete 2FA sign-in yet.':'Login failed')` so the panel stops writing the literal string \"undefined\" into localStorage and gives a truthful error instead of a false \"session expired\".",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0351",
@@ -8127,14 +8241,20 @@
       "severity": "medium",
       "why": "handleVoiceJoin's pre-flight (voiceJoinPrecheck, lines 84-172) refuses every condition that would make the join bounce — rate limit, bad channel_id, CONNECT_VOICE, missing channel, wrong channel type, DM block, archived, nil user, LiveKit down — but it never checks voice_max_users. voiceJoinLeaveCurrent then unconditionally runs the destructive half of the switch (h.handleVoiceLeave at line 223: DB row deleted, voice_leave broadcast to the whole READ audience, LiveKit participant removed, key-holder re-elected), and only afterwards does voiceJoinPersist (line 269) run the atomic capacity check and answer CHANNEL_FULL. The user is already out of their old channel when the refusal is sent. The sibling server-driven path knows this is wrong and guards it: handleVoiceModMoveV2 runs an explicit advisory CountChannelVoiceUsers pre-flight (Server/ws/voice_moderation.go:426-437) with the comment \"this one keeps the common case from dropping the target into a channel that is already full\", and the whole handler is introduced as \"the pre-flight: they refuse a move the re-join would only bounce, so the target is never dropped from voice for nothing.\" The self-switch path has no equivalent.",
       "repro": "Voice channel B has voice_max_users = 2 and two participants. User U is live in voice channel A. U clicks B (the client deliberately never pre-blocks the click — Client/src/lib/dispatcher.ts:1291-1296: \"The server owns the limits ... the client never pre-blocks the click\"), sending voice_join{channel_id: B}. voiceJoinPrecheck passes (B exists, is a voice channel, is not archived, U holds CONNECT_VOICE). voiceJoinLeaveCurrent then calls handleVoiceLeave: U's voice_states row for A is deleted, voice_leave(A, U) is broadcast to everyone who can see A, U's LiveKit participant in A is removed, and A's E2EE key holder is re-elected. voiceJoinPersist then returns db.ErrChannelFull and the server replies CHANNEL_FULL. Client-side, dispatcher.ts:1287-1291 sees voiceStatus === \"joining\" and calls leaveVoice(true). End state: U is in no voice channel at all, their call in A is over, and rejoining A can now itself fail if A filled up meanwhile. Deterministic — no race required. Neither TestVoice_Join_ChannelFull (Server/ws/voice_handlers_test.go:996) nor TestHandleVoiceJoin_ChannelFull (Server/ws/coverage_voice_test.go:395) covers the switch case: in both, the refused joiner starts with no current voice channel, so the destructive leave never runs.",
-      "evidence": "// voice_join.go:221-223 — destructive leave, no capacity pre-flight above it\n\t// If user is already in a different voice channel, leave it first.\n\tif currentChID > 0 {\n\t\th.handleVoiceLeave(ctx, c)\n\n// voice_join.go:266-273 — the capacity check runs only AFTER that leave\n\t// Check channel capacity and persist to DB atomically.\n\tmaxUsers := ch.VoiceMaxUsers\n\tif maxUsers > 0 {\n\t\tif err := h.db.JoinVoiceChannelIfCapacity(ctx, c.userID, channelID, maxUsers); err != nil {\n\t\t\tif errors.Is(err, db.ErrChannelFull) {\n\t\t\t\tc.sendMsg(buildErrorMsg(ErrCodeChannelFull, \"voice channel is full\"))\n\t\t\t\treturn nil, false\n\n// voice_moderation.go:426-437 — the sibling path DOES pre-check\n\tif dest.VoiceMaxUsers > 0 {\n\t\tcount, cErr := d.DB.CountChannelVoiceUsers(ctx, c.ToChannelID())\n\t\t...\n\t\tif count >= dest.VoiceMaxUsers {\n\t\t\treturn Result{Error: ClientError{Code: ErrCodeChannelFull, Message: \"voice channel is full\"}}\n\t\t}\n\t}",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "ws-hub",
       "suggestedFix": "Add the same advisory capacity pre-flight the sibling path already has, in voiceJoinPrecheck where `ch` is already in hand — after the Archived check and before any state mutation — scoped to the switch case so the same-channel re-join keeps answering ALREADY_JOINED: `if cur := c.getVoiceChID(); cur > 0 && cur != channelID && ch.VoiceMaxUsers > 0 { count, cErr := h.db.CountChannelVoiceUsers(ctx, channelID); if cErr != nil { c.sendMsg(buildErrorMsg(ErrCodeInternal, \"failed to check channel capacity\")); return 0, nil, false }; if count >= ch.VoiceMaxUsers { c.sendMsg(buildErrorMsg(ErrCodeChannelFull, \"voice channel is full\")); return 0, nil, false } }`. CountChannelVoiceUsers already exists (Server/db/voice_queries.go:329). This is advisory only — the atomic JoinVoiceChannelIfCapacity check in voiceJoinPersist stays as the authority for the racing case, exactly as in handleVoiceModMoveV2 — and the joiner's own row lives on the old channel, so it cannot be miscounted against the destination.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0352",
@@ -8144,14 +8264,20 @@
       "severity": "medium",
       "why": "reannounceForReconnect() mints a brand-new ephemeral ECDH keypair on every LiveKit auto-reconnect attempt and publishes it with a single unacknowledged `getWs()?.send(...)` (line 384). WsClient.sendRaw silently drops the frame when the WS proxy is not open (ws.ts:603-609 — `if (tauriInvoke === null || !proxyOpen) { log.warn(\"Cannot send, WebSocket not open\"); ... return; }`), and nothing queues or retries it. The one bounded retry that exists — the RECONNECT_CONFIRM_MS timer — is armed only for non-key-holders (`if (!this._isKeyHolder && roomKeyAtReconnect !== null)`), so a key holder whose announce is dropped has zero recovery: no retry, no log, no signal. Its published ECDH key is now permanently the pre-reconnect (dead) one, while it wraps every future room key under the new private half. No other code path ever re-announces mid-call: setupKeyExchange only runs on a fresh join, and the server's OC-0316 resume relay (Server/ws/hub.go:672) re-publishes the client's *stale stored* key, cementing the divergence.",
       "repro": "1) Client H is the elected key holder (lowest uid) in a voice channel with peers P1, P2. 2) The user's network drops. livekit-client gives up on the SFU signal socket and the session enters attemptAutoReconnect (livekitSession.ts:498); ws.ts is meanwhile in exponential backoff (getReconnectDelay, ws.ts:206 — 1s/2s/4s/8s/16s/30s, capped at 30s), so after a ~60s outage its next retry is ~30s away. 3) Network returns. attemptAutoReconnect's 3s-delayed attempt calls `await this._e2ee.reannounceForReconnect()` (livekitSession.ts:564) BEFORE `newRoom.connect()`: a fresh pair K_new is generated, `this._ecdhKeyPair = pair` is published locally, and the announce carrying K_new is passed to `getWs()?.send(...)` while `proxyOpen === false` → dropped. 4) `newRoom.connect()` succeeds (the SFU is reachable again), so the room is live with K_new. Because `this._isKeyHolder` is true, the block at line 401 never arms the confirm timer, so the announce is never repeated. 5) The WS resumes ~30s later; the server transfers and re-relays H's OLD stored key K_old to VoiceTopic (hub.go:672, `if key, sig := c.getE2EEPubKey(); key != \"\"`). P1/P2 see a duplicate announce for K_old and keep K_old in _peerPublicKeys. 6) H's next rotation (5-minute timer, or any voice_leave) calls distributeRoomKey → wrapRoomKey(K_new.privateKey, peerPub, ...). P1/P2 unwrap with unwrapRoomKey(theirPriv, K_old.publicKey, ...): the two ECDH shared secrets differ, AES-GCM authentication fails, handleOfferInner's catch logs \"failed to handle offer\" and returns. Every peer stays on the superseded room key while H encrypts with the new one — the whole call is deaf and mute in both directions, with the UI still showing \"🔒 Secured\". 7) It never heals: a *new* joiner is handed H's stale K_old by sendVoicePeerKeys (Server/ws/voice_e2ee.go:329), so its setupKeyExchange also cannot unwrap H's offer and it is ejected with e2ee_timeout after 15s. The existing test at Client/tests/unit/livekit-e2ee.test.ts:1196 deliberately stands the manager down to a non-holder (`await mgr.handleOffer(PEER_ID, \"enc\", \"iv\"); // stands us down — now a non-holder`) before asserting the retry, so the holder case is neither covered nor intended behaviour.",
-      "evidence": "livekitE2EE.ts:384  this.deps.getWs()?.send({ type: \"voice_e2ee_announce\", payload: reconnectAnnounce });\nlivekitE2EE.ts:394-395  // periodic rotation (OC-0007). Holders don't need this: their own key\\n    // IS the current one.\nlivekitE2EE.ts:401  if (!this._isKeyHolder && roomKeyAtReconnect !== null) {\nws.ts:603-609  if (tauriInvoke === null || !proxyOpen) { log.warn(\"Cannot send, WebSocket not open\"); queueMicrotask(() => notifySendFailure(id, \"OFFLINE\")); return; }",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "voice-e2ee",
       "suggestedFix": "One guard in reannounceForReconnect (Client/src/lib/livekitE2EE.ts, around :368): do not adopt the freshly generated pair when the announce cannot actually be delivered. Widen the E2EE ws dep to expose the connection state (WsClient already has getState(), ws.ts:755) and, when it is not \"connected\", skip the keypair swap entirely — keep the existing `_ecdhKeyPair`, still `keyProvider.setKey(...)` the retained room key, and return. Losing per-reconnect forward secrecy on that one attempt is strictly better than publishing a key half nobody holds; the published key and the local private half then can never diverge, for holders and non-holders alike. (Equivalent, slightly larger: re-send the stored `reconnectAnnounce` from an ws.onStateChange(\"connected\") hook until it is accepted.)",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0353",
@@ -8161,14 +8287,20 @@
       "severity": "medium",
       "why": "rewrite_proxy_headers replaces the webview's Origin with `https://` + remote_host, and remote_host always carries an explicit port (livekitSession.ts's ensureLiveKitProxy appends `:443` when the profile host has none). The server gates every `/livekit/*` request — including the signal WS upgrade — with isOriginAllowed, which accepts only (a) an absent Origin, (b) an Origin whose host string EqualFolds r.Host, (c) the three fixed `tauri.localhost` origins, or (d) an exact allowed_origins entry. The synthesized `https://chat.example.com:443` is not a canonical origin serialization (RFC 6454 omits the default port), so it matches none of the first-party entries, and it only matches r.Host when nothing in front of the Go server normalizes the Host header. The project's own documented nginx recipe uses `proxy_set_header Host $host`, and nginx's `$host` strips the port — so r.Host becomes `chat.example.com` while Origin stays `https://chat.example.com:443`.",
       "repro": "Deploy the server behind the documented nginx snippet (docs/deployment.md:285-303) on chat.example.com with the default `server.allowed_origins: []`. Save the profile as host \"chat.example.com\" in the desktop client and join a voice channel from a machine that is not the server. ensureLiveKitProxy computes remote_host=\"chat.example.com:443\"; the Rust proxy sends `Host: chat.example.com:443` and `Origin: https://chat.example.com:443`; nginx forwards `Host: chat.example.com`; isOriginAllowed compares u.Host \"chat.example.com:443\" against r.Host \"chat.example.com\", falls through the first-party list and the empty allowlist, and returns false. The LiveKit signal WS gets 403 FORBIDDEN and voice never connects, while the chat WebSocket keeps working (ws_proxy uses tokio-tungstenite, which sends no Origin header at all, so it takes the `origin == \"\"` early-accept). Note livekit_proxy.rs:598's unit test pins the rewrite's shape but nothing tests that the resulting origin is one the server accepts.",
-      "evidence": "Client/src-tauri/src/livekit_proxy.rs:135-137\n        } else if lower.starts_with(\"origin:\") {\n            modified.push_str(\"Origin: https://\");\n            modified.push_str(remote_host);\n\nClient/src/lib/livekitSession.ts:766 (ensureLiveKitProxy)\n      hostWithPort = this.serverHost.includes(\":\") ? this.serverHost : `${this.serverHost}:443`;\n\nServer/api/livekit_proxy.go:147-149 (isOriginAllowed)\n\tif u, err := url.Parse(origin); err == nil && u.Host != \"\" && strings.EqualFold(u.Host, r.Host) {\n\t\treturn true\n\t}\n\nServer/api/livekit_proxy.go:76-84 — the check gates every /livekit/* request, WS upgrades included.\n\ndocs/deployment.md:297\n        proxy_set_header Host $host;\n\nCorroborating: Server/api/livekit_proxy_test.go:127 calls the Rust layer the client's \"Origin-stripping Rust proxy\" — the server-side allowance was written against a premise (Origin removed) that livekit_proxy.rs does not implement (Origin rewritten).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "tauri-rust",
       "suggestedFix": "Normalize the scheme-default port on both sides of the same-origin comparison in the shared server-side guard, Server/api/livekit_proxy.go:145 — e.g. compare `stripDefaultPort(u.Scheme, u.Host)` against `stripDefaultPort(schemeOf(r), r.Host)`, dropping only \":443\" for https and \":80\" for http. One guard in isOriginAllowed covers both the port-stripping and port-preserving proxies, and keeps TestIsOriginAllowed_SameHostDifferentPortDenied (:9999 vs :8443) failing as it should. Fixing it client-side by dropping :443 from the Origin alone would break the direct-on-443 case, where the rewritten Host still carries the port.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0354",
@@ -8201,14 +8333,20 @@
       "severity": "medium",
       "why": "The global keydown handler calls e.preventDefault() for \"/\" whenever any .filter-search element exists, with no check that the event target is already a text field. On the Audit Log and Server Logs pages the search box IS that element, so the character is dropped instead of inserted. The hidden admin shell keeps its markup after logout, so the login form inherits the same swallow.",
       "repro": "Open Server Logs, click the \"Filter logs...\" box and type `api/v1`. The field shows `apiv1` — every \"/\" is preventDefault-ed, so no log line can be filtered by path. Same in the Audit Log search box. Secondary: after visiting Audit Log or Server Logs, let the session expire (or sign out) — the login overlay is shown while #content still holds a .filter-search, so typing a password containing \"/\" silently drops that character and focus() targets a display:none input.",
-      "evidence": "index.html:2002 `if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}}`\nindex.html:1494 the Server Logs toolbar renders `<input class=\"filter-search\" placeholder=\"Filter logs...\" ... oninput=\"state.logSearch=this.value;renderLogLines()\">`\nindex.html:218 `.hidden{display:none!important}` — hideAll() only hides #adminShell, it never clears #content.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-admin-static",
       "suggestedFix": "Add one target guard at index.html:2002 before preventDefault: `if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){const t=e.target;if(t&&(t.isContentEditable||/^(input|textarea|select)$/i.test(t.tagName)))return;const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}}` — this single guard fixes both the filter fields and the login form.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0356",
@@ -8218,14 +8356,20 @@
       "severity": "medium",
       "why": "`createQuickSwitcher` builds its whole UI out of `quick-switcher`, `quick-switcher__input`, `quick-switcher__results`, `quick-switcher__item` and `quick-switcher__item--active`. `grep -n \"switcher\" Client/src/styles/*.css` returns **zero** matches across all five loaded stylesheets (tokens/base/login/app/theme-neon-glow, the complete set imported by `main.ts:3-7`), and only the backdrop (`quick-switcher-overlay`, line 166) carries an inline style. The `base.css` reset then applies: the modal is a transparent block with no background/width/padding on a 60%-black backdrop, `.quick-switcher__results` gets no `max-height`/`overflow` so a long channel list runs off the bottom of the viewport with no scroller, and — the functional break — `quick-switcher__item--active`, the class `renderResults()` moves on every ArrowUp/ArrowDown (lines 56-58, 110-126), paints nothing at all, so the keyboard highlight the widget's entire navigation model depends on is invisible.",
       "repro": "Press Ctrl+K anywhere in MainPage (OverlayManagers.createQuickSwitcherManager → createQuickSwitcher). The overlay opens as unstyled text on a dark backdrop; press ArrowDown repeatedly — `activeIndex` advances and `aria-activedescendant` moves, but no row is visually highlighted, so Enter (line 129-136) navigates to a channel the user had no way to see was selected. On a server with ~30+ channels the results list also extends past the viewport bottom with no scrollbar, making the lower entries unreachable by mouse.",
-      "evidence": "QuickSwitcher.ts:56  class: isActive ? \"quick-switcher__item quick-switcher__item--active\" : \"quick-switcher__item\",\nQuickSwitcher.ts:172 const modal = createElement(\"div\", { class: \"quick-switcher\" });\nQuickSwitcher.ts:181   class: \"quick-switcher__input\",\nQuickSwitcher.ts:192   class: \"quick-switcher__results\",\n$ grep -n \"switcher\" Client/src/styles/*.css   -> (no output)\n(compare: `.quick-switch*` — the *other* overlay — has 18 rules in app.css, and SearchOverlay's `.search-result-item--active` is defined)",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-client-src-components",
       "suggestedFix": "Add the missing block to Client/src/styles/app.css (next to the existing .quick-switch-* rules) rather than to each call site — at minimum `.quick-switcher__item--active { background: var(--bg-modifier-selected); color: var(--text-normal); }` so the roving highlight paints, plus `.quick-switcher { width: 480px; max-width: 90vw; background: var(--bg-primary); border-radius: 8px; padding: 12px; }`, `.quick-switcher__input { width: 100%; padding: 8px; background: var(--bg-tertiary); color: var(--text-normal); border-radius: 4px; }`, `.quick-switcher__results { max-height: 50vh; overflow-y: auto; }` and `.quick-switcher__item { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; }`.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0357",
@@ -8279,14 +8423,20 @@
       "severity": "low",
       "why": "set_with's write-failure arm (line 164) was fixed to defer its keyring_delete until after fallback_set has actually committed, with a comment saying an eager delete \"risks erasing the last good copy of the secret if the fallback write fails too.\" The read-back-mismatch arm 15 lines above does exactly that eager delete, then falls through to `fallback_set(account, secret)?` — whose `?` returns before any replacement copy exists. If the fallback write fails, the credential/identity key that was in the keyring is gone and nothing was written anywhere.",
       "repro": "A machine whose OS credential store accepts writes but serves a stale value. User re-logs in: save_credential -> secret_store::set -> keyring_set returns Ok(()); keyring_get returns the PREVIOUS (still-valid) credential blob, which != the new secret, so the Ok(Some(_)) arm at line 139 runs keyring_delete and removes it. Execution reaches line 179; fallback_set fails (app.path().app_data_dir() unresolvable, credential_fallback.key cannot be created, or store.save() hits ENOSPC) and returns Err. Both stores are now empty: the next load_credential returns Ok(None), indistinguishable from first login, and the user's saved credential — or, via save_identity_key, the voice-E2EE identity private key every peer has TOFU-pinned — is permanently destroyed. The existing test at secret_store.rs:648 only covers this arm with a SUCCEEDING fallback, so nothing locks the current behavior; the mirror-image test for the sibling arm (line 594, set_with_keeps_the_stale_keyring_entry_when_the_write_and_fallback_both_fail) has no counterpart here.",
-      "evidence": "Client/src-tauri/src/secret_store.rs:139-153\n            Ok(Some(_)) => {\n                log::error!(... \"returned a different secret than was written\" ...);\n                if let Err(e) = keyring_delete(account) {\n                    log::warn!(\"{SERVICE}: could not remove the mismatched entry for '{account}': {e}\");\n                }\n            }\n...\nline 179:    fallback_set(account, secret)?;\n\nContrast, same function, line 164-175:\n        Err(e) => {\n            ...\n            // But the purge must wait until fallback_set below has actually\n            // committed the replacement: deleting now, before that write is\n            // known to succeed, risks erasing the last good copy of the secret\n            // if the fallback write fails too.\n            purge_stale_keyring_after_fallback_commits = true;\n        }",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "tauri-rust",
       "suggestedFix": "In the Ok(Some(_)) arm (Client/src-tauri/src/secret_store.rs:139-153), drop the inline keyring_delete and reuse the existing deferral flag: `purge_stale_keyring_after_fallback_commits = true;`. The shared purge block at lines 181-188 then runs it only after fallback_set has committed, making both degraded arms obey the same ordering invariant with no new code path and no test change.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0360",
@@ -8296,14 +8446,20 @@
       "severity": "low",
       "why": "The same value lives in two places: AudioElements.outputVolumeMultiplier (the one that is actually applied to participants) and LiveKitSession.outputVolumeMultiplier. setOutputVolume writes the pref and the AudioElements field only; the LiveKitSession field is initialised once from localStorage at module construction and never written again, yet it is what buildSessionDebugInfo publishes.",
       "repro": "1. Launch the client with the stored `owncord:settings:outputVolume` at 100. LiveKitSession.outputVolumeMultiplier = 1.\n2. Settings -> Voice & Audio -> drag Output Volume to 40%. VoiceAudioTab calls setOutputVolume(40) -> AudioElements.outputVolumeMultiplier = 0.4 and audio really is at 40%.\n3. Settings -> Logs -> copy diagnostics (LogsTab.ts:288 getSessionDebugInfo()), or run `__owncord.lkDebug()`. The dump reports outputVolumeMultiplier: 1 while every participant is actually being played at 0.4 — the field is stale for the whole app session and only re-reads the pref on the next launch.",
-      "evidence": "livekitSession.ts:153 — `private outputVolumeMultiplier = loadPref<number>(\"outputVolume\", 100) / 100;` (no other assignment to this field exists in the file)\nlivekitSession.ts:1769-1774 — `return buildSessionDebugInfo({ room: this._room, currentChannelId: this._currentChannelId, outputVolumeMultiplier: this.outputVolumeMultiplier, ... })`\naudioElements.ts:248-252 —\n    setOutputVolume(volume: number): void {\n      const clamped = Math.max(0, Math.min(200, volume));\n      savePref(\"outputVolume\", clamped);\n      this.outputVolumeMultiplier = clamped / 100;\nlivekitDiagnostics.ts:171 — `outputVolumeMultiplier,` is emitted verbatim into the debug object.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "state-desync",
       "suggestedFix": "Delete the duplicate field at livekitSession.ts:153 and read the single source of truth in getSessionDebugInfo: change line 1772 to `outputVolumeMultiplier: this._audioElements.getOutputVolumeMultiplier(),` (that getter already exists at audioElements.ts:90-92). One line, no caller or signature changes — buildSessionDebugInfo's deps shape is unchanged.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0361",
@@ -8313,14 +8469,20 @@
       "severity": "low",
       "why": "The \"has more\" decision is `users.length < PAGE_SIZE` on a page fetched with `limit=PAGE_SIZE`, so a full page is indistinguishable from \"a full page and nothing after it\". The server API supports over-fetching (and this repo already uses the fetch-one-extra pattern correctly in `MessageService.GetMessages`, which asks for `limit+1` and derives `hasMore := len(msgs) > limit`), so the admin panel is the odd one out. Same defect at line 1433 for the audit log.",
       "repro": "Server with exactly 50 users (PAGE_SIZE = 50). Open Admin -> Users: `GET /users?limit=50&offset=0` returns 50 rows, so `users.length < PAGE_SIZE` is false and the \">\" button stays enabled. Clicking it sets usersPage=2 -> `GET /users?limit=50&offset=50` returns [] -> the table renders \"No users found\" with \"Page 2\" showing. The same sequence reproduces on Admin -> Audit Log (index.html:1433) with an entry count that is an exact multiple of 50.",
-      "evidence": "const offset=(state.usersPage-1)*PAGE_SIZE;\nusers=await api('GET','/users?limit='+PAGE_SIZE+'&offset='+offset)\n...\nhtml+='<button class=\"page-btn\" '+(users.length<PAGE_SIZE?'disabled':'')+' onclick=\"state.usersPage++;renderContent()\">&gt;</button>';\n// audit log sibling, line 1433:\nhtml+='<button class=\"page-btn\" '+(!entries||entries.length<PAGE_SIZE?'disabled':'')+' onclick=\"state.auditPage++;renderContent()\">&gt;</button>';",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "ordering-boundary",
       "suggestedFix": "Fetch one row past the page and derive hasMore from the overflow, matching MessageService.GetMessages. In renderUsers: `const rows=await api('GET','/users?limit='+(PAGE_SIZE+1)+'&offset='+offset); const hasMore=rows.length>PAGE_SIZE; users=rows.slice(0,PAGE_SIZE);` then line 832 becomes `(!hasMore?'disabled':'')`. Apply the identical change in renderAudit (lines 1396/1433), assigning the sliced array to state.auditCache so the \"N entries on this page\" label stays accurate. limit=51 is inside the server's 1..500 clamp, so no server change is needed.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0362",
@@ -8330,14 +8492,20 @@
       "severity": "low",
       "why": "The OC-0251 staleness guard in setCustomEmoji compares the caller's snapshotted `rev` against the store's current `rev`, but clearCustomEmoji (called from MainPage.destroy on logout/server switch) either resets `rev` to 0 via INITIAL or, when the set is already empty, early-returns and never touches `rev` at all. Either way the counter is back at 0 for the next session, which snapshots `emojiRevAtFetch = 0` too — so a reply belonging to the previous server still matches and is applied, which is precisely what clearCustomEmoji exists to prevent, and it then bumps rev to 1 so the new server's own reply is discarded as \"stale\".",
       "repro": "1) Connect to server A. dispatcher's ready handler snapshots emojiRevAtFetch = 0 and issues GET /emoji to A. 2) Before that reply lands (slow/remote A), switch profiles to server B. MainPage.destroy() calls clearCustomEmoji(); the store is still empty, so line 98 early-returns and rev stays 0. 3) B's ready handler snapshots emojiRevAtFetch = 0 and issues its own GET /emoji. 4) A's late reply arrives first: setCustomEmoji(A_list, 0) sees 0 === 0, applies A's emoji and bumps rev to 1. 5) B's reply arrives: setCustomEmoji(B_list, 0) sees 0 !== 1 and is skipped. Result: for the whole B session, resolveEmoji answers from A's set — B's own shortcodes render as literal `:name:` text, and any A shortcode present in a B message renders `<img src=\"/api/v1/emoji/<A-id>/image\">` resolved against B's host, i.e. an unrelated emoji of B's. Nothing recovers until an emoji_update broadcast happens on B.",
-      "evidence": "emoji.store.ts:47-51  const INITIAL: EmojiState = { emoji: [], byShortcode: new Map(), rev: 0 };\nemoji.store.ts:90-93  emojiStore.setState((prev) => { if (rev !== undefined && rev !== (prev.rev ?? 0)) return prev; return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1 }; });\nemoji.store.ts:97-99  export function clearCustomEmoji(): void { emojiStore.setState((prev) => (prev.emoji.length === 0 ? prev : INITIAL)); }\ndispatcher.ts:571-574  const emojiRevAtFetch = emojiStore.getState().rev ?? 0; api.listEmoji().then((list) => setCustomEmoji(list, emojiRevAtFetch))\nMainPage.ts:916-920  // Custom emoji belong to the server this page was connected to. ... clearCustomEmoji();",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-db",
       "suggestedFix": "Make clearCustomEmoji invalidate in-flight fetches instead of resetting the counter: `emojiStore.setState((prev) => ({ emoji: [], byShortcode: new Map(), rev: (prev.rev ?? 0) + 1 }));` — unconditional (drop the `emoji.length === 0` early return), so any snapshotted rev from the previous session can never match again. One change in the shared store; no caller edits needed.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0363",
@@ -8364,14 +8532,20 @@
       "severity": "low",
       "why": "The Users table derives its Banned column and Status dot from the raw `users.banned` column alone; nothing in the panel ever reads `ban_expires` (zero hits for ban_expires/BanExpires in that file), even though Server/db/admin_queries.go:87 maps it and Server/admin/types.go:101 ships it as `ban_expires`. Nothing on the server clears `users.banned` when a temporary ban lapses — expiry is decided lazily by auth.IsEffectivelyBanned and by the `replace(ban_expires,' ','T') <= strftime(...)` arm in ListMembers / CountUsersWithoutTOTP / notBannedClause / GetOwnerUser. So the row keeps banned=1 with a past ban_expires for life while the account is fully active (logs in, passes AuthMiddleware and the WS handshake, appears in the roster, counts for the last-admin and require_2fa guards), and the admin panel — the only surface where an operator reviews ban state — is the one place that still calls them banned.",
       "repro": "1. From the desktop client, right-click a member -> Ban and pick a finite duration from the ban-duration dropdown (Client/src/components/AdminActions.ts:345; sent as ban_duration_hours by Client/src/lib/api.ts:794). The server stores banned=1 with ban_expires = now+N hours (Server/admin/handlers_users.go:169-176 -> db.BanUser).\n2. Let the ban lapse, or seed it directly: UPDATE users SET banned=1, ban_expires='2020-01-01T00:00:00Z' WHERE id=?.\n3. Log in as that user: login succeeds, they appear in every client's member list, they can be @mentioned, and they count toward the last-admin / require_2fa guards.\n4. Open the admin panel's Users page: the same account renders with a red \"Banned: Yes\" badge, the stale ban reason under it, a \"banned\" status dot instead of Online, and only an Unban action — the Ban button is hidden, so re-banning them takes two steps (Unban, then Ban).",
-      "evidence": "Server/admin/static/index.html:805-806,823:\n    const status=u.Status||u.status||'offline';const banned=u.Banned||u.banned||false;\n    const statusDot=banned?'banned':status;const statusLabel=banned?'Banned':status==='online'?'Online':'Offline';\n      if(banned)html+='<button class=\"act-btn\" title=\"Unban\" onclick=\"unbanUser('+uid+')\">'+I.check+'</button>';\n      else html+='<button class=\"act-btn danger\" title=\"Ban\" ...>'+I.ban+'</button>';\n\nServer/admin/types.go:99-101 (data the panel is given but ignores):\n\tBanned     bool    `json:\"banned\"`\n\tBanReason  *string `json:\"ban_reason,omitempty\"`\n\tBanExpires *string `json:\"ban_expires,omitempty\"`\n\nServer/auth/helpers.go:73-91 (the rule every other surface applies):\n\tif u == nil || !u.Banned { return false }\n\tif u.BanExpires == nil { return true }\n\t... return time.Now().UTC().Before(t.UTC())",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-1",
       "suggestedFix": "Derive the effective flag once in renderUsers (Server/admin/static/index.html:805) instead of reading the raw column: `const rawBan=u.Banned||u.banned||false; const exp=u.ban_expires||u.BanExpires||null; const banned=rawBan&&(!exp||new Date(String(exp).replace(' ','T').replace(/Z?$/,'Z')).getTime()>Date.now());` — the replace() normalises SQLite's space-separated form the same way db.notBannedClause does. That one expression fixes the badge, the status dot and the Ban/Unban button choice together. Do not move the computation into toAdminUserResponse: the API's raw `banned` is what the panel would still need to offer an Unban that clears the stale row.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0365",
@@ -8381,14 +8555,20 @@
       "severity": "low",
       "why": "`renderGifs` replaces the whole cell set (`clearChildren(gridArea)` then a fresh `.gp-grid`) on every load, but binds each new item's click listener to `signal` — the AbortController created once at `createGifPicker` and only aborted in `destroy()`. Per the DOM spec, `addEventListener` with a signal installs an abort algorithm on that signal holding a strong reference to the EventTarget, so every detached `.gp-item` (and its `<img>` with a decoded Klipy GIF) stays reachable until the picker closes. This is the identical mechanism already accepted and fixed for EmojiPicker.ts:620, SearchOverlay.ts:96, QuickSwitcher.ts:83, MemberList.ts:469 and MessageList.ts:332 — GifPicker is the one picker in that family that was not covered, and its cells are animated images rather than text.",
       "repro": "Open the composer's GIF picker (MessageInput.ts:989). `loadGifs(\"\")` renders 20 trending cells, each with a click listener on `signal`. Type a query: the 300 ms debounce (GifPicker.ts:181) fires `loadGifs(\"cats\")`, `renderGifs` calls `clearChildren(gridArea)` and builds 20 brand-new cells with 20 more listeners on the same signal. Refine the search five times and the picker is holding 6 × 20 = 120 detached `<div class=\"gp-item\">` nodes plus their `<img>` GIF payloads, all rooted in `abortController.signal`'s abort-algorithm list, until `destroy()` runs when the picker is closed (MessageInput.ts:964). Take a heap snapshot after the fifth search: the detached-node count grows by 20 per search and never drops.",
-      "evidence": "Client/src/components/GifPicker.ts:46-47\n  const abortController = new AbortController();\n  const signal = abortController.signal;\n\nClient/src/components/GifPicker.ts:91-127\n  function renderGifs(gifs: readonly GifResult[]): void {\n    clearChildren(gridArea);          // detaches the previous cell set...\n    ...\n    for (const gif of gifs) {\n      const item = createElement(\"div\", { class: \"gp-item\", ... });\n      ...\n      item.addEventListener(\n        \"click\",\n        () => { options.onSelect(gif.fullUrl); options.onClose(); },\n        { signal },                    // ...but the picker-lifetime signal keeps holding it\n      );\n\nClient/src/components/GifPicker.ts:206-211\n  function destroy(): void {\n    if (debounceTimer !== null) clearTimeout(debounceTimer);\n    abortController.abort();           // the only release point",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "Register one delegated click listener on gridArea at mount time (alongside enableRovingNavigation at line 78), and drop the per-item addEventListener at line 117 — mirroring EmojiPicker's data-emoji delegation: store the URL on the cell as a data attribute (e.g. createElement(\"div\", { class: \"gp-item\", ..., \"data-full-url\": gif.fullUrl })) and have the delegated handler do const cell = (e.target as Element).closest<HTMLElement>(\".gp-item\"); if (cell?.dataset.fullUrl) { options.onSelect(cell.dataset.fullUrl); options.onClose(); }.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0366",
@@ -8398,14 +8578,20 @@
       "severity": "low",
       "why": "`resetBlocksStore()` writes the module-level `INITIAL`, which carries `blockedByMeRev: 0`. The OC-0218 staleness guard in `setBlockedByMe` compares the caller's snapshotted revision against the store's current revision — resetting that counter to its starting value makes a token snapshotted in the *previous* server/account session match again in the *next* one, so the stale reply is applied instead of skipped. This is exactly the defect already confirmed on the twin counter in `emoji.store.ts` (`clearCustomEmoji` resetting `rev` to 0), and it defeats the cross-server isolation `clearAuth` calls `resetBlocksStore` to guarantee (auth.store.ts:77-82, 105).",
       "repro": "1. User A signs into server S1. `ready` fires; dispatcher.ts:551 snapshots `blockedByMeRevAtFetch = 0` (fresh session) and issues `GET /blocks` with no AbortSignal (api.ts:686 — dispatcher passes none). A has blocked user id 7 on S1.\n2. Before the HTTP reply lands (slow link / large server), A logs out (or the session is terminated). `clearAuth()` runs `resetBlocksStore()` → state is `INITIAL`, so `blockedByMeRev` goes back to 0 and `blockedByMe` is empty.\n3. User B signs in (another server, or the same server as a different account). Its `ready` snapshots `blockedByMeRev = 0` and issues its own `GET /blocks`.\n4. S1's earlier reply now resolves: `setBlockedByMe([7], 0)`. The guard at line 58 compares 0 === 0, passes, and writes A's blocked-user ids into B's store.\n5. Result: in B's session, `dmComposerBlockReason` (line 103-106) disables the DM composer for whoever user id 7 is on this server with \"You've blocked this user. Unblock to send messages.\", and MemberList's context menu (MemberList.ts:294) offers \"Unblock\" for a user B never blocked. Because `setBlockedByMe` does not bump the revision, B's own correct reply is *also* accepted at rev 0 — so whichever of the two HTTP responses lands last wins, and if the stale one loses the race the wrong list persists until the next `ready` or block toggle.",
-      "evidence": "blocks.store.ts:38-42  const INITIAL: BlocksState = { blockedByMe: new Set(), blockedByThem: new Set(), blockedByMeRev: 0 };\nblocks.store.ts:56-61  export function setBlockedByMe(userIds, rev?) { blocksStore.setState((prev) => { if (rev !== undefined && rev !== (prev.blockedByMeRev ?? 0)) return prev; return { ...prev, blockedByMe: new Set(userIds) }; }); }\nblocks.store.ts:95-97  export function resetBlocksStore(): void { blocksStore.setState(() => INITIAL); }\nauth.store.ts:105      resetBlocksStore();\ndispatcher.ts:551-554  const blockedByMeRevAtFetch = blocksStore.getState().blockedByMeRev ?? 0;\n                       api.listBlocks().then((r) => setBlockedByMe(r.blocked_user_ids, blockedByMeRevAtFetch))\napi.ts:686             listBlocks(signal?: AbortSignal)   // dispatcher passes no signal, so the fetch is never aborted on logout",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "Make the revision monotonic across resets instead of rewinding it — one guard in the shared function: `export function resetBlocksStore(): void { blocksStore.setState((prev) => ({ ...INITIAL, blockedByMeRev: (prev.blockedByMeRev ?? 0) + 1 })); }`. Every snapshot taken before the reset then fails the equality at line 58, so no pre-logout reply can be applied, while a post-reset ready-time snapshot still matches.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0367",
@@ -8415,14 +8601,20 @@
       "severity": "low",
       "why": "The create modal always prefills position = myPosition()-1 and saveRole always sends the field, so the server's auto-placement path (which walks down to the highest free slot) is unreachable. CreateRole rejects an explicitly requested position that is occupied, and the slot directly below the actor is occupied by the previous role the admin created.",
       "repro": "Sign in as Owner (position 100). Roles → Create Role → name \"Helper\" → Save: created at position 99. Roles → Create Role again → name \"Greeter\": the Position field is prefilled 99 again, Save returns 400 \"position 99 is already used by another role\". Every subsequent create fails on its own default until the admin manually types a free number; the server's free-slot fallback never runs because the panel never omits position.",
-      "evidence": "index.html:1310 `const position=role?role.position:Math.max(0,myPosition()-1);`\nindex.html:1360 `position:parseInt(document.getElementById('rolePos').value,10)||0,`\nServer/service/role.go (CreateRole): `if in.Position != nil { ... if taken[position] { return nil, fmt.Errorf(\"%w: position %d is already used by another role\", ErrBadRequest, position) } } else { for position > 0 && taken[position] { position-- } ... }`",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-admin-static",
       "suggestedFix": "Mirror the server's walk-down in the prefill at index.html:1310: `let position;if(role)position=role.position;else{const taken={};(state.roleList||[]).forEach(r=>{taken[r.position]=true});position=Math.max(0,myPosition()-1);while(position>0&&taken[position])position--;}` (equivalently, omit `position` from the create body so role.go's auto-placement branch runs).",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0368",
@@ -8432,14 +8624,20 @@
       "severity": "low",
       "why": "The popup re-implements the focus trap instead of using @lib/a11y's trapFocus, and its copy is missing the two guards that helper documents as required: it never treats `document.activeElement === popup` (the dialog container, which is exactly what mount() focuses at line 341) as an edge of the cycle, and it returns without `e.preventDefault()` when the dialog holds no focusable control (line 373). Either case falls through to the browser's native tab order, so focus leaves a dialog that declares `aria-modal=\"true\"` and lands on controls hidden behind a full-screen `.upp-overlay` (position:fixed; inset:0; z-index:200).",
       "repro": "Case A (any member): click a row in the member list; the popup mounts and focus sits on the popup container. Press Shift+Tab as the first keystroke. activeElement is the popup, which is neither `first` nor `last`, so no branch fires, nothing is prevented, and the browser moves focus backwards to the last tabbable element of the page *behind* the overlay (composer, sidebar buttons) — visually covered and unclickable, with no way to tab back in. Case B (own row): clicking your own member row builds a popup with zero buttons (MemberList.ts:257-260 omits onMessage when isSelf, and never passes onCall), so `focusable.length === 0` and plain Tab escapes the dialog the same way.",
-      "evidence": "line 341: popup.focus();  // activeElement is now the popup container itself\nline 373: if (focusable.length === 0) return;              // no preventDefault -> native Tab escapes\nline 378: if (e.shiftKey && document.activeElement === first) {\nline 381: } else if (!e.shiftKey && document.activeElement === last) {\n// neither branch matches while activeElement === popup\n// contrast Client/src/lib/a11y.ts:74-88, which preventDefaults the empty case and\n// wraps when `active === container`.",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "Delete the hand-rolled listener at UserProfilePopup.ts:363-384 and call the shared helper instead: `import { trapFocus } from \"@lib/a11y\";` then `trapFocus(popup, signal);` — it preventDefaults the empty-dialog case and treats `active === container` as an edge that wraps.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0369",
@@ -8449,14 +8647,20 @@
       "severity": "low",
       "why": "The `authStore` → `s.user` subscriber unconditionally pushes the server's stored custom status back into the picker's input with no \"is the user editing it\" guard. `StatusPicker.setCustomStatus` both overwrites `customInputEl.value` and resets `lastCommittedCustom`, so the in-progress text is not just visually replaced — the later blur/Enter commit compares against the freshly-reset watermark, short-circuits, and never sends what was typed.",
       "repro": "Open the user bar's status dropdown and type \"on vacation\" into the custom-status input; do not press Enter yet. Have an admin change your role — dispatcher.ts:892 runs `updateUser({ role: payload.role })` on a self MEMBER_UPDATE, which replaces `authStore.user` with a new object (auth.store.ts:127-130). The selector `(s) => s.user` fires, `statusPicker.setCustomStatus(serverCustomStatus() ?? \"\")` runs, the input now reads the old server value and `lastCommittedCustom` equals it. Click away: `commit()` in StatusPicker.ts:178-183 computes `text === lastCommittedCustom` and returns early, so \"on vacation\" is never saved or sent. The identical clobber happens on a self USER_UPDATE (dispatcher.ts:947 `setAuth({...currentUser, ...})`).",
-      "evidence": "    disposable.onStoreChange(\n      authStore,\n      (s) => s.user,\n      () => {\n        updateFromState();\n        statusPicker?.setCustomStatus(serverCustomStatus() ?? \"\");   // no focus/dirty guard\n      },\n    );\n\n// StatusPicker.ts\n  function setCustomStatus(text: string): void {\n    lastCommittedCustom = text;\n    if (customInputEl !== null) customInputEl.value = text;\n  }\n  const commit = (): void => {\n    const text = input.value.trim().slice(0, MAX_CUSTOM_STATUS_LEN);\n    if (text === lastCommittedCustom) return;   // <-- typed text now silently dropped",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-client-src-components",
       "suggestedFix": "Guard the push in the UserBar subscriber (one place, not per caller): skip the overwrite when the user is mid-edit, e.g. expose the input's focus state (or accept a `force` flag) and in UserBar.ts:283-286 call `statusPicker?.setCustomStatus(...)` only when the custom-status input is not `document.activeElement`. Equivalently, inside `StatusPicker.setCustomStatus` return early if `customInputEl !== null && document.activeElement === customInputEl`, leaving `lastCommittedCustom` untouched so the pending commit still fires on blur.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0370",
@@ -8466,14 +8670,20 @@
       "severity": "low",
       "why": "handleKeydown moves `activeIndex` and calls render(), which only repaints the `ma-item--active` class and re-aims `aria-activedescendant`. Nothing ever calls `scrollIntoView` on the active row, but the list is a fixed-height scroller (`.mention-autocomplete .ma-list { max-height: 240px; overflow-y: auto; }`, app.css:2838) while the widget renders up to 10 rows of ~29-30px each (~290-300px). aria-activedescendant does not scroll the container, so the highlighted row can sit entirely outside the visible box and Enter inserts something the user cannot see.",
       "repro": "In a server with ≥10 members whose names share a prefix, type `@user` in the composer. filterMentionSuggestions returns MAX_MENTION_SUGGESTIONS = 10 rows; `.ma-list` clips at 240px so only ~8 are visible. Press ArrowDown nine times: activeIndex reaches 8 then 9, render() marks those rows `ma-item--active`, but the list scrollTop is still 0, so no row appears highlighted anywhere on screen. Pressing Enter inserts the 10th suggestion the user never saw. The same happens immediately on a single ArrowUp from index 0, which wraps to index 9 (line 172) — the popup looks like nothing is selected. Identical for the emoji popup (10 rows at 30px each with `.ea-preview` 18px + 12px padding).",
-      "evidence": "      case \"ArrowDown\":\n        e.preventDefault();\n        activeIndex = (activeIndex + 1) % suggestions.length;\n        render();          // render() has no scrollIntoView / scrollTop write\n        return true;\n      case \"ArrowUp\":\n        activeIndex = (activeIndex - 1 + suggestions.length) % suggestions.length;\n/* app.css:2838 */ .mention-autocomplete .ma-list { max-height: 240px; overflow-y: auto; }",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "One change in the shared widget: at the end of `render()` in Client/src/components/inline-autocomplete.ts, after the aria-activedescendant block, add `if (suggestions.length > 0) (list.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({ block: \"nearest\" });`. That covers both the mention and emoji popups and both arrow directions.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0371",
@@ -8483,14 +8693,20 @@
       "severity": "low",
       "why": "Four components give their secondary action the class `btn-modal-cancel`, but no CSS file in the repo defines `.btn-modal-cancel`. The styled sibling that clearly belongs to it, `.btn-cancel` (login.css:989 — padding, muted colour, hover underline), has zero users. With base.css:34's global `button { border:none; background:none; color:inherit; }` reset the Cancel control ends up with no padding, no background, no border and no hover state, flush against the `.btn-modal-save` accent pill in the same `.modal-footer` flex row.",
       "repro": "Open the channel context menu → \"Create Channel\". The footer holds `<button class=\"btn-modal-cancel\">Cancel</button>` next to `<button class=\"btn-modal-save\">Create Channel</button>`. `grep -rn 'btn-modal-cancel' --include=*.css .` returns nothing, so only base.css's `button` reset applies: Cancel paints as inherit-coloured text with zero padding (a click target the height of one text line), while Save is a padded accent-filled button. Same on EditChannelModal.ts:332, DeleteChannelModal.ts:70 and NsfwGate.ts:74 (\"Go Back\" next to the \"Continue\" save button). The intended rule exists but is spelled `.btn-cancel`, which nothing uses.",
-      "evidence": "CreateChannelModal.ts:132-136\n    const cancelBtn = createElement(\n      \"button\",\n      { class: \"btn-modal-cancel\", type: \"button\" },\n      \"Cancel\",\n    );\nlogin.css:989  .btn-cancel { padding: 8px 16px; ... }   /* zero users */\nlogin.css:999  .btn-modal-save { padding: 8px 20px; background: var(--accent); ... }",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "Rename the orphaned selector: change `.btn-cancel` / `.btn-cancel:hover` at Client/src/styles/login.css:987 and :995 to `.btn-modal-cancel` / `.btn-modal-cancel:hover`. One CSS edit fixes all four call sites; do not touch the components.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0372",
@@ -8500,14 +8716,20 @@
       "severity": "low",
       "why": "The overlay's modal is `.quick-switch-modal`, which sets `overflow: hidden` with no `max-height`, and `.quick-switch-list` sets neither. Its parent `.quick-switch-backdrop` is `position: fixed; inset: 0; display: flex; align-items: center`, so once the row list makes the modal taller than the viewport the box overflows the fixed backdrop symmetrically above and below the fold. Nothing scrolls — a fixed-position backdrop creates no scrollable overflow and the modal clips its own children — so those rows can never be reached. Every other modal in the app gets this right (`.modal { max-height: 80vh; overflow-y: auto; }`, login.css:945).",
       "repro": "Save 14 server profiles, then click the disconnect/switch button in the UserBar. createQuickSwitchOverlay renders one `.quick-switch-item` per profile plus the `add-new` row; each is 36px icon + 10px×2 padding + 1px×2 border = 58px, on top of a ~70px header and ~40px footer. On a 800px-tall window the modal is ~940px and, being flex-centred in a viewport-sized fixed backdrop, extends ~70px above y=0 and ~70px below the bottom. The first profile row and the \"Add new server\" row are outside the viewport, the modal's `overflow:hidden` shows no scrollbar, and the page does not scroll — so the user cannot add a server or switch to the clipped profiles without deleting profiles first.",
-      "evidence": "QuickSwitchOverlay.ts:52  const modal = createElement(\"div\", { class: \"quick-switch-modal\" });\napp.css:5253 .quick-switch-backdrop { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }\napp.css:5262 .quick-switch-modal { width: 380px; max-width: 90vw; overflow: hidden; }   /* no max-height */\napp.css:5285 .quick-switch-list { padding: 0 12px 8px; }                                /* no overflow-y */\nlogin.css:945 .modal { width: 440px; max-height: 80vh; overflow-y: auto; }             /* every other modal */",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "In Client/src/styles/app.css, give `.quick-switch-modal` (line 5262) `max-height: 85vh; display: flex; flex-direction: column;` and give `.quick-switch-list` (line 5285) `overflow-y: auto;` (plus `min-height: 0`), so the row list scrolls while the header and footer stay pinned. No TS change needed.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0373",
@@ -8517,14 +8739,20 @@
       "severity": "low",
       "why": "The <select> options are rebuilt from the actions present on the *currently fetched page*, but state.auditActionFilter is global and survives paging. When the filtered action does not occur on the new page, no option carries `selected`, so the browser falls back to the first option (\"All Actions\") while the filter is still in force — and because the element's DOM value is already \"all\", picking \"All Actions\" fires no change event, so the filter can no longer be cleared from the control.",
       "repro": "1. Audit Log, page 1 (50 rows) contains at least one `channel_delete`. Select \"channel_delete\" in the dropdown.\n2. Click \">\" to page 2, whose 50 rows contain no `channel_delete`.\n3. renderAudit emits only the \"All Actions\" option (no `selected` anywhere), so the dropdown displays \"All Actions\" — but state.auditActionFilter is still 'channel_delete', so `filtered` is empty and the table reads \"No matching entries\" beside 50 fetched rows.\n4. Open the dropdown and choose \"All Actions\": the element's value is already \"all\", so no `change` event fires and state.auditActionFilter is never reset. The page stays blank until the admin selects some other action first and then re-selects \"All Actions\".",
-      "evidence": "Server/admin/static/index.html:1400\n  const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean))].sort();   // current page only\nServer/admin/static/index.html:1415-1418\n  html+='<select class=\"filter-select\" onchange=\"state.auditActionFilter=this.value;refilterAudit()\">';\n  html+='<option value=\"all\" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';\n  actionTypes.forEach(t=>{html+='<option value=\"'+esc(t)+'\" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});\nServer/admin/static/index.html:1403-1405 — the row filter still reads the stale state:\n  if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;\nstate.auditActionFilter is declared once at line 315 and is never reset by paging (`state.auditPage++;renderContent()` at line 1432).",
-      "status": "open",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-admin-static",
       "suggestedFix": "Make the option set always contain the active filter so the control and the state cannot diverge, in the one place that builds it (index.html:1400): `const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean).concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();`. The stale filter then still renders as a `selected` option, the dropdown tells the truth, and choosing \"All Actions\" is a real value change that fires `change`.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-03",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0374",
@@ -8834,7 +9062,7 @@
     },
     {
       "id": "OC-0388",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8846,11 +9074,18 @@
       "why": "VERIFIED ON HEAD. markerSchema (markers.go:68-86) is deletion_markers + sequence_floors + floor_probes — nothing key-derived — and OpenMarkerStore (:91) accepts any 32-byte key with no check against the markers already in the file. auth/totp_encrypt.go's shared loader generates a fresh key on confirmed absence (the fs.ErrNotExist branch at :95-102), and OWNCORD_ERASURE_KEY takes precedence over the file. So markers present + key regenerated (or env-var flipped) makes every marker unmatchable: ReplayAccounts hashes the live ids under the new key, matches nothing, returns {Erased:0} with a nil error, and the resurrected account serves traffic. auth/erasure_key.go:12-14 names this exact harm as the reason the READ-ERROR branch refuses ('replacing the key on a read error would orphan every marker recorded so far, and a restore could then resurrect what they guard') — the absent-key branch does the replacement anyway. The finder's live repro (scratchpad/keyprobe) showed KEY A -> {Erased:1}, victim gone; the same marker file under KEY B -> {Erased:0}, victim RESURRECTED, no error and no warning.",
       "repro": "sed -n '68,113p' Server/db/markers.go (no key fingerprint in the schema, no check in OpenMarkerStore); sed -n '78,102p' Server/auth/totp_encrypt.go (ErrNotExist -> generate); Server/auth/erasure_key.go:12-14 states the invariant the absent-key branch breaks. Fix shape: write HMAC(key,'owncord-marker-fingerprint') into a meta row on create and refuse to open (or refuse to replay) when the file holds markers under a different fingerprint.",
       "confidence": "high",
-      "source": "I07-markers-restore"
+      "source": "I07-markers-restore",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0389",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8862,11 +9097,18 @@
       "why": "VERIFIED ON HEAD. Server/admin/api.go:59-62 mounts GET /retention, GET /retention/preview, PUT /channels/{id}/retention, DELETE /channels/{id}/retention. The panel calls none of them: `grep -n -i retention Server/admin/static/index.html` returns exactly two lines, 1635 and 1645, and both are backup_retention (backup-FILE pruning, unrelated). saveSettings' key list at :1645 is ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention','registration_mode'] — retention_days is absent, so PATCH /settings can never carry it either. An operator cannot set, inspect, override per channel or preview a policy that irreversibly and continuously deletes message history, and handlers_retention.go's 'owner-facing effect preview' has no owner-facing surface at all.",
       "repro": "grep -n -i retention Server/admin/static/index.html -> 1635, 1645 (both backup_retention); grep -n retention_days Server/admin/static/index.html -> no match; sed -n '56,65p' Server/admin/api.go lists the four mounted routes.",
       "confidence": "high",
-      "source": "I11-admin-usable"
+      "source": "I11-admin-usable",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0390",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8878,11 +9120,18 @@
       "why": "VERIFIED ON HEAD. Server/admin/api.go:49 mounts Delete(\"/users/{id}\", handleDeleteUser(mod, hub)) behind ADMINISTRATOR. The panel's only user DELETE is api('DELETE','/users/'+uid+'/sessions') at index.html:920 (force logout); `grep -n -i erase Server/admin/static/index.html` returns nothing. The one irreversible data-lifecycle operation B4-9 built — the route that satisfies the BPR-052 erasure requirement — cannot be invoked by an operator through the only admin surface the product ships (Client/src/lib/admin-panel.ts just opens /admin in the browser; the desktop client has no admin views). The surviving panel action is the older anonymising ban path B4-9 was written to replace.",
       "repro": "grep -oE \"api\\('[A-Z]+','[^']*'\" Server/admin/static/index.html | sort -u | grep users; grep -n -i erase Server/admin/static/index.html -> nothing; sed -n '48,49p' Server/admin/api.go.",
       "confidence": "high",
-      "source": "I11-admin-usable"
+      "source": "I11-admin-usable",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "e704c753",
+        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0391",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8894,11 +9143,18 @@
       "why": "VERIFIED ON HEAD. `grep -n 'Audit|audit' Server/admin/update_handlers.go` returns zero lines. handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) is not handed a db handle, so there is no audit write on the success path, none on any failure path, and none in the applyAndRestart tail. Every neighbouring owner-only mutation on the same router IS audited (backup_create, backup_delete, backup_restore, config_write, api_token_create), and plugin_install — a strictly weaker code-execution change — was added by B2-6 deliberately. B2-6/S-02 requires every state-changing administrative action to be audited; an owner-credential compromise can swap the server binary and the operator's only tamper-evident record shows nothing: no actor, no version, no time.",
       "repro": "grep -c Audit Server/admin/update_handlers.go -> 0; route at Server/admin/api.go:268 r.Post(\"/updates/apply\", ownerOnlyMiddleware(...)); compare Server/admin/handlers_backup.go:99/183/240. docs/security.md:203 'Ops:' lists backup_create/backup_delete/backup_restore/ws_connect and no update action.",
       "confidence": "high",
-      "source": "I05-audit-coverage"
+      "source": "I05-audit-coverage",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "44ff9d24",
+        "test": "Server/admin/update_audit_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0392",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8910,11 +9166,18 @@
       "why": "VERIFIED ON HEAD. Migration 039 line 13 creates channel_retention with `updated_by INTEGER NOT NULL` and no foreign key (no cascade). erasureStatements (erasure.go:247-278, read in full) has no channel_retention entry, db.SubjectInventory has no class for it, and `grep -rn channel_retention Server --include=*.go | grep -v _test` returns only db/retention.go and service/retention.go. The row therefore outlives the erasure carrying the subject's real id and the timestamp of their action, and is served verbatim by GET /admin/api/retention (ChannelRetention.UpdatedBy, json:\"updated_by\"). The erasure already handles the two structurally identical cases one screen away — audit_log.actor_id via erasureUnlinkAudit and `UPDATE recovery_assists SET issued_by = 0 WHERE issued_by = ?` at erasure.go:268 — so this is a miss, not a decision. The finder's standalone program confirmed: 'inventory classes nonzero: 0' while 'channel_retention SURVIVES: channel=1 days=30 updated_by=2' for erased subject id 2.",
       "repro": "sed -n '9,15p' Server/migrations/039_retention.sql (updated_by INTEGER NOT NULL, no FK); sed -n '247,278p' Server/db/erasure.go (no channel_retention statement); grep -n channel_retention Server/db/inventory.go -> nothing. Fix: one statement modelled on the recovery_assists issuer row — UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ? — plus an inventory class.",
       "confidence": "high",
-      "source": "I06-erasure-complete"
+      "source": "I06-erasure-complete",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0393",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8926,11 +9189,18 @@
       "why": "VERIFIED ON HEAD. cutoff() is `s.now().UTC().Add(-time.Duration(days) * 24 * time.Hour)` (service/retention.go:209-211). RetentionMaxDays=3650 is checked only in the two WRITE paths (service/settings.go:156 and service/retention.go:123). DB.ServerRetentionDays (db/retention.go:39-52) fails safe on negative/non-numeric — its comment is literally 'a typo must never start deleting' — but accepts any positive value; DB.RetentionWindows returns cr.days straight out of channel_retention, whose only guard is `CHECK (days >= 0)` (migration 039:12). At days >= 106752 the int64 multiplication wraps and the cutoff lands in the future, so `timestamp < cutoff` matches every unpinned message and the sweep hard-deletes the channel history, attachments included, irreversibly. Measured: 106751 -> 1734-05-26 (past); 106752 -> 2318-12-14 (FUTURE); 200000 -> 2063-08-24 (FUTURE). NOT reachable through the API today (both write paths validate, and the wizard's ApplyWizardSettings does not write retention_days) — it needs a hand-edited or migrated settings row, which is exactly the case the fail-safe comment promises to survive.",
       "repro": "sed -n '39,52p' Server/db/retention.go (no upper clamp) against service/retention.go:209-211. Fix is one line in each read path: treat days > RetentionMaxDays as 0, matching the existing fail-safe posture.",
       "confidence": "high",
-      "source": "I08-retention-bounds"
+      "source": "I08-retention-bounds",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0394",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8942,11 +9212,18 @@
       "why": "VERIFIED ON HEAD. `grep -rn DisconnectRevokedUser Server --include=*.go | grep -v _test` returns exactly three lines: api/profile_handler.go:123 (interface), api/profile_handler.go:654 (call site, sign-out-everywhere) and ws/hub_broadcast.go:248 (impl). Nothing in api/recovery_handler.go, service/recovery.go, db/recovery_kit.go or db/recovery_assist.go touches it, and handleRecover is registered as handleRecover(svc, trustedProxies) at api/auth_handler.go:101 — it has no hub handle at all. So the socket an attacker authenticated on a now-deleted session keeps reading and sending until ws/hub.go:198's 30-second sweep (or the per-N-frames recheck at ws/handlers.go:135). Recovery is precisely the takeover case, and the repository already documents at profile_handler.go:116-119 and hub_broadcast.go:242-247 that the sweep alone is not good enough for this promise — the lower-stakes sign-out path already calls the fix. docs/trust-model.md:326 and B4-5/B4-6 both say 'revokes every session'.",
       "repro": "grep -rn DisconnectRevokedUser Server --include=*.go | grep -v _test; grep -n handleRecover Server/api/auth_handler.go -> :101 with a two-argument signature. Fix: pass the same SessionDisconnector profile_handler.go already takes into handleRecover and call it after a successful redemption.",
       "confidence": "high",
-      "source": "I09-recovery-credentials"
+      "source": "I09-recovery-credentials",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "a16604e6",
+        "test": "Server/service/recovery_test.go, Server/service/erasure_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0395",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8958,11 +9235,18 @@
       "why": "VERIFIED ON HEAD, with one correction to the finder's impact claim. 039_retention.sql has two commits (`git log -- Server/migrations/039_retention.sql`): added by 607fd4d7 (PR #1521, 07:50), rewritten by 15ba7c9a (PR #1522, 08:40) to add `purge_pending TEXT NOT NULL DEFAULT '[]'` inside CREATE TABLE retention_runs. Server/db/migrate.go keys schema_versions on the FILENAME only (isApplied at :78-90, the INSERT at :252) and stores no content hash, so a database migrated at 607fd4d7 skips 039 forever; `grep -rn purge_pending Server/migrations/` matches only 039, so nothing back-fills it. db/retention.go then names the column at :344, :405-407 and :433. CORRECTION: this does NOT abort start-up as the finder claimed — resumeRuns is called from Tick (service/retention.go:230) and its error is only slog.Warn'd, and with the default retention_days=0 Tick returns before touching purge_pending. Real impact: on such an install retention is permanently, silently broken (every resume warns, every sweep's purgeJournaled errors) rather than failing loudly. No release tag contains 607fd4d7, so exposure is dev-tracking self-hosts that migrated inside a 50-minute window.",
       "repro": "git log --format='%h %ad' --date=iso -- Server/migrations/039_retention.sql -> 15ba7c9a then 607fd4d7; git show 15ba7c9a -- Server/migrations/039_retention.sql; grep -rn purge_pending Server/migrations/ -> only 039; Server/db/migrate.go:78-90 and :252. Fix: a new 044 migration doing ALTER TABLE retention_runs ADD COLUMN purge_pending TEXT NOT NULL DEFAULT '[]' — applyMigration already skips duplicate-column errors, so it is a no-op on a fresh install.",
       "confidence": "high",
-      "source": "I15-migrations"
+      "source": "I15-migrations",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0396",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8974,11 +9258,18 @@
       "why": "VERIFIED ON HEAD by reading both callers of SweepRetention. Tick (retention.go:226-297) is bounded: budget := RetentionTickBudget (5000), RetentionBatch (500) per transaction, purgeJournaled per batch inside sweepChannel. ReplayMarkers (retention.go:434-488) — the other caller, run at start-up in the erasure-markers stage before anything serves — has no budget parameter and no ctx deadline: `for { ... SweepRetention(channelID, t, RetentionBatch) ... }` accumulates every removed id and every attachment name in memory, and only afterwards (`if total > 0`) calls StartRetentionRun / RecordRetentionRunFiles / purgeJournaled. This is by construction the path that faces the largest backlog (a restored backup holds the whole history the policy already removed): start-up blocks for the full delete, the slices grow with the restored history, the whole id list becomes one JSON value bound as a single json_each argument, and a kill mid-replay leaves already-deleted messages with no journaled file list — the next boot sweeps zero rows, never takes the `total > 0` branch, and so never journals or purges them.",
       "repro": "sed -n '434,488p' Server/service/retention.go (the unbounded `for {` at 451, journal calls at 466-486) against sed -n '244,320p' (Tick's budget and sweepChannel's per-batch purgeJournaled at :316). Called from Server/internal/app/erasure.go:61. Fix: reuse sweepChannel's shape — open the run first, journal per batch.",
       "confidence": "high",
-      "source": "I08-retention-bounds"
+      "source": "I08-retention-bounds",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0397",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -8990,11 +9281,18 @@
       "why": "VERIFIED ON HEAD. `grep -n 'environment:' .github/workflows/release.yml` returns exactly one line, 504, inside the `publish` job. release-server-docker (:423-488) declares `needs: verify-versions`, `permissions: packages: write` and no environment, and runs docker/build-push-action with push: true and metadata tags including type=raw,value=latest. docs/plans/b1-release-tag-protection.sh:39 instructs 'add environment: release to the release-server-docker AND publish jobs', and its rationale at :75 says 'Required reviewers gate the job at the point it would push to GHCR or create the Release'. Register row R-09's closure condition is 'immutable exact-SHA gate evidence AND a protected release approval'; the container publish consumes the first and not the second, and every `docker compose pull` upgrade takes the resulting :latest.",
       "repro": "grep -n 'environment:' .github/workflows/release.yml -> 504 only; sed -n '423,430p' .github/workflows/release.yml; compare docs/plans/b1-release-tag-protection.sh:39 and :75. Fix: add `environment: release` to release-server-docker, or record in b1/b2 why the container publish is deliberately unreviewed.",
       "confidence": "high",
-      "source": "I13-gates-real"
+      "source": "I13-gates-real",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0398",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9006,11 +9304,18 @@
       "why": "VERIFIED ON HEAD by running the exact CI tag sets. The file's first line is `//go:build !race && !deadlock` and it is the only such file in the tree. CI has exactly four go test invocations (grep -n 'go test' .github/workflows/ci.yml -> 80, 83, 97, 98): `go test -race ./...`, `go test -tags deadlock ./...`, `go test -tags wazero ./plugin/...`, `go test -tags otel ./telemetry/... ./api/...`. The first sets `race`, the second sets `deadlock`, and neither tagged step names ./admin/. Measured: `go test -race -list '.*' ./admin/ | grep -c RingBuffer_WriteDoesNotAllocate` -> 0; `-tags deadlock` -> 0; plain `go test -list` -> 1. The ci-check skill mirror repeats the miss and CLAUDE.md tells contributors not to use a bare `go test`, so the zero-allocation guarantee on admin.RingBuffer.Write is asserted nowhere that runs. The tag-gated step's own comment claims it is 'scoped to the packages that carry tagged files — every other package is tag-invariant', which is false for ./admin/; the same class of miss was already patched once for ./api/ in 59518c47.",
       "repro": "head -1 Server/admin/logstream_alloc_test.go; (cd Server && go test -race -list '.*' ./admin/ | grep -c RingBuffer_WriteDoesNotAllocate) -> 0. Fix: add a plain `go test -count=1 ./admin/` line to the tagged step at ci.yml:96-98 (and to the ci-check skill), or drop the build tag and skip inside the test.",
       "confidence": "high",
-      "source": "I14-tests-run"
+      "source": "I14-tests-run",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0399",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9022,11 +9327,18 @@
       "why": "VERIFIED ON HEAD by reading the whole chain. openMarkers (internal/app/erasure.go:27-67) logs 'erasure markers: upload storage unavailable at start-up; a replayed erasure journals its files' and leaves `files` nil when storage.New fails. But runJob (service/erasure.go:396-404) returns errors.New(\"no file storage configured\") when s.files == nil and the job lists files; finishErasure (:344-347) wraps it as ErrErasureFilesPending; eraseForReplay (:216) returns it; ReplayAccounts stops on the first erase error; and openMarkers turns that into fmt.Errorf(\"replaying erasure markers: %w\", err) at :46-50, which fails the erasure-markers lifecycle stage and refuses the boot. The live routes treat the identical condition as SUCCESS (service/erasure.go:57-61: 'callers report success and leave the files to the journal'). It self-heals on the next boot only because the database half committed, so the marker takes the !exists branch — i.e. the operator's workaround is 'start it again'.",
       "repro": "sed -n '38,50p' Server/internal/app/erasure.go; sed -n '385,404p' Server/service/erasure.go (the s.files == nil arm); sed -n '325,348p' (finishErasure wrapping into ErrErasureFilesPending); contrast service/erasure.go:57-61. Fix: treat ErrErasureFilesPending as non-fatal in openMarkers, matching the route behaviour and the log line.",
       "confidence": "high",
-      "source": "I07-markers-restore"
+      "source": "I07-markers-restore",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "a16604e6",
+        "test": "Server/service/recovery_test.go, Server/service/erasure_test.go",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0400",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9038,11 +9350,18 @@
       "why": "VERIFIED ON HEAD: wc -l gives hub.go 403, hub_broadcast.go 461, serve.go 177 against targets <400, <500, <500. B3-5 exit condition 4 (docs/plans/b3-server-architecture-guardrails-2026-08-29.md:802) says 'hub.go under 400. Numbers, not adjectives, in the evidence block', and the same plan's exit table records 866 -> 361 and ticks the target. The regression walk over every commit touching the file is 361 (528ae260, the B3-5 finisher) -> 365 -> 369 -> 381 -> 386 -> 397 -> 403, crossing 400 at 15ba7c9a (PR #1522). No single commit added more than a handful — drift, not one bad change, which is exactly what a gate would catch. Cosmetic in itself: the cost is a false recorded exit, not a runtime defect.",
       "repro": "wc -l Server/ws/hub.go -> 403; docs/plans/b3-server-architecture-guardrails-2026-08-29.md:802 and its B3-5 exit table; for s in $(git log --format=%H --reverse -- Server/ws/hub.go); do git show $s:Server/ws/hub.go | wc -l; done.",
       "confidence": "high",
-      "source": "I03-file-sizes"
+      "source": "I03-file-sizes",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0401",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9054,11 +9373,18 @@
       "why": "VERIFIED ON HEAD. livekit.go:57 constructs lksdk.NewRoomServiceClient(httpURL, apiKey, apiSecret) and roomSvc is called at :172 (RemoveParticipant), :197 (GetParticipant), :209 (MutePublishedTrack), :232 (ListParticipants) and :267 (ListRooms) — each an outbound Twirp HTTP request carrying the room name, the participant identity and a signed JWT, which leaves the machine whenever voice.livekit_url is remote. `grep -n livekit Server/invariants/egress_sites.go` lists only livekit_download.go, livekit_process.go and api/livekit_proxy.go; docs/architecture/diagnostics.md's table (rows 57-59) is the same three. The doc states it lists 'every production site that can open an outbound connection'. The substance of the invariant still holds — the path is configuration-gated to the same destination as the two listed LiveKit rows — so this is an inventory gap in an operator-facing security document, not a live egress. The static rule cannot see it because the SDK builds its own *http.Client.",
       "repro": "grep -n 'NewRoomServiceClient|roomSvc\\.' Server/ws/livekit.go -> 57,172,197,209,232,267; grep -n livekit Server/invariants/egress_sites.go and docs/architecture/diagnostics.md -> three rows, none for ws/livekit.go. Fix: one EgressAllow row plus the matching diagnostics.md table row.",
       "confidence": "high",
-      "source": "I12-egress-absence"
+      "source": "I12-egress-absence",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0402",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9070,11 +9396,18 @@
       "why": "VERIFIED ON HEAD. wizardSettingUpdates (setup_wizard.go:221-235) writes server_name, motd, registration_mode, max_upload_bytes and voice_quality; SetupService.ApplyWizardSettings (service/setup.go:196-204) calls s.st.ApplySettings directly and explicitly documents that it bypasses SettingsService.Patch, which is the only writer of registration_mode_change / retention_policy_change / setting_change (service/settings.go:117-127). The two rows the wizard does write name nothing that was set: RecordSetup's detail is a fixed string, and RecordConfigWrite fires only when a config path is present and lists config.yaml keys (patchedConfigKeys), which contains no registration_mode. So the server's initial admission policy is chosen with no audit record of the choice. Downgraded from the finder's medium: this is a one-time first-run event that already produces a server_setup row naming the actor, and the resulting values are visible on the Settings page — the gap is which values, not who or when.",
       "repro": "sed -n '213,235p' Server/admin/setup_wizard.go against sed -n '266,293p' (patchedConfigKeys) and Server/service/setup.go:196-216; grep -n registration_mode_change Server --include=*.go | grep -v _test -> only service/settings.go:117. Fix: append the applied setting keys to RecordSetup's detail (keys only — the same rule RecordConfigWrite already follows).",
       "confidence": "high",
-      "source": "I05-audit-coverage"
+      "source": "I05-audit-coverage",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0403",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9086,11 +9419,18 @@
       "why": "VERIFIED ON HEAD. In Tick, sweepChannel commits each batch's DELETE of messages and attachments inside the `for _, w := range windows` loop (retention.go:248-272), and RecordRetentionRunFiles is called once at :277, after the loop. docs/architecture/data-lifecycle.md:370 (O9 axis A1) states 'A kill between the commit and the unlinks leaves the run's file list journaled: resumeRuns on the next tick removes them', and RetentionService's own doc comment repeats it. A kill during batch 3 of channel 2 of 10 leaves those blobs with no attachment row and an empty retention_runs.files; the only compensating control is ErasureService.Reconcile, which is skipped entirely when upload storage failed to open — exactly the case where the sweep is most likely leaking. The ordering is untested: TestRetention_BudgetAndResume hand-writes the journal row rather than exercising Tick. purgeJournaled is already per batch at :316, so the shape to copy is right there.",
       "repro": "sed -n '244,278p' Server/service/retention.go (RecordRetentionRunFiles at :277, after the loop) vs :316 (purgeJournaled per batch); Server/service/retention_test.go:238-247 constructs the journal by hand.",
       "confidence": "high",
-      "source": "I08-retention-bounds"
+      "source": "I08-retention-bounds",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0404",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9102,11 +9442,18 @@
       "why": "VERIFIED ON HEAD, and LATENT — hence low, not the finder's medium. wireAuth (router.go:335-353) is `svc.Auth = authSvc; if svc.Erasure == nil { return }` followed by svc.Retention.SetFiles/SetHub and authSvc.UseErasure, so one service's absence unwires an unrelated service (Retention's hub is what purges swept messages from the replay tiers, B4-11) plus the auth erasure swap, silently. Compounding it, NewAuthService (service/auth.go:304-315) builds a private `erasure: NewErasureService(st)` that can never hold markers, files or a hub, and UseErasure (:319-323) is `if e != nil { s.erasure = e }` — a missed wire degrades account erasure (no deletion marker recorded, so a restore resurrects the account) instead of failing. NewHub refuses to construct rather than run degraded; this does the opposite. Not live today: service.New always populates both Erasure and Retention, and there is one production call path — but Server/admin/api.go already builds partial service.Services{} literals, which is the shape that would trip it.",
       "repro": "sed -n '335,353p' Server/api/router.go (the guard at :337 dominates :343/:349/:352, each of which carries its own nil check that is never reached); sed -n '304,323p' Server/service/auth.go. Fix: hoist the Retention wiring out of the guard; make UseErasure's nil case a programming error rather than a no-op.",
       "confidence": "high",
-      "source": "I01-construction"
+      "source": "I01-construction",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0405",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9118,7 +9465,14 @@
       "why": "VERIFIED ON HEAD. `grep -rn 'OwnerRolePosition|OwnerRoleID' Server --include=*.go | grep -v _test | grep -v permissions/` gives four decision sites in two spellings: admin/middleware.go:136 `role.Position < permissions.OwnerRolePosition` (deny) and admin/handlers_users.go:367 `role.Position >= permissions.OwnerRolePosition` (the IsOwner flag the panel renders) use position alone, while service/recovery.go:400 `role.ID != permissions.OwnerRoleID && role.Position < permissions.OwnerRolePosition` and service/role.go:408 also accept the seeded OwnerRoleID. They disagree exactly in the case role.go:408's own comment says it exists for — 'a database whose positions were edited by hand' — where ownerOnlyMiddleware would lock the real owner out of every owner-only route while the services behind them still consider them the owner. B2-5's rule is one predicate per security property, and none of these four spellings is a permissions.* helper call, so the authz-chokepoint rule is green on all of them. Low because it is not reachable through the API: nothing outranks position 100, so the Owner role's position cannot be edited.",
       "repro": "git grep -nE '[.]Position *(<|>|<=|>=|==|!=)' -- 'Server/**/*.go' ':!*_test.go'; git log --oneline -S OwnerRolePosition -- Server/service/recovery.go -> 33f82a8a (B4-6, #1513) added the fourth site. Fix: one permissions.IsOwner(role) predicate used by all four, added to the authz-chokepoint symbol list.",
       "confidence": "high",
-      "source": "I04-authz-chokepoint"
+      "source": "I04-authz-chokepoint",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0406",
@@ -9218,7 +9572,7 @@
     },
     {
       "id": "OC-0412",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9230,11 +9584,18 @@
       "why": "VERIFIED ON HEAD. adminRequiredServices' doc comment (api.go:100-110) states the rule 'a service only a HANDLER dereferences may be nil, because the handler checks it and answers 500 \"… service unavailable\"' and names Moderation, Roles and Channels as deliberately left alone. `grep -rn 'service unavailable' Server/admin/*.go` returns rows for recovery, retention, roles and moderation — and none for channels or settings. Neither handleListChannels, resolveGuildChannel, the four override handlers nor the settings/audit-log handlers nil-check their service, so a nil *service.ChannelService or *service.SettingsService is dereferenced through s.st and panics. Before the B3-8 family moves those handlers took *db.DB, which NewAdminAPI is always given non-nil, so the panic is new. Latent: the one production caller and the test helper both pass a full bundle — but the comment is the contract a future caller will read.",
       "repro": "sed -n '98,112p' Server/admin/api.go; grep -rn 'service unavailable' Server/admin/*.go (no channels/settings row). Fix: either add the two nil guards the comment promises, or add Channels and Settings to adminRequiredServices and correct the comment.",
       "confidence": "medium",
-      "source": "I16-error-semantics"
+      "source": "I16-error-semantics",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0413",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9246,11 +9607,18 @@
       "why": "VERIFIED ON HEAD. `grep -rn WithErasure Server --include=*.go` returns exactly two lines, both in service/moderation.go: :29 (the comment) and :31 (the declaration). Zero call sites in production and zero in tests. The comment says 'New does this for the shared bundle, tests do it by hand' — both halves are false: service.New assigns the unexported field directly (`moderation.erasure = erasure`, service/service.go:49). So the only exported way to wire ModerationService's erasure runner is dead code justified by a false rationale, while the live wiring is a field poke no other package can perform. B3-4's rule permits a late-binding setter only where a comment names why it exists.",
       "repro": "grep -rn WithErasure Server --include=*.go -> moderation.go:29 and :31 only. Fix: delete the setter (the shortest correct change), or make service.New use it.",
       "confidence": "high",
-      "source": "I01-construction"
+      "source": "I01-construction",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "0c610f61",
+        "test": "per-group tests added alongside each fix; see the commit",
+        "revertProof": "adversarial review + suite green"
+      }
     },
     {
       "id": "OC-0414",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9262,7 +9630,29 @@
       "why": "VERIFIED ON HEAD. Merge order on dev is 7907c163 (PR #1517, 06:12, adds 040_erasure_replay_purge.sql), 87ad9971 (PR #1520, 07:03, adds 038_audit_unlinking.sql), 607fd4d7 (PR #1521, 07:50, adds 039_retention.sql). MigrateFS applies unrecorded files lexicographically, so a server that ran 7907c163 has 037 and 040 recorded and later applies 038, 039, 041-043 (order 040 -> 038 -> 039), while a fresh install gets 038 -> 039 -> 040. I checked every pair: 040 touches erasure_jobs (created by 037, which precedes it in both orders) and indexes messages; 038 ALTERs audit_log; 039 INSERTs a settings row and creates two tables referencing channels. Disjoint, so they commute and no divergent schema results — safe by luck, not by construction. Low because nothing needs fixing in the SQL; what is missing is the gate (see unenforced).",
       "repro": "for f in Server/migrations/03[89]*.sql Server/migrations/040*.sql; do git log --diff-filter=A --format=\"$f %ad %s\" --date=iso -- \"$f\" | tail -1; done; git log --first-parent --date=iso --format='%h %ad %s' dev | grep -E '#1517|#1520|#1521'.",
       "confidence": "high",
-      "source": "I15-migrations"
+      "source": "I15-migrations",
+      "fixed": "2026-09-03",
+      "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
+      "fix": {
+        "commit": "f0d7b784",
+        "test": "Server/db/markers_key_test.go, Server/db/erasure_test.go, Server/db/retention_test.go, Server/service/retention_journal_order_test.go, Server/api/wireauth_test.go, Server/ci_tags_test.go, scripts/check-migrations.mjs, scripts/check-release-environment.mjs",
+        "revertProof": "adversarial review + suite green"
+      }
+    },
+    {
+      "id": "OC-0415",
+      "status": "open",
+      "title": "The client unit suite is red on Node 26: the localStorage shim returns a plain object, so a spy on Storage.prototype never intercepts it",
+      "file": "Client/tests/setup.ts",
+      "line": 48,
+      "severity": "low",
+      "why": "Node 26 shadows jsdom's localStorage with a native accessor, so tests/setup.ts installs an in-memory replacement built from an object literal. It is not a Storage instance and its methods are own properties, so vi.spyOn(Storage.prototype, \"getItem\") — which four tests use to simulate storage a browser has disabled — never intercepts the call, the throw never happens, and the assertions fail. CI pins Node 24, where jsdom's own Storage is in place and all four pass, so the gate is green while a developer on the current Node sees five red tests across three files (legacy-key-migration, audio-elements, dm-profile-sidebar). CLAUDE.md states the client suite is green and must stay green; on Node 26 it is not, and a habitually red suite is one nobody reads. Same class as OC-0315: a test whose result depends on the environment rather than the code.",
+      "repro": "node --version (v26.4.0), then cd Client && npx vitest run — 5 failed, 5294 passed on dev at 6670c671. The same run on Node 24 is green. tests/setup.ts:23 createMemoryStorage returns an object literal, not a Storage.",
+      "confidence": "high",
+      "found": "2026-09-03",
+      "hunt": "postmerge-review-2026-09-03",
+      "lens": "invariant",
+      "finder": "claude"
     }
   ]
 }
