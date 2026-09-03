@@ -1550,14 +1550,22 @@ decisions 3 and 4.
   the writer connection the transaction still holds, read by the store at
   insert time (`TestPersistAudits_AppliesTheUnlinkRulesAtInsert`). A
   marker file from before the floors existed got none, so the first
-  restore could still reuse an id: the first replay recovers the floor from
-  the ids its own markers name (`MarkerStore.LocateSequenceFloor` hashes
-  candidates against the tokens until every marker is accounted for, the
-  counter standing only as a lower bound beside it — Codex's review of
-  #1523 refuted the first attempt, which trusted the counter a restore can
-  have rolled back below those very ids;
+  restore could still reuse an id: the floor is recovered from the ids its
+  own markers name (`MarkerStore.LocateSequenceFloor` hashes candidates
+  against the tokens until every marker is accounted for). Codex refuted
+  two attempts before this one, and both refutations were right: the first
+  trusted the live counter, which a restore can have rolled back below the
+  very ids the markers name; the second gated the recovery on a floor row
+  being absent, when a legacy store can hold a floor a later erasure wrote
+  while an older marker still names a higher id. The gate is now a recorded
+  probe (`floor_probes`), the result is merged with the row and the counter,
+  and a marker beyond the probe's ceiling fails the start-up stage
+  (`ErrSequenceFloorUnresolved`) rather than persisting a floor that only
+  looks safe — the operator raises it themselves, knowing the id space.
   `TestErasureService_ReplayMarkersRecoversMissingFloors`,
-  `TestMarkerStore_LocateSequenceFloor`).
+  `TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor`,
+  `TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor`,
+  `TestMarkerStore_LocateSequenceFloor`.
   038-era actor-side tokens sat in `subject_token`, where a later erasure
   of the target would overwrite them: migration 042 moves the determinable
   ones (`TestMigration042_BackfillsLegacyActorTokens`). And the marker

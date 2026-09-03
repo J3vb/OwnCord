@@ -101,9 +101,12 @@ func TestCreateOwnerIfEmpty_NoFlagFallsBackToTheCount(t *testing.T) {
 func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 	ctx := context.Background()
 	m := openTestMarkersExternal(t)
+	// A ceiling the test can exceed cheaply; production passes
+	// db.SequenceFloorProbeCeiling.
+	const probeCeiling = 2000
 
 	// Nothing recorded: nothing to locate, and the answer is complete.
-	got, complete, err := m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	got, complete, err := m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)
 	if err != nil || got != 0 || !complete {
 		t.Fatalf("LocateSequenceFloor on an empty file = %d, %v, %v", got, complete, err)
 	}
@@ -119,28 +122,29 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 	if err := m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
-	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)
 	if err != nil || got != 900 || !complete {
 		t.Errorf("users floor = %d, %v, %v; want 900 located completely", got, complete, err)
 	}
-	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorChannels)
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorChannels, probeCeiling)
 	if err != nil || got != 7 || !complete {
 		t.Errorf("channels floor = %d, %v, %v; want 7 located completely", got, complete, err)
 	}
-	if _, _, err := m.LocateSequenceFloor(ctx, "emoji"); err == nil {
+	if _, _, err := m.LocateSequenceFloor(ctx, "emoji", probeCeiling); err == nil {
 		t.Error("LocateSequenceFloor on a table with no marker scope returned no error")
 	}
 
 	// An id past the probe's ceiling cannot be located: the floor comes back
-	// as the lower bound it is, and says so.
-	tok, _, err := m.RecordPendingAccount(ctx, db.SequenceFloorProbeCeiling+5, 0)
+	// as the lower bound it is, and says so, which the caller treats as
+	// fatal rather than persisting it.
+	tok, _, err := m.RecordPendingAccount(ctx, probeCeiling+5, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := m.ConfirmAccount(ctx, tok); err != nil {
 		t.Fatal(err)
 	}
-	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)
 	if err != nil || complete || got != 900 {
 		t.Errorf("users floor with an out-of-range marker = %d, %v, %v; want 900 reported incomplete", got, complete, err)
 	}

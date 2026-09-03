@@ -76,13 +76,17 @@ type ErasureService struct {
 	files   FileRemover
 	hub     ErasureHub
 	markers *db.MarkerStore
+	// floorProbeCeiling bounds the sequence-floor probe; production runs at
+	// db.SequenceFloorProbeCeiling and the tests lower it to reach the
+	// refusal without hashing their way to it.
+	floorProbeCeiling int64
 }
 
 // NewErasureService wires the runner over st. Files are removed only once
 // SetFiles has installed the upload storage; until then jobs stay db_done
 // and are resumed later.
 func NewErasureService(st ErasureStore) *ErasureService {
-	return &ErasureService{st: st}
+	return &ErasureService{st: st, floorProbeCeiling: db.SequenceFloorProbeCeiling}
 }
 
 // SetFiles installs the file remover. Call it at the composition root before
@@ -225,22 +229,31 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 	if err != nil {
 		return db.ReplayReport{}, err
 	}
-	// A marker file from before the floors existed has none, and the live
-	// counter cannot stand in for them: this database may be a restore, and
-	// a restore rolls the counter back below the ids the markers name — the
-	// case the floors defend against. The markers are the only source, so
-	// the ids they name are recovered from the tokens themselves
-	// (MarkerStore.LocateSequenceFloor) and the counter is only a lower
-	// bound beside them.
+	// A marker file written before the floors existed records none, and
+	// neither the live counter nor a floor row already present can stand in
+	// for them: this database may be a restore, which rolls the counter back
+	// below the ids the markers name — the case the floors defend against —
+	// and a floor row may have been written by a later erasure while an
+	// older marker still names a higher id. The markers are the only source,
+	// so the ids they name are recovered from the tokens themselves once;
+	// the probe is then recorded and later opens skip it, every marker
+	// written after it having recorded its own floor.
 	for _, table := range []string{db.SequenceFloorUsers, db.SequenceFloorChannels} {
-		if _, ok := floors[table]; ok {
+		probed, err := s.markers.FloorProbed(ctx, table)
+		if err != nil {
+			return db.ReplayReport{}, err
+		}
+		if probed {
 			continue
 		}
-		floor, err := s.recoverSequenceFloor(ctx, table)
+		floor, err := s.recoverSequenceFloor(ctx, table, floors[table])
 		if err != nil {
 			return db.ReplayReport{}, err
 		}
 		if err := s.markers.RaiseSequenceFloor(ctx, table, floor); err != nil {
+			return db.ReplayReport{}, err
+		}
+		if err := s.markers.MarkFloorProbed(ctx, table); err != nil {
 			return db.ReplayReport{}, err
 		}
 		floors[table] = floor
@@ -251,25 +264,34 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 	return s.markers.ReplayAccounts(ctx, s.st, s.eraseForReplay)
 }
 
-// recoverSequenceFloor is the floor for a table whose marker file never
-// recorded one: the highest id its markers name, or the live counter when
-// that is higher (markers for ids the probe could not reach are reported,
-// loudly — the floor is then a lower bound, and every marker written from
-// now on records its own).
-func (s *ErasureService) recoverSequenceFloor(ctx context.Context, table string) (int64, error) {
-	located, complete, err := s.markers.LocateSequenceFloor(ctx, table)
+// ErrSequenceFloorUnresolved is the refusal when a marker names an id the
+// probe cannot reach: no floor below it is safe, and accepting one would
+// leave that id free to be handed out again and its innocent holder erased
+// by the old marker on a later open. Start-up fails on it instead, and the
+// operator raises the floor themselves — they know the id space their
+// markers came from, and the log says so.
+var ErrSequenceFloorUnresolved = errors.New("erasure markers: no safe sequence floor could be established from the markers")
+
+// recoverSequenceFloor is the floor for a table whose marker file has not
+// been probed: the highest id its markers name, or whichever of the
+// recorded floor and the live counter stands higher. A marker the probe
+// cannot reach is fatal rather than logged — a floor that is only a lower
+// bound is the defect this recovery exists to close.
+func (s *ErasureService) recoverSequenceFloor(ctx context.Context, table string, recorded int64) (int64, error) {
+	located, complete, err := s.markers.LocateSequenceFloor(ctx, table, s.floorProbeCeiling)
 	if err != nil {
 		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
 	if !complete {
-		slog.Error("erasure markers: could not locate every marker's id within the probe ceiling; the recovered sequence floor is a lower bound and an id above it could still be reused",
-			"table", table, "located_up_to", located, "ceiling", db.SequenceFloorProbeCeiling)
+		slog.Error("erasure markers: a marker names an id beyond the probe ceiling, so no safe sequence floor can be established; raise this table's floor by hand, above the highest id this installation ever handed out",
+			"table", table, "located_up_to", located, "ceiling", s.floorProbeCeiling)
+		return 0, fmt.Errorf("%w: %s", ErrSequenceFloorUnresolved, table)
 	}
 	seq, err := s.st.SequenceValue(ctx, table)
 	if err != nil {
 		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
-	return max(located, seq), nil
+	return max(located, max(recorded, seq)), nil
 }
 
 // finishErasure is everything after the database half: the member_ban and

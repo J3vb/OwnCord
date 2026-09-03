@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS sequence_floors (
     name TEXT    PRIMARY KEY,
     seq  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS floor_probes (
+    name      TEXT PRIMARY KEY,
+    probed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 ```
 
 `state` is the erasure's two-phase protocol: `pending` is written before the
@@ -178,7 +183,11 @@ the tables whose ids the markers name, as they stood when a marker was
 written. A restore rolls `sqlite_sequence` back with the rest of the file, and
 the next row would take an id a marker still names; every open raises the
 counters to these floors before the markers are replayed, so an id is never
-handed out twice across restored timelines.
+handed out twice across restored timelines. A file written before the floors
+existed has none, or only ones a later erasure wrote: `floor_probes` records
+that the ids its markers name have been recovered from the tokens themselves
+(`MarkerStore.LocateSequenceFloor`) and the floor merged, which is what lets
+later opens skip that work — a floor row alone does not prove it.
 
 ---
 

@@ -424,3 +424,104 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 		t.Error("the new account was erased by the old marker")
 	}
 }
+
+// A pre-floor marker file can already hold a floor written by a later
+// erasure while an older marker still names a higher id, so the presence of
+// a floor row is not evidence that every marker is covered. The probe runs
+// until it has been recorded as complete, not until a row exists, and its
+// result is merged with the row (Codex's second review of #1523).
+func TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+
+	// The legacy store: the marker for uid survives, and the only floor is a
+	// lower one a later erasure recorded after a restore rolled the counter
+	// back. No probe has been recorded.
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFile.Close()
+	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rawFile.ExecContext(ctx, `UPDATE sequence_floors SET seq = ? WHERE name = ?`, uid-1, db.SequenceFloorUsers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'`, uid-1); err != nil {
+		t.Fatal(err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != uid-1 {
+		t.Fatalf("floors before the replay = %v, want the insufficient %d", floors, uid-1)
+	}
+
+	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("ReplayMarkers = %+v, %v", rep, err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] < uid {
+		t.Errorf("floors after the replay = %v, want the users floor raised to at least the erased %d", floors, uid)
+	}
+	fresh, err := database.CreateUser(ctx, "after-the-merge", "hash", 4)
+	if err != nil || fresh <= uid {
+		t.Fatalf("the next account got id %d (%v), want one above the erased %d", fresh, err, uid)
+	}
+
+	// The probe is recorded, so a later open does not pay for it again.
+	if probed, err := markers.FloorProbed(ctx, db.SequenceFloorUsers); err != nil || !probed {
+		t.Errorf("FloorProbed = %v, %v; want it recorded", probed, err)
+	}
+}
+
+// A marker whose id lies beyond the probe ceiling leaves no safe floor, so
+// start-up fails rather than persisting one that only looks safe (Codex's
+// second review of #1523).
+func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetMarkers(markers)
+	svc.floorProbeCeiling = 200
+
+	tok, _, err := markers.RecordPendingAccount(ctx, 5000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markers.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFile.Close()
+	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.ReplayMarkers(ctx); !errors.Is(err, ErrSequenceFloorUnresolved) {
+		t.Fatalf("ReplayMarkers with an unreachable marker = %v, want ErrSequenceFloorUnresolved", err)
+	}
+	if probed, _ := markers.FloorProbed(ctx, db.SequenceFloorUsers); probed {
+		t.Error("a refused probe was recorded as complete")
+	}
+
+	// With a ceiling that reaches it, the floor is established and start-up
+	// proceeds.
+	svc.floorProbeCeiling = 6000
+	if _, err := svc.ReplayMarkers(ctx); err != nil {
+		t.Fatalf("ReplayMarkers with a ceiling past the marker = %v", err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != 5000 {
+		t.Errorf("floors = %v, want the users floor at the located 5000", floors)
+	}
+}
