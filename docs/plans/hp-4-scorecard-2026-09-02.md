@@ -308,3 +308,148 @@ refs are in the chain table above.
 **Signed:** Accepted 2026-09-03 — the owner merged this scorecard as #1515
 (`9598c51`) with all six decisions standing; recorded by B4-9's PR, not
 signed in the owner's name. Acceptance authorises B4-9 → B4-10 → B4-11.
+
+## B4 exit — 2026-09-03, measured at `dev` `1133a26`
+
+The B4 plan's exit gate says the exit evidence is appended to this scorecard
+as a dated section, measured at the exact exit SHA with the gate green there.
+This is that section. `1133a26` is the squash of
+[#1525](https://github.com/J3vb/OwnCord/pull/1525), the last of the
+B4-9 → B4-10 → B4-11 chain and the commit that closed its review fixes.
+
+Every result below was run on `1133a26` rather than cited from the step that
+first produced it. Where a condition is met by a named suite, the suite was
+re-run here and its count is the count of tests that passed.
+
+### The seven roadmap conditions
+
+| #   | Condition                                                                                                      | Evidence at `1133a26`                                                                                                                                                                                                                                                                  |
+| --- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | All registration modes enforce their documented default and transitions                                        | **Met.** 15 tests, 0 failures: `TestMigration034_MapsRegistrationOpenWithoutOpening` (a fresh install defaults to invite, an upgrade never opens), `TestSettings_RegistrationModeTransitionsChainUnderConcurrency`, the normalise/reject pair, `TestAdminAPI_Registrations_*`          |
+| 2   | Recovery works without SMTP, rotates secrets, revokes sessions, rate-limits, content-free audit                | **Met.** 32 tests, 0 failures: `TestRecoverRoute_*` (kit and owner-issued credential), `TestAdminAPI_RecoveryCredential_OwnerOnlyIssueAndRedeem`, `TestEraseAccount_PurgesTheRecoveryKit`/`Credential`, and the five `TestAbsenceContract_*` proofs that no mail path exists           |
+| 3   | Multi-device session contracts list and revoke only the correct account's devices                              | **Met.** 18 tests, 0 failures: `TestListUserSessions_DoesNotReturnOtherUsers`, `TestGetUserSessions_IsolatedByUser`, `TestRevokeAllSessions_OnlyTheCallersAccount`, `TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly`, `TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists` |
+| 4   | Deletion removes every required data class and backup restore cannot resurrect the account                     | **Met.** 71 tests, 0 failures: `TestEraseAccount_EveryInventoryClassIsZero`, `TestErasureService_LineageChecklistOnAlphaSnapshot`, and `TestHP4_D1`–`D5` on snapshot copies — `D2` is the post-restore proof (restore resurrects, the markers re-apply the erasure)                    |
+| 5   | Retention removes messages and attachments consistently without bypassing legal/operator holds (if introduced) | **Met, holds deliberately absent.** 14 tests, 0 failures: window precedence, indefinite-by-default, budget/resume, the run journal and the replay purge. No hold mechanism ships — owner decision 5 in this scorecard. The condition's "if introduced" is answered: not introduced     |
+| 6   | Support bundles are user initiated, reviewed for secrets, and no automatic telemetry occurs                    | **Met at the slim scope.** `TestNoAutomaticTelemetry_Capture` plus the four `TestDiagnosticsConnectivity_*`, 5 tests, 0 failures. The export endpoint itself is B6/B9 under BG-15 — owner question 10, recorded as the slim scope when B4-8 landed, not discovered at exit             |
+| 7   | Alpha-shaped data migrates forward and rolls back according to the declared boundary                           | **Met at the exit, after work.** Three of the twelve B4 migrations had a reversal when the chain finished. All twelve now do, plus the marker file, and `TestMigrationRollbackRehearsalOnAlphaSnapshot` rehearses the whole set on a snapshot copy. Report below                       |
+| —   | _(roadmap rule 2)_ No B4-tagged `OC-*` finding open                                                            | **Met.** OC-0313, OC-0314, OC-0321, OC-0324, OC-0329, OC-0340, OC-0341, OC-0354 all `fixed`; `node .superpowers/render-ledger.mjs --check` → `ledger valid: 383 finding(s)`                                                                                                            |
+
+### Migration and rollback rehearsal report
+
+The roadmap asks for this as its own evidence artifact, and it is the one
+condition that was not a matter of measuring something already true. The B4
+plan's traps say the steps carrying migrations do so "each with a rollback
+rehearsed on an alpha-snapshot copy". At `1133a26`, three of twelve did.
+
+Twelve migrations landed in B4, `032` through `043`.
+`docs/plans/hp-4-drafts/` held four reversals, written with the HP-4 data
+contracts before those migrations landed — `037`, `038`, `039` and the
+deletion-marker file. The other nine had none: `032`, `033`, `034`, `035`,
+`036`, `040`, `041`, `042`, `043`. Two defects also sat in the four that
+existed:
+
+- **None cleared its own `schema_versions` row.** The runner records a
+  migration by filename and skips what it finds recorded, so a reversal that
+  leaves the row behind leaves the database claiming a schema it no longer
+  has, and the next server start does not put it back.
+- **`deletion_markers.down.sql` was stale.** It predates `sequence_floors`
+  and `floor_probes`, so it dropped one of the marker file's three tables.
+
+`Server/rollback/` is the completed set: one reversal per migration in the
+order to run them, the marker file's separately, each clearing its own
+`schema_versions` row, each carrying in its own comment what reversing it
+costs (`Server/rollback/README.md` collects those for an operator).
+
+The rehearsal runs on a copy of the committed alpha snapshot, per the drill
+protocol — the tracked file is never opened. The snapshot sits at `031`, so
+the forward run is exactly the B4 delta and a full reversal has to land back
+on the snapshot's own schema:
+
+| Stage                 | Result at `1133a26`                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Forward               | 12 migrations applied, `schema_versions` 31 → 43, clean                                                                              |
+| Completeness          | every migration past the snapshot's level has a reversal, and every reversal names a migration the head applied                      |
+| Reverse, newest first | 12 reversals, 35 statements, clean — 043, 042, 041, 040, 039, 038, 037, 036, 035, 034, 033, 032                                      |
+| Round trip            | schema fingerprint, `schema_versions` (43 → 31), `settings` and the row counts of seven data classes all identical to the snapshot's |
+| Convergence           | migrating forward again reaches the same head schema and the same 43 rows — a rolled-back database is one a server can start on      |
+| Marker file           | `TestMarkerFileRollback`: all three tables dropped, `OpenMarkerStore` rebuilds the schema on the next open, the marker is gone       |
+
+Two reversals are documented to lose something, and the rehearsal pins each
+loss to the row it is documented for rather than letting it pass silently:
+
+- **`042` then `041` (audit tokens).** An audit row naming two erased
+  principals holds a token for each, and the pre-`041` schema has one column.
+  `042`'s reversal moves an actor-only token back into `subject_token`, so
+  `041`'s column drop cannot be what discards it; a two-principal row keeps
+  the target's token and forfeits the actor's. That is the loss migration
+  `041` exists to prevent, made visible in the direction that gives it up.
+- **`034` (registration modes).** `approval` and `open` have no boolean
+  spelling, so a rollback puts registration back to closed. On the snapshot
+  the round trip is exact (`registration_open` `0` → `closed` → `0`); on a
+  server running approval or open it is not, and the reversal's comment says
+  to note the mode first.
+
+Every other reversal round-trips exactly on this fixture.
+
+### The gate, run on the exit SHA
+
+| Check                                                 | Result                                                                                                                  |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Four build-tag variants (default, otel, wazero, both) | all OK                                                                                                                  |
+| `go vet ./...`                                        | clean                                                                                                                   |
+| `golangci-lint run ./...` (pinned v2.11.3)            | **0 issues**                                                                                                            |
+| `go test ./...`                                       | ok, all packages                                                                                                        |
+| `go test -tags otel,wazero ./...`                     | ok, all packages                                                                                                        |
+| `go test -race`, one package at a time                | ok, all packages — run one package at a time, not in parallel                                                           |
+| `go test -tags deadlock ./ws/`                        | ok, 63.4s                                                                                                               |
+| Coverage floors                                       | aggregate 81.7 (80.9), auth 91.9 (91.4), db 80.7 (79.3), permissions 100.0 (100.0), service 77.7 (74.3), ws 87.6 (86.7) |
+| `make sqlc-verify`                                    | no drift in `Server/db/dbgen`                                                                                           |
+| `go run -tags otel,wazero ./cmd/gendocs`              | no drift in the `gendocs:*` blocks                                                                                      |
+| `node scripts/check-doc-counts.mjs`                   | 21 claims across 9 documents agree with the ledger                                                                      |
+| `node .superpowers/render-ledger.mjs --check`         | `ledger valid: 383 finding(s)`                                                                                          |
+| Client unit suite, `tsc --noEmit`, lint               | 192 files, 5273 tests pass; `tsc --noEmit` clean; lint no errors                                                        |
+
+### Integration evidence for the exit commits
+
+`dev` is squash-merge-only and its pushes run no `ci.yml` matrix, so what
+transfers the PR-head result to the squash commit is
+`required_status_checks.strict` plus tree identity (G-03 as amended). The
+whole chain, as a command with output:
+
+```
+PASS 1133a26 (PR #1525): squash tree == PR head tree ff85f81fd25490093d1069a9ebf5181b8aa6dd76
+PASS 5263b13 (PR #1524): squash tree == PR head tree 1de9774a78900a75dd89b7fbf5f22c2f36ca623c
+PASS b973d21 (PR #1523): squash tree == PR head tree 3bf643feda637311c7ba355fa6d6ee7ba7db4144
+PASS 15ba7c9 (PR #1522): squash tree == PR head tree cbed29d525249e48be0e39c6368f309f5160bee7
+PASS 607fd4d (PR #1521): squash tree == PR head tree b919e6854b5ed81c06449cafb52ebe26b85b3581
+PASS 87ad997 (PR #1520): squash tree == PR head tree 31752440fdf61cbc62b045e7822e362404fef045
+PASS 7907c16 (PR #1517): squash tree == PR head tree b3658696c50a84f3b67b6341a79bba5061dbaf7c
+PASS c9f06da (PR #1516): squash tree == PR head tree 5c562d9102534a427946b8176f528f992b814d46
+```
+
+### What this exit does not claim
+
+Four limits, stated here so nobody has to infer them from silence:
+
+- **No hold mechanism exists.** Condition 5 is met because holds were not
+  introduced, which is owner decision 5, not because a hold was tested. If
+  legal or operator holds are ever wanted, retention is where they land and
+  this row stops being an absence.
+- **The support-bundle endpoint is not built.** Condition 6 covers the
+  contract and the no-telemetry proof, which is the slim scope owner question
+  10 set. B6/B9 carries the export itself under BG-15.
+- **Condition 7 was closed at the exit, not per step.** Nine reversals were
+  written here rather than alongside their migrations, so they were rehearsed
+  once, together, against the alpha snapshot — not against the schema each
+  migration actually met on the day it landed. The rehearsal test is what
+  stops the next migration repeating it.
+- **The reversals are rehearsed, not exercised in anger.** They round-trip a
+  100-user snapshot in a test. Nobody has rolled one of them back on a
+  running installation, and the ones that discard credentials or forfeit the
+  anti-resurrection guarantee are meant to be rare, deliberate acts.
+
+**Prepared:** 2026-09-03 by the B4 exit PR, measured at `1133a26`. The seven
+conditions and roadmap rule 2 are met, with the four limits above.
+**Awaiting the owner's sign-off** — recorded factually here rather than
+signed in the owner's name, the same way this scorecard's own acceptance was
+recorded.
