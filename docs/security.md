@@ -129,9 +129,15 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 ```
 
 The next `POST /admin/api/setup` then creates a new Owner and sets the flag
-again. `0` is the only value that opens setup: the gate stands in front of an
-unauthenticated endpoint, so a missing, corrupted or unrecognised flag is
-treated as closed.
+again. `0` is the only _value_ that opens setup: the gate stands in front of an
+unauthenticated endpoint, so a flag holding anything else — corrupted,
+hand-edited to something the server does not recognise — is treated as
+closed. A missing row is the one case that is not: it is what every database
+from before migration 043 looks like, so the user count decides there, and a
+server that has genuinely never been set up can still run its wizard. The
+migration writes the row on every upgrade, so after it the row is absent only
+if something removed it, and removing it needs the same write access to the
+database file that setting it to `0` needs anyway.
 
 The flag lives in the database, so a restore rolls it back with everything
 else — including a backup taken before the server was ever set up, which the
