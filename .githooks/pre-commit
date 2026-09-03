@@ -52,8 +52,14 @@ fi
 # Protocol schema changed -> regenerated Go + TS constants must be in the same commit.
 if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genprotocol/)'; then
     if command -v go >/dev/null 2>&1; then
-        (cd Server && go run ./cmd/genprotocol \
-            && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts) \
+        # The diff runs from repo_root, not from Server/: git hooks export
+        # GIT_DIR, and with GIT_DIR set and no GIT_WORK_TREE git treats the
+        # current directory as the work tree, so a "../" path is rejected as
+        # outside the repository. That made every one of these checks abort
+        # in a git worktree, which is where this repository's own guidance
+        # says to do branch work.
+        (cd Server && go run ./cmd/genprotocol) \
+            && git diff --exit-code Server/ws/message_types.go Client/src/lib/protocolTypes.ts \
             || fail "protocol constants are stale — run 'go run ./cmd/genprotocol' in Server/ and stage the result"
     else
         printf 'pre-commit: WARNING: go not installed; skipping the protocol-constants check. CI will run it.\n' >&2
@@ -72,8 +78,10 @@ fi
 # is generated from; the tool refuses to run without it.
 if printf '%s\n' "$staged" | grep -qE '^Server/(api|admin)/.*\.go$|^Server/(migrations/|config/config\.go|cmd/gendocs/)'; then
     if command -v go >/dev/null 2>&1; then
-        (cd Server && go run -tags otel,wazero ./cmd/gendocs \
-            && git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md) \
+        # Root-relative paths, and the diff outside the subshell — see the
+        # GIT_DIR note on the protocol check above.
+        (cd Server && go run -tags otel,wazero ./cmd/gendocs) \
+            && git diff --exit-code docs/api.md docs/schema.md docs/server-configuration.md \
             || fail "generated docs blocks are stale, or a config key is undocumented — if gendocs named keys above, document them in docs/server-configuration.md; otherwise run 'go run -tags otel,wazero ./cmd/gendocs' in Server/ and stage the result"
     else
         printf 'pre-commit: WARNING: go not installed; skipping the generated-docs check. CI will run it.\n' >&2
