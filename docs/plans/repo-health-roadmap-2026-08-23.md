@@ -3,15 +3,14 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** B0–B3 complete (HP-0 accepted 2026-08-25, HP-1 accepted
-2026-08-27, HP-2 accepted 2026-08-29, HP-3 accepted 2026-08-30; B3 exit
-signed 2026-09-01 — the "B3 exit" section of
+**Status:** B0–B4 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27, HP-2 accepted 2026-08-29, HP-3 accepted 2026-08-30, HP-4 accepted
+2026-09-03; B3 exit signed 2026-09-01 — the "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)). **B4 executed
-2026-09-01 to 2026-09-03** (HP-4 accepted 2026-09-03), all twelve steps
-merged to `dev`; its **exit is prepared and awaiting the owner's sign-off** —
-the "B4 exit" section of
+2026-09-01 to 2026-09-03**, all twelve steps merged to `dev`; its **exit was
+accepted 2026-09-03** — the "B4 exit" section of
 [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md), measured at
-`dev` `1133a26`. HP-5 is next; B5–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+`dev` `1133a26` and accepted at `0a14554`. HP-5 is next; B5–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
 in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
 [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
 is the implementation supplement for the B3, B7 and B9 structural workstreams
