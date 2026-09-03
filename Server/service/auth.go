@@ -25,6 +25,14 @@ type AuthBroadcaster interface {
 	BroadcastMemberBan(userID int64)
 }
 
+// sessionDisconnector is the hub's half of dropping a live socket once its
+// session is gone — api.SessionDisconnector's counterpart inside the service
+// layer, satisfied by *ws.Hub. A broadcaster that does not implement it
+// (tests, a nil hub) simply skips the disconnect.
+type sessionDisconnector interface {
+	DisconnectRevokedUser(userID int64)
+}
+
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
 // request. Session is nil for an API-token principal.
 type Principal struct {

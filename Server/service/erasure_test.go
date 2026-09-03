@@ -730,6 +730,82 @@ func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
 	}
 }
 
+// ReplayMarkers must not abort start-up when the upload store is
+// unavailable: openMarkers logs that a replayed erasure journals its files
+// (Server/internal/app/erasure.go), and the live routes (DeleteAccount,
+// EraseUser) treat ErrErasureFilesPending as success, not a failure to
+// propagate. The database half of the replay must go through, and the job
+// stays listed for Resume to finish once the store comes back (OC-0399).
+func TestErasureService_ReplayMarkersSurvivesFilesUnavailable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, files := seedErasureMember(t, database, dir)
+	backup := filepath.Join(t.TempDir(), "older.db")
+	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
+		t.Fatal(err)
+	}
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restored.Close() })
+	if err := db.Migrate(restored); err != nil {
+		t.Fatal(err)
+	}
+
+	// No SetFiles here: the upload store failed to open at start-up, just
+	// as openMarkers leaves it when storage.New errors.
+	fresh := NewErasureService(restored)
+	fresh.SetMarkers(markers)
+	rep, err := fresh.ReplayMarkers(ctx)
+	if err != nil {
+		t.Fatalf("ReplayMarkers with no file storage = %v, want nil (files pending is not fatal)", err)
+	}
+	if rep.Erased != 1 {
+		t.Fatalf("report = %+v, want 1 erased", rep)
+	}
+	if u, _ := restored.GetUserByID(ctx, uid); u != nil {
+		t.Error("the resurrected account survived the replay")
+	}
+	jobs, err := restored.ListUnfinishedErasureJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("unfinished erasure jobs = %d, want 1 (the files are still journaled)", len(jobs))
+	}
+}
+
 // failingHub refuses the replay purge until allowed; the job must stay
 // listed with the purge outstanding and Resume must retry it.
 type failingHub struct {
