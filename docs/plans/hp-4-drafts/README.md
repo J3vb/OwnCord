@@ -25,13 +25,18 @@ the rollback. `040_erasure_replay_purge.sql` (#1517) adds
 `erasure_jobs.replay_purged` and the `idx_messages_reply_to` index the erasure's
 cascade needed — its own migration, so upgraded installations get both.
 `audit_unlinking` landed as `Server/migrations/038_audit_unlinking.sql`
-(B4-10, 2026-09-03), verbatim. `deletion_markers` is applied by the server on
+(B4-10, 2026-09-03), verbatim; `041_audit_actor_token.sql` adds the actor's
+own token column beside it — a row names two principals, and the draft's
+single column kept only the last erasure's token (Codex's review of #1520). `deletion_markers` is applied by the server on
 the marker file itself (`Server/db/markers.go`, `OpenMarkerStore`), not by the
-migrations, with one addition to the draft: a `state` column
-(`pending`/`recorded`) for the two-phase write around the erasure transaction
-(`docs/schema.md`, "The deletion-marker file"); its `down` file is the
-rollback for that file. `retention` landed as
-`Server/migrations/039_retention.sql` (B4-11, 2026-09-03), the `up` draft
-with the semicolons inside its comments turned into commas — the migration
-splitter treats `;` as a statement boundary even in a comment (the
-`db-change` skill's trap); its `down` file stays here as the rollback.
+migrations, with two additions to the draft: a `state` column
+(`pending`/`recorded`) for the two-phase write around the erasure transaction,
+and a `sequence_floors` table holding the `AUTOINCREMENT` counters the
+markers' ids depend on, re-applied on every open (`docs/schema.md`, "The
+deletion-marker file"); its `down` file is the rollback for that file.
+`retention` landed as `Server/migrations/039_retention.sql` (B4-11,
+2026-09-03), the `up` draft with the semicolons inside its comments turned
+into commas — the migration splitter treats `;` as a statement boundary even
+in a comment (the `db-change` skill's trap) — and one column the draft did
+not have: `retention_runs.purge_pending`, the replay-purge journal (Codex's
+review of #1521); its `down` file stays here as the rollback.

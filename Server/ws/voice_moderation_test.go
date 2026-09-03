@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
     subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)...)
@@ -128,7 +129,8 @@ func auditActions(t *testing.T, database *db.DB) []string {
 		t.Fatalf("GetAuditLog: %v", err)
 	}
 	actions := make([]string, 0, len(entries))
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		actions = append(actions, e.Action)
 	}
 	return actions

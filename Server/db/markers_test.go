@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,11 +51,11 @@ func TestMarkerStore_TokenIsKeyedAndUnlinkable(t *testing.T) {
 func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
 	ctx := context.Background()
 	m := openTestMarkers(t, testMarkerKey(3))
-	tok, created, err := m.RecordPendingAccount(ctx, 7)
+	tok, created, err := m.RecordPendingAccount(ctx, 7, 0)
 	if err != nil || !created || tok != m.SubjectToken(7) {
 		t.Fatalf("RecordPendingAccount = %q, %v, %v", tok, created, err)
 	}
-	if _, again, err := m.RecordPendingAccount(ctx, 7); err != nil || again {
+	if _, again, err := m.RecordPendingAccount(ctx, 7, 0); err != nil || again {
 		t.Fatalf("second RecordPendingAccount created = %v, %v; want false", again, err)
 	}
 	markers, err := m.Markers(ctx)
@@ -67,7 +68,7 @@ func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
 	if markers, _ := m.Markers(ctx); len(markers) != 0 {
 		t.Fatalf("discard left %+v", markers)
 	}
-	if _, _, err := m.RecordPendingAccount(ctx, 7); err != nil {
+	if _, _, err := m.RecordPendingAccount(ctx, 7, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.ConfirmAccount(ctx, tok); err != nil {
@@ -97,9 +98,12 @@ func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
 	}
 }
 
-// ReplayAccounts on an in-memory database: a recorded marker whose account
-// is present erases it again; a pending marker resolves by the account's
-// existence; markers for absent accounts do nothing.
+// ReplayAccounts on an in-memory database: a marker whose account is
+// present erases it — recorded, or still pending from a crash (a restore
+// can revert the commit the pending marker was waiting on, so a present
+// account proves nothing, and the request behind the marker was
+// authorised); a pending marker whose account is gone is confirmed;
+// recorded markers for absent accounts do nothing.
 func TestMarkerStore_ReplayAccounts(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemoryInternal(t)
@@ -112,12 +116,11 @@ func TestMarkerStore_ReplayAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []int64{resurrected} {
-		tok, _, _ := m.RecordPendingAccount(ctx, id)
+		tok, _, _ := m.RecordPendingAccount(ctx, id, 0)
 		_ = m.ConfirmAccount(ctx, tok)
 	}
-	_, _, _ = m.RecordPendingAccount(ctx, crashedBefore)
-	_, _, _ = m.RecordPendingAccount(ctx, gone)
-	_ = owner
+	_, _, _ = m.RecordPendingAccount(ctx, crashedBefore, 0)
+	_, _, _ = m.RecordPendingAccount(ctx, gone, 0)
 
 	var erased []int64
 	rep, err := m.ReplayAccounts(ctx, database, func(ctx context.Context, userID int64, token string) error {
@@ -125,23 +128,27 @@ func TestMarkerStore_ReplayAccounts(t *testing.T) {
 			t.Errorf("erase called with token %q for %d", token, userID)
 		}
 		erased = append(erased, userID)
-		_, err := database.EraseAccount(ctx, userID, token)
+		_, err := database.ReplayEraseAccount(ctx, userID, token)
 		return err
 	})
 	if err != nil {
 		t.Fatalf("ReplayAccounts: %v", err)
 	}
-	if rep.Erased != 1 || rep.Confirmed != 1 || rep.Discarded != 1 {
-		t.Errorf("report = %+v, want 1 erased, 1 confirmed, 1 discarded", rep)
+	if rep.Erased != 2 || rep.Confirmed != 1 {
+		t.Errorf("report = %+v, want 2 erased (one recorded, one pending), 1 confirmed", rep)
 	}
-	if len(erased) != 1 || erased[0] != resurrected {
-		t.Errorf("erased = %v, want [%d]", erased, resurrected)
+	slices.Sort(erased)
+	if want := []int64{resurrected, crashedBefore}; !slices.Equal(erased, want) {
+		t.Errorf("erased = %v, want %v", erased, want)
 	}
 	if u, _ := database.GetUserByID(ctx, resurrected); u != nil {
 		t.Error("the resurrected account survived the replay")
 	}
-	if u, _ := database.GetUserByID(ctx, crashedBefore); u == nil {
-		t.Error("an account whose erasure never committed was erased by its pending marker")
+	if u, _ := database.GetUserByID(ctx, crashedBefore); u != nil {
+		t.Error("the account behind a pending marker survived the replay")
+	}
+	if u, _ := database.GetUserByID(ctx, owner); u == nil {
+		t.Error("an account without a marker was erased")
 	}
 	markers, _ := m.Markers(ctx)
 	byTok := map[string]DeletionMarker{}
@@ -154,8 +161,8 @@ func TestMarkerStore_ReplayAccounts(t *testing.T) {
 	if mk, ok := byTok[m.SubjectToken(gone)]; !ok || mk.State != MarkerRecorded {
 		t.Errorf("marker for the account gone before confirm = %+v, want recorded", mk)
 	}
-	if _, ok := byTok[m.SubjectToken(crashedBefore)]; ok {
-		t.Error("the discarded pending marker is still there")
+	if mk, ok := byTok[m.SubjectToken(crashedBefore)]; !ok || mk.State != MarkerRecorded || mk.Replays != 0 {
+		t.Errorf("marker applied while pending = %+v, want recorded, not counted as a replay", mk)
 	}
 	// A second replay finds nothing to do.
 	rep, err = m.ReplayAccounts(ctx, database, func(context.Context, int64, string) error { t.Error("erase called again"); return nil })
@@ -184,7 +191,7 @@ func TestMarkerStore_FileLivesOutsideTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	if _, _, err := m.RecordPendingAccount(context.Background(), 1); err != nil {
+	if _, _, err := m.RecordPendingAccount(context.Background(), 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "data", "erasure", "markers.sqlite")); err != nil {
@@ -198,14 +205,14 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 	if m.MessagesToken(5) == m.SubjectToken(5) || m.MessagesToken(5) == m.MessagesToken(6) {
 		t.Fatal("messages tokens collide with account tokens or each other")
 	}
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00"); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00"); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
 	// An older cutoff never moves the marker back.
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00"); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
 	markers, _ := m.Markers(ctx)
@@ -225,7 +232,7 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 		t.Errorf("replays = %d, want 1", markers[0].Replays)
 	}
 	// Account markers are not handed to the messages sweep.
-	tok, _, _ := m.RecordPendingAccount(ctx, 9)
+	tok, _, _ := m.RecordPendingAccount(ctx, 9, 0)
 	_ = m.ConfirmAccount(ctx, tok)
 	n, err = m.ReplayMessages(ctx, func(_ context.Context, ch int64, _ string) (int, error) {
 		if ch != 5 {

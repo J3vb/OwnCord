@@ -84,11 +84,11 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 		t.Errorf("Close on a nil store = %v", err)
 	}
 	markerCalls := map[string]func() error{
-		"RecordPendingAccount": func() error { _, _, err := m.RecordPendingAccount(ctx, uid); return err },
+		"RecordPendingAccount": func() error { _, _, err := m.RecordPendingAccount(ctx, uid, 0); return err },
 		"ConfirmAccount":       func() error { return m.ConfirmAccount(ctx, "t") },
 		"DiscardPending":       func() error { return m.DiscardPending(ctx, "t") },
 		"Markers":              func() error { _, err := m.Markers(ctx); return err },
-		"RecordMessagesSweep":  func() error { return m.RecordMessagesSweep(ctx, chID, "2026-01-01 00:00:00") },
+		"RecordMessagesSweep":  func() error { return m.RecordMessagesSweep(ctx, chID, "2026-01-01 00:00:00", 0) },
 		"ReplayMessages": func() error {
 			_, err := m.ReplayMessages(ctx, func(context.Context, int64, string) (int, error) { return 0, nil })
 			return err
@@ -124,9 +124,9 @@ func TestMarkerStore_ReplayPropagatesCallbackErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = m.Close() })
-	tok, _, _ := m.RecordPendingAccount(ctx, uid)
+	tok, _, _ := m.RecordPendingAccount(ctx, uid, 0)
 	_ = m.ConfirmAccount(ctx, tok)
-	_ = m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00")
+	_ = m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0)
 	if _, err := m.ReplayAccounts(ctx, database, func(context.Context, int64, string) error { return context.DeadlineExceeded }); err == nil {
 		t.Error("ReplayAccounts swallowed the erase error")
 	}

@@ -572,6 +572,12 @@ func (h *Hub) FreezeTopicLimiterForTest() {
 // EventNamesUserForTest exposes eventNamesUser to the external test package.
 func EventNamesUserForTest(data []byte, userID int64) bool { return eventNamesUser(data, userID) }
 
+// EventNamesMessageForTest exposes eventNamesMessage to the external test
+// package.
+func EventNamesMessageForTest(data []byte, ids map[int64]struct{}) bool {
+	return eventNamesMessage(data, ids)
+}
+
 // AllFramesForTest returns every frame still held in the ring buffer, oldest
 // first, including the oldest slot EventsSince can never return.
 func (rb *EventRingBuffer) AllFramesForTest() [][]byte {

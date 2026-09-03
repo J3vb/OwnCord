@@ -22,9 +22,12 @@ type RetentionStore interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
-	SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) (int, []string, error)
+	SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
+	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
+	SequenceValue(ctx context.Context, table string) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
 	RecordRetentionRunFiles(ctx context.Context, runID int64, channels, deleted int, files []string) error
+	RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int64) error
 	FinishRetentionRun(ctx context.Context, runID int64, filesRemoved int, lastError string) error
 	ListUnfinishedRetentionRuns(ctx context.Context) ([]db.RetentionRun, error)
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
@@ -49,6 +52,12 @@ const (
 // never in scope (owner decision 4).
 var ErrRetentionDMChannel = errors.New("retention does not apply to direct messages")
 
+// RetentionHub is what the sweep needs from the WebSocket hub: the replay
+// purge for the messages a sweep removed. *ws.Hub satisfies it.
+type RetentionHub interface {
+	PurgeMessagesFromReplay(ctx context.Context, ids []int64) error
+}
+
 // RetentionService is the message-retention policy and its sweep (B4-11,
 // BPR-054): indefinite by default, a server-wide window in settings, a
 // per-channel override in either direction, pinned messages exempt, DMs
@@ -62,6 +71,7 @@ type RetentionService struct {
 	mu      syncutil.Mutex
 	st      RetentionStore
 	files   FileRemover
+	hub     RetentionHub
 	markers *db.MarkerStore
 	now     func() time.Time
 }
@@ -76,6 +86,12 @@ func (s *RetentionService) SetFiles(f FileRemover) { s.files = f }
 
 // SetMarkers installs the deletion-marker store the sweep records into.
 func (s *RetentionService) SetMarkers(m *db.MarkerStore) { s.markers = m }
+
+// SetHub installs the hub: from then on a sweep purges the replay pipeline
+// through it — ring buffer, persister barrier, events rows, the producer
+// tombstone — instead of the persisted rows alone. Call it at the
+// composition root before serving.
+func (s *RetentionService) SetHub(h RetentionHub) { s.hub = h }
 
 // SetClock replaces the clock (tests).
 func (s *RetentionService) SetClock(now func() time.Time) { s.now = now }
@@ -226,6 +242,7 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		return rep, err
 	}
 	var files []string
+	var purgePending []int64
 	budget := RetentionTickBudget
 	var sweepErr error
 	for _, w := range windows {
@@ -234,7 +251,7 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 			break
 		}
 		cutoff := s.cutoff(w.Days)
-		removed, swept, exhausted, err := s.sweepChannel(ctx, w.ChannelID, cutoff, &budget)
+		removed, swept, exhausted, err := s.sweepChannel(ctx, runID, w.ChannelID, cutoff, &budget, &purgePending)
 		files = append(files, swept...)
 		if err != nil {
 			sweepErr = err
@@ -247,14 +264,15 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 			// swept to it; a budgeted channel records nothing and continues
 			// next tick.
 			if exhausted && s.markers != nil {
-				if mErr := s.markers.RecordMessagesSweep(ctx, w.ChannelID, cutoff.Format("2006-01-02 15:04:05")); mErr != nil {
-					slog.Error("retention: could not record the messages marker", "channel_id", w.ChannelID, "err", mErr)
-				}
+				s.recordMessagesMarker(ctx, w.ChannelID, cutoff)
 			}
 		}
 		if !exhausted {
 			rep.Budgeted = true
 		}
+	}
+	if len(purgePending) > 0 && sweepErr == nil {
+		sweepErr = fmt.Errorf("replay purge pending for %d messages, retried next tick", len(purgePending))
 	}
 	if err := s.st.RecordRetentionRunFiles(ctx, runID, rep.Channels, rep.Messages, files); err != nil {
 		return rep, err
@@ -280,22 +298,75 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 }
 
 // sweepChannel removes messages older than cutoff in batches until the
-// channel is clean or the budget is spent. exhausted reports the former.
-func (s *RetentionService) sweepChannel(ctx context.Context, channelID int64, cutoff time.Time, budget *int) (removed int, files []string, exhausted bool, err error) {
+// channel is clean or the budget is spent, taking each batch's frames out
+// of the replay tiers behind the run's purge journal. exhausted reports the
+// former. A purge that fails leaves its ids journaled in pending for the
+// next tick; the rows are gone either way.
+func (s *RetentionService) sweepChannel(ctx context.Context, runID, channelID int64, cutoff time.Time, budget *int, pending *[]int64) (removed int, files []string, exhausted bool, err error) {
 	for *budget > 0 {
 		limit := min(RetentionBatch, *budget)
-		n, batchFiles, err := s.st.SweepRetention(ctx, channelID, cutoff, limit)
+		ids, batchFiles, err := s.st.SweepRetention(ctx, channelID, cutoff, limit)
 		if err != nil {
 			return removed, files, false, err
 		}
-		removed += n
-		*budget -= n
+		removed += len(ids)
+		*budget -= len(ids)
 		files = append(files, batchFiles...)
-		if n < limit {
+		if len(ids) > 0 {
+			if err := s.purgeJournaled(ctx, runID, ids, pending); err != nil {
+				return removed, files, false, err
+			}
+		}
+		if len(ids) < limit {
 			return removed, files, true, nil
 		}
 	}
 	return removed, files, false, nil
+}
+
+// purgeJournaled purges the replay tiers for ids behind the run's journal:
+// the ids are written to purge_pending first, so a crash between the sweep's
+// commit and the purge leaves them for the next tick, and taken out again
+// once the purge succeeds. A failed purge stays journaled (logged, not an
+// error of the sweep: the rows are gone, only the frames wait).
+func (s *RetentionService) purgeJournaled(ctx context.Context, runID int64, ids []int64, pending *[]int64) error {
+	if err := s.st.RecordRetentionRunPurge(ctx, runID, append(append([]int64{}, *pending...), ids...)); err != nil {
+		return err
+	}
+	if err := s.purgeReplay(ctx, ids); err != nil {
+		slog.Warn("retention: replay purge failed, journaled for the next tick", "run", runID, "messages", len(ids), "err", err)
+		*pending = append(*pending, ids...)
+		return nil
+	}
+	return s.st.RecordRetentionRunPurge(ctx, runID, *pending)
+}
+
+// purgeReplay takes the swept messages' frames out of the replay pipeline:
+// through the hub when one is installed (ring buffer, persister barrier,
+// events rows, the producer tombstone); without one — the start-up replay,
+// a test — the persisted rows alone, since nothing is buffered yet.
+func (s *RetentionService) purgeReplay(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if s.hub != nil {
+		return s.hub.PurgeMessagesFromReplay(ctx, ids)
+	}
+	_, err := s.st.DeleteEventsForMessages(ctx, ids)
+	return err
+}
+
+// recordMessagesMarker writes the channel's messages marker with the
+// channels sequence as its floor; loud but not fatal, the sweep itself is
+// done.
+func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID int64, cutoff time.Time) {
+	seq, err := s.st.SequenceValue(ctx, db.SequenceFloorChannels)
+	if err != nil {
+		slog.Error("retention: could not read the channels sequence for the marker", "channel_id", channelID, "err", err)
+	}
+	if mErr := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format("2006-01-02 15:04:05"), seq); mErr != nil {
+		slog.Error("retention: could not record the messages marker", "channel_id", channelID, "err", mErr)
+	}
 }
 
 // removeFiles unlinks the journaled files; a missing file counts as removed.
@@ -318,7 +389,8 @@ func (s *RetentionService) removeFiles(files []string) (int, error) {
 	return removed, lastErr
 }
 
-// resumeRuns finishes the file half of runs an earlier process left behind.
+// resumeRuns finishes what earlier runs left behind: a replay purge still
+// journaled, then the file half.
 func (s *RetentionService) resumeRuns(ctx context.Context) error {
 	runs, err := s.st.ListUnfinishedRetentionRuns(ctx)
 	if err != nil {
@@ -326,6 +398,20 @@ func (s *RetentionService) resumeRuns(ctx context.Context) error {
 	}
 	var firstErr error
 	for _, r := range runs {
+		if len(r.PurgePending) > 0 {
+			if err := s.purgeReplay(ctx, r.PurgePending); err != nil {
+				slog.Warn("retention: journaled replay purge failed again", "run", r.ID, "messages", len(r.PurgePending), "err", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else if err := s.st.RecordRetentionRunPurge(ctx, r.ID, nil); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if r.FinishedAt != nil && r.FilesRemoved >= len(r.Files) {
+			// Only the purge was outstanding.
+			continue
+		}
 		removed, fileErr := s.removeFiles(r.Files)
 		errText := ""
 		if fileErr != nil {
@@ -361,14 +447,16 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 		}
 		total := 0
 		var files []string
+		var ids []int64
 		for {
-			n, batchFiles, err := s.st.SweepRetention(ctx, channelID, t, RetentionBatch)
+			batchIDs, batchFiles, err := s.st.SweepRetention(ctx, channelID, t, RetentionBatch)
 			if err != nil {
 				return total, err
 			}
-			total += n
+			total += len(batchIDs)
+			ids = append(ids, batchIDs...)
 			files = append(files, batchFiles...)
-			if n < RetentionBatch {
+			if len(batchIDs) < RetentionBatch {
 				break
 			}
 		}
@@ -378,6 +466,12 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 				return total, err
 			}
 			if err := s.st.RecordRetentionRunFiles(ctx, runID, 1, total, files); err != nil {
+				return total, err
+			}
+			// The persisted replay rows, behind the journal; nothing is
+			// buffered before the hub exists.
+			var pending []int64
+			if err := s.purgeJournaled(ctx, runID, ids, &pending); err != nil {
 				return total, err
 			}
 			removed, fileErr := s.removeFiles(files)

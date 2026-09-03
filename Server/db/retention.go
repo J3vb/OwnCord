@@ -170,55 +170,57 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 // mention counts those messages raised are reversed first (OC-0294), their
 // attachment rows go and the stored_as names come back for the caller's
 // file journal, and the messages_ad trigger drops the FTS entries. Returns
-// the number of messages removed; a return below limit means the channel
-// is swept for this cutoff.
-func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) (int, []string, error) {
+// the ids of the messages removed — the caller takes their frames out of
+// the replay tiers (DeleteEventsForMessages, ws.Hub.PurgeMessagesFromReplay)
+// — and the files; fewer ids than limit means the channel is swept for this
+// cutoff.
+func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
 	if limit < 1 {
-		return 0, nil, nil
+		return nil, nil, nil
 	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
+		return nil, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
 		channelID, cutoff.UTC().Format(sqliteTimeLayout), limit)
 	if err != nil {
-		return 0, nil, fmt.Errorf("SweepRetention select: %w", err)
+		return nil, nil, fmt.Errorf("SweepRetention select: %w", err)
 	}
 	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			rows.Close() //nolint:errcheck
-			return 0, nil, fmt.Errorf("SweepRetention scan: %w", err)
+			return nil, nil, fmt.Errorf("SweepRetention scan: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	rows.Close() //nolint:errcheck
 	if err := rows.Err(); err != nil {
-		return 0, nil, fmt.Errorf("SweepRetention rows: %w", err)
+		return nil, nil, fmt.Errorf("SweepRetention rows: %w", err)
 	}
 	if len(ids) == 0 {
-		return 0, nil, nil
+		return nil, nil, nil
 	}
 	in, args := placeholdersFor(ids)
 
 	if err := reverseMentionCountsForMessages(ctx, tx, channelID, in, args); err != nil {
-		return 0, nil, err
+		return nil, nil, err
 	}
 	files, err := collectAndDeleteAttachments(ctx, tx, in, args)
 	if err != nil {
-		return 0, nil, err
+		return nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (`+in+`)`, args...); err != nil { //nolint:gosec // G202: placeholders only
-		return 0, nil, fmt.Errorf("SweepRetention delete: %w", err)
+		return nil, nil, fmt.Errorf("SweepRetention delete: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, nil, fmt.Errorf("SweepRetention commit: %w", err)
+		return nil, nil, fmt.Errorf("SweepRetention commit: %w", err)
 	}
-	return len(ids), files, nil
+	return ids, files, nil
 }
 
 func placeholdersFor(ids []int64) (string, []any) {
@@ -292,7 +294,10 @@ type RetentionRun struct {
 	MessagesDeleted int
 	Files           []string
 	FilesRemoved    int
-	LastError       string
+	// PurgePending lists swept message ids whose replay purge is still
+	// outstanding: journaled before the purge, cleared after it.
+	PurgePending []int64
+	LastError    string
 }
 
 // StartRetentionRun opens a run row and returns its id.
@@ -323,6 +328,60 @@ func (d *DB) RecordRetentionRunFiles(ctx context.Context, runID int64, channels,
 	return nil
 }
 
+// RecordRetentionRunPurge journals the swept message ids whose replay purge
+// is outstanding (the ring buffer and the events rows): written before the
+// purge, replaced by the empty list after it, so a purge that fails or is
+// interrupted is retried from the run on the next tick. nil clears it.
+func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int64) error {
+	if ids == nil {
+		ids = []int64{}
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("RecordRetentionRunPurge encode: %w", err)
+	}
+	if _, err := d.writer.ExecContext(ctx,
+		`UPDATE retention_runs SET purge_pending = ? WHERE id = ?`, string(encoded), runID); err != nil {
+		return fmt.Errorf("RecordRetentionRunPurge: %w", err)
+	}
+	return nil
+}
+
+// EventNamesMessagePredicate is the SQL that decides whether a persisted
+// replay event is about one of a set of messages, bound to a JSON array of
+// message ids as ?1: a message-family frame (chat_message, chat_edited,
+// chat_deleted, chat_bulk_deleted, reaction_update — the ones that carry a
+// message's content or name it) whose payload.id, payload.message_id or one
+// of payload.ids is in the set. ws.eventNamesMessage is the same rule over
+// the bytes in the ring buffer; the two must stay in step.
+const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update')
+	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
+	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))
+	   OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.ids') AS named WHERE named.value IN (SELECT value FROM json_each(?1)))))`
+
+// DeleteEventsForMessages removes every persisted replay event about the
+// given messages — the retention sweep's persisted tier (B4-11): a swept
+// message's chat_message frame would otherwise stay replayable, content
+// included, until the events pruner reached it. Returns rows deleted.
+func (d *DB) DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteEventsForMessages encode: %w", err)
+	}
+	res, err := d.writer.ExecContext(ctx, `DELETE FROM events WHERE `+EventNamesMessagePredicate, string(encoded))
+	if err != nil {
+		return 0, fmt.Errorf("DeleteEventsForMessages: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("DeleteEventsForMessages RowsAffected: %w", err)
+	}
+	return n, nil
+}
+
 // FinishRetentionRun closes a run: files_removed, the last error (empty for
 // none) and finished_at.
 func (d *DB) FinishRetentionRun(ctx context.Context, runID int64, filesRemoved int, lastError string) error {
@@ -338,14 +397,14 @@ func (d *DB) FinishRetentionRun(ctx context.Context, runID int64, filesRemoved i
 	return nil
 }
 
-// ListUnfinishedRetentionRuns returns runs whose files are not all gone —
-// finished_at NULL, or files_removed short of the journal — oldest first,
-// for the resume at start-up and on each tick.
+// ListUnfinishedRetentionRuns returns runs with work outstanding — not
+// finished, files_removed short of the journal, or a replay purge still
+// pending — oldest first, for the resume at start-up and on each tick.
 func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, error) {
 	rows, err := d.reader.QueryContext(ctx,
-		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, COALESCE(last_error, '')
+		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, purge_pending, COALESCE(last_error, '')
 		   FROM retention_runs
-		  WHERE finished_at IS NULL OR files_removed < json_array_length(files)
+		  WHERE finished_at IS NULL OR files_removed < json_array_length(files) OR json_array_length(purge_pending) > 0
 		  ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("ListUnfinishedRetentionRuns: %w", err)
@@ -354,12 +413,12 @@ func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, e
 	var out []RetentionRun
 	for rows.Next() {
 		var r RetentionRun
-		var files string
-		if err := rows.Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Channels, &r.MessagesDeleted, &files, &r.FilesRemoved, &r.LastError); err != nil {
+		var files, purge string
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Channels, &r.MessagesDeleted, &files, &r.FilesRemoved, &purge, &r.LastError); err != nil {
 			return nil, fmt.Errorf("ListUnfinishedRetentionRuns scan: %w", err)
 		}
-		if err := json.Unmarshal([]byte(files), &r.Files); err != nil {
-			return nil, fmt.Errorf("retention run %d: decode files: %w", r.ID, err)
+		if err := decodeRetentionRunLists(&r, files, purge); err != nil {
+			return nil, err
 		}
 		out = append(out, r)
 	}
@@ -369,18 +428,29 @@ func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, e
 // GetRetentionRun returns one run, or ErrNotFound.
 func (d *DB) GetRetentionRun(ctx context.Context, id int64) (*RetentionRun, error) {
 	var r RetentionRun
-	var files string
+	var files, purge string
 	err := d.reader.QueryRowContext(ctx,
-		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, COALESCE(last_error, '') FROM retention_runs WHERE id = ?`, id).
-		Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Channels, &r.MessagesDeleted, &files, &r.FilesRemoved, &r.LastError)
+		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, purge_pending, COALESCE(last_error, '') FROM retention_runs WHERE id = ?`, id).
+		Scan(&r.ID, &r.StartedAt, &r.FinishedAt, &r.Channels, &r.MessagesDeleted, &files, &r.FilesRemoved, &purge, &r.LastError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetRetentionRun: %w", err)
 	}
-	if err := json.Unmarshal([]byte(files), &r.Files); err != nil {
-		return nil, fmt.Errorf("retention run %d: decode files: %w", id, err)
+	if err := decodeRetentionRunLists(&r, files, purge); err != nil {
+		return nil, err
 	}
 	return &r, nil
+}
+
+// decodeRetentionRunLists fills a run's journaled lists from their JSON.
+func decodeRetentionRunLists(r *RetentionRun, files, purge string) error {
+	if err := json.Unmarshal([]byte(files), &r.Files); err != nil {
+		return fmt.Errorf("retention run %d: decode files: %w", r.ID, err)
+	}
+	if err := json.Unmarshal([]byte(purge), &r.PurgePending); err != nil {
+		return fmt.Errorf("retention run %d: decode purge_pending: %w", r.ID, err)
+	}
+	return nil
 }

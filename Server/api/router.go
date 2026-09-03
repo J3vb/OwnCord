@@ -345,6 +345,9 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 	}
 	if hub != nil {
 		svc.Erasure.SetHub(hub)
+		if svc.Retention != nil {
+			svc.Retention.SetHub(hub)
+		}
 	}
 	authSvc.UseErasure(svc.Erasure)
 }

@@ -2350,9 +2350,11 @@ Array of:
 }
 ```
 
-Rows about an erased account (B4-10) carry `"subject_token"` — the deletion
-marker's token in place of the id — with `actor_id` and/or `target_id` at
-`0` and `detail` cleared; the field is omitted on every other row.
+Rows about an erased account (B4-10) carry the deletion marker's token in
+place of the id — `"subject_token"` where the erased account was the target,
+`"actor_token"` where it acted, both on a row naming two erased accounts —
+with `actor_id` and/or `target_id` at `0` and `detail` cleared; the fields
+are omitted on every other row.
 
 ---
 

@@ -41,6 +41,7 @@ type AuditLog struct {
 	Detail       string  `json:"detail"`
 	CreatedAt    string  `json:"createdAt"`
 	SubjectToken *string `json:"subjectToken"`
+	ActorToken   *string `json:"actorToken"`
 }
 
 type Channel struct {
@@ -240,6 +241,7 @@ type RetentionRun struct {
 	MessagesDeleted int64   `json:"messagesDeleted"`
 	Files           string  `json:"files"`
 	FilesRemoved    int64   `json:"filesRemoved"`
+	PurgePending    string  `json:"purgePending"`
 	LastError       *string `json:"lastError"`
 }
 

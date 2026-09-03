@@ -216,21 +216,18 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 	return nil
 }
 
-// LogAuditEntry inserts an audit entry with every field, the subject token
+// LogAuditEntry inserts an audit entry with every field, the tokens
 // included (B4-10); LogAudit is the token-less form the rest of the server
 // writes.
 func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
-	var token *string
-	if e.SubjectToken != "" {
-		token = &e.SubjectToken
-	}
 	if err := d.q.LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
 		ActorID:      e.ActorID,
 		Action:       e.Action,
 		TargetType:   e.TargetType,
 		TargetID:     e.TargetID,
 		Detail:       e.Detail,
-		SubjectToken: token,
+		SubjectToken: nullableToken(e.SubjectToken),
+		ActorToken:   nullableToken(e.ActorToken),
 	}); err != nil {
 		return fmt.Errorf("LogAuditEntry: %w", err)
 	}
@@ -256,8 +253,9 @@ func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, erro
 	// Fallback: insert rows individually so one bad row doesn't drop the batch.
 	persisted := 0
 	var firstErr error
-	for _, e := range entries {
-		if err := d.LogAuditEntry(ctx, e); err != nil {
+	for i := range entries {
+		e := &entries[i]
+		if err := d.LogAuditEntry(ctx, *e); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -276,15 +274,16 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 		return fmt.Errorf("PersistAudits begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token, actor_token) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
 	)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("PersistAudits prepare: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
-	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken); err != nil {
+	for i := range entries {
+		e := &entries[i]
+		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken, e.ActorToken); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)
 		}
@@ -305,7 +304,8 @@ func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, 
 		return nil, fmt.Errorf("GetAuditLog: %w", err)
 	}
 	entries := make([]AuditEntry, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		entries = append(entries, AuditEntry{
 			ID:           r.ID,
 			ActorID:      r.ActorID,
@@ -315,10 +315,20 @@ func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, 
 			TargetID:     r.TargetID,
 			Detail:       r.Detail,
 			SubjectToken: r.SubjectToken,
+			ActorToken:   r.ActorToken,
 			CreatedAt:    r.CreatedAt,
 		})
 	}
 	return entries, nil
+}
+
+// nullableToken maps an empty token to NULL, so the partial indexes on the
+// token columns hold only the rows that carry one.
+func nullableToken(token string) *string {
+	if token == "" {
+		return nil
+	}
+	return &token
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

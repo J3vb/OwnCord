@@ -69,6 +69,61 @@ const (
 // Returns ErrLastAdmin when the subject is the last admin-class account and
 // ErrNotFound when no such user exists. Nothing is logged here by username.
 func (d *DB) EraseAccount(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
+	return d.eraseAccount(ctx, userID, subjectToken, true)
+}
+
+// ReplayEraseAccount is EraseAccount for a deletion-marker replay (B4-10,
+// MarkerStore.ReplayAccounts): the same transaction without the last-admin
+// guard. The guard is a live-operation rule — an administrator may not
+// delete the last administrator — and the erasure a marker records passed
+// it when it ran; at replay the subject is present only because a backup
+// from before the erasure was restored, and a backup from before the admin
+// handover would otherwise keep the subject for good. The caller says so
+// when no admin-class account remains (service.ErasureService).
+func (d *DB) ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
+	return d.eraseAccount(ctx, userID, subjectToken, false)
+}
+
+// EraseAccountPreflight runs EraseAccount's refusals — the user exists, the
+// last-admin guard — outside the transaction, on the reader, so a caller
+// can write the deletion marker before the transaction (B4-10) without
+// writing one for an erasure that would be refused: a pending marker is
+// applied on the next open whether or not the transaction ran. The
+// transaction checks again; this only closes the window.
+func (d *DB) EraseAccountPreflight(ctx context.Context, userID int64) error {
+	tx, err := d.reader.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("EraseAccountPreflight begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var one int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("EraseAccountPreflight user %d: %w", userID, ErrNotFound)
+		}
+		return fmt.Errorf("EraseAccountPreflight fetch user: %w", err)
+	}
+	return deleteAccountAdminGuard(ctx, tx, userID)
+}
+
+// CountAdminClassAccounts counts the accounts the last-admin guard would
+// protect: not banned, holding the seeded Owner or Admin role or a custom
+// role with the Administrator bit — deleteAccountAdminGuard's criteria.
+func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
+	var n int
+	if err := d.reader.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM users
+		  WHERE role_id IN (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0)
+		    AND `+notBannedClause,
+		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator).Scan(&n); err != nil {
+		return 0, fmt.Errorf("CountAdminClassAccounts: %w", err)
+	}
+	return n, nil
+}
+
+// eraseAccount is EraseAccount and ReplayEraseAccount: guard selects the
+// last-admin guard.
+func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
 	conn, err := d.writer.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount conn: %w", err)
@@ -90,7 +145,7 @@ func (d *DB) EraseAccount(ctx context.Context, userID int64, subjectToken string
 		}
 	}()
 
-	job, err := eraseAccountTx(ctx, conn, userID, subjectToken)
+	job, err := eraseAccountTx(ctx, conn, userID, subjectToken, guard)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +163,9 @@ func (d *DB) EraseAccount(ctx context.Context, userID int64, subjectToken string
 	return job, nil
 }
 
-// eraseAccountTx is EraseAccount's transaction.
-func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string) (*ErasureJob, error) {
+// eraseAccountTx is EraseAccount's transaction; guard selects the
+// last-admin guard (off for a marker replay).
+func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
@@ -123,8 +179,10 @@ func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTo
 		}
 		return nil, fmt.Errorf("EraseAccount fetch user: %w", err)
 	}
-	if err := deleteAccountAdminGuard(ctx, tx, userID); err != nil {
-		return nil, err
+	if guard {
+		if err := deleteAccountAdminGuard(ctx, tx, userID); err != nil {
+			return nil, err
+		}
 	}
 	dmChannelIDs, err := deleteAccountDMChannels(ctx, tx, userID)
 	if err != nil {
@@ -247,15 +305,17 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 // every audit row the subject appears in — as actor, or as a user target —
 // keeps its action, time and position but loses the id and its free-text
 // detail, and carries the deletion marker's token instead (NULL when the
-// erasure ran without a marker store). "An erasure happened, by this actor
-// class, at this time" survives; "of whom" needs the erasure key.
+// erasure ran without a marker store): in actor_token where the subject
+// acted, in subject_token where they were the target, so a row naming two
+// erased subjects keeps both (migration 041). "An erasure happened, by this
+// actor class, at this time" survives; "of whom" needs the erasure key.
 func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
 	var token any
 	if subjectToken != "" {
 		token = subjectToken
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE audit_log SET actor_id = 0, detail = '', subject_token = ? WHERE actor_id = ?`, token, userID); err != nil {
+		`UPDATE audit_log SET actor_id = 0, detail = '', actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink audit actor: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,

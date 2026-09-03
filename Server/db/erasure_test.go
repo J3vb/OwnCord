@@ -425,26 +425,28 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 	if len(got) < len(rows) {
 		t.Fatalf("audit rows = %d, want at least the %d seeded (unlinked, never deleted)", len(got), len(rows))
 	}
-	check := func(e db.AuditEntry, actor, target int64, detail, tok string) {
+	check := func(e db.AuditEntry, actor, target int64, detail, actorTok, subjectTok string) {
 		t.Helper()
-		if e.ActorID != actor || e.TargetID != target || e.Detail != detail || e.SubjectToken != tok {
-			t.Errorf("%s: actor %d target %d detail %q token %q; want %d %d %q %q", e.Action, e.ActorID, e.TargetID, e.Detail, e.SubjectToken, actor, target, detail, tok)
+		if e.ActorID != actor || e.TargetID != target || e.Detail != detail || e.ActorToken != actorTok || e.SubjectToken != subjectTok {
+			t.Errorf("%s: actor %d target %d detail %q actor token %q subject token %q; want %d %d %q %q %q",
+				e.Action, e.ActorID, e.TargetID, e.Detail, e.ActorToken, e.SubjectToken, actor, target, detail, actorTok, subjectTok)
 		}
 	}
-	// The subject's own login: both ids gone, detail (an IP) gone, token set.
+	// The subject's own login: both ids gone, detail (an IP) gone, the token
+	// on both sides.
 	for _, e := range byAction["user_login"] {
 		if e.Detail == "from 198.51.100.7" || e.ActorID == sub.other {
-			check(e, sub.other, sub.other, "from 198.51.100.7", "")
+			check(e, sub.other, sub.other, "from 198.51.100.7", "", "")
 		} else {
-			check(e, 0, 0, "", token)
+			check(e, 0, 0, "", token, token)
 		}
 	}
 	// Banned by another: the actor stays, the target is the token.
-	check(byAction["user_ban"][0], sub.other, 0, "", token)
+	check(byAction["user_ban"][0], sub.other, 0, "", "", token)
 	// Acting on a channel: the actor is the token, the channel target stays.
-	check(byAction["channel_create"][0], 0, 5, "", token)
+	check(byAction["channel_create"][0], 0, 5, "", token, "")
 	// Nothing to do with the subject: untouched.
-	check(byAction["setting_change"][0], sub.other, 0, "motd", "")
+	check(byAction["setting_change"][0], sub.other, 0, "motd", "", "")
 	// Order and time survive: ids still descend, created_at is set.
 	for i := 1; i < len(got); i++ {
 		if got[i-1].ID <= got[i].ID {
@@ -463,8 +465,65 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR target_id = ?`, other2, other2).Scan(&n); err != nil || n != 0 {
 		t.Errorf("rows still naming the second subject = %d (%v)", n, err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token IS NULL AND actor_id = 0 AND target_id = 0 AND action = 'user_login'`).Scan(&n); err != nil || n != 1 {
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token IS NULL AND actor_token IS NULL AND actor_id = 0 AND target_id = 0 AND action = 'user_login'`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("token-less unlinked rows = %d (%v), want 1", n, err)
+	}
+}
+
+// A row naming two subjects — one acted on the other — keeps both tokens
+// when both are erased, whichever goes first (migration 041; Codex's review
+// of #1520 found the draft's single column kept only the last).
+func TestEraseAccount_TwoErasedPrincipalsKeepBothTokens(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	owner := seedUser(t, database, "principals-owner")
+	setRole(t, database, owner, 1)
+	a := seedUser(t, database, "principal-a")
+	b := seedUser(t, database, "principal-b")
+	for _, r := range []db.AuditEntry{
+		{ActorID: a, Action: "user_ban", TargetType: "user", TargetID: b, Detail: "spam by principal-b"},
+		{ActorID: b, Action: "user_kick", TargetType: "user", TargetID: a, Detail: "retaliation"},
+	} {
+		if err := database.LogAuditEntry(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const tokA, tokB = "aaaa", "bbbb"
+	if _, err := database.EraseAccount(ctx, b, tokB); err != nil {
+		t.Fatalf("EraseAccount(b): %v", err)
+	}
+	if _, err := database.EraseAccount(ctx, a, tokA); err != nil {
+		t.Fatalf("EraseAccount(a): %v", err)
+	}
+	got, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, e := range got {
+		switch e.Action {
+		case "user_ban": // a banned b
+			seen++
+			if e.ActorID != 0 || e.TargetID != 0 || e.Detail != "" || e.ActorToken != tokA || e.SubjectToken != tokB {
+				t.Errorf("user_ban row = %+v, want actor token %q and subject token %q", e, tokA, tokB)
+			}
+		case "user_kick": // b kicked a
+			seen++
+			if e.ActorID != 0 || e.TargetID != 0 || e.Detail != "" || e.ActorToken != tokB || e.SubjectToken != tokA {
+				t.Errorf("user_kick row = %+v, want actor token %q and subject token %q", e, tokB, tokA)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("rows naming the two subjects = %d, want 2", seen)
+	}
+	// Both trails are still whole: every row about a subject is reachable by
+	// their token, on either side.
+	for _, tok := range []string{tokA, tokB} {
+		var n int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token = ? OR actor_token = ?`, tok, tok).Scan(&n); err != nil || n != 2 {
+			t.Errorf("rows carrying %q = %d (%v), want 2", tok, n, err)
+		}
 	}
 }
 

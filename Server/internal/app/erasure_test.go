@@ -53,7 +53,7 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 	}
 	// An erasure elsewhere recorded a marker; then a "restore" put the
 	// account back (it was never removed from this in-memory database).
-	tok, _, err := markers.RecordPendingAccount(ctx, uid)
+	tok, _, err := markers.RecordPendingAccount(ctx, uid, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00"); err != nil {
+	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
 	_ = markers.Close()

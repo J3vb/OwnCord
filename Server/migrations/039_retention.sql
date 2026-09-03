@@ -24,5 +24,9 @@ CREATE TABLE retention_runs (
     messages_deleted INTEGER NOT NULL DEFAULT 0,
     files            TEXT    NOT NULL DEFAULT '[]',
     files_removed    INTEGER NOT NULL DEFAULT 0,
+    -- ids of swept messages whose replay purge (ring buffer and events rows)
+    -- is still outstanding, journaled before the purge and cleared after it,
+    -- so a failed or interrupted purge is retried on the next tick
+    purge_pending    TEXT    NOT NULL DEFAULT '[]',
     last_error       TEXT
 );

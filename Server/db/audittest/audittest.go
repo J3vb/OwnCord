@@ -62,9 +62,11 @@ func (r *Recorder) Wait(t testing.TB, action string) db.AuditEntry {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var got []string
-		for _, e := range r.Entries() {
+		entries := r.Entries()
+		for i := range entries {
+			e := &entries[i]
 			if e.Action == action {
-				return e
+				return *e
 			}
 			got = append(got, e.Action)
 		}
@@ -94,7 +96,8 @@ var detailDenylist = []*regexp.Regexp{
 // this list's exceptions.
 func AssertSafeDetails(t testing.TB, entries []db.AuditEntry, secrets ...string) {
 	t.Helper()
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		for _, re := range detailDenylist {
 			if re.MatchString(e.Detail) {
 				t.Errorf("audit %q detail matches denylist %q: %q", e.Action, re, e.Detail)

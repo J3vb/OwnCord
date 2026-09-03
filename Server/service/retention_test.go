@@ -237,8 +237,8 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	// The database half only, as a crash after commit leaves it: the run
 	// is journaled with its files, none removed.
 	runID, _ := database.StartRetentionRun(ctx)
-	n, swept, err := database.SweepRetention(ctx, chID, retentionNow.Add(-7*24*time.Hour), 2)
-	if err != nil || n != 2 {
+	ids, swept, err := database.SweepRetention(ctx, chID, retentionNow.Add(-7*24*time.Hour), 2)
+	if err != nil || len(ids) != 2 {
 		t.Fatal(err)
 	}
 	if err := database.RecordRetentionRunFiles(ctx, runID, 1, 2, swept); err != nil {

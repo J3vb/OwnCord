@@ -41,7 +41,7 @@ diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
-through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 opened 2026-09-03** (PR #1520, branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). **B4-11 opened 2026-09-03** (PR #1521, branch `feat/b4-11-retention`, stacked on #1520; indefinite by default, server and per-channel windows, pinned exempt, no DMs, no holds, a bounded restart-safe sweep with a file journal and a `messages` marker per channel replayed on open, the effect preview and the audited policy). B4 chain complete pending merges; next HP-5 / B4 exit. _Update this line — not only the step table — as steps
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 merged 2026-09-03** (PR #1520 = `87ad997`, its Codex review fixes following as #1522; branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). **B4-11 opened 2026-09-03** (PR #1521, branch `feat/b4-11-retention`, stacked on #1520; indefinite by default, server and per-channel windows, pinned exempt, no DMs, no holds, a bounded restart-safe sweep with a file journal and a `messages` marker per channel replayed on open, the effect preview and the audited policy). B4 chain complete pending merges; next HP-5 / B4 exit. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1475,7 +1475,9 @@ Exit: unlinkability and non-resurrection tests green on alpha copies;
 
 **Evidence, 2026-09-03** — branch `feat/b4-10-deletion-markers`, stacked on
 #1517 (B4-9's review fix) until that merged as `7907c16` and was cascaded in;
-PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
+PR #1520 to `dev`, merged as `87ad997` (at `a9aa6da`, before the review fixes
+landed on the branch); those follow as #1522 (`fix/b4-10-review`). HP-4
+decisions 3 and 4.
 
 - **The key and the file:** `auth.LoadOrGenerateErasureKey`
   (`Server/auth/erasure_key.go`) — `OWNCORD_ERASURE_KEY`, else
@@ -1486,29 +1488,64 @@ PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
   open — the `deletion_markers` draft plus a `state` column. A marker names
   its subject as `SubjectToken` = HMAC-SHA256(key, `account:<id>`); the
   file names nobody without the key.
-- **Two-phase write around the erasure:** `ErasureService.Erase` records
-  the marker `pending`, runs `db.EraseAccount` with the token, then
-  confirms it `recorded`; a refused erasure discards the pending marker it
-  created, a replay leaves an existing one alone. A pending marker left by
-  a crash is resolved on the next open by whether the account exists — gone
-  means the commit happened (confirm), present means it did not (discard) —
-  so a crash can neither lose an erasure's marker nor erase an account
-  whose erasure never committed.
+- **Two-phase write around the erasure:** `ErasureService.Erase` checks
+  the refusals first (`db.EraseAccountPreflight`: the user exists, the
+  last-admin guard), records the marker `pending` together with the users
+  id counter (`sequence_floors`), runs `db.EraseAccount` with the token
+  behind the audit writer's barrier, then confirms it `recorded`; a refused
+  erasure discards the pending marker it created, a replay leaves an
+  existing one alone. A pending marker left by a crash is applied on the
+  next open like a recorded one when its account is present — the restore
+  is what the markers defend against, and it reverts the very commit the
+  marker was waiting on, so the main database cannot say whether it
+  happened; the request behind the marker was authorised before it was
+  written — and confirmed when the account is gone
+  (`TestErasureService_PendingMarkerSurvivesACrashAndARestore`).
 - **Replay on every open:** the `erasure-markers` start-up stage
   (`Server/internal/app/erasure.go`, between `migrate` and `telemetry`,
   before the hub, the router and any listener) loads the key, opens the
   file and runs `MarkerStore.ReplayAccounts`: every account whose id hashes
-  to a recorded marker is erased again through the full runner — rows,
-  audit unlinking, files — with an `account_erasure_replayed` audit row
-  carrying the token; `replays`/`last_replay` count it. A restore restarts
-  the process (`handleRestoreBackup`), so "after every restore" is this
-  stage. The routes' runner gets the same store (`SetMarkers`) so their
-  erasures record into it.
+  to a marker is erased again through the full runner — rows, audit
+  unlinking, files — with an `account_erasure_replayed` audit row carrying
+  the token; `replays`/`last_replay` count it. The replay runs
+  `db.ReplayEraseAccount`, the transaction without the last-admin guard: a
+  live-operation rule the erasure passed when it ran, and a backup from
+  before the handover to another administrator would otherwise keep the
+  subject for good — the replay erases them and logs that no admin-class
+  account remains (`TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup`).
+  Before the replay the id counters are raised to the floors the marker
+  file keeps (`MarkerStore.SequenceFloors`, `db.RaiseSequences`): a restore
+  rolls `sqlite_sequence` back, and the next account would otherwise
+  inherit an erased id and the marker's token
+  (`TestErasureService_ReplayMarkersRaisesTheSequenceFloors`, with the
+  negative control). A restore restarts the process
+  (`handleRestoreBackup`), so "after every restore" is this stage. The
+  routes' runner gets the same store (`SetMarkers`) so their erasures
+  record into it.
+- **The audit writer's barrier:** the production audit path is
+  asynchronous (`db.AuditWriter`), so an entry about the subject queued
+  just before the transaction would land raw after its `UPDATE`. The
+  erasure installs the writer's unlinking rule for the subject and takes
+  its flush barrier before the transaction (`db.UnlinkQueuedAudits`:
+  `AuditWriter.Unlink`, `Flush`); the rule outlives the barrier, so an
+  entry a producer enqueues after the erasure is written unlinked too, and
+  a refused erasure withdraws it (`RelinkAudits`) —
+  `TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked`,
+  `TestErasureService_QueuedAuditEntriesAreUnlinked`.
+- **Codex's review** (on #1521, whose diff carried this code, and on
+  #1520; five findings, all confirmed): the audit writer's queue, the
+  last-admin guard at replay, the discarded pending marker, the id reuse
+  across restored timelines, and the one token column a second erasure
+  overwrote — the bullets above are the fixes.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and
   position, gets `actor_id`/`target_id` = 0 and `detail = ''`, and carries
-  `subject_token`. The erasure's own `account_deleted` row is written
+  the token — in `subject_token` where the subject was the target, in
+  `actor_token` where they acted (migration 041, after Codex's review: the
+  draft's one column kept only the last erasure's token on a row naming two
+  erased subjects; `TestEraseAccount_TwoErasedPrincipalsKeepBothTokens`).
+  The erasure's own `account_deleted` row is written
   unlinked from the start (`db.WriteAuditEntry`: actor 0 for self-service,
   the administrator for the admin route, the target the token, no IP); the
   async audit writer carries the token. `GET /admin/api/audit-log` returns
@@ -1583,7 +1620,9 @@ resurrect messages the policy already deleted — same marker question
 resolved at HP-4, or window-based re-sweep on restore).
 
 **Evidence, 2026-09-03** — branch `feat/b4-11-retention`, stacked on #1520
-(B4-10); PR #1521 to `dev` (draft). Owner decisions 4 and 5; HP-4 decisions 5
+(B4-10) until it merged as `87ad997`; PR #1521 to `dev`, merged as `607fd4d`
+(at `ac24eb7`, before the review fixes below landed on the branch — the
+replay-tiers fix `c815593` follows in #1522 together with B4-10's fixes). Owner decisions 4 and 5; HP-4 decisions 5
 and 6.
 
 - **Policy model (migration 039, the `retention` draft with its comment
@@ -1620,7 +1659,28 @@ and 6.
   (`TestRetention_ReplayMarkersResweepsARestoredBackup`,
   `TestOpenMarkers_ReplaysRetentionMarkers`,
   `TestMarkerStore_MessagesMarkersMoveForwardAndReplay`). No `account`
-  marker is written for a retention deletion.
+  marker is written for a retention deletion. The marker carries the
+  `channels` sequence as a floor (B4-10's `sequence_floors`), so a restore
+  cannot hand a swept channel's id to a new one.
+- **The replay tiers (Codex's review of #1521, one finding, confirmed):**
+  a swept message's `chat_message` frame stayed replayable, content
+  included, in the ring buffer and the `events` table until the events
+  pruner reached it. `DB.SweepRetention` now returns the ids it removed and
+  each batch purges them behind the run's journal
+  (`retention_runs.purge_pending`, written before the purge, cleared after
+  it): through the hub when one is installed
+  (`Hub.PurgeMessagesFromReplay` — dispatch barrier, persister flush, the
+  ring's copies dropped, the persisted rows deleted by
+  `DB.DeleteEventsForMessages` over the message-family frames, and the ids
+  as the hub's tombstone set until the next sweep, so a late frame about a
+  swept message is dropped), or the persisted rows alone at start-up. A
+  purge that fails stays journaled and `resumeRuns` retries it on the next
+  tick. `TestRetention_PurgeMessagesFromReplay` (ring, rows, the resume
+  across the holes, the late frame), `TestDeleteEventsForMessages_MatchesTheMessageFamily`,
+  `TestRetention_SweepPurgesTheReplayTiers`,
+  `TestRetention_ReplayPurgeIsRetriedFromTheJournal`,
+  `TestRetention_ReplayMarkersPurgesPersistedEvents`,
+  `TestRetentionRuns_PurgeJournal`.
 - **Audit + preview:** `GET /admin/api/retention`,
   `GET /admin/api/retention/preview` ("would delete N" per channel),
   `PUT`/`DELETE /admin/api/channels/{id}/retention`, all `MANAGE_SERVER`

@@ -185,7 +185,7 @@ func TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure(t *testing.T) {
 	backup := backupTo(t, database, "before-erasure.db")
 	m := openTestMarkers(t, testMarkerKey(5))
 
-	tok, _, err := m.RecordPendingAccount(ctx, uid)
+	tok, _, err := m.RecordPendingAccount(ctx, uid, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

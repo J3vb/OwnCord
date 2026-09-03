@@ -139,16 +139,16 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	}
 
 	// Bounded: one per call, then the rest.
-	n, files, err := database.SweepRetention(ctx, ch, cutoff, 1)
-	if err != nil || n != 1 || len(files) != 1 || files[0] != "stored-0" {
-		t.Fatalf("first sweep = %d, %v, %v", n, files, err)
+	ids, files, err := database.SweepRetention(ctx, ch, cutoff, 1)
+	if err != nil || len(ids) != 1 || len(files) != 1 || files[0] != "stored-0" {
+		t.Fatalf("first sweep = %v, %v, %v", ids, files, err)
 	}
-	n, files, err = database.SweepRetention(ctx, ch, cutoff, 100)
-	if err != nil || n != 1 || len(files) != 1 || files[0] != "stored-1" {
-		t.Fatalf("second sweep = %d, %v, %v", n, files, err)
+	ids, files, err = database.SweepRetention(ctx, ch, cutoff, 100)
+	if err != nil || len(ids) != 1 || len(files) != 1 || files[0] != "stored-1" {
+		t.Fatalf("second sweep = %v, %v, %v", ids, files, err)
 	}
-	if n, _, err := database.SweepRetention(ctx, ch, cutoff, 100); err != nil || n != 0 {
-		t.Fatalf("third sweep = %d, %v; want 0", n, err)
+	if ids, _, err := database.SweepRetention(ctx, ch, cutoff, 100); err != nil || len(ids) != 0 {
+		t.Fatalf("third sweep = %v, %v; want none", ids, err)
 	}
 
 	left := map[int64]bool{}
