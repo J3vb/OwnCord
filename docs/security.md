@@ -129,7 +129,26 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 ```
 
 The next `POST /admin/api/setup` then creates a new Owner and sets the flag
-again.
+again. `0` is the only _value_ that opens setup: the gate stands in front of an
+unauthenticated endpoint, so a flag holding anything else — corrupted,
+hand-edited to something the server does not recognise — is treated as
+closed. A missing row is the one case that is not: it is what every database
+from before migration 043 looks like, so the user count decides there, and a
+server that has genuinely never been set up can still run its wizard. The
+migration writes the row on every upgrade, so after it the row is absent only
+if something removed it, and removing it needs the same write access to the
+database file that setting it to `0` needs anyway.
+
+The flag lives in the database, so a restore rolls it back with everything
+else — including a backup taken before the server was ever set up, which the
+scheduled-backup loop will happily have made. The deletion markers close that
+hole: they live outside the database, and an account marker proves an account
+existed here and was erased, so the start-up replay sets the flag closed
+whenever the marker file holds one, whatever the restored database says. A
+marker file with only retention markers leaves a genuinely fresh server
+alone. The key is deliberately not in the settings PATCH
+allowlist, so no authenticated route can write it — only the operator, with
+access to the database file.
 
 ### Erasure marker sequence floors
 

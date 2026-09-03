@@ -1591,7 +1591,23 @@ decisions 3 and 4.
   `account_deleted` or `account_erasure_replayed` audit row — the three an
   account must have existed to produce
   (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`, with the
-  maintenance loop's own rows as the negative control).
+  maintenance loop's own rows as the negative control). A security pass over
+  the branch added one hardening on top: `0` is the only value that opens
+  setup, so a corrupted or unrecognised flag refuses rather than falling
+  through to the user count
+  (`TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses`). The key is not in the
+  settings PATCH allowlist, so no authenticated route can write it. Codex's
+  last finding on #1523 closed the remaining hole: the flag lives in the
+  database, so restoring a backup taken before the server was ever set up —
+  one the scheduled-backup loop makes on its own — rolls it back to open with
+  an empty users table, and the replay erases nothing because the marked
+  account is absent from that backup. An account marker now closes the gate
+  at start-up (`ErasureService.ReplayMarkers`, `DB.CloseSetupGate`), the
+  marker file being the one piece of evidence a restore cannot touch
+  (`TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore`, with
+  a retention-markers-only file as the negative control). That finding, and
+  the hardening, land in #1524: #1523 merged at its previous head while the
+  review was in flight.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and

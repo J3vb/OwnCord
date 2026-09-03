@@ -28,6 +28,34 @@ func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, role
 	return res.LastInsertId()
 }
 
+// The durable first-run gate (migration 043). SetupCompletedKey is written
+// in the same transaction as the first owner and never cleared by the
+// server; an operator re-opens the wizard by setting it back to SetupOpen
+// with filesystem access to the database (docs/security.md, "First-run
+// setup"). Any other value is treated as closed, this being the gate in
+// front of an unauthenticated endpoint.
+const (
+	SetupCompletedKey = "setup_completed"
+	SetupOpen         = "0"
+	SetupClosed       = "1"
+)
+
+// CloseSetupGate records that this installation has been set up, whatever
+// the users table says. The erasure markers call it at start-up: a marker
+// proves an account existed here, it lives outside the database a restore
+// overwrites, and a backup taken before the first owner rolls both the users
+// table and the flag back to their fresh state — which would otherwise
+// reopen the unauthenticated setup endpoint. Idempotent.
+func (d *DB) CloseSetupGate(ctx context.Context) error {
+	if _, err := d.writer.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?1, ?2)
+		 ON CONFLICT(key) DO UPDATE SET value = ?2 WHERE settings.value <> ?2`,
+		SetupCompletedKey, SetupClosed); err != nil {
+		return fmt.Errorf("CloseSetupGate: %w", err)
+	}
+	return nil
+}
+
 // CreateOwnerIfEmpty atomically checks that no users exist and inserts the
 // first owner in a single transaction. Returns ErrConflict if any user already
 // exists, closing the TOCTOU race in the setup endpoint (BUG-119).
@@ -49,13 +77,20 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	// on a restored backup — cannot reopen the unauthenticated setup
 	// endpoint. Read inside this transaction, like the count it backs up, so
 	// two concurrent requests cannot both pass.
+	//
+	// Only SetupOpen lets the count decide. The server writes SetupClosed and
+	// the documented re-open writes SetupOpen, so any other value is
+	// corruption or someone's guess at the schema, and this gate stands in
+	// front of an unauthenticated endpoint: an unrecognised value refuses. A
+	// missing row is the one exception, being what every pre-migration
+	// database looks like.
 	var completed string
-	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = 'setup_completed'`).Scan(&completed); {
+	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = ?`, SetupCompletedKey).Scan(&completed); {
 	case errors.Is(err, sql.ErrNoRows):
 		// A database from before the migration: the count is the gate.
 	case err != nil:
 		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
-	case completed == "1":
+	case completed != SetupOpen:
 		return 0, ErrConflict
 	}
 
@@ -83,8 +118,8 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	// Setup is closed from this commit on, in the same transaction as the
 	// owner it belongs to.
 	if _, err := tx.Exec(
-		`INSERT INTO settings (key, value) VALUES ('setup_completed', '1')
-		 ON CONFLICT(key) DO UPDATE SET value = '1'`); err != nil {
+		`INSERT INTO settings (key, value) VALUES (?1, ?2)
+		 ON CONFLICT(key) DO UPDATE SET value = ?2`, SetupCompletedKey, SetupClosed); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
 	}
 

@@ -78,7 +78,7 @@ type BootstrapResult struct {
 // empty the users table (a marker replay erases past the last-admin guard),
 // and that must not reopen it. An operator re-opens the wizard deliberately
 // by setting the row back to 0 with filesystem access to the database.
-const SetupCompletedSetting = "setup_completed"
+const SetupCompletedSetting = db.SetupCompletedKey
 
 // NeedsSetup reports whether the server still needs its first run: the
 // durable flag is unset and no account exists. It is advisory — a status
@@ -90,7 +90,9 @@ func (s *SetupService) NeedsSetup(ctx context.Context) (bool, error) {
 		// A database from before the migration: the count decides.
 	case err != nil:
 		return false, fmt.Errorf("%w: failed to read the setup flag: %w", ErrInternal, err)
-	case done == "1":
+	case done != db.SetupOpen:
+		// Closed, or a value nothing recognises — Bootstrap refuses either
+		// way, so the page must not offer a wizard it would reject.
 		return false, nil
 	}
 	count, err := s.st.UserCount(ctx)

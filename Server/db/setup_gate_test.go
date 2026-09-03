@@ -149,3 +149,29 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 		t.Errorf("users floor with an out-of-range marker = %d, %v, %v; want 900 reported incomplete", got, complete, err)
 	}
 }
+
+// The gate stands in front of an unauthenticated endpoint, so it opens only
+// on the one value that means open. A corrupted or unrecognised flag refuses
+// rather than falling through to the user count.
+func TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses(t *testing.T) {
+	ctx := context.Background()
+	for _, value := range []string{"", "2", "true", "TRUE", "0 ", "no"} {
+		t.Run("flag="+value, func(t *testing.T) {
+			database := openMigratedMemory(t)
+			if err := database.SetSetting(ctx, db.SetupCompletedKey, value); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.CreateOwnerIfEmpty(ctx, "someone", "hash", 1); !errors.Is(err, db.ErrConflict) {
+				t.Errorf("CreateOwnerIfEmpty with setup_completed = %q = %v, want ErrConflict", value, err)
+			}
+		})
+	}
+	// The documented re-open value is the one that lets the count decide.
+	database := openMigratedMemory(t)
+	if err := database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateOwnerIfEmpty(ctx, "recovered", "hash", 1); err != nil {
+		t.Errorf("CreateOwnerIfEmpty with the re-open value = %v", err)
+	}
+}

@@ -146,6 +146,7 @@ type Store interface {
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	FlushAudits(ctx context.Context) error
 	CountAdminClassAccounts(ctx context.Context) (int, error)
+	CloseSetupGate(ctx context.Context) error
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	RaiseSequences(ctx context.Context, floors map[string]int64) error
 	ListUserIDs(ctx context.Context) ([]int64, error)

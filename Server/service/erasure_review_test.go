@@ -567,3 +567,92 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 		t.Errorf("floors = %v, want the users floor at least the located 5000", floors)
 	}
 }
+
+// A backup taken before first-run setup rolls the users table and the setup
+// flag back to their fresh state together, and the replay finds nothing to
+// erase because the marked account is absent from it. The marker file is the
+// only evidence left that this installation was ever set up, and it lives
+// outside the database the restore overwrote — so the start-up replay closes
+// the gate from it, keeping the unauthenticated setup endpoint shut (Codex's
+// fifth review of #1523, landing here after that PR merged).
+func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
+	database := openFileDB(t, dbPath)
+	ctx := context.Background()
+
+	// The backup the maintenance loop takes before anyone has set up.
+	preSetup := filepath.Join(t.TempDir(), "before-setup.db")
+	if err := database.BackupToSafe(ctx, preSetup, filepath.Dir(preSetup)); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := database.GetSetting(ctx, db.SetupCompletedKey); err != nil || v != db.SetupOpen {
+		t.Fatalf("the pre-setup flag = %q, %v; want it open", v, err)
+	}
+
+	// Setup, a second administrator, and an erasure that leaves a marker.
+	owner, err := database.CreateOwnerIfEmpty(ctx, "the-owner", "hash", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.CreateUser(ctx, "second-admin", "hash", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, second); err != nil {
+		t.Fatalf("Erase(second admin): %v", err)
+	}
+	_ = owner
+
+	// The restore of that pre-setup backup: no users, and the flag back to
+	// open, both from inside the database.
+	restored := restoreBackupOver(t, database, dbPath, preSetup)
+	if n, err := restored.UserCount(ctx); err != nil || n != 0 {
+		t.Fatalf("users after the restore = %d, %v; want 0", n, err)
+	}
+	if v, _ := restored.GetSetting(ctx, db.SetupCompletedKey); v != db.SetupOpen {
+		t.Fatalf("the flag after the restore = %q; want the restore to have reopened it", v)
+	}
+
+	fresh := NewErasureService(restored)
+	fresh.SetMarkers(markers)
+	rep, err := fresh.ReplayMarkers(ctx)
+	if err != nil {
+		t.Fatalf("ReplayMarkers: %v", err)
+	}
+	if rep.Erased != 0 {
+		t.Fatalf("report = %+v; the marked account is absent from the restore, so nothing is erased", rep)
+	}
+
+	// The marker closed the gate even though the replay erased nothing.
+	if v, err := restored.GetSetting(ctx, db.SetupCompletedKey); err != nil || v != db.SetupClosed {
+		t.Errorf("the flag after the replay = %q, %v; want it closed by the marker", v, err)
+	}
+	if _, err := restored.CreateOwnerIfEmpty(ctx, "takeover", "hash", 1); !errors.Is(err, db.ErrConflict) {
+		t.Errorf("CreateOwnerIfEmpty after the replay = %v, want ErrConflict", err)
+	}
+	setup := NewSetupService(restored)
+	if needs, err := setup.NeedsSetup(ctx); err != nil || needs {
+		t.Errorf("NeedsSetup after the replay = %v, %v; want false", needs, err)
+	}
+
+	// A marker file with no account markers leaves a genuinely fresh server
+	// alone: retention markers are not evidence that anyone was set up.
+	freshPath := filepath.Join(t.TempDir(), "fresh.sqlite")
+	freshDB := openFileDB(t, freshPath)
+	t.Cleanup(func() { _ = freshDB.Close() })
+	empty := newTestMarkers(t)
+	if err := empty.RecordMessagesSweep(ctx, 1, "2026-01-01 00:00:00", 0); err != nil {
+		t.Fatal(err)
+	}
+	bare := NewErasureService(freshDB)
+	bare.SetMarkers(empty)
+	if _, err := bare.ReplayMarkers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := freshDB.GetSetting(ctx, db.SetupCompletedKey); err != nil || v != db.SetupOpen {
+		t.Errorf("a fresh server's flag after a replay with no account markers = %q, %v; want it still open", v, err)
+	}
+}
