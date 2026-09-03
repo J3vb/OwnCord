@@ -66,9 +66,10 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
-	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"type":"typing","user_id":%d}`, uid), chID)
-	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"type":"chat_message","user":{"id":%d}}`, uid), chID)
-	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (3, 'typing', ?, ?)`, fmt.Sprintf(`{"type":"typing","user_id":%d}`, other), chID)
+	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
+	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
+	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
+	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (3, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":3,"type":"typing","payload":{"user_id":%d}}`, other), chID)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 
@@ -333,5 +334,52 @@ func TestReferencedStoredFiles(t *testing.T) {
 	}
 	if empty, err := database.ReferencedStoredFiles(ctx, nil); err != nil || len(empty) != 0 {
 		t.Errorf("ReferencedStoredFiles(nil) = %v, %v", empty, err)
+	}
+}
+
+// The predicate reads the envelope the hub persists — the ids sit under
+// payload — in each shape a frame can name a user; a flattened payload,
+// which no production path writes, must not match, or the checklist would
+// pass on a shape the store never holds.
+func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	const uid, other = 42, 43
+	rows := []struct {
+		payload string
+		names   bool
+	}{
+		{fmt.Sprintf(`{"seq":1,"type":"presence","payload":{"user_id":%d,"status":"online"}}`, uid), true},
+		{fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"id":9,"user":{"id":%d,"username":"x"},"content":"hi","mentions":[]}}`, uid), true},
+		{fmt.Sprintf(`{"seq":3,"type":"chat_message","payload":{"id":10,"user":{"id":%d},"content":"@you","mentions":[%d,%d]}}`, other, other, uid), true},
+		{fmt.Sprintf(`{"seq":4,"type":"voice_e2ee_offer","payload":{"from_user_id":%d,"encrypted_key":"k"}}`, uid), true},
+		{fmt.Sprintf(`{"seq":5,"type":"member_ban","payload":{"user_id":%d}}`, uid), true},
+		{fmt.Sprintf(`{"seq":6,"type":"typing","payload":{"user_id":%d}}`, other), false},
+		{fmt.Sprintf(`{"seq":7,"type":"chat_message","payload":{"user":{"id":%d},"mentions":[%d]}}`, other, other), false},
+		{fmt.Sprintf(`{"seq":8,"type":"typing","user_id":%d}`, uid), false}, // flattened: not a persisted shape
+		{`{"seq":9,"type":"roles_update","payload":{"roles":[]}}`, false},
+	}
+	for i, r := range rows {
+		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	var before int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if before != 5 {
+		t.Errorf("predicate matched %d rows, want 5", before)
+	}
+	n, err := database.DeleteEventsForUser(ctx, uid)
+	if err != nil {
+		t.Fatalf("DeleteEventsForUser: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("deleted %d rows, want 5", n)
+	}
+	var left int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 4 {
+		t.Errorf("rows left = %d (%v), want the 4 naming nobody or someone else", left, err)
 	}
 }

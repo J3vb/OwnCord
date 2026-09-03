@@ -197,10 +197,38 @@ var erasureStatements = []struct {
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
-	// Replay events naming the subject (HP-4 decision 1): the wire JSON
-	// carries the author as user_id on state frames and as user.id on
-	// message frames (docs/protocol.md).
-	{"events", `DELETE FROM events WHERE json_extract(payload, '$.user_id') = ?1 OR json_extract(payload, '$.user.id') = ?1`},
+	// Replay events naming the subject (HP-4 decision 1).
+	{"events", `DELETE FROM events WHERE ` + EventNamesUserPredicate},
+}
+
+// EventNamesUserPredicate is the SQL that decides whether a persisted replay
+// event names a user, bound to the user's id as ?1. A persisted row is the
+// wire envelope the hub sent, `{"seq":…,"type":…,"payload":{…}}`
+// (ws.wrapWithSeq), so every lookup goes through $.payload: state frames
+// carry user_id (presence, typing, reactions, voice, member_ban), message
+// frames carry the author as user.id, chat frames list the mentioned ids
+// under mentions, and a relayed E2EE offer names its sender as
+// from_user_id. ws.eventNamesUser is the same rule over the bytes in the
+// ring buffer; the two must stay in step.
+const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
+	 OR json_extract(payload, '$.payload.user.id') = ?1
+	 OR json_extract(payload, '$.payload.from_user_id') = ?1
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1))`
+
+// DeleteEventsForUser removes every persisted replay event naming userID —
+// the erasure's own statement, run again after the member_ban broadcast and
+// the persister flush so nothing queued or notified after the transaction
+// survives (data-lifecycle O1 A4, O5). Returns rows deleted.
+func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, error) {
+	res, err := d.writer.ExecContext(ctx, `DELETE FROM events WHERE `+EventNamesUserPredicate, userID)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteEventsForUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("DeleteEventsForUser RowsAffected: %w", err)
+	}
+	return n, nil
 }
 
 // erasureCollectFiles lists the stored_as names of every attachment the

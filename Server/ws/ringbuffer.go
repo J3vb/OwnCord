@@ -71,11 +71,30 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 	for i := 0; i < rb.count; i++ {
 		idx := (oldestIdx + i) % rb.size
 		e := rb.entries[idx]
-		if e.seq > afterSeq {
+		if e.seq > afterSeq && e.data != nil {
 			result = append(result, e.data)
 		}
 	}
 	return result
+}
+
+// RemoveWhere drops the data of every buffered event drop reports true for
+// and returns how many it dropped. The entry keeps its seq so the buffer's
+// coverage window (OldestSeq/NewestSeq) is unchanged; EventsSince and
+// EventsSinceFiltered skip the emptied slot. Used by the account erasure to
+// take an erased user's frames out of hot replay (data-lifecycle O5).
+func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	removed := 0
+	for i := 0; i < rb.count; i++ {
+		idx := (rb.pos - rb.count + rb.size + i) % rb.size
+		if rb.entries[idx].data != nil && drop(rb.entries[idx].data) {
+			rb.entries[idx].data = nil
+			removed++
+		}
+	}
+	return removed
 }
 
 // newestSeqLocked returns the highest sequence number in the buffer. Callers
@@ -115,7 +134,7 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 		if e.seq > afterSeq {
 			// channelID 0 = global broadcast, always include.
 			// channelID > 0 = channel-scoped, include only if allowed.
-			if e.channelID == 0 || allowedChannelIDs[e.channelID] {
+			if e.data != nil && (e.channelID == 0 || allowedChannelIDs[e.channelID]) {
 				result = append(result, e.data)
 			}
 		}

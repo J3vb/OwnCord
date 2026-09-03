@@ -245,11 +245,13 @@ func TestHP4_D4_ErasurePurgesTheSubjectsReplayEvents(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT id FROM users WHERE id != ? ORDER BY id LIMIT 1`, uid).Scan(&other); err != nil {
 		t.Fatalf("pick another user: %v", err)
 	}
+	// Persisted rows are the wire envelope the hub sends (ws.wrapWithSeq):
+	// seq, type, then the payload object.
 	payloads := []string{
-		fmt.Sprintf(`{"type":"chat_message","channel_id":1,"user":{"id":%d,"username":%q},"content":"still in the window"}`, uid, uname),
-		fmt.Sprintf(`{"type":"typing","channel_id":1,"user_id":%d}`, uid),
-		fmt.Sprintf(`{"type":"chat_message","channel_id":1,"user":{"id":%d},"content":"and another"}`, uid),
-		fmt.Sprintf(`{"type":"typing","channel_id":1,"user_id":%d}`, other),
+		fmt.Sprintf(`{"seq":1,"type":"chat_message","payload":{"channel_id":1,"user":{"id":%d,"username":%q},"content":"still in the window"}}`, uid, uname),
+		fmt.Sprintf(`{"seq":2,"type":"typing","payload":{"channel_id":1,"user_id":%d}}`, uid),
+		fmt.Sprintf(`{"seq":3,"type":"chat_message","payload":{"channel_id":1,"user":{"id":%d},"content":"and another"}}`, uid),
+		fmt.Sprintf(`{"seq":4,"type":"typing","payload":{"channel_id":1,"user_id":%d}}`, other),
 	}
 	for i, p := range payloads {
 		if err := database.PersistEvent(ctx, int64(i+1), "chat_message", 1, []byte(p)); err != nil {

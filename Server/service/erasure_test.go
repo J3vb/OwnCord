@@ -520,3 +520,60 @@ func TestModerationService_EraseUser(t *testing.T) {
 		t.Errorf("EraseUser without a runner = %v, want ErrInternal (fail closed)", err)
 	}
 }
+
+type recordingErasureHub struct {
+	calls []string
+}
+
+func (h *recordingErasureHub) BroadcastMemberBan(userID int64) {
+	h.calls = append(h.calls, fmt.Sprintf("ban:%d", userID))
+}
+
+func (h *recordingErasureHub) PurgeUserFromReplay(_ context.Context, userID int64) error {
+	h.calls = append(h.calls, fmt.Sprintf("purge:%d", userID))
+	return nil
+}
+
+// With the hub installed the runner broadcasts the member_ban itself and
+// purges replay right behind it, and the routes stop sending their own.
+func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	hash, _ := auth.HashPassword("correct horse battery")
+	if err := database.UpdateUserPassword(ctx, uid, hash); err != nil {
+		t.Fatal(err)
+	}
+	user, _ := database.GetUserByID(ctx, uid)
+	hub := &recordingErasureHub{}
+	shared := NewErasureService(database)
+	shared.SetFiles(newTestStorage(t, dir))
+	if shared.BroadcastsMemberBan() {
+		t.Fatal("BroadcastsMemberBan before SetHub")
+	}
+	shared.SetHub(hub)
+	bcast := &recordingBanBroadcaster{}
+	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), bcast)
+	svc.UseErasure(shared)
+
+	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", ""); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+	want := fmt.Sprintf("[ban:%d purge:%d]", uid, uid)
+	if got := fmt.Sprint(hub.calls); got != want {
+		t.Errorf("hub calls = %s, want %s", got, want)
+	}
+	if len(bcast.banned) != 0 {
+		t.Errorf("the auth service broadcast on its own too: %v", bcast.banned)
+	}
+
+	all := New(database, auth.NewRateLimiter())
+	if all.Moderation.ErasureBroadcastsMemberBan() {
+		t.Error("ErasureBroadcastsMemberBan without a hub")
+	}
+	all.Erasure.SetHub(hub)
+	if !all.Moderation.ErasureBroadcastsMemberBan() {
+		t.Error("ErasureBroadcastsMemberBan with a hub")
+	}
+}

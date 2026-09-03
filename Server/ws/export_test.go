@@ -568,3 +568,21 @@ func NewFaultConnForTest(seed, stream uint64, sched FaultSchedule, preface [][]b
 func (h *Hub) FreezeTopicLimiterForTest() {
 	h.topicLimiter = NewTopicRateLimiter(topicRateLimitPerSecond, time.Hour)
 }
+
+// EventNamesUserForTest exposes eventNamesUser to the external test package.
+func EventNamesUserForTest(data []byte, userID int64) bool { return eventNamesUser(data, userID) }
+
+// AllFramesForTest returns every frame still held in the ring buffer, oldest
+// first, including the oldest slot EventsSince can never return.
+func (rb *EventRingBuffer) AllFramesForTest() [][]byte {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	out := make([][]byte, 0, rb.count)
+	for i := 0; i < rb.count; i++ {
+		idx := (rb.pos - rb.count + rb.size + i) % rb.size
+		if rb.entries[idx].data != nil {
+			out = append(out, rb.entries[idx].data)
+		}
+	}
+	return out
+}

@@ -25,6 +25,14 @@ type StorageLister interface {
 	List() ([]storage.Entry, error)
 }
 
+// ErasureHub is what the runner needs from the WebSocket hub: the
+// member_ban that drops the erased user from every client and closes their
+// socket, and the replay purge that follows it. *ws.Hub satisfies it.
+type ErasureHub interface {
+	BroadcastMemberBan(userID int64)
+	PurgeUserFromReplay(ctx context.Context, userID int64) error
+}
+
 // ErasureStore is the slice of Store the erasure runner needs.
 type ErasureStore interface {
 	EraseAccount(ctx context.Context, userID int64) (*db.ErasureJob, error)
@@ -55,6 +63,7 @@ type ErasureService struct {
 	mu    syncutil.Mutex
 	st    ErasureStore
 	files FileRemover
+	hub   ErasureHub
 }
 
 // NewErasureService wires the runner over st. Files are removed only once
@@ -75,6 +84,19 @@ func (s *ErasureService) HasFiles() bool {
 	return s.files != nil
 }
 
+// SetHub installs the hub: from then on Erase broadcasts the member_ban
+// itself, right after the transaction, and purges the replay pipeline
+// behind it. Call it at the composition root before serving.
+func (s *ErasureService) SetHub(h ErasureHub) {
+	s.hub = h
+}
+
+// BroadcastsMemberBan reports whether Erase sends the member_ban itself;
+// a caller without a hub here sends its own.
+func (s *ErasureService) BroadcastsMemberBan() bool {
+	return s.hub != nil
+}
+
 // Erase erases userID: the database half, then this job's files. Errors from
 // the database half are the store's (db.ErrLastAdmin, db.ErrNotFound) and
 // mean nothing changed; ErrErasureFilesPending means the account is gone and
@@ -85,10 +107,20 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 		return err
 	}
 	slog.Info("account erased", "user_id", userID, "erasure_job", job.ID, "files", len(job.Files))
-	// The files outlive the request that started them: a cancelled context
-	// must not leave a half-removed job for the next tick when the process
-	// is right here to finish it.
-	if err := s.runJob(context.WithoutCancel(ctx), job); err != nil {
+	// The rest outlives the request that started it: a cancelled context
+	// must not leave the replay pipeline naming the subject or a
+	// half-removed job for the next tick when the process is right here.
+	bg := context.WithoutCancel(ctx)
+	if s.hub != nil {
+		// Drop the user from every client and close their socket, then take
+		// every frame naming them — the member_ban included — out of hot
+		// and cold replay (data-lifecycle O1 A4, O5).
+		s.hub.BroadcastMemberBan(userID)
+		if err := s.hub.PurgeUserFromReplay(bg, userID); err != nil {
+			slog.Error("erasure: replay purge failed", "user_id", userID, "err", err)
+		}
+	}
+	if err := s.runJob(bg, job); err != nil {
 		return fmt.Errorf("%w: job %d: %w", ErrErasureFilesPending, job.ID, err)
 	}
 	return nil

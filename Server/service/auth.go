@@ -959,8 +959,9 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	// The erasure left the subject in the state an admin ban does for every
 	// other client (gone from the roster, sessions revoked) — broadcast the
 	// same event so connected clients drop the user immediately, and the
-	// subject's own socket is disconnected.
-	if s.broadcaster != nil {
+	// subject's own socket is disconnected. With the hub installed on the
+	// runner the erasure already did this, and purged replay behind it.
+	if s.broadcaster != nil && !s.erasure.BroadcastsMemberBan() {
 		s.broadcaster.BroadcastMemberBan(user.ID)
 	}
 	return nil

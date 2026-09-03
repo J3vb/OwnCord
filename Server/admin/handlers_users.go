@@ -339,7 +339,7 @@ func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.H
 			writeModerationErr(w, err)
 			return
 		}
-		if hub != nil {
+		if hub != nil && !mod.ErasureBroadcastsMemberBan() {
 			hub.BroadcastMemberBan(id)
 		}
 		w.WriteHeader(http.StatusNoContent)

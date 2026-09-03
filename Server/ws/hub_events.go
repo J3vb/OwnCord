@@ -2,6 +2,11 @@ package ws
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"slices"
 	"strconv"
 	"sync/atomic"
 
@@ -78,6 +83,90 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
 	w := h.visibilityChangeSeq.Load()
 	return w > 0 && lastSeq <= w
+}
+
+// PurgeUserFromReplay takes every frame naming userID out of the replay
+// pipeline after an account erasure (data-lifecycle O5, HP-4 decision 1),
+// in the order the pipeline runs: the persister is flushed so a frame queued
+// before the erasure — or the member_ban the erasure itself broadcast — is
+// on disk rather than in flight, the ring buffer's copies are dropped, and
+// the persisted rows are deleted again. A reconnect whose last_seq predates
+// a removed row meets an interior gap and falls back to a full ready
+// (reconnectVetColdTail), which is the convergence an erasure wants. Runs
+// under seqMu between the flush and the delete so no broadcast is sequenced
+// in between. Returns the first error; the frames a failed step left are
+// what the next erasure or the pruner takes.
+func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
+	if err := h.awaitDispatch(ctx); err != nil {
+		return fmt.Errorf("purge replay: %w", err)
+	}
+	if p := h.eventPersister.Load(); p != nil {
+		if err := p.Flush(ctx); err != nil {
+			return fmt.Errorf("purge replay: flush: %w", err)
+		}
+	}
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+	dropped := h.replayBuf.RemoveWhere(func(data []byte) bool { return eventNamesUser(data, userID) })
+	var rows int64
+	if h.db != nil {
+		n, err := h.db.DeleteEventsForUser(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("purge replay: %w", err)
+		}
+		rows = n
+	}
+	slog.Info("hub: replay purged for erased user", "user_id", userID, "buffered", dropped, "persisted", rows)
+	return nil
+}
+
+// awaitDispatch returns once every broadcast enqueued on h.broadcast before
+// the call has been through deliverBroadcast — sequenced, buffered and
+// handed to the persister. BroadcastToAll is asynchronous, so the caller
+// that just broadcast a member_ban and now wants to purge replay behind it
+// needs this barrier first. A hub whose dispatch loop is not running (a
+// test hub, a hub after GracefulStop) has nothing queued to wait for.
+func (h *Hub) awaitDispatch(ctx context.Context) error {
+	if !h.running.Load() || !h.DispatchAlive() {
+		return nil
+	}
+	done := make(chan struct{})
+	select {
+	case h.broadcast <- broadcastMsg{barrier: done}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// eventNamesUser reports whether a wrapped broadcast frame names userID —
+// the Go twin of db.EventNamesUserPredicate over the same envelope shape:
+// payload.user_id, payload.user.id, payload.from_user_id, or userID among
+// payload.mentions. An unparseable frame names nobody.
+func eventNamesUser(data []byte, userID int64) bool {
+	var frame struct {
+		Payload struct {
+			UserID     *int64  `json:"user_id"`
+			FromUserID *int64  `json:"from_user_id"`
+			Mentions   []int64 `json:"mentions"`
+			User       *struct {
+				ID int64 `json:"id"`
+			} `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return false
+	}
+	pl := frame.Payload
+	return (pl.UserID != nil && *pl.UserID == userID) ||
+		(pl.FromUserID != nil && *pl.FromUserID == userID) ||
+		(pl.User != nil && pl.User.ID == userID) ||
+		slices.Contains(pl.Mentions, userID)
 }
 
 // persistEvent enqueues a broadcast event for cold-storage persistence. Safe
