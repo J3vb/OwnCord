@@ -266,7 +266,7 @@ func (a *App) startAuditWriter() error {
 // in-flight tick (which can hold the writer — scheduled backups run VACUUM
 // INTO) is not still using the database when the handle closes.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services.Settings)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services.Settings, a.runtime.Services.Erasure)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil

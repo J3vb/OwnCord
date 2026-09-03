@@ -273,7 +273,7 @@ var (
 
 // AuthService owns the auth slice's orchestration: the lockout and
 // enumeration guards, the password and second-factor checks, session issue
-// and revoke, the audit writes and the member_ban broadcast on self-deletion.
+// and revoke, the audit writes and the member_ban broadcast on self-erasure.
 // Persistence stays in db behind Store. B3-2 moved every line here verbatim
 // from api/auth_handler.go and api/totp_handler.go at 71d867cb; B3-1's
 // characterization rows pin the behaviour.
@@ -287,6 +287,10 @@ type AuthService struct {
 	usedCodes   *auth.UsedTOTPCodeStore
 	totpKey     []byte
 	broadcaster AuthBroadcaster
+	// erasure runs DeleteAccount's erasure (B4-9). NewAuthService builds a
+	// private one over st; the composition root swaps in the shared
+	// Services.Erasure (UseErasure) so the file storage is installed once.
+	erasure *ErasureService
 }
 
 // NewAuthService wires the auth slice. limiter is the shared auth rate
@@ -306,6 +310,15 @@ func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadca
 		usedCodes:   auth.NewUsedTOTPCodeStore().WithPersister(st),
 		totpKey:     totpKey,
 		broadcaster: broadcaster,
+		erasure:     NewErasureService(st),
+	}
+}
+
+// UseErasure makes DeleteAccount run through e — the bundle's shared runner,
+// which carries the upload storage — instead of the private one.
+func (s *AuthService) UseErasure(e *ErasureService) {
+	if e != nil {
+		s.erasure = e
 	}
 }
 
@@ -887,9 +900,18 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 	return nil
 }
 
-// DeleteAccount confirms the password, anonymises and bans the account and
+// DeleteAccount confirms the password, erases the account (B4-9: every data
+// class the subject holds is hard-deleted in one transaction and the
+// subject's files are removed, journaled so an interruption resumes) and
 // broadcasts member_ban. Progressive lockout mirrors login: 3 failures →
-// 15-min lock. ip is only logged and audited.
+// 15-min lock. ip is only logged and audited; the username is never logged.
+//
+// A message the subject sends over an already-authenticated socket cannot
+// outlive the erasure (data-lifecycle O1 A4): the writer connection
+// serialises it either before the transaction, which then deletes it, or
+// after, when messages.user_id no longer has a users row to reference and
+// the insert fails the foreign-key check. The member_ban broadcast then
+// disconnects the socket.
 func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, ip string) error {
 	user := p.User
 
@@ -917,22 +939,27 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	}
 	s.limiter.Reset(ctx, failKey)
 
-	if err := s.st.DeleteAccount(ctx, user.ID); err != nil {
-		if errors.Is(err, db.ErrLastAdmin) {
+	if err := s.erasure.Erase(ctx, user.ID); err != nil {
+		switch {
+		case errors.Is(err, db.ErrLastAdmin):
 			return ErrLastAdmin
+		case errors.Is(err, ErrErasureFilesPending):
+			// The account is gone; the journal finishes the files.
+			slog.Warn("DeleteAccount: files pending", "user_id", user.ID, "err", err)
+		default:
+			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
+			return ErrDeleteAccountFailed
 		}
-		slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
-		return ErrDeleteAccountFailed
 	}
 
-	slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
+	slog.Info("account deleted", "user_id", user.ID, "ip", ip)
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "account_deleted", "user", user.ID,
 		"account self-deleted from "+ip)
 
-	// DeleteAccount left the row in exactly the state an admin ban does
-	// (anonymised, banned, sessions revoked) — broadcast the same event so
-	// every other connected client drops the deleted user immediately
-	// instead of keeping their pre-deletion username until it reconnects.
+	// The erasure left the subject in the state an admin ban does for every
+	// other client (gone from the roster, sessions revoked) — broadcast the
+	// same event so connected clients drop the user immediately, and the
+	// subject's own socket is disconnected.
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastMemberBan(user.ID)
 	}

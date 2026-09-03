@@ -240,20 +240,25 @@ func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
+// anonymiseNameAttempts is how many names DenyPendingUser will try: the
+// canonical "[denied-<id>]" plus randomly suffixed variants. Exhausting it
+// means the generator collided repeatedly, which is not something an
+// attacker can force.
+const anonymiseNameAttempts = 4
+
 // DenyPendingUser denies an application: the row is anonymised (the username
 // is released as "[denied-{id}]", the password and profile cleared) and locked
-// as 'denied' for good — the same convention DeleteAccount uses, because
-// audit rows reference the id. Only a still-pending row is touched; an
-// approved account never goes through here. ErrNotFound when nothing pending
-// matches.
+// as 'denied' for good — the convention the pre-B4-9 account deletion used,
+// because audit rows reference the id. Only a still-pending row is touched;
+// an approved account never goes through here. ErrNotFound when nothing
+// pending matches.
 func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
 	// users.username is UNIQUE COLLATE NOCASE and the "[denied-…]" namespace
 	// is reserved at registration (auth.ValidateUsername), but a row from
-	// before the reservation could hold the plain name; like DeleteAccount's
-	// anonymisation, fall back to randomly suffixed variants rather than
-	// leave the application pending.
+	// before the reservation could hold the plain name; fall back to randomly
+	// suffixed variants rather than leave the application pending.
 	var lastErr error
-	for attempt := range anonymiseUserAttempts {
+	for attempt := range anonymiseNameAttempts {
 		name := fmt.Sprintf("[denied-%d]", userID)
 		if attempt > 0 {
 			suffix := make([]byte, 6)

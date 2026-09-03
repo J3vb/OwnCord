@@ -14,16 +14,22 @@ import (
 
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
-func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, settings *service.SettingsService) func() {
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, settings *service.SettingsService, erasure *service.ErasureService) func() {
 	// Periodically purge expired sessions and orphaned attachments.
 	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if fileStorageErr != nil {
 		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", fileStorageErr)
 	}
+	// The erasure runner removes files through whichever storage was
+	// installed first (the router's, normally); this one is the fallback so
+	// journaled jobs still finish when the upload routes did not mount.
+	if erasure != nil && fileStorage != nil && !erasure.HasFiles() {
+		erasure.SetFiles(fileStorage)
+	}
 
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	go maintenanceLoop(bgCtx, log, database, fileStorage, settings, stopMaintenance, maintenanceDone)
+	go maintenanceLoop(bgCtx, log, database, fileStorage, settings, erasure, stopMaintenance, maintenanceDone)
 
 	return func() {
 		// Backstop for early returns below (see hub.GracefulStop defer above),
@@ -41,8 +47,11 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 
 // maintenanceLoop is the periodic maintenance goroutine started by
 // startMaintenanceLoop.
-func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, stopMaintenance, maintenanceDone chan struct{}) {
+func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService, stopMaintenance, maintenanceDone chan struct{}) {
 	defer close(maintenanceDone)
+	// Erasure jobs interrupted by the last shutdown (files journaled, not
+	// yet removed) finish now, not fifteen minutes from now (B4-9).
+	resumeErasureJobs(bgCtx, log, erasure)
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -58,7 +67,7 @@ func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 				continue
 			}
 
-			if maintenanceTick(bgCtx, log, database, fileStorage, settings) {
+			if maintenanceTick(bgCtx, log, database, fileStorage, settings, erasure) {
 				consecutiveFailures++
 			} else {
 				consecutiveFailures = 0
@@ -71,7 +80,7 @@ func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 
 // maintenanceTick runs one maintenance pass and reports whether any step
 // of it failed.
-func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService) bool {
+func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, settings *service.SettingsService, erasure *service.ErasureService) bool {
 	tickFailed := false
 	if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 		log.Warn("failed to delete expired sessions", "error", err)
@@ -118,5 +127,44 @@ func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, f
 		}
 	}
 
+	// Erasure jobs whose files are still on disk, then the reconciliation
+	// pass: files in upload storage that no row names — what the sweep
+	// above strands when it stops between its DELETE and its unlinks (O3
+	// A1), or a restore leaves behind (O3 A5) — bounded per tick and only
+	// past the same one-hour grace an in-flight upload gets.
+	if !resumeErasureJobs(bgCtx, log, erasure) {
+		tickFailed = true
+	}
+	if erasure != nil && fileStorage != nil {
+		removed, err := erasure.Reconcile(bgCtx, fileStorage, time.Now().Add(-1*time.Hour), reconcileFilesPerTick)
+		if err != nil {
+			log.Warn("storage reconciliation failed", "error", err)
+			tickFailed = true
+		} else if removed > 0 {
+			log.Info("storage reconciliation removed stranded files", "count", removed)
+		}
+	}
+
 	return tickFailed
+}
+
+// reconcileFilesPerTick bounds how many stranded files one maintenance tick
+// removes; the rest wait for the next tick.
+const reconcileFilesPerTick = 500
+
+// resumeErasureJobs runs every unfinished erasure job once and reports
+// whether the pass succeeded (no runner is a success: nothing to do).
+func resumeErasureJobs(ctx context.Context, log *slog.Logger, erasure *service.ErasureService) bool {
+	if erasure == nil {
+		return true
+	}
+	done, err := erasure.Resume(ctx)
+	if done > 0 {
+		log.Info("erasure jobs completed", "count", done)
+	}
+	if err != nil {
+		log.Warn("erasure jobs still pending", "error", err)
+		return false
+	}
+	return true
 }

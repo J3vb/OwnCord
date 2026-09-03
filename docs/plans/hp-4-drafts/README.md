@@ -18,3 +18,7 @@ not improvised later.
 
 The scorecard ([hp-4-scorecard-2026-09-02.md](../hp-4-scorecard-2026-09-02.md))
 records the decisions the shapes encode.
+
+Applied so far: `erasure_jobs` landed as `Server/migrations/037_erasure_jobs.sql`
+(B4-9, 2026-09-03), byte-for-byte the `up` draft; its `down` file stays here
+as the rollback.

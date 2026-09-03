@@ -95,6 +95,19 @@ type Emoji struct {
 	MimeType   string `json:"mimeType"`
 }
 
+type ErasureJob struct {
+	ID           int64   `json:"id"`
+	UserID       int64   `json:"userId"`
+	State        string  `json:"state"`
+	Files        string  `json:"files"`
+	FilesRemoved int64   `json:"filesRemoved"`
+	Attempts     int64   `json:"attempts"`
+	LastError    *string `json:"lastError"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+	FinishedAt   *string `json:"finishedAt"`
+}
+
 type Event struct {
 	Seq       int64     `json:"seq"`
 	EventType string    `json:"eventType"`

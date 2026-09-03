@@ -33,6 +33,23 @@ var setupLimiterHook func(*auth.RateLimiter)
 // a one-shot caller's entry sits forever unless something sweeps the whole
 // map. api/router.go reaps its own limiter with RateLimiter.StartCleanup, a
 // goroutine parked in a ticker select until a stop channel closes — but
+// mountUserRoutes registers the member-management routes under the
+// authenticated perimeter. Ban/unban and role change are authorized inside
+// ModerationService (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so PATCH stays
+// perimeter-level — a moderator with only BAN_MEMBERS must reach it.
+// Force-logout is KICK_MEMBERS; account erasure by an administrator (B4-9)
+// is ADMINISTRATOR with the hierarchy re-checked in the service; recovery
+// credentials (B4-6) are owner-only.
+func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) {
+	r.Get("/users", handleListUsers(svc.Users))
+	r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
+	r.With(requirePerm(permissions.KickMembers)).
+		Delete("/users/{id}/sessions", handleForceLogout(mod))
+	r.With(requirePerm(permissions.Administrator)).
+		Delete("/users/{id}", handleDeleteUser(mod, hub))
+	r.Post("/users/{id}/recovery-credential", ownerOnlyMiddleware(handleIssueRecoveryCredential(svc.Auth)).ServeHTTP)
+}
+
 // NewAdminAPI has no shutdown hook and is called directly by ~180 tests that
 // never capture one, so a parked goroutine here would leak under every
 // test's goleak check. time.AfterFunc self-rescheduling avoids that: between
@@ -162,14 +179,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe())
-		r.Get("/users", handleListUsers(svc.Users))
-		// Ban/unban and role change are authorized inside ModerationService
-		// (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so the route itself stays
-		// perimeter-level — a moderator with only BAN_MEMBERS must reach it.
-		r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
-		r.With(requirePerm(permissions.KickMembers)).
-			Delete("/users/{id}/sessions", handleForceLogout(mod))
-		r.Post("/users/{id}/recovery-credential", ownerOnlyMiddleware(handleIssueRecoveryCredential(svc.Auth)).ServeHTTP) // B4-6, owner-only
+		mountUserRoutes(r, svc, hub, permInvalidator, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).

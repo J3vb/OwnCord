@@ -209,8 +209,8 @@ func TestRecoveryCodes_ReplaceListMarkCountDelete(t *testing.T) {
 	}
 }
 
-// DeleteAccount purges the four second-factor tables with the rest.
-func TestDeleteAccount_PurgesSecondFactorState(t *testing.T) {
+// EraseAccount purges the four second-factor tables with the rest.
+func TestEraseAccount_PurgesSecondFactorState(t *testing.T) {
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	// A second account so uid is not the last admin-class account (it is a
@@ -235,8 +235,8 @@ func TestDeleteAccount_PurgesSecondFactorState(t *testing.T) {
 		}
 	}
 
-	if err := database.DeleteAccount(ctx, uid); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
+	if _, err := database.EraseAccount(ctx, uid); err != nil {
+		t.Fatalf("EraseAccount: %v", err)
 	}
 	count := func(q string, id int64) int {
 		var n int
@@ -252,7 +252,7 @@ func TestDeleteAccount_PurgesSecondFactorState(t *testing.T) {
 		`SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?`,
 	} {
 		if got := count(q, uid); got != 0 {
-			t.Errorf("%s = %d after DeleteAccount, want 0", q, got)
+			t.Errorf("%s = %d after EraseAccount, want 0", q, got)
 		}
 		if got := count(q, other); got != 1 {
 			t.Errorf("%s = %d for the bystander, want 1 (untouched)", q, got)

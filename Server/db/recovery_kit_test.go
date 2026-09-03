@@ -110,7 +110,7 @@ func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
 	}
 }
 
-func TestDeleteAccount_PurgesTheRecoveryKit(t *testing.T) {
+func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.CreateUser(ctx, "owner", "hash", 1); err != nil {
@@ -120,8 +120,8 @@ func TestDeleteAccount_PurgesTheRecoveryKit(t *testing.T) {
 	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
 		t.Fatalf("UpsertRecoveryKit: %v", err)
 	}
-	if err := database.DeleteAccount(ctx, uid); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
+	if _, err := database.EraseAccount(ctx, uid); err != nil {
+		t.Fatalf("EraseAccount: %v", err)
 	}
 	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {
 		t.Fatal("the recovery kit survived account deletion")

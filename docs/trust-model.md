@@ -378,10 +378,18 @@ does not claim").
   resists an operator who reads. A modified server controls call membership
   and can add a participant it holds the keys for; pins do not cover a member
   that was never a known peer. Authenticated membership is not in beta.
-- **No secure deletion.** Account deletion blanks message bodies and
-  anonymises the name (`Server/db/account.go:116`, `:131`; test
-  `TestDeleteAccount_AnonymisesUsername`), but backups taken before the
-  deletion still hold the text, and SQLite does not scrub freed pages.
+- **Deletion does not reach backups yet.** Account erasure (B4-9,
+  `Server/db/erasure.go`; `TestHP4_D1_ErasureLeavesNoClass`) hard-deletes
+  every row attributable to the account — the account itself, its messages
+  and their search-index entries, reactions, mentions, uploads and their
+  files, DM state, invites, blocks, credentials, sessions and replay events —
+  in one transaction run with SQLite's `secure_delete` on, and truncates the
+  write-ahead log after it, so the live database file keeps no trace in
+  freed pages or the WAL. What it does not reach is a backup taken before
+  the erasure: restoring one brings the account back in full, and nothing in
+  the restored file records that an erasure happened. B4-10's deletion
+  markers, kept outside the database file and replayed on every open and
+  restore, close that; until then the operator's backups are the disclosure.
 - **No browser client yet**, and when there is one it will not pin
   certificates.
 - **No stable plugin API** — [architecture/plugins.md](architecture/plugins.md).
