@@ -207,8 +207,8 @@ cold-tier reconnect replay ([websocket.md](websocket.md)); `StartEventPruner`
 the retention window, a reconnecting client can receive the `chat_message`
 frame of a message that has since been deleted or whose author has been
 erased — followed by the delete frame, but the content crosses the wire. The
-erasure target (B4-9) either purges the subject's events or records the
-bounded window as an accepted, disclosed limitation; HP-4 decides which.
+erasure target (B4-9) purges the subject's events in the erasure transaction
+— decided at HP-4 (2026-09-02), after drill D4 showed the window is real.
 
 ### O6 — Session sweeps and revocation
 
@@ -360,6 +360,10 @@ copies, each recorded with its before/after inventory:
   message's attachments, run `DeleteOrphanedAttachments`, then delete one
   returned file before the removal loop would; expect the O3 A1 class — a
   file with no row — so the reconciliation pass has a fixture.
+
+The five drills are implemented as `TestHP4_D1`…`TestHP4_D5` in
+`Server/db/hp4_drills_test.go` (HP-4, 2026-09-02); the scorecard pastes their
+inventories.
 
 ## The private half
 
