@@ -99,6 +99,67 @@ reset anyone's credentials. Issuance and use are audited
 
 Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
 
+## First-run setup
+
+`POST /admin/api/setup` is unauthenticated: it is how the first Owner account
+comes to exist, and until B4-10 the only thing standing in front of it was
+"no users exist". Account erasure can now empty that table — the
+administrator erases the last account, or a deletion marker is replayed
+against a restored backup whose only user is the erased owner (the replay
+does not apply the last-admin guard) — so the count is no longer the gate.
+The `setup_completed` setting is (migration 043): it is written in the same
+transaction as the first Owner and never cleared by the server, so an emptied
+users table leaves setup closed rather than open to the first caller on an
+allowed network. An installation upgrading into that migration is judged the
+same way: a live user closes setup, and so do the traces an erasure leaves
+behind — its `erasure_jobs` row, or a `server_setup`, `account_deleted` or
+`account_erasure_replayed` audit row — so a server whose users table was
+already emptied before the upgrade closes on those rather than reading as
+fresh. The audit evidence is deliberately those three actions and not any
+row: a server that has never been set up still writes `backup_create` from
+the scheduled-backup loop, and closing setup on that would deny it its own
+first run.
+
+A server with no accounts and the flag set is therefore locked, deliberately.
+Re-opening it is an operator action with filesystem access to the database,
+not a network one:
+
+```sql
+UPDATE settings SET value = '0' WHERE key = 'setup_completed';
+```
+
+The next `POST /admin/api/setup` then creates a new Owner and sets the flag
+again.
+
+### Erasure marker sequence floors
+
+A deletion marker names its subject by a one-way token, and the id behind it
+must never be handed out again: a new account holding it would hash to the
+old marker and be erased on the next start-up. `sequence_floors` in the
+marker file keeps the id counters that prevents, and every marker written
+records its own. A marker file from before those floors existed records
+none, so the first start-up after the upgrade recovers them by hashing
+candidate ids against the markers' tokens until every marker is accounted
+for, then records the recovery in `floor_probes` so later start-ups skip it.
+
+If a marker names an id beyond the probe's reach (`SequenceFloorProbeCeiling`,
+16,777,216 — past any real id space), no floor can be proven safe and the
+server refuses to start rather than serve with one that only looks safe. The
+log names the two statements that resolve it. Only the operator can, because
+only they know the highest id their installation ever handed out; run both
+against the **marker file** (`data/erasure/markers.sqlite`), not the main
+database:
+
+```sql
+INSERT INTO sequence_floors (name, seq) VALUES ('users', <highest id ever handed out>)
+  ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq);
+INSERT OR IGNORE INTO floor_probes (name) VALUES ('users');
+```
+
+The second statement is the acknowledgement: it records that the floor is
+settled, so the next start-up honours it instead of probing again. Use
+`'channels'` in place of `'users'` when the refusal names that table.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every

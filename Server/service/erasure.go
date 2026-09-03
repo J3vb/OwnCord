@@ -40,8 +40,7 @@ type ErasureStore interface {
 	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
-	UnlinkQueuedAudits(ctx context.Context, userID int64, token string) error
-	RelinkAudits(userID int64)
+	FlushAudits(ctx context.Context) error
 	CountAdminClassAccounts(ctx context.Context) (int, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	RaiseSequences(ctx context.Context, floors map[string]int64) error
@@ -77,13 +76,17 @@ type ErasureService struct {
 	files   FileRemover
 	hub     ErasureHub
 	markers *db.MarkerStore
+	// floorProbeCeiling bounds the sequence-floor probe; production runs at
+	// db.SequenceFloorProbeCeiling and the tests lower it to reach the
+	// refusal without hashing their way to it.
+	floorProbeCeiling int64
 }
 
 // NewErasureService wires the runner over st. Files are removed only once
 // SetFiles has installed the upload storage; until then jobs stay db_done
 // and are resumed later.
 func NewErasureService(st ErasureStore) *ErasureService {
-	return &ErasureService{st: st}
+	return &ErasureService{st: st, floorProbeCeiling: db.SequenceFloorProbeCeiling}
 }
 
 // SetFiles installs the file remover. Call it at the composition root before
@@ -155,7 +158,7 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 			return fmt.Errorf("erasure: marker: %w", err)
 		}
 	}
-	job, err := s.eraseUnlinked(ctx, userID, token, s.st.EraseAccount)
+	job, err := s.eraseBehindBarrier(ctx, userID, token, s.st.EraseAccount)
 	if err != nil {
 		if created {
 			if dErr := s.markers.DiscardPending(context.WithoutCancel(ctx), token); dErr != nil {
@@ -174,24 +177,19 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	return s.finishErasure(ctx, userID, job)
 }
 
-// eraseUnlinked runs one erasure transaction behind the audit-writer
-// barrier (db.UnlinkQueuedAudits): the writer's unlinking rule for the
-// subject is installed and everything it holds is flushed first, so an
-// entry naming the subject that was queued before the transaction goes
-// down unlinked instead of landing raw after the transaction's UPDATE, and
-// one a request enqueues after it is written unlinked by the rule. A
-// refused transaction withdraws the rule.
-func (s *ErasureService) eraseUnlinked(ctx context.Context, userID int64, token string, erase func(context.Context, int64, string) (*db.ErasureJob, error)) (*db.ErasureJob, error) {
-	if err := s.st.UnlinkQueuedAudits(ctx, userID, token); err != nil {
-		s.st.RelinkAudits(userID)
+// eraseBehindBarrier runs one erasure transaction behind the audit
+// writer's barrier (db.FlushAudits): everything the writer holds is on
+// disk first, with its ids, so an entry about the subject queued before
+// the transaction is rewritten by the transaction's UPDATE, and a refused
+// transaction leaves it as it was. An entry enqueued after the barrier is
+// written unlinked by the rule the transaction installs on commit
+// (db.eraseAccount, AuditWriter.Unlink), read under the writer connection
+// at insert time.
+func (s *ErasureService) eraseBehindBarrier(ctx context.Context, userID int64, token string, erase func(context.Context, int64, string) (*db.ErasureJob, error)) (*db.ErasureJob, error) {
+	if err := s.st.FlushAudits(ctx); err != nil {
 		return nil, fmt.Errorf("erasure: audit barrier: %w", err)
 	}
-	job, err := erase(ctx, userID, token)
-	if err != nil {
-		s.st.RelinkAudits(userID)
-		return nil, err
-	}
-	return job, nil
+	return erase(ctx, userID, token)
 }
 
 // eraseForReplay is Erase for a marker replay: the marker already exists
@@ -202,7 +200,7 @@ func (s *ErasureService) eraseUnlinked(ctx context.Context, userID int64, token 
 // replay that leaves no admin-class account is the restored backup's
 // state, said loudly: the copy predates the handover.
 func (s *ErasureService) eraseForReplay(ctx context.Context, userID int64, token string) error {
-	job, err := s.eraseUnlinked(ctx, userID, token, s.st.ReplayEraseAccount)
+	job, err := s.eraseBehindBarrier(ctx, userID, token, s.st.ReplayEraseAccount)
 	if err != nil {
 		return err
 	}
@@ -231,10 +229,75 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 	if err != nil {
 		return db.ReplayReport{}, err
 	}
+	// A marker file written before the floors existed records none, and
+	// neither the live counter nor a floor row already present can stand in
+	// for them: this database may be a restore, which rolls the counter back
+	// below the ids the markers name — the case the floors defend against —
+	// and a floor row may have been written by a later erasure while an
+	// older marker still names a higher id. The markers are the only source,
+	// so the ids they name are recovered from the tokens themselves once;
+	// the probe is then recorded and later opens skip it, every marker
+	// written after it having recorded its own floor.
+	for _, table := range []string{db.SequenceFloorUsers, db.SequenceFloorChannels} {
+		probed, err := s.markers.FloorProbed(ctx, table)
+		if err != nil {
+			return db.ReplayReport{}, err
+		}
+		if probed {
+			continue
+		}
+		floor, err := s.recoverSequenceFloor(ctx, table, floors[table])
+		if err != nil {
+			return db.ReplayReport{}, err
+		}
+		if err := s.markers.RaiseSequenceFloor(ctx, table, floor); err != nil {
+			return db.ReplayReport{}, err
+		}
+		if err := s.markers.MarkFloorProbed(ctx, table); err != nil {
+			return db.ReplayReport{}, err
+		}
+		floors[table] = floor
+	}
 	if err := s.st.RaiseSequences(ctx, floors); err != nil {
 		return db.ReplayReport{}, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
 	return s.markers.ReplayAccounts(ctx, s.st, s.eraseForReplay)
+}
+
+// ErrSequenceFloorUnresolved is the refusal when a marker names an id the
+// probe cannot reach: no floor below it is safe, and accepting one would
+// leave that id free to be handed out again and its innocent holder erased
+// by the old marker on a later open. Start-up fails on it instead. The way
+// out is the operator's, because only they know the id space their markers
+// came from: they raise the floor and acknowledge it, which settles the
+// table and lets the next start-up through (MarkerStore.MarkFloorProbed,
+// docs/security.md, "Erasure marker sequence floors"). The message names
+// both statements.
+var ErrSequenceFloorUnresolved = errors.New("erasure markers: no safe sequence floor could be established from the markers")
+
+// recoverSequenceFloor is the floor for a table whose marker file has not
+// been probed: the highest id its markers name, or whichever of the
+// recorded floor and the live counter stands higher. A marker the probe
+// cannot reach is fatal rather than logged — a floor that is only a lower
+// bound is the defect this recovery exists to close.
+func (s *ErasureService) recoverSequenceFloor(ctx context.Context, table string, recorded int64) (int64, error) {
+	located, complete, err := s.markers.LocateSequenceFloor(ctx, table, s.floorProbeCeiling)
+	if err != nil {
+		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
+	}
+	if !complete {
+		slog.Error("erasure markers: a marker names an id beyond the probe ceiling, so no safe sequence floor can be established; set the floor above the highest id this installation ever handed out and acknowledge it, in the marker file (docs/security.md, \"Erasure marker sequence floors\")",
+			"table", table, "located_up_to", located, "ceiling", s.floorProbeCeiling,
+			"marker_file", s.markers.Path(),
+			"set_floor", fmt.Sprintf("INSERT INTO sequence_floors (name, seq) VALUES ('%s', <highest id ever handed out>) ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq);", table),
+			"acknowledge", fmt.Sprintf("INSERT OR IGNORE INTO floor_probes (name) VALUES ('%s');", table))
+		return 0, fmt.Errorf("%w: %s", ErrSequenceFloorUnresolved, table)
+	}
+	seq, err := s.st.SequenceValue(ctx, table)
+	if err != nil {
+		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
+	}
+	return max(located, max(recorded, seq)), nil
 }
 
 // finishErasure is everything after the database half: the member_ban and

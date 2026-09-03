@@ -71,10 +71,28 @@ type BootstrapResult struct {
 	Warnings   []string
 }
 
-// NeedsSetup reports whether the server has no accounts yet. It is advisory —
-// a status read for the setup page — and never the gate: Bootstrap's atomic
-// insert is.
+// SetupCompletedSetting is the durable first-run flag (migration 043): set
+// in the same transaction as the first owner and never cleared by the
+// server. It, not the user count, is what keeps the unauthenticated setup
+// endpoint closed once a server has been set up — an account erasure can
+// empty the users table (a marker replay erases past the last-admin guard),
+// and that must not reopen it. An operator re-opens the wizard deliberately
+// by setting the row back to 0 with filesystem access to the database.
+const SetupCompletedSetting = "setup_completed"
+
+// NeedsSetup reports whether the server still needs its first run: the
+// durable flag is unset and no account exists. It is advisory — a status
+// read for the setup page — and never the gate: Bootstrap's atomic insert,
+// which reads the same flag inside its transaction, is.
 func (s *SetupService) NeedsSetup(ctx context.Context) (bool, error) {
+	switch done, err := s.st.GetSetting(ctx, SetupCompletedSetting); {
+	case errors.Is(err, db.ErrNotFound):
+		// A database from before the migration: the count decides.
+	case err != nil:
+		return false, fmt.Errorf("%w: failed to read the setup flag: %w", ErrInternal, err)
+	case done == "1":
+		return false, nil
+	}
 	count, err := s.st.UserCount(ctx)
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to count users: %w", ErrInternal, err)

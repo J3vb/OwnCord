@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
 CREATE TABLE IF NOT EXISTS sequence_floors (
     name TEXT    PRIMARY KEY,
     seq  INTEGER NOT NULL
+);`, `
+CREATE TABLE IF NOT EXISTS floor_probes (
+    name      TEXT PRIMARY KEY,
+    probed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`}
 
 // OpenMarkerStore opens (creating if absent) the marker file at path with
@@ -204,6 +208,94 @@ func (m *MarkerStore) SequenceFloors(ctx context.Context) (map[string]int64, err
 		floors[name] = seq
 	}
 	return floors, rows.Err()
+}
+
+// SequenceFloorProbeCeiling bounds LocateSequenceFloor's search. A marker
+// names its subject by a one-way token, so recovering the id means hashing
+// candidates until every marker is accounted for; the probe stops there,
+// which on any real id space is long before this. A store whose markers
+// name an id beyond it cannot be resolved by probing, and the caller is
+// told rather than left with a floor that only looks safe.
+const SequenceFloorProbeCeiling = 1 << 24
+
+// LocateSequenceFloor recovers the floor a marker file written before
+// sequence_floors existed never recorded: the highest id its markers name,
+// found by hashing candidates and looking them up. The live counter cannot
+// supply it — a restore can have rolled it back below an id a marker still
+// names, which is the case the floors exist to defend against — and neither
+// can a floor row that is present but older than some marker, so the
+// markers themselves are the only source. complete reports whether every
+// marker of the table's scope was located; a false means the probe reached
+// ceiling first and the floor it returns is a lower bound, not a safe one.
+//
+// table is SequenceFloorUsers (account markers, keyed by SubjectToken) or
+// SequenceFloorChannels (messages markers, keyed by MessagesToken).
+func (m *MarkerStore) LocateSequenceFloor(ctx context.Context, table string, ceiling int64) (highest int64, complete bool, err error) {
+	var scope string
+	var token func(int64) string
+	switch table {
+	case SequenceFloorUsers:
+		scope, token = MarkerScopeAccount, m.SubjectToken
+	case SequenceFloorChannels:
+		scope, token = MarkerScopeMessages, m.MessagesToken
+	default:
+		return 0, false, fmt.Errorf("marker store: no marker scope for sequence floor %q", table)
+	}
+	markers, err := m.Markers(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	wanted := make(map[string]struct{})
+	for _, mk := range markers {
+		if mk.Scope == scope {
+			wanted[mk.SubjectToken] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, true, nil
+	}
+	for id := int64(1); id <= ceiling; id++ {
+		if _, ok := wanted[token(id)]; !ok {
+			continue
+		}
+		highest = id
+		delete(wanted, token(id))
+		if len(wanted) == 0 {
+			return highest, true, nil
+		}
+	}
+	return highest, false, nil
+}
+
+// FloorProbed reports whether this table's floor is settled: a complete
+// probe established it, or an operator acknowledged one they established by
+// hand. Once either has happened every marker then present is covered, and
+// every marker written since recorded its own floor, so the probe never has
+// to run again — and, equally, a floor row alone is not evidence of that: a
+// store can hold a floor written by a later erasure while an older marker
+// still names a higher id. The acknowledgement is the row itself, which is
+// what an operator inserts to unblock a store whose markers reach past the
+// probe (docs/security.md, "Erasure marker sequence floors").
+func (m *MarkerStore) FloorProbed(ctx context.Context, table string) (bool, error) {
+	var one int
+	err := m.sqlDB.QueryRowContext(ctx, `SELECT 1 FROM floor_probes WHERE name = ?`, table).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("marker store: floor probe %s: %w", table, err)
+	}
+	return true, nil
+}
+
+// MarkFloorProbed records that a complete probe established this table's
+// floor.
+func (m *MarkerStore) MarkFloorProbed(ctx context.Context, table string) error {
+	if _, err := m.sqlDB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO floor_probes (name) VALUES (?)`, table); err != nil {
+		return fmt.Errorf("marker store: record floor probe %s: %w", table, err)
+	}
+	return nil
 }
 
 // ConfirmAccount marks the subject's marker recorded: the erasure committed.

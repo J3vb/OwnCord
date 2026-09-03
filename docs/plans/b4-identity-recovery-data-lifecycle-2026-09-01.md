@@ -1525,18 +1525,73 @@ decisions 3 and 4.
 - **The audit writer's barrier:** the production audit path is
   asynchronous (`db.AuditWriter`), so an entry about the subject queued
   just before the transaction would land raw after its `UPDATE`. The
-  erasure installs the writer's unlinking rule for the subject and takes
-  its flush barrier before the transaction (`db.UnlinkQueuedAudits`:
-  `AuditWriter.Unlink`, `Flush`); the rule outlives the barrier, so an
-  entry a producer enqueues after the erasure is written unlinked too, and
-  a refused erasure withdraws it (`RelinkAudits`) —
-  `TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked`,
+  erasure takes the writer's flush barrier before the transaction
+  (`db.FlushAudits`), so the queued entry is on disk with its ids for the
+  `UPDATE` to rewrite, and installs the writer's unlinking rule for the
+  subject once the transaction has committed, while it still holds the
+  writer connection (`AuditWriter.Unlink`); the store applies the rule at
+  insert time under that connection (`PersistAudits`, `LogAuditEntry`), so
+  an entry a producer enqueues after the erasure is written unlinked, and
+  a refused erasure changes nothing —
+  `TestAuditWriter_FlushIsABarrier`,
+  `TestPersistAudits_AppliesTheUnlinkRulesAtInsert`,
   `TestErasureService_QueuedAuditEntriesAreUnlinked`.
 - **Codex's review** (on #1521, whose diff carried this code, and on
   #1520; five findings, all confirmed): the audit writer's queue, the
   last-admin guard at replay, the discarded pending marker, the id reuse
   across restored timelines, and the one token column a second erasure
-  overwrote — the bullets above are the fixes.
+  overwrote — the bullets above are the fixes, which merged as #1522 =
+  `15ba7c9`. Codex's review of that PR added four more, also confirmed;
+  they follow in the next PR, since #1522 merged before they landed. The
+  unlinking rule was installed before the transaction, so a refused
+  erasure had already anonymised the entries the barrier flushed: the
+  barrier now only flushes (the transaction's `UPDATE` rewrites what it
+  finds, and a refusal leaves it), and the rule goes in on commit, under
+  the writer connection the transaction still holds, read by the store at
+  insert time (`TestPersistAudits_AppliesTheUnlinkRulesAtInsert`). A
+  marker file from before the floors existed got none, so the first
+  restore could still reuse an id: the floor is recovered from the ids its
+  own markers name (`MarkerStore.LocateSequenceFloor` hashes candidates
+  against the tokens until every marker is accounted for). Codex refuted
+  two attempts before this one, and both refutations were right: the first
+  trusted the live counter, which a restore can have rolled back below the
+  very ids the markers name; the second gated the recovery on a floor row
+  being absent, when a legacy store can hold a floor a later erasure wrote
+  while an older marker still names a higher id. The gate is now a recorded
+  probe (`floor_probes`), the result is merged with the row and the counter,
+  and a marker beyond the probe's ceiling fails the start-up stage
+  (`ErrSequenceFloorUnresolved`) rather than persisting a floor that only
+  looks safe. A third refutation followed: that refusal had no working way
+  out, since it returned before consulting any floor an operator had set, so
+  the advertised remedy left the server unable to start. `floor_probes` is
+  now the acknowledgement too — the operator raises the floor and records
+  it, both statements named in the log and written up in `security.md`
+  ("Erasure marker sequence floors").
+  `TestErasureService_ReplayMarkersRecoversMissingFloors`,
+  `TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor`,
+  `TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor`,
+  `TestMarkerStore_LocateSequenceFloor`.
+  038-era actor-side tokens sat in `subject_token`, where a later erasure
+  of the target would overwrite them: migration 042 moves the determinable
+  ones (`TestMigration042_BackfillsLegacyActorTokens`). And the marker
+  replay, erasing past the last-admin guard, can empty the users table on
+  a restored backup, which would reopen the unauthenticated first-run
+  endpoint: the gate is now the durable `setup_completed` flag (migration
+  043), written in the first owner's own transaction and never cleared by
+  the server, so an emptied table leaves setup closed and re-opening it is
+  the operator's deliberate, local act
+  (`TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted`,
+  `TestSetupService_AnEmptiedUserTableDoesNotReopenSetup`). Codex refuted
+  the migration's predicate twice. First it was too narrow: an installation
+  whose users table a replay had already emptied would upgrade with the flag
+  at `0` and read as fresh. Widening it to any audit row was then too broad:
+  a server that has never been set up still writes `backup_create` from the
+  scheduled-backup loop, so that would have denied a genuine first run. It
+  now closes on a live user, an `erasure_jobs` row, or a `server_setup`,
+  `account_deleted` or `account_erasure_replayed` audit row — the three an
+  account must have existed to produce
+  (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`, with the
+  maintenance loop's own rows as the negative control).
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and
@@ -1544,7 +1599,8 @@ decisions 3 and 4.
   the token — in `subject_token` where the subject was the target, in
   `actor_token` where they acted (migration 041, after Codex's review: the
   draft's one column kept only the last erasure's token on a row naming two
-  erased subjects; `TestEraseAccount_TwoErasedPrincipalsKeepBothTokens`).
+  erased subjects; `TestEraseAccount_TwoErasedPrincipalsKeepBothTokens`;
+  migration 042 backfills the rows 038 had already unlinked).
   The erasure's own `account_deleted` row is written
   unlinked from the start (`db.WriteAuditEntry`: actor 0 for self-service,
   the administrator for the admin route, the target the token, no IP); the

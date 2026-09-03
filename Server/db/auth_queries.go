@@ -43,6 +43,22 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 		}
 	}()
 
+	// The durable gate (migration 043): setup_completed is set by the first
+	// owner's creation below and never cleared by the server, so an emptied
+	// users table — an erasure, or a marker replay past the last-admin guard
+	// on a restored backup — cannot reopen the unauthenticated setup
+	// endpoint. Read inside this transaction, like the count it backs up, so
+	// two concurrent requests cannot both pass.
+	var completed string
+	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = 'setup_completed'`).Scan(&completed); {
+	case errors.Is(err, sql.ErrNoRows):
+		// A database from before the migration: the count is the gate.
+	case err != nil:
+		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
+	case completed == "1":
+		return 0, ErrConflict
+	}
+
 	var count int64
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty count: %w", err)
@@ -62,6 +78,14 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	uid, err := res.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty last_id: %w", err)
+	}
+
+	// Setup is closed from this commit on, in the same transaction as the
+	// owner it belongs to.
+	if _, err := tx.Exec(
+		`INSERT INTO settings (key, value) VALUES ('setup_completed', '1')
+		 ON CONFLICT(key) DO UPDATE SET value = '1'`); err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

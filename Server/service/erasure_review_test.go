@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -24,8 +25,10 @@ func countAudit(t *testing.T, database *db.DB, where string, args ...any) int {
 // The production audit path is asynchronous: an entry about the subject
 // queued just before the erasure would land raw after the transaction had
 // rewritten the persisted rows. The erasure takes the writer's barrier
-// under its unlinking rule, and the rule outlives the barrier for a
-// producer that enqueues after it (B4-10).
+// before its transaction, so the entry is on disk for the UPDATE to
+// rewrite, and installs the unlinking rule on commit, so a producer that
+// enqueues after the erasure is written unlinked too; a refused erasure
+// leaves everything as it was (B4-10).
 func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
@@ -77,19 +80,90 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 		t.Errorf("%d audit rows name the subject by id after the late entry", n)
 	}
 
-	// A refused erasure withdraws the rule it installed: the sole owner
-	// keeps their id. Without a marker store there is no preflight, so the
-	// transaction itself refuses, after the barrier.
+	// A refused erasure changes nothing: the entry queued before it went
+	// down with its ids at the barrier and the transaction never ran, so
+	// no rule exists and a later entry keeps its ids too. Without a marker
+	// store there is no preflight, so the transaction itself refuses,
+	// after the barrier.
 	bare := NewErasureService(database)
+	db.WriteAudit(ctx, database, owner.ID, "role_change", "user", owner.ID, "queued before the refused erasure")
 	if err := bare.Erase(ctx, owner.ID); !errors.Is(err, db.ErrLastAdmin) {
 		t.Fatalf("Erase(sole owner) = %v, want ErrLastAdmin", err)
+	}
+	if n := countAudit(t, database, `action = 'role_change' AND actor_id = ? AND target_id = ? AND detail = 'queued before the refused erasure' AND subject_token IS NULL AND actor_token IS NULL`, owner.ID, owner.ID); n != 1 {
+		t.Errorf("the entry queued before the refused erasure = %d rows with its ids and detail, want 1", n)
 	}
 	db.WriteAudit(ctx, database, owner.ID, "settings_change", "settings", 0, "retention")
 	if err := w.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n := countAudit(t, database, `action = 'settings_change' AND actor_id = ? AND detail = 'retention' AND subject_token IS NULL`, owner.ID); n != 1 {
+	if n := countAudit(t, database, `action = 'settings_change' AND actor_id = ? AND detail = 'retention' AND subject_token IS NULL AND actor_token IS NULL`, owner.ID); n != 1 {
 		t.Errorf("the owner's entry after the refused erasure = %d rows with their id, want 1", n)
+	}
+}
+
+// A marker file from before the floors existed has none, and the counter it
+// is paired with may itself be a restore — rolled back below the id a
+// marker still names, which is the case the floors defend against. The
+// first replay recovers the floor from the markers' own tokens, not from
+// the counter (Codex's review of #1523).
+func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	channelsSeq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
+	if err != nil || channelsSeq == 0 {
+		t.Fatalf("channels sequence = %d, %v; want the seeded channel counted", channelsSeq, err)
+	}
+
+	// The previous build's file: the marker, no floors. And the restore the
+	// review describes: the counter rolled back below the erased id, so it
+	// cannot stand in for the floor.
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFile.Close()
+	if _, err := rawFile.ExecContext(ctx, `DELETE FROM sequence_floors`); err != nil {
+		t.Fatal(err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); len(floors) != 0 {
+		t.Fatalf("floors after the deletion = %v", floors)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'`, uid-1); err != nil {
+		t.Fatal(err)
+	}
+
+	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("ReplayMarkers = %+v, %v", rep, err)
+	}
+	floors, err := markers.SequenceFloors(ctx)
+	if err != nil || floors[db.SequenceFloorUsers] < uid {
+		t.Fatalf("floors after the first replay = %v, %v; want the users floor at or above the erased %d, not the rolled-back counter %d", floors, err, uid, uid-1)
+	}
+	if floors[db.SequenceFloorChannels] != channelsSeq {
+		t.Errorf("channels floor = %v, want %d (no messages marker names a channel, so the counter stands)", floors, channelsSeq)
+	}
+	if got, _ := database.SequenceValue(ctx, db.SequenceFloorUsers); got < uid {
+		t.Errorf("users counter after the replay = %d, want it raised to at least %d", got, uid)
+	}
+	fresh, err := database.CreateUser(ctx, "after-the-recovery", "hash", 4)
+	if err != nil || fresh <= uid {
+		t.Fatalf("the next account got id %d (%v), want one above the erased %d", fresh, err, uid)
+	}
+	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("second ReplayMarkers = %+v, %v; the new account must not match the old marker", rep, err)
+	}
+	if u, _ := database.GetUserByID(ctx, fresh); u == nil {
+		t.Error("the account created after the recovery was erased by the old marker")
 	}
 }
 
@@ -348,5 +422,148 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 	}
 	if u, _ := database.GetUserByID(ctx, fresh); u == nil {
 		t.Error("the new account was erased by the old marker")
+	}
+}
+
+// A pre-floor marker file can already hold a floor written by a later
+// erasure while an older marker still names a higher id, so the presence of
+// a floor row is not evidence that every marker is covered. The probe runs
+// until it has been recorded as complete, not until a row exists, and its
+// result is merged with the row (Codex's second review of #1523).
+func TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	if err := svc.Erase(ctx, uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+
+	// The legacy store: the marker for uid survives, and the only floor is a
+	// lower one a later erasure recorded after a restore rolled the counter
+	// back. No probe has been recorded.
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFile.Close()
+	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rawFile.ExecContext(ctx, `UPDATE sequence_floors SET seq = ? WHERE name = ?`, uid-1, db.SequenceFloorUsers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'`, uid-1); err != nil {
+		t.Fatal(err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != uid-1 {
+		t.Fatalf("floors before the replay = %v, want the insufficient %d", floors, uid-1)
+	}
+
+	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("ReplayMarkers = %+v, %v", rep, err)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] < uid {
+		t.Errorf("floors after the replay = %v, want the users floor raised to at least the erased %d", floors, uid)
+	}
+	fresh, err := database.CreateUser(ctx, "after-the-merge", "hash", 4)
+	if err != nil || fresh <= uid {
+		t.Fatalf("the next account got id %d (%v), want one above the erased %d", fresh, err, uid)
+	}
+
+	// The probe is recorded, so a later open does not pay for it again.
+	if probed, err := markers.FloorProbed(ctx, db.SequenceFloorUsers); err != nil || !probed {
+		t.Errorf("FloorProbed = %v, %v; want it recorded", probed, err)
+	}
+}
+
+// A marker whose id lies beyond the probe ceiling leaves no safe floor, so
+// start-up fails rather than persisting one that only looks safe (Codex's
+// second review of #1523).
+func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	markers := newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetMarkers(markers)
+	svc.floorProbeCeiling = 200
+
+	tok, _, err := markers.RecordPendingAccount(ctx, 5000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markers.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFile.Close()
+	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.ReplayMarkers(ctx); !errors.Is(err, ErrSequenceFloorUnresolved) {
+		t.Fatalf("ReplayMarkers with an unreachable marker = %v, want ErrSequenceFloorUnresolved", err)
+	}
+	if probed, _ := markers.FloorProbed(ctx, db.SequenceFloorUsers); probed {
+		t.Error("a refused probe was recorded as complete")
+	}
+
+	// The operator's way out, which the refusal's log names: set the floor
+	// above the highest id ever handed out, then acknowledge it. The next
+	// start-up honours it instead of probing again — without that, the
+	// advertised remedy would not unblock anything (Codex's third review of
+	// #1523).
+	if err := markers.RaiseSequenceFloor(ctx, db.SequenceFloorUsers, 9000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplayMarkers(ctx); !errors.Is(err, ErrSequenceFloorUnresolved) {
+		t.Fatalf("ReplayMarkers with a raised but unacknowledged floor = %v, want the refusal to stand", err)
+	}
+	if err := markers.MarkFloorProbed(ctx, db.SequenceFloorUsers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplayMarkers(ctx); err != nil {
+		t.Fatalf("ReplayMarkers after the operator acknowledged the floor = %v", err)
+	}
+	if got, _ := database.SequenceValue(ctx, db.SequenceFloorUsers); got != 9000 {
+		t.Errorf("users counter after the acknowledged floor = %d, want it raised to 9000", got)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != 9000 {
+		t.Errorf("floors = %v, want the operator's 9000 kept", floors)
+	}
+
+	// And with a ceiling that reaches the marker, the probe establishes the
+	// floor on its own.
+	fresh := newTestMarkers(t)
+	freshSvc := NewErasureService(database)
+	freshSvc.SetMarkers(fresh)
+	freshSvc.floorProbeCeiling = 6000
+	tok, _, err = fresh.RecordPendingAccount(ctx, 5000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	rawFresh, err := sql.Open("sqlite", fresh.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFresh.Close()
+	if _, err := rawFresh.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := freshSvc.ReplayMarkers(ctx); err != nil {
+		t.Fatalf("ReplayMarkers with a ceiling past the marker = %v", err)
+	}
+	if floors, _ := fresh.SequenceFloors(ctx); floors[db.SequenceFloorUsers] < 5000 {
+		t.Errorf("floors = %v, want the users floor at least the located 5000", floors)
 	}
 }
