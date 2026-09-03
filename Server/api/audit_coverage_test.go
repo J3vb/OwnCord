@@ -89,7 +89,7 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			return rec, append([]string{password, token, secret, code}, resp.BackupCodes...)
 		}},
 		{"account delete", "account_deleted", func(t *testing.T) (*audittest.Recorder, []string) {
-			database := newAuthTestDB(t)
+			database := newMigratedAuthTestDB(t)
 			router := buildAuthRouter(database, auth.NewRateLimiter())
 			hash, _ := auth.HashPassword(password)
 			uid, _ := database.CreateUser(context.Background(), "selfdelete", hash, 4)

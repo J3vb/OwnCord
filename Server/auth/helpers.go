@@ -13,18 +13,17 @@ import (
 // ValidateUsername checks that a (pre-trimmed) username meets naming rules:
 //   - Length 2-32 runes (after trim)
 //   - Only printable characters (no control chars, no zero-width chars)
-//   - Not inside the "[deleted-…]" namespace reserved for anonymised accounts
+//   - Not inside the "[deleted-…]" / "[denied-…]" namespaces reserved for anonymised rows
 //
 // Returns a descriptive error on failure, nil on success.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
-	// db.DeleteAccount anonymises an account by renaming it to "[deleted-<id>]",
-	// and users.username is UNIQUE COLLATE NOCASE. With the namespace
-	// unreserved, anyone could rename themselves to "[deleted-<victimID>]" and
-	// make the victim's own account deletion fail on the unique index for as
-	// long as they held the name. Reserve the whole namespace, not just the
-	// exact "[deleted-<digits>]" form, so the collision-fallback names
-	// DeleteAccount generates are unavailable too.
+	// Before B4-9 account deletion anonymised the row by renaming it to
+	// "[deleted-<id>]" (with randomly suffixed fallbacks on collision), and
+	// databases from that time still hold such rows; users.username is
+	// UNIQUE COLLATE NOCASE, so the whole namespace stays reserved rather
+	// than letting a registration impersonate a deleted account's marker.
+	// Erasure (db.EraseAccount) deletes the row and needs no name.
 	// "[denied-<id>]" is the same shape for a refused approval-mode
 	// application (db.DenyPendingUser), reserved for the same reason.
 	if lower := strings.ToLower(username); strings.HasSuffix(lower, "]") &&

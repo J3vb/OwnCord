@@ -137,7 +137,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// force-disconnects the deleted user's own socket exactly like the admin
 	// ban path does for the same DB state.
 	authSvc := service.NewAuthService(database, limiter, totpKey, hub)
-	svc.Auth = authSvc // the admin panel's owner-only recovery issuance (B4-6) shares it
+	wireAuth(svc, authSvc, store)
 	MountAuthRoutes(r, authSvc, AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
 
 	// Voice: webhook, LiveKit health and signalling-proxy routes. The client
@@ -322,6 +322,24 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	if cfg.Server.WAFEnabled {
 		r.Use(NewWAFMiddlewareCRS(cfg.Server.WAFParanoiaLevel, cfg.Server.WAFCRSMode))
 	}
+}
+
+// wireAuth shares the auth service with the bundle (the admin panel's
+// owner-only recovery issuance, B4-6, uses it) and gives the bundle's erasure
+// runner (B4-9) the upload storage the routes serve from — it is what
+// removes an erased account's files — then makes the self-service route run
+// through that same runner, as the admin route and the maintenance loop's
+// resume already do. A nil store (upload storage failed to open) leaves the
+// file half journaled for the maintenance loop's fallback storage.
+func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storage.Storage) {
+	svc.Auth = authSvc
+	if svc.Erasure == nil {
+		return
+	}
+	if store != nil {
+		svc.Erasure.SetFiles(store)
+	}
+	authSvc.UseErasure(svc.Erasure)
 }
 
 // routerUploadRoutes mounts the file upload and serving routes and returns the

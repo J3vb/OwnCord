@@ -1298,8 +1298,24 @@ func deleteJSONWithToken(t *testing.T, router http.Handler, path, token string, 
 	return rr
 }
 
+// newMigratedAuthTestDB is newAuthTestDB on the real migration set: the
+// account erasure touches every table, which the reduced apiTestSchema does
+// not carry.
+func newMigratedAuthTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
+
 func TestDeleteAccount_Success(t *testing.T) {
-	database := newAuthTestDB(t)
+	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
@@ -1318,19 +1334,13 @@ func TestDeleteAccount_Success(t *testing.T) {
 		t.Fatalf("DeleteAccount status = %d, want 204; body = %s", rr.Code, rr.Body.String())
 	}
 
-	// User should be anonymised (banned, username changed).
+	// The account is erased: no row survives (B4-9).
 	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserByID after delete: %v", err)
 	}
-	if user == nil {
-		t.Fatal("user row should still exist (soft-delete), got nil")
-	}
-	if !user.Banned {
-		t.Error("expected user to be banned after deletion")
-	}
-	if user.Username != "[deleted-1]" && user.Username != "[deleted-"+fmt.Sprintf("%d", uid)+"]" {
-		t.Errorf("expected anonymised username, got %q", user.Username)
+	if user != nil {
+		t.Errorf("user row survived the erasure: %+v", user)
 	}
 
 	// Session should be gone.
@@ -1383,7 +1393,7 @@ func TestDeleteAccount_WrongPassword(t *testing.T) {
 }
 
 func TestDeleteAccount_LastAdmin(t *testing.T) {
-	database := newAuthTestDB(t)
+	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 

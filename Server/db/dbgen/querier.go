@@ -33,6 +33,7 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
+	CompleteErasureJob(ctx context.Context, arg CompleteErasureJobParams) error
 	// The consume deletes only the live credential whose verifier the caller
 	// compared against, so the affected row count is what tells two concurrent
 	// redemptions, an expired credential, and a credential replaced since the
@@ -48,6 +49,7 @@ type Querier interface {
 	CountDMParticipants(ctx context.Context, channelID int64) (int64, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
 	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
+	CountUnfinishedErasureJobs(ctx context.Context) (int64, error)
 	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Authorization probe for the file route: an unlinked attachment is readable by
@@ -176,6 +178,7 @@ type Querier interface {
 	GetDefaultRole(ctx context.Context) (Role, error)
 	GetEmojiByID(ctx context.Context, id int64) (GetEmojiByIDRow, error)
 	GetEmojiByShortcode(ctx context.Context, shortcode string) (GetEmojiByShortcodeRow, error)
+	GetErasureJob(ctx context.Context, id int64) (GetErasureJobRow, error)
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
 	GetInvite(ctx context.Context, code string) (GetInviteRow, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
@@ -231,6 +234,12 @@ type Querier interface {
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
+	// Erasure jobs (migration 037, B4-9): the durable file half of an account
+	// erasure. The row is written inside the erasure transaction with the
+	// stored_as names of every file the subject owned; the runner removes them
+	// after commit and marks the job done, retrying from startup and the
+	// maintenance tick until it is.
+	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
@@ -280,6 +289,7 @@ type Querier interface {
 	// offsets when stripping them, so a non-ASCII character here truncates the
 	// generated SQL of THIS and every following query by the byte/rune delta.
 	ListRoles(ctx context.Context) ([]Role, error)
+	ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinishedErasureJobsRow, error)
 	ListUnusedRecoveryCodes(ctx context.Context, userID int64) ([]ListUnusedRecoveryCodesRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
@@ -312,6 +322,7 @@ type Querier interface {
 	PluginKVGet(ctx context.Context, arg PluginKVGetParams) ([]byte, error)
 	PluginKVSet(ctx context.Context, arg PluginKVSetParams) error
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
+	RecordErasureJobAttempt(ctx context.Context, arg RecordErasureJobAttemptParams) error
 	RemoveDMParticipant(ctx context.Context, arg RemoveDMParticipantParams) error
 	RemoveReaction(ctx context.Context, arg RemoveReactionParams) (sql.Result, error)
 	// Startup reset: nothing is connected yet, so every 'online' is a leftover

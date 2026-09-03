@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -15,11 +16,74 @@ import (
 type ModerationService struct {
 	st    Store
 	perms *PermissionService
+	// erasure runs the administrator's account erasure (B4-9); nil fails
+	// EraseUser closed.
+	erasure *ErasureService
 }
 
 // NewModerationService creates a ModerationService.
 func NewModerationService(st Store, perms *PermissionService) *ModerationService {
 	return &ModerationService{st: st, perms: perms}
+}
+
+// WithErasure installs the erasure runner EraseUser delegates to; New does
+// this for the shared bundle, tests do it by hand.
+func (s *ModerationService) WithErasure(e *ErasureService) *ModerationService {
+	s.erasure = e
+	return s
+}
+
+// EraseUser is the administrator-initiated account erasure (B4-9): the same
+// implementation as self-deletion, gated on ADMINISTRATOR plus the
+// actor-outranks-target hierarchy. An actor cannot erase itself here — that
+// is the password-confirmed self-service route. The last admin-class
+// account cannot be erased (Forbidden). Writes the account_deleted audit
+// row with the actor; the transport broadcasts member_ban.
+func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int64) error {
+	if targetID <= 0 {
+		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return fmt.Errorf("%w: cannot erase your own account via the admin panel", ErrBadRequest)
+	}
+	if s.erasure == nil {
+		return fmt.Errorf("%w: erasure unavailable", ErrInternal)
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.Administrator)
+	if err != nil {
+		return err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return err
+	}
+
+	if err := s.erasure.Erase(ctx, targetID); err != nil {
+		switch {
+		case errors.Is(err, db.ErrLastAdmin):
+			return fmt.Errorf("%w: cannot erase the last admin account", ErrForbidden)
+		case errors.Is(err, db.ErrNotFound):
+			return fmt.Errorf("%w: user not found", ErrNotFound)
+		case errors.Is(err, ErrErasureFilesPending):
+			// The account is gone; the journal finishes the files.
+			slog.Warn("admin erasure: files pending", "actor_id", actorID, "target_id", targetID, "err", err)
+		default:
+			slog.Error("admin erasure failed", "actor_id", actorID, "target_id", targetID, "err", err)
+			return fmt.Errorf("%w: failed to erase account", ErrInternal)
+		}
+	}
+
+	// Audit rows must survive a request canceled after the erasure committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "account_deleted", "user", targetID,
+		"account erased by administrator")
+
+	slog.Info("account erased by administrator", "actor_id", actorID, "target_id", targetID)
+	return nil
 }
 
 // roleFor loads a principal's role through the permission cache. Every failure

@@ -147,7 +147,7 @@ func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
 	}
 }
 
-func TestDeleteAccount_PurgesTheRecoveryCredential(t *testing.T) {
+func TestEraseAccount_PurgesTheRecoveryCredential(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.CreateUser(ctx, "owner", "hash", 1); err != nil {
@@ -157,8 +157,8 @@ func TestDeleteAccount_PurgesTheRecoveryCredential(t *testing.T) {
 	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatalf("UpsertRecoveryAssist: %v", err)
 	}
-	if err := database.DeleteAccount(ctx, uid); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
+	if _, err := database.EraseAccount(ctx, uid); err != nil {
+		t.Fatalf("EraseAccount: %v", err)
 	}
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {
 		t.Fatal("the recovery credential survived account deletion")

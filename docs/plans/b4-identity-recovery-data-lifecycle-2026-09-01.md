@@ -41,7 +41,7 @@ diagnostics inventory, the egress-sites invariant, the no-telemetry
 capture and the support-bundle contract — BPR-055's server half); **B4-12 batch (c) merged 2026-09-02** (PR #1509 = `fc4c562`; OC-0324
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
-through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions; awaiting the owner's signature). Next HP-4's signature, then B4-9 → B4-10 → B4-11. _Update this line — not only the step table — as steps
+through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 opened 2026-09-03** (branch `feat/b4-9-account-erasure` from `dev` `9598c51`; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). Next B4-10 → B4-11. _Update this line — not only the step table — as steps
 land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
@@ -1339,6 +1339,77 @@ draft in `hp-4-drafts/`.
 Exit: lineage checklist green on the alpha copy; interruption/restart tests
 green; `trust-model.md:345`'s "No secure deletion" paragraph rewritten to
 the new truth (backup caveat remains until B4-10).
+
+**Evidence, 2026-09-03** — branch `feat/b4-9-account-erasure` from `dev`
+`9598c51` (HP-4 accepted); PR to `dev` (draft). Owner decision 9 and HP-4
+decisions 1–2.
+
+- **Erasure (`db.EraseAccount`, `Server/db/erasure.go`):** one transaction
+  on the writer connection with `PRAGMA secure_delete = ON` for its duration
+  (restored after) and `PRAGMA wal_checkpoint(TRUNCATE)` after commit; the
+  last-admin guard and the OC-0294/OC-0293 mention-count reversal kept from
+  the anonymising deletion it replaces. Children before parents, so the
+  `users` DELETE passes with `foreign_keys=ON`: mentions naming the subject,
+  attachment rows (uploaded by the subject or on the subject's messages, the
+  avatar included), messages (the FTS trigger drops the index entries),
+  reactions, read states, sessions, API-token **rows**, the four
+  second-factor tables, recovery kit and assists (`issued_by → 0` on
+  credentials the subject issued), voice state, blocks both directions,
+  per-user overrides, DM membership and open state, the subject's invites
+  (deleted — `created_by` is `NOT NULL REFERENCES users`, no user 0 exists),
+  `redeemed_by → NULL`, the subject's `rate_lockouts` keys (exact-suffix
+  match on id and case-folded name), the subject's replay `events`
+  (`$.user_id` / `$.user.id`); emoji reassigned to the oldest remaining
+  admin-class account (else any account, else deleted with their files);
+  survivor DM closing as before; then the `users` row, then the
+  `erasure_jobs` row (migration 037, the `erasure_jobs` draft verbatim) with
+  the captured `stored_as` list. `db.SubjectInventory` /
+  `DB.TakeInventory` (`Server/db/inventory.go`) is the data-lifecycle
+  appendix as code.
+- **The file half (`service.ErasureService`, `Server/service/erasure.go`):**
+  removes the journaled files after commit (a missing file counts as
+  removed), completes or records the attempt; `Resume` runs every
+  unfinished job at maintenance start-up and each tick; `Reconcile` lists
+  the upload directory (`storage.Storage.List`), asks
+  `DB.ReferencedStoredFiles` which names a row still references and removes
+  the rest, older than the one-hour upload grace, at most 500 per tick — the
+  HP-4 drill D5 stranded-file class reclaimed. One runner is shared by the
+  self-service route (`AuthService.DeleteAccount`), the admin route
+  (`ModerationService.EraseUser`, `DELETE /admin/api/users/{id}`,
+  `ADMINISTRATOR` + hierarchy, never self, audited with the actor) and the
+  maintenance loop; the router installs the upload storage, the loop's own
+  storage is the fallback.
+- **O1 A4 closed:** a message on an already-authenticated socket is either
+  deleted by the transaction or refused by the foreign key once the row is
+  gone, then the `member_ban` broadcast cuts the socket
+  (`TestErasure_MessageOnAuthenticatedSocketDoesNotSurvive`).
+- **Tests:** lineage — `TestHP4_D1_ErasureLeavesNoClass` (alpha copy, every
+  class zero, one journaled file per attachment row),
+  `TestErasureService_LineageChecklistOnAlphaSnapshot` (files materialised
+  per the drill protocol, zero on disk after),
+  `TestEraseAccount_EveryInventoryClassIsZero` (a fixture with a row in
+  every class, what must survive checked); interruption/restart —
+  `TestErasureService_RestartResumesTheFileHalf` (commit, close, reopen,
+  `Resume` finishes), `TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount`,
+  `TestErasureService_NoStorageLeavesTheJobPending`; disk-full —
+  `TestEraseAccount_FailingStatementRollsBackEverything` (a failing
+  statement late in the transaction leaves every class as before, no job
+  row, `secure_delete` restored, the retry succeeds); reconciliation —
+  `TestErasureService_ReconcileRemovesOnlyStrandedFiles` (a live attachment,
+  an emoji file and a fresh upload survive; the stranded files go, bounded);
+  the routes — `TestAuthService_DeleteAccountErasesAndBroadcasts`,
+  `TestAuthService_DeleteAccountLastAdminIsRefused`,
+  `TestModerationService_EraseUser`, `TestAdminAPI_DeleteUser_*`,
+  `TestDeleteAccount_*` (api); D2 and D4 rewritten for the erasure (D2 keeps
+  its resurrection expectation for B4-10 to invert); the earlier
+  `TestDeleteAccount_*` db rows carried over as `TestEraseAccount_*`.
+- **Docs:** `trust-model.md` ("No secure deletion" → "Deletion does not reach
+  backups yet"), `data-lifecycle.md` (O1 rewritten, O3 A1/A3/A5, the
+  inventory's Today column, the drill protocol, the appendix), `api.md` (both
+  routes, the authorization table), `schema.md` (regenerated; the
+  `ADMINISTRATOR` row), `hp-4-drafts/README.md`, the HP-4 scorecard's chain
+  table and acceptance record, this block and the README row. Client
+  confirmation UX stays B9.
 
 ## B4-10 — Unlinkable integrity history and anti-resurrection markers
 

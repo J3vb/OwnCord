@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 130 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 131 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -86,6 +86,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/updates`                                                 |
 | POST    | `/admin/api/updates/apply`                                           |
 | GET     | `/admin/api/users`                                                   |
+| DELETE  | `/admin/api/users/{id}`                                              |
 | PATCH   | `/admin/api/users/{id}`                                              |
 | POST    | `/admin/api/users/{id}/recovery-credential`                          |
 | DELETE  | `/admin/api/users/{id}/sessions`                                     |
@@ -511,7 +512,18 @@ Invalidate the current session token.
 
 ### DELETE /api/v1/auth/account
 
-Permanently delete the authenticated user's account. Requires password confirmation.
+Erase the authenticated user's account (B4-9, BPR-052). Requires password
+confirmation. Every row attributable to the account is hard-deleted in one
+transaction — the account itself, its messages (channel history shows
+nothing where they were) and their search-index entries, reactions,
+mentions, uploads and the avatar, DM membership, invites it created, blocks,
+channel overrides, sessions, API tokens, second-factor and recovery
+material, and its replay events — with SQLite's `secure_delete` on for the
+transaction; custom emoji it uploaded stay, reassigned to the oldest
+remaining admin-class account. Its files are removed after the commit from a
+journal (`erasure_jobs`) that survives a restart and is resumed until every
+file is gone. The last admin-class account cannot be erased. Connected
+clients receive `member_ban` and the account's own socket is closed.
 
 **Auth:** Required (Bearer token)
 **Rate limit:** 5 requests/minute per IP. After 3 failed password attempts, the endpoint locks out for 15 minutes per user.
@@ -526,7 +538,9 @@ Permanently delete the authenticated user's account. Requires password confirmat
 
 #### Response 204 No Content
 
-Account deleted successfully. All sessions, messages (soft-deleted), and associated data are cleaned up.
+The account is erased. The response is sent once the database transaction
+has committed; if a file could not be removed yet, the journal finishes it on
+the next maintenance tick.
 
 #### Errors
 
@@ -1921,6 +1935,7 @@ Authorization is two-layered:
 | `GET /admin/api/users`                                                                      | perimeter only                                                                               |
 | `PATCH /admin/api/users/{id}`                                                               | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
 | `DELETE /admin/api/users/{id}/sessions`                                                     | `KICK_MEMBERS`                                                                               |
+| `DELETE /admin/api/users/{id}`                                                              | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
 | `POST /admin/api/users/{id}/recovery-credential`                                            | Owner role position (`>= 100`), not a bit — B4-6                                             |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                          | `MANAGE_ROLES`                                                                               |
@@ -2142,6 +2157,29 @@ is audited.
 **Auth:** `KICK_MEMBERS`
 
 #### Response 204 No Content
+
+---
+
+### DELETE /admin/api/users/{id}
+
+Erase the target account (B4-9): the same erasure as
+[`DELETE /api/v1/auth/account`](#delete-apiv1authaccount), started by an
+administrator. The hierarchy rule (actor outranks target) is enforced in the
+moderation service, the actor cannot erase its own account here, the last
+admin-class account cannot be erased, and the action is audited as
+`account_deleted` with the actor. Connected clients receive `member_ban`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                             |
+| ------ | ------------- | ------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id, or the actor's own account                                                            |
+| 403    | `FORBIDDEN`   | Missing bit, the actor does not outrank the target, or the target is the last admin-class account |
+| 404    | `NOT_FOUND`   | User not found                                                                                    |
 
 ---
 

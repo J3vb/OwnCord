@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ErrIO marks a Save failure caused by the server's own filesystem — disk
@@ -189,6 +190,39 @@ func (s *Storage) Delete(uuid string) error {
 		return err
 	}
 	return os.Remove(dst)
+}
+
+// Entry is one regular file in the storage directory, as List reports it.
+type Entry struct {
+	Name    string
+	ModTime time.Time
+}
+
+// List returns every regular file in the storage directory with its
+// modification time, in name order. Subdirectories and anything that is
+// not a plain file are skipped. It is the storage side of the reconciliation
+// pass (docs/architecture/data-lifecycle.md, O3 A3): a file no database row
+// names is stranded, and only a directory listing can find it.
+func (s *Storage) List() ([]Entry, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, fmt.Errorf("listing storage dir: %w: %w", ErrIO, err)
+	}
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // removed between the listing and the stat
+			}
+			return nil, fmt.Errorf("stat %s: %w: %w", e.Name(), ErrIO, err)
+		}
+		out = append(out, Entry{Name: e.Name(), ModTime: info.ModTime()})
+	}
+	return out, nil
 }
 
 // File is what serving a stored blob requires of an opened file. Seeking is

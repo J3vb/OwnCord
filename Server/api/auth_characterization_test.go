@@ -719,7 +719,7 @@ func TestAuthCharacterization_TokenResolutionFaultIs503(t *testing.T) {
 
 func TestAuthCharacterization_DeleteAccountFailurePaths(t *testing.T) {
 	t.Run("purge fails -> 500, account and session intact", func(t *testing.T) {
-		database := newAuthTestDB(t)
+		database := newMigratedAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
 		uid := seedUser(t, database, "gone", "correctPass1", 4)
 		token := seedSession(t, database, uid)

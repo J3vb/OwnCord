@@ -28,6 +28,10 @@ type Services struct {
 	Tokens      *TokenService
 	Sessions    *SessionService
 	Setup       *SetupService
+	// Erasure runs account erasure for the self-service route and the admin
+	// route alike (B4-9); the composition root installs the upload storage
+	// on it and the maintenance loop resumes its unfinished jobs.
+	Erasure *ErasureService
 	// Auth is set by the composition root once the hub exists; the admin
 	// panel's owner-only recovery issuance (B4-6) shares it.
 	Auth *AuthService
@@ -37,7 +41,11 @@ type Services struct {
 func New(st Store, limiter *auth.RateLimiter) *Services {
 	permChecker := permissions.NewChecker(st)
 	permSvc := NewPermissionService(st, permChecker)
+	erasure := NewErasureService(st)
+	moderation := NewModerationService(st, permSvc)
+	moderation.erasure = erasure
 	return &Services{
+		Erasure:     erasure,
 		Messages:    NewMessageService(st, permSvc, limiter),
 		Channels:    NewChannelService(st, permSvc),
 		Permissions: permSvc,
@@ -45,7 +53,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		DMs:         NewDMService(st),
 		Invites:     NewInviteService(st),
 		Blocks:      NewBlockService(st),
-		Moderation:  NewModerationService(st, permSvc),
+		Moderation:  moderation,
 		Roles:       NewRoleService(st, permSvc),
 		Emoji:       NewEmojiService(st, permSvc),
 		Settings:    NewSettingsService(st),

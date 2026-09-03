@@ -13,49 +13,17 @@ import (
 )
 
 // HP-4 baseline drills (docs/architecture/data-lifecycle.md, "Drill
-// protocol"): today's destructive operations exercised on a private copy of
-// the alpha snapshot before any of B4-9..B4-11's new ones exist, each with
-// its before/after subject inventory. Run with -v to read the inventories
-// the scorecard pastes:
+// protocol"), on a private copy of the alpha snapshot, each with its
+// before/after subject inventory. Written before B4-9 against the anonymising
+// deletion; D1 and D4 now run the erasure that replaced it (D1 is the B4-9
+// lineage checklist over SubjectInventory, D4 the replay-window purge HP-4
+// decision 1 asked for) and D2 keeps its resurrection expectation, which
+// B4-10's post-restore proof inverts. Run with -v to read the inventories:
 //
 //	go test -count=1 -v -run 'TestHP4' ./db/
 //
 // The tracked snapshot is never opened: alphasnap.Copy hands each drill a
 // byte copy in a directory the test owns.
-
-// inventoryClass is one row of the appendix's subject-inventory queries.
-type inventoryClass struct {
-	key   string
-	query string
-	args  func(uid int64, uname string) []any
-}
-
-func byUID(uid int64, _ string) []any     { return []any{uid} }
-func byUname(_ int64, uname string) []any { return []any{uname} }
-
-var subjectInventory = []inventoryClass{
-	{"1 identity row (not anonymised)", `SELECT COUNT(*) FROM users WHERE id = ? AND username NOT LIKE '[deleted-%'`, byUID},
-	{"2 sessions", `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, byUID},
-	{"3 api tokens", `SELECT COUNT(*) FROM api_tokens WHERE user_id = ?`, byUID},
-	{"4 second factor", `SELECT COUNT(*) FROM users WHERE id = ? AND totp_secret IS NOT NULL`, byUID},
-	{"6 rate-limit keys", `SELECT COUNT(*) FROM rate_lockouts WHERE key LIKE '%:' || ? OR key LIKE '%:' || ?`, func(uid int64, uname string) []any { return []any{uname, uid} }},
-	{"7 login attempts", `SELECT COUNT(*) FROM login_attempts WHERE username = ?`, byUname},
-	{"8a messages attributed", `SELECT COUNT(*) FROM messages WHERE user_id = ?`, byUID},
-	{"8b messages with content", `SELECT COUNT(*) FROM messages WHERE user_id = ? AND content <> ''`, byUID},
-	{"9 mentions naming the subject", `SELECT COUNT(*) FROM message_mentions WHERE mentioned_user_id = ?`, byUID},
-	{"10 reactions", `SELECT COUNT(*) FROM reactions WHERE user_id = ?`, byUID},
-	{"11 read states", `SELECT COUNT(*) FROM read_states WHERE user_id = ?`, byUID},
-	{"12 attachment rows uploaded", `SELECT COUNT(*) FROM attachments WHERE uploader_id = ?`, byUID},
-	{"14a dm participation", `SELECT COUNT(*) FROM dm_participants WHERE user_id = ?`, byUID},
-	{"14b dm open state", `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ?`, byUID},
-	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, func(uid int64, _ string) []any { return []any{uid, uid} }},
-	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, byUID},
-	{"17 blocks", `SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?`, func(uid int64, _ string) []any { return []any{uid, uid} }},
-	{"18 channel user overrides", `SELECT COUNT(*) FROM channel_user_overrides WHERE user_id = ?`, byUID},
-	{"19 voice state", `SELECT COUNT(*) FROM voice_states WHERE user_id = ?`, byUID},
-	{"20 replay events", `SELECT COUNT(*) FROM events WHERE json_extract(payload, '$.user_id') = ? OR json_extract(payload, '$.user.id') = ?`, func(uid int64, _ string) []any { return []any{uid, uid} }},
-	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, func(uid int64, _ string) []any { return []any{uid, uid} }},
-}
 
 // drillCopy is a migrated private copy of the alpha snapshot and its path.
 func drillCopy(t *testing.T) (*DB, string) {
@@ -93,9 +61,9 @@ func countQ(t *testing.T, database *DB, query string, args ...any) int {
 // takeInventory runs the appendix queries for the subject.
 func takeInventory(t *testing.T, database *DB, uid int64, uname string) map[string]int {
 	t.Helper()
-	out := map[string]int{}
-	for _, c := range subjectInventory {
-		out[c.key] = countQ(t, database, c.query, c.args(uid, uname)...)
+	out, err := database.TakeInventory(context.Background(), uid, uname)
+	if err != nil {
+		t.Fatalf("TakeInventory: %v", err)
 	}
 	return out
 }
@@ -105,8 +73,8 @@ func logInventory(t *testing.T, title string, before, after map[string]int) {
 	t.Helper()
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n| Class | Before | After |\n| --- | ---: | ---: |\n", title)
-	for _, c := range subjectInventory {
-		fmt.Fprintf(&b, "| %s | %d | %d |\n", c.key, before[c.key], after[c.key])
+	for _, c := range SubjectInventory {
+		fmt.Fprintf(&b, "| %s | %d | %d |\n", c.Key, before[c.Key], after[c.Key])
 	}
 	t.Log(b.String())
 }
@@ -131,51 +99,43 @@ func pickSubject(t *testing.T, database *DB) (int64, string) {
 	return uid, uname
 }
 
-// The classes O1 leaves behind on purpose (rows that survive with the
-// anonymised row as their anchor), keyed as in subjectInventory.
-var o1Leftovers = map[string]bool{
-	"8a messages attributed": true, "9 mentions naming the subject": true, "12 attachment rows uploaded": true,
-	"15 invites": true, "16 emoji": true, "17 blocks": true, "18 channel user overrides": true,
-	"20 replay events": true, "21 audit rows": true,
-}
-
-// runD1 performs O1 on the subject and checks exactly the predicted leftovers.
+// runD1 performs O1 — since B4-9 the erasure — on the subject and checks
+// every inventory class is zero except the audit history B4-10 unlinks.
 func runD1(t *testing.T, database *DB, uid int64, uname string, before map[string]int) map[string]int {
 	t.Helper()
-	if err := database.DeleteAccount(context.Background(), uid); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
+	job, err := database.EraseAccount(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("EraseAccount: %v", err)
 	}
 	after := takeInventory(t, database, uid, uname)
-	for _, c := range subjectInventory {
+	for _, c := range SubjectInventory {
 		want := 0
-		if o1Leftovers[c.key] {
-			want = before[c.key]
+		if InventoryKeptByErasure[c.Key] {
+			want = before[c.Key]
 		}
-		if after[c.key] != want {
-			t.Errorf("%s after O1 = %d, want %d", c.key, after[c.key], want)
+		if after[c.Key] != want {
+			t.Errorf("%s after erasure = %d, want %d", c.Key, after[c.Key], want)
 		}
 	}
-	var username string
-	_ = database.QueryRowContext(context.Background(), `SELECT username FROM users WHERE id = ?`, uid).Scan(&username)
-	if !strings.HasPrefix(username, "[deleted-") {
-		t.Errorf("username after O1 = %q, want anonymised", username)
+	if len(job.Files) != before["12 attachment rows uploaded"] {
+		t.Errorf("job lists %d files, want one per attachment row (%d)", len(job.Files), before["12 attachment rows uploaded"])
 	}
 	return after
 }
 
-// D1 — O1 on a member with everything.
-func TestHP4_D1_DeleteAccountLeavesExactlyThePredictedClasses(t *testing.T) {
+// D1 — the B4-9 lineage checklist: erasure of a member with everything
+// leaves zero in every class, and journals one file per attachment row.
+func TestHP4_D1_ErasureLeavesNoClass(t *testing.T) {
 	database, _ := drillCopy(t)
 	uid, uname := pickSubject(t, database)
 	before := takeInventory(t, database, uid, uname)
 	if before["8a messages attributed"] == 0 || before["12 attachment rows uploaded"] == 0 || before["14a dm participation"] == 0 {
-		t.Fatalf("subject %d (%s) is not a member with everything: %v", uid, uname, before)
+		t.Fatalf("subject %d is not a member with everything: %v", uid, before)
 	}
 	after := runD1(t, database, uid, uname, before)
-	logInventory(t, fmt.Sprintf("D1 — subject %d (%s)", uid, uname), before, after)
-	// The FTS index dropped the subject's text with the content.
-	if n := countQ(t, database, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND deleted = 0`, uid); n != 0 {
-		t.Errorf("%d of the subject's messages are not soft-deleted", n)
+	logInventory(t, fmt.Sprintf("D1 — subject %d", uid), before, after)
+	if n := countQ(t, database, `SELECT COUNT(*) FROM users WHERE id = ?`, uid); n != 0 {
+		t.Errorf("users row survived: %d", n)
 	}
 }
 
@@ -213,7 +173,8 @@ func backupTo(t *testing.T, database *DB, name string) string {
 }
 
 // D2 — Resurrection, the negative control for B4-10: a backup from before
-// O1 brings the account back in full, and nothing records the deletion.
+// the erasure brings the account back in full, and nothing in the restored
+// file records that it happened.
 func TestHP4_D2_RestoreResurrectsADeletedAccount(t *testing.T) {
 	database, dbPath := drillCopy(t)
 	uid, uname := pickSubject(t, database)
@@ -224,9 +185,9 @@ func TestHP4_D2_RestoreResurrectsADeletedAccount(t *testing.T) {
 	restored := restoreOver(t, database, dbPath, backup)
 	after := takeInventory(t, restored, uid, uname)
 	logInventory(t, fmt.Sprintf("D2 — subject %d (%s), after restore", uid, uname), before, after)
-	for _, c := range subjectInventory {
-		if after[c.key] != before[c.key] {
-			t.Errorf("%s after restore = %d, want %d (resurrected)", c.key, after[c.key], before[c.key])
+	for _, c := range SubjectInventory {
+		if after[c.Key] != before[c.Key] {
+			t.Errorf("%s after restore = %d, want %d (resurrected)", c.Key, after[c.Key], before[c.Key])
 		}
 	}
 	var username string
@@ -274,15 +235,21 @@ func TestHP4_D3_RestoreDropsNewerData(t *testing.T) {
 	}
 }
 
-// D4 — The replay window: O1 does not touch events; the pruner does.
-func TestHP4_D4_ReplayEventsSurviveDeletionUntilPruned(t *testing.T) {
+// D4 — The replay window: the erasure purges the subject's events (HP-4
+// decision 1) and leaves everyone else's for the pruner.
+func TestHP4_D4_ErasurePurgesTheSubjectsReplayEvents(t *testing.T) {
 	database, _ := drillCopy(t)
 	ctx := context.Background()
 	uid, uname := pickSubject(t, database)
+	var other int64
+	if err := database.QueryRowContext(ctx, `SELECT id FROM users WHERE id != ? ORDER BY id LIMIT 1`, uid).Scan(&other); err != nil {
+		t.Fatalf("pick another user: %v", err)
+	}
 	payloads := []string{
 		fmt.Sprintf(`{"type":"chat_message","channel_id":1,"user":{"id":%d,"username":%q},"content":"still in the window"}`, uid, uname),
 		fmt.Sprintf(`{"type":"typing","channel_id":1,"user_id":%d}`, uid),
 		fmt.Sprintf(`{"type":"chat_message","channel_id":1,"user":{"id":%d},"content":"and another"}`, uid),
+		fmt.Sprintf(`{"type":"typing","channel_id":1,"user_id":%d}`, other),
 	}
 	for i, p := range payloads {
 		if err := database.PersistEvent(ctx, int64(i+1), "chat_message", 1, []byte(p)); err != nil {
@@ -290,19 +257,15 @@ func TestHP4_D4_ReplayEventsSurviveDeletionUntilPruned(t *testing.T) {
 		}
 	}
 	before := takeInventory(t, database, uid, uname)
+	if before["20 replay events"] != 3 {
+		t.Fatalf("seeded events naming the subject = %d, want 3", before["20 replay events"])
+	}
 	after := runD1(t, database, uid, uname, before)
-	logInventory(t, fmt.Sprintf("D4 — subject %d (%s), events seeded", uid, uname), before, after)
-	if after["20 replay events"] != len(payloads) {
-		t.Fatalf("replay events after O1 = %d, want %d (O1 leaves the window alone)", after["20 replay events"], len(payloads))
-	}
-	pruned, err := database.PruneEventsOlderThan(ctx, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("PruneEventsOlderThan: %v", err)
-	}
-	left := countQ(t, database, subjectInventory[19].query, uid, uid)
-	t.Logf("D4 — pruned %d rows with a cutoff after them; %d left naming the subject", pruned, left)
-	if pruned != int64(len(payloads)) || left != 0 {
-		t.Errorf("prune removed %d rows and left %d, want %d and 0", pruned, left, len(payloads))
+	logInventory(t, fmt.Sprintf("D4 — subject %d, events seeded", uid), before, after)
+	total := countQ(t, database, `SELECT COUNT(*) FROM events`)
+	t.Logf("D4 — events naming the subject %d → %d; other users' events kept: %d", before["20 replay events"], after["20 replay events"], total)
+	if after["20 replay events"] != 0 || total != 1 {
+		t.Errorf("erasure left %d events naming the subject and %d in total, want 0 and 1", after["20 replay events"], total)
 	}
 }
 

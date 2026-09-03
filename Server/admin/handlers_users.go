@@ -317,6 +317,35 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	}
 }
 
+// handleDeleteUser erases the target account (B4-9). The route is gated on
+// ADMINISTRATOR; ModerationService additionally enforces the
+// actor-outranks-target hierarchy, refuses the last admin-class account and
+// writes the audit row. On success every connected client gets the same
+// member_ban the ban path sends, which also disconnects the subject.
+func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt64(r, "id")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			return
+		}
+		if mod == nil {
+			// Fail closed rather than erase without a hierarchy check.
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			return
+		}
+
+		if err := mod.EraseUser(r.Context(), actorFromContext(r), id); err != nil {
+			writeModerationErr(w, err)
+			return
+		}
+		if hub != nil {
+			hub.BroadcastMemberBan(id)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // handleGetMe describes the calling principal so the admin panel can hide the
 // surfaces its role cannot use. Perimeter-level: every authenticated principal
 // may read its own permissions.

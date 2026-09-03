@@ -138,7 +138,14 @@ type Store interface {
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
 	ResetAllUserStatuses(ctx context.Context) error
-	DeleteAccount(ctx context.Context, userID int64) error
+	// Account erasure (B4-9): the database half in one transaction, the
+	// file half journaled in erasure_jobs and resumed until every file is
+	// gone; ReferencedStoredFiles serves the storage reconciliation pass.
+	EraseAccount(ctx context.Context, userID int64) (*db.ErasureJob, error)
+	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
+	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
+	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
+	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 
 	// ── Sessions ──
