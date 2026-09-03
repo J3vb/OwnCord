@@ -1393,7 +1393,17 @@ decisions 1–2.
   (`TestErasure_PurgesTheReplayPipeline`, `TestEventPersister_FlushIsABarrier`,
   `TestEventRingBuffer_RemoveWhere`, `TestErasureService_HubBroadcastsThenPurges`,
   `TestDeleteEventsForUser_MatchesEveryEnvelopeShape`) — Codex's two
-  findings on #1516, both confirmed and fixed.
+  findings on #1516, both confirmed and fixed. Its review of #1517 added
+  three more, also fixed there: the purge is a journaled job step
+  (`erasure_jobs.replay_purged`, migration 040) retried until it succeeds;
+  a producer that reaches the hub after the purge with a frame naming the
+  erased user is dropped (the hub's tombstone set); and a client resuming
+  from before the purge takes the full ready (a replay-purge watermark in
+  `mustFullResync`, and a ring replay crossing a cleared slot returns nil)
+  — `TestErasure_PurgeForcesFullResyncAndDropsLateFrames`,
+  `TestErasureService_ReplayPurgeIsRetriedFromTheJournal`; the
+  `idx_messages_reply_to` index moved to migration 040 so upgraded
+  installations get it.
 - **Tests:** lineage — `TestHP4_D1_ErasureLeavesNoClass` (alpha copy, every
   class zero, one journaled file per attachment row),
   `TestErasureService_LineageChecklistOnAlphaSnapshot` (files materialised

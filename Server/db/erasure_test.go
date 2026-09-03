@@ -195,9 +195,16 @@ func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
 	if got.State != db.ErasureStateDone || got.FilesRemoved != 2 || got.LastError != "" || got.Attempts != 2 {
 		t.Errorf("after completion: %+v", got)
 	}
+	// Files done, purge still outstanding: listed until it is recorded.
+	if jobs, err := database.ListUnfinishedErasureJobs(ctx); err != nil || len(jobs) != 1 {
+		t.Errorf("unfinished jobs with the purge outstanding = %v, %v; want the job", jobs, err)
+	}
+	if err := database.MarkErasureJobReplayPurged(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
 	jobs, err = database.ListUnfinishedErasureJobs(ctx)
 	if err != nil || len(jobs) != 0 {
-		t.Errorf("unfinished jobs after completion = %v, %v; want none", jobs, err)
+		t.Errorf("unfinished jobs after completion and purge = %v, %v; want none", jobs, err)
 	}
 	if _, err := database.GetErasureJob(ctx, job.ID+100); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("GetErasureJob(missing) = %v, want ErrNotFound", err)
@@ -458,5 +465,46 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 	}
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE subject_token IS NULL AND actor_id = 0 AND target_id = 0 AND action = 'user_login'`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("token-less unlinked rows = %d (%v), want 1", n, err)
+	}
+}
+
+// Migration 040: a job is listed until its replay purge is recorded, even
+// once its files are gone; rows from before the column count as purged.
+func TestErasureJob_ListedUntilReplayPurged(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sub := seedEraseSubject(t, database)
+	job, err := database.EraseAccount(ctx, sub.id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CompleteErasureJob(ctx, job.ID, len(job.Files)); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := database.ListUnfinishedErasureJobs(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].ReplayPurged || jobs[0].State != db.ErasureStateDone {
+		t.Fatalf("a done but unpurged job is not listed: %+v, %v", jobs, err)
+	}
+	if err := database.MarkErasureJobReplayPurged(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if jobs, _ := database.ListUnfinishedErasureJobs(ctx); len(jobs) != 0 {
+		t.Errorf("a purged, done job is still listed: %+v", jobs)
+	}
+	got, err := database.GetErasureJob(ctx, job.ID)
+	if err != nil || !got.ReplayPurged {
+		t.Errorf("GetErasureJob = %+v, %v; want purged", got, err)
+	}
+	// A pre-040 row: inserted with the column's default.
+	if _, err := database.ExecContext(ctx, `INSERT INTO erasure_jobs (user_id, state, files) VALUES (12345, 'db_done', '[]')`); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ = database.ListUnfinishedErasureJobs(ctx)
+	if len(jobs) != 1 || !jobs[0].ReplayPurged {
+		t.Errorf("a legacy row = %+v, want listed for its files with the purge counted as done", jobs)
+	}
+	var idx int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_reply_to'`).Scan(&idx); err != nil || idx != 1 {
+		t.Errorf("idx_messages_reply_to present = %d (%v), want 1", idx, err)
 	}
 }

@@ -23,9 +23,3 @@ CREATE TABLE erasure_jobs (
     finished_at   TEXT
 );
 CREATE INDEX idx_erasure_jobs_state ON erasure_jobs(state) WHERE state <> 'done';
-
--- messages.reply_to has ON DELETE SET NULL and had no index, so every message
--- the erasure deletes cost a scan of the whole table to find its replies:
--- two seconds for one member of the alpha snapshot, and far worse under the
--- race detector. The index makes the cascade a lookup.
-CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to);

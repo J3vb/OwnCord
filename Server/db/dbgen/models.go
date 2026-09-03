@@ -107,6 +107,7 @@ type ErasureJob struct {
 	CreatedAt    string  `json:"createdAt"`
 	UpdatedAt    string  `json:"updatedAt"`
 	FinishedAt   *string `json:"finishedAt"`
+	ReplayPurged int64   `json:"replayPurged"`
 }
 
 type Event struct {

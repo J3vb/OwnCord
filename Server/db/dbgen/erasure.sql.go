@@ -42,7 +42,7 @@ func (q *Queries) CountUnfinishedErasureJobs(ctx context.Context) (int64, error)
 }
 
 const getErasureJob = `-- name: GetErasureJob :one
-SELECT id, user_id, state, files, files_removed, attempts, last_error, finished_at
+SELECT id, user_id, state, files, files_removed, attempts, last_error, finished_at, replay_purged
 FROM erasure_jobs
 WHERE id = ?
 `
@@ -56,6 +56,7 @@ type GetErasureJobRow struct {
 	Attempts     int64   `json:"attempts"`
 	LastError    *string `json:"lastError"`
 	FinishedAt   *string `json:"finishedAt"`
+	ReplayPurged int64   `json:"replayPurged"`
 }
 
 func (q *Queries) GetErasureJob(ctx context.Context, id int64) (GetErasureJobRow, error) {
@@ -70,14 +71,15 @@ func (q *Queries) GetErasureJob(ctx context.Context, id int64) (GetErasureJobRow
 		&i.Attempts,
 		&i.LastError,
 		&i.FinishedAt,
+		&i.ReplayPurged,
 	)
 	return i, err
 }
 
 const insertErasureJob = `-- name: InsertErasureJob :one
 
-INSERT INTO erasure_jobs (user_id, state, files)
-VALUES (?, 'db_done', ?)
+INSERT INTO erasure_jobs (user_id, state, files, replay_purged)
+VALUES (?, 'db_done', ?, 0)
 RETURNING id
 `
 
@@ -99,9 +101,9 @@ func (q *Queries) InsertErasureJob(ctx context.Context, arg InsertErasureJobPara
 }
 
 const listUnfinishedErasureJobs = `-- name: ListUnfinishedErasureJobs :many
-SELECT id, user_id, state, files, files_removed, attempts, last_error
+SELECT id, user_id, state, files, files_removed, attempts, last_error, replay_purged
 FROM erasure_jobs
-WHERE state <> 'done'
+WHERE state <> 'done' OR replay_purged = 0
 ORDER BY id ASC
 `
 
@@ -113,6 +115,7 @@ type ListUnfinishedErasureJobsRow struct {
 	FilesRemoved int64   `json:"filesRemoved"`
 	Attempts     int64   `json:"attempts"`
 	LastError    *string `json:"lastError"`
+	ReplayPurged int64   `json:"replayPurged"`
 }
 
 func (q *Queries) ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinishedErasureJobsRow, error) {
@@ -132,6 +135,7 @@ func (q *Queries) ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinish
 			&i.FilesRemoved,
 			&i.Attempts,
 			&i.LastError,
+			&i.ReplayPurged,
 		); err != nil {
 			return nil, err
 		}
@@ -144,6 +148,18 @@ func (q *Queries) ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinish
 		return nil, err
 	}
 	return items, nil
+}
+
+const markErasureJobReplayPurged = `-- name: MarkErasureJobReplayPurged :exec
+UPDATE erasure_jobs
+SET replay_purged = 1,
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) MarkErasureJobReplayPurged(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, markErasureJobReplayPurged, id)
+	return err
 }
 
 const recordErasureJobAttempt = `-- name: RecordErasureJobAttempt :exec

@@ -353,6 +353,9 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
 
+	if h.dropsForPurgedUser(msg) {
+		return
+	}
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	h.replayBuf.Push(seq, channelID, wrapped)
@@ -387,6 +390,13 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 					"channel_id", bm.channelID)
 				return 0, 0, false
 			}
+		}
+
+		// A frame naming an erased user, produced by a request that read
+		// its rows before the erasure and reached the hub after the purge,
+		// must not be sequenced: nothing it describes exists any more.
+		if h.dropsForPurgedUser(bm.msg) {
+			return 0, 0, false
 		}
 
 		seq = h.nextSeq()

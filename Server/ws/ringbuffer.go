@@ -71,18 +71,25 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 	for i := 0; i < rb.count; i++ {
 		idx := (oldestIdx + i) % rb.size
 		e := rb.entries[idx]
-		if e.seq > afterSeq && e.data != nil {
-			result = append(result, e.data)
+		if e.seq <= afterSeq {
+			continue
 		}
+		if e.data == nil {
+			// A slot RemoveWhere cleared: the client would ack past a frame
+			// it never saw. Replay cannot cover the range — full ready.
+			return nil
+		}
+		result = append(result, e.data)
 	}
 	return result
 }
 
 // RemoveWhere drops the data of every buffered event drop reports true for
 // and returns how many it dropped. The entry keeps its seq so the buffer's
-// coverage window (OldestSeq/NewestSeq) is unchanged; EventsSince and
-// EventsSinceFiltered skip the emptied slot. Used by the account erasure to
-// take an erased user's frames out of hot replay (data-lifecycle O5).
+// coverage window (OldestSeq/NewestSeq) is unchanged; a replay whose range
+// crosses an emptied slot returns nil, so the client takes the full ready
+// instead of acking past a frame it never received. Used by the account
+// erasure to take an erased user's frames out of hot replay (O5).
 func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -132,9 +139,14 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 		idx := (oldestIdx + i) % rb.size
 		e := rb.entries[idx]
 		if e.seq > afterSeq {
+			if e.data == nil {
+				// See EventsSince: a cleared slot in the range forces a
+				// full ready rather than a replay with a hole.
+				return nil
+			}
 			// channelID 0 = global broadcast, always include.
 			// channelID > 0 = channel-scoped, include only if allowed.
-			if e.data != nil && (e.channelID == 0 || allowedChannelIDs[e.channelID]) {
+			if e.channelID == 0 || allowedChannelIDs[e.channelID] {
 				result = append(result, e.data)
 			}
 		}

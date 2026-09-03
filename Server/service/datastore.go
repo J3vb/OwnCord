@@ -147,6 +147,8 @@ type Store interface {
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
+	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
+	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 
