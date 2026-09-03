@@ -102,10 +102,12 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	}
 }
 
-// A marker file from before the floors existed has none: the first replay
-// seeds them from the counters as they stand, and the database is raised
-// to them from then on.
-func TestErasureService_ReplayMarkersSeedsMissingFloors(t *testing.T) {
+// A marker file from before the floors existed has none, and the counter it
+// is paired with may itself be a restore — rolled back below the id a
+// marker still names, which is the case the floors defend against. The
+// first replay recovers the floor from the markers' own tokens, not from
+// the counter (Codex's review of #1523).
+func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -117,7 +119,14 @@ func TestErasureService_ReplayMarkersSeedsMissingFloors(t *testing.T) {
 	if err := svc.Erase(ctx, uid); err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
-	// The previous build's file: the marker, no floors.
+	channelsSeq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
+	if err != nil || channelsSeq == 0 {
+		t.Fatalf("channels sequence = %d, %v; want the seeded channel counted", channelsSeq, err)
+	}
+
+	// The previous build's file: the marker, no floors. And the restore the
+	// review describes: the counter rolled back below the erased id, so it
+	// cannot stand in for the floor.
 	rawFile, err := sql.Open("sqlite", markers.Path())
 	if err != nil {
 		t.Fatal(err)
@@ -129,34 +138,32 @@ func TestErasureService_ReplayMarkersSeedsMissingFloors(t *testing.T) {
 	if floors, _ := markers.SequenceFloors(ctx); len(floors) != 0 {
 		t.Fatalf("floors after the deletion = %v", floors)
 	}
-	usersSeq, err := database.SequenceValue(ctx, db.SequenceFloorUsers)
-	if err != nil {
+	if _, err := database.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'`, uid-1); err != nil {
 		t.Fatal(err)
 	}
-	channelsSeq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
-	if err != nil || channelsSeq == 0 {
-		t.Fatalf("channels sequence = %d, %v; want the seeded channel counted", channelsSeq, err)
-	}
+
 	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
 		t.Fatalf("ReplayMarkers = %+v, %v", rep, err)
 	}
 	floors, err := markers.SequenceFloors(ctx)
-	if err != nil || floors[db.SequenceFloorUsers] != usersSeq || floors[db.SequenceFloorChannels] != channelsSeq {
-		t.Fatalf("floors after the first replay = %v, %v; want users %d, channels %d", floors, err, usersSeq, channelsSeq)
+	if err != nil || floors[db.SequenceFloorUsers] < uid {
+		t.Fatalf("floors after the first replay = %v, %v; want the users floor at or above the erased %d, not the rolled-back counter %d", floors, err, uid, uid-1)
 	}
-	// From now on a rolled-back counter is raised before the replay.
-	if _, err := database.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'`, uid-1); err != nil {
-		t.Fatal(err)
+	if floors[db.SequenceFloorChannels] != channelsSeq {
+		t.Errorf("channels floor = %v, want %d (no messages marker names a channel, so the counter stands)", floors, channelsSeq)
 	}
-	if _, err := svc.ReplayMarkers(ctx); err != nil {
-		t.Fatal(err)
+	if got, _ := database.SequenceValue(ctx, db.SequenceFloorUsers); got < uid {
+		t.Errorf("users counter after the replay = %d, want it raised to at least %d", got, uid)
 	}
-	if got, _ := database.SequenceValue(ctx, db.SequenceFloorUsers); got != usersSeq {
-		t.Errorf("users counter after the replay = %d, want %d", got, usersSeq)
-	}
-	fresh, err := database.CreateUser(ctx, "after-the-seed", "hash", 4)
+	fresh, err := database.CreateUser(ctx, "after-the-recovery", "hash", 4)
 	if err != nil || fresh <= uid {
-		t.Errorf("the next account got id %d (%v), want one above the erased %d", fresh, err, uid)
+		t.Fatalf("the next account got id %d (%v), want one above the erased %d", fresh, err, uid)
+	}
+	if rep, err := svc.ReplayMarkers(ctx); err != nil || rep.Erased != 0 {
+		t.Fatalf("second ReplayMarkers = %+v, %v; the new account must not match the old marker", rep, err)
+	}
+	if u, _ := database.GetUserByID(ctx, fresh); u == nil {
+		t.Error("the account created after the recovery was erased by the old marker")
 	}
 }
 

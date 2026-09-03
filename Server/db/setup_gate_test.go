@@ -3,10 +3,27 @@ package db_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
+
+// openTestMarkersExternal opens a marker store from the external test
+// package (db_test), where the internal helper is out of reach.
+func openTestMarkersExternal(t *testing.T) *db.MarkerStore {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = 11
+	}
+	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), key)
+	if err != nil {
+		t.Fatalf("OpenMarkerStore: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	return m
+}
 
 // First-run setup is unauthenticated and gated by CreateOwnerIfEmpty. The
 // users table is no longer the whole gate: account erasure can empty it —
@@ -74,5 +91,57 @@ func TestCreateOwnerIfEmpty_NoFlagFallsBackToTheCount(t *testing.T) {
 	}
 	if v, err := database.GetSetting(ctx, "setup_completed"); err != nil || v != "1" {
 		t.Errorf("setup_completed after that run = %q, %v; want it written", v, err)
+	}
+}
+
+// LocateSequenceFloor recovers the ids a pre-floor marker file's markers
+// name, by hashing candidates until every marker is accounted for: the
+// tokens are one-way, and the live counter cannot stand in for the floor on
+// a restored database (Codex's review of #1523).
+func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
+	ctx := context.Background()
+	m := openTestMarkersExternal(t)
+
+	// Nothing recorded: nothing to locate, and the answer is complete.
+	got, complete, err := m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	if err != nil || got != 0 || !complete {
+		t.Fatalf("LocateSequenceFloor on an empty file = %d, %v, %v", got, complete, err)
+	}
+	for _, id := range []int64{3, 41, 900} {
+		tok, _, err := m.RecordPendingAccount(ctx, id, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.ConfirmAccount(ctx, tok); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	if err != nil || got != 900 || !complete {
+		t.Errorf("users floor = %d, %v, %v; want 900 located completely", got, complete, err)
+	}
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorChannels)
+	if err != nil || got != 7 || !complete {
+		t.Errorf("channels floor = %d, %v, %v; want 7 located completely", got, complete, err)
+	}
+	if _, _, err := m.LocateSequenceFloor(ctx, "emoji"); err == nil {
+		t.Error("LocateSequenceFloor on a table with no marker scope returned no error")
+	}
+
+	// An id past the probe's ceiling cannot be located: the floor comes back
+	// as the lower bound it is, and says so.
+	tok, _, err := m.RecordPendingAccount(ctx, db.SequenceFloorProbeCeiling+5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers)
+	if err != nil || complete || got != 900 {
+		t.Errorf("users floor with an out-of-range marker = %d, %v, %v; want 900 reported incomplete", got, complete, err)
 	}
 }

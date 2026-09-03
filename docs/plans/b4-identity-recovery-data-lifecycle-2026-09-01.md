@@ -1550,8 +1550,14 @@ decisions 3 and 4.
   the writer connection the transaction still holds, read by the store at
   insert time (`TestPersistAudits_AppliesTheUnlinkRulesAtInsert`). A
   marker file from before the floors existed got none, so the first
-  restore could still reuse an id: the first replay seeds them from the
-  counters as they stand (`TestErasureService_ReplayMarkersSeedsMissingFloors`).
+  restore could still reuse an id: the first replay recovers the floor from
+  the ids its own markers name (`MarkerStore.LocateSequenceFloor` hashes
+  candidates against the tokens until every marker is accounted for, the
+  counter standing only as a lower bound beside it — Codex's review of
+  #1523 refuted the first attempt, which trusted the counter a restore can
+  have rolled back below those very ids;
+  `TestErasureService_ReplayMarkersRecoversMissingFloors`,
+  `TestMarkerStore_LocateSequenceFloor`).
   038-era actor-side tokens sat in `subject_token`, where a later erasure
   of the target would overwrite them: migration 042 moves the determinable
   ones (`TestMigration042_BackfillsLegacyActorTokens`). And the marker

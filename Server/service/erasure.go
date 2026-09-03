@@ -225,26 +225,51 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 	if err != nil {
 		return db.ReplayReport{}, err
 	}
-	// A marker file from before the floors existed has none: seed them from
-	// the counters as they stand, which are at or above every id a marker
-	// names, so the next restore cannot roll the id space below them.
+	// A marker file from before the floors existed has none, and the live
+	// counter cannot stand in for them: this database may be a restore, and
+	// a restore rolls the counter back below the ids the markers name — the
+	// case the floors defend against. The markers are the only source, so
+	// the ids they name are recovered from the tokens themselves
+	// (MarkerStore.LocateSequenceFloor) and the counter is only a lower
+	// bound beside them.
 	for _, table := range []string{db.SequenceFloorUsers, db.SequenceFloorChannels} {
 		if _, ok := floors[table]; ok {
 			continue
 		}
-		seq, err := s.st.SequenceValue(ctx, table)
+		floor, err := s.recoverSequenceFloor(ctx, table)
 		if err != nil {
-			return db.ReplayReport{}, fmt.Errorf("erasure: sequence floors: %w", err)
-		}
-		if err := s.markers.RaiseSequenceFloor(ctx, table, seq); err != nil {
 			return db.ReplayReport{}, err
 		}
-		floors[table] = seq
+		if err := s.markers.RaiseSequenceFloor(ctx, table, floor); err != nil {
+			return db.ReplayReport{}, err
+		}
+		floors[table] = floor
 	}
 	if err := s.st.RaiseSequences(ctx, floors); err != nil {
 		return db.ReplayReport{}, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
 	return s.markers.ReplayAccounts(ctx, s.st, s.eraseForReplay)
+}
+
+// recoverSequenceFloor is the floor for a table whose marker file never
+// recorded one: the highest id its markers name, or the live counter when
+// that is higher (markers for ids the probe could not reach are reported,
+// loudly — the floor is then a lower bound, and every marker written from
+// now on records its own).
+func (s *ErasureService) recoverSequenceFloor(ctx context.Context, table string) (int64, error) {
+	located, complete, err := s.markers.LocateSequenceFloor(ctx, table)
+	if err != nil {
+		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
+	}
+	if !complete {
+		slog.Error("erasure markers: could not locate every marker's id within the probe ceiling; the recovered sequence floor is a lower bound and an id above it could still be reused",
+			"table", table, "located_up_to", located, "ceiling", db.SequenceFloorProbeCeiling)
+	}
+	seq, err := s.st.SequenceValue(ctx, table)
+	if err != nil {
+		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
+	}
+	return max(located, seq), nil
 }
 
 // finishErasure is everything after the database half: the member_ban and

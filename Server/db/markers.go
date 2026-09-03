@@ -206,6 +206,62 @@ func (m *MarkerStore) SequenceFloors(ctx context.Context) (map[string]int64, err
 	return floors, rows.Err()
 }
 
+// SequenceFloorProbeCeiling bounds LocateSequenceFloor's search. A marker
+// names its subject by a one-way token, so recovering the id means hashing
+// candidates until every marker is accounted for; the probe normally stops
+// long before this, when the last marker is located. An installation that
+// has handed out more ids than this and still has a marker file from
+// before the floors existed is past what the probe can recover, and says so.
+const SequenceFloorProbeCeiling = 1 << 20
+
+// LocateSequenceFloor recovers the floor a marker file written before
+// sequence_floors existed never recorded: the highest id its markers name,
+// found by hashing candidates and looking them up. The live counter cannot
+// supply it — a restore can have rolled it back below an id a marker still
+// names, which is the case the floors exist to defend against — so the
+// markers themselves are the only source. complete reports whether every
+// marker of the table's scope was located; a false means the probe hit its
+// ceiling first and the floor it returns is a lower bound.
+//
+// table is SequenceFloorUsers (account markers, keyed by SubjectToken) or
+// SequenceFloorChannels (messages markers, keyed by MessagesToken).
+func (m *MarkerStore) LocateSequenceFloor(ctx context.Context, table string) (highest int64, complete bool, err error) {
+	var scope string
+	var token func(int64) string
+	switch table {
+	case SequenceFloorUsers:
+		scope, token = MarkerScopeAccount, m.SubjectToken
+	case SequenceFloorChannels:
+		scope, token = MarkerScopeMessages, m.MessagesToken
+	default:
+		return 0, false, fmt.Errorf("marker store: no marker scope for sequence floor %q", table)
+	}
+	markers, err := m.Markers(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	wanted := make(map[string]struct{})
+	for _, mk := range markers {
+		if mk.Scope == scope {
+			wanted[mk.SubjectToken] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, true, nil
+	}
+	for id := int64(1); id <= SequenceFloorProbeCeiling; id++ {
+		if _, ok := wanted[token(id)]; !ok {
+			continue
+		}
+		highest = id
+		delete(wanted, token(id))
+		if len(wanted) == 0 {
+			return highest, true, nil
+		}
+	}
+	return highest, false, nil
+}
+
 // ConfirmAccount marks the subject's marker recorded: the erasure committed.
 func (m *MarkerStore) ConfirmAccount(ctx context.Context, token string) error {
 	if _, err := m.sqlDB.ExecContext(ctx,
