@@ -1581,7 +1581,12 @@ decisions 3 and 4.
   the server, so an emptied table leaves setup closed and re-opening it is
   the operator's deliberate, local act
   (`TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted`,
-  `TestSetupService_AnEmptiedUserTableDoesNotReopenSetup`).
+  `TestSetupService_AnEmptiedUserTableDoesNotReopenSetup`). Codex refuted
+  the migration's first predicate — an installation whose users table a
+  replay had already emptied would upgrade with the flag at `0` and read as
+  fresh — so it now also closes on the traces an erasure leaves: any audit
+  row (unlinked, never deleted) or any `erasure_jobs` row
+  (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`).
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and

@@ -110,7 +110,11 @@ does not apply the last-admin guard) — so the count is no longer the gate.
 The `setup_completed` setting is (migration 043): it is written in the same
 transaction as the first Owner and never cleared by the server, so an emptied
 users table leaves setup closed rather than open to the first caller on an
-allowed network.
+allowed network. An installation upgrading into that migration is judged the
+same way: a live user closes setup, and so does any audit row or `erasure_jobs`
+row, the two traces an erasure leaves behind — a server whose users table was
+already emptied before the upgrade closes on those rather than reading as
+fresh.
 
 A server with no accounts and the flag set is therefore locked, deliberately.
 Re-opening it is an operator action with filesystem access to the database,
