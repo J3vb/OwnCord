@@ -323,7 +323,10 @@ func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadca
 }
 
 // UseErasure makes DeleteAccount run through e — the bundle's shared runner,
-// which carries the upload storage — instead of the private one.
+// which carries the upload storage — instead of the private one. A nil e is
+// a no-op: the caller (wireAuth) is the one that decides whether a missing
+// runner is worth logging, since only it knows whether the bundle simply
+// never had one.
 func (s *AuthService) UseErasure(e *ErasureService) {
 	if e != nil {
 		s.erasure = e

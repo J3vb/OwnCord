@@ -127,10 +127,15 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 		}
 		return fmt.Errorf("reading backup_retention: %w", err)
 	}
-	// Malformed values parse to 0; zero-or-below means retention is off, so a
-	// typo disables pruning rather than failing the maintenance tick.
+	// Malformed values parse to 0; zero-or-below or above db.RetentionMaxDays
+	// means retention is off, so a typo — or an admin fat-fingering a digit,
+	// since backup_retention carries no numeric validation on the write side
+	// — disables pruning instead of failing the maintenance tick or, worse,
+	// overflowing the cutoff below into the future and unlinking every
+	// backup but the newest (OC-0393; the message-retention window fails the
+	// same way over the identical -days*24h arithmetic).
 	days, _ := strconv.Atoi(strings.TrimSpace(retStr))
-	if days <= 0 {
+	if days <= 0 || days > db.RetentionMaxDays {
 		return nil
 	}
 

@@ -32,6 +32,7 @@ go build ./... && go build -tags otel ./... && go build -tags wazero ./... && go
 go vet ./...
 go test -race ./...
 go test -tags deadlock -count=1 ./ws/    # deadlock detector; ws is where lock order actually varies
+go test -count=1 ./admin/...             # untagged leg: admin/logstream_alloc_test.go is !race && !deadlock
 golangci-lint run                        # CI pins v2.11.3
 
 # Generated output must not be stale. These are what `make sqlc-verify` and

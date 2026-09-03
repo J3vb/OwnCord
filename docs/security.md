@@ -179,6 +179,46 @@ The second statement is the acknowledgement: it records that the floor is
 settled, so the next start-up honours it instead of probing again. Use
 `'channels'` in place of `'users'` when the refusal names that table.
 
+### Erasure marker key
+
+A marker names its subject by HMAC of the id under `data/erasure.key`, so the
+markers are only meaningful under the key they were written with. Opened under
+another key — one regenerated after the file was lost, or an
+`OWNCORD_ERASURE_KEY` pointed somewhere else — every token would miss: the
+start-up replay would erase nothing, report success, and leave a restored
+backup's erased accounts serving. So the file records `marker_meta`'s
+`erasure-key-fingerprint` (HMAC of a fixed label under the key; the key itself
+is never in the file) and the server refuses to start on a key that does not
+match it. Two refusals, both the operator's to resolve, and the log names the
+statement for each. Run them against the **marker file**
+(`data/erasure/markers.sqlite`), not the main database:
+
+- **The file records a different key.** Put the original `erasure.key` back —
+  the log prints the first 12 hex of both fingerprints so you can tell which
+  backup holds it. Only if that key is gone for good, and you accept that the
+  markers become unmatchable, repoint the file at the running key:
+
+  ```sql
+  UPDATE marker_meta SET value = '<running key fingerprint from the log>'
+    WHERE name = 'erasure-key-fingerprint';
+  ```
+
+- **The file holds markers and no fingerprint** — it was written before the
+  key was bound to the file. The server will not adopt a key it cannot prove,
+  because adopting the wrong one is the silent failure above. Confirm the
+  running key is the one those markers were written under, then bless the file:
+
+  ```sql
+  INSERT INTO marker_meta (name, value)
+    VALUES ('erasure-key-fingerprint', '<running key fingerprint from the log>');
+  ```
+
+Deleting or moving `markers.sqlite` is not a way past either refusal. The file
+also carries `sequence_floors` — without them an erased account's id is handed
+out again and its innocent new holder is erased by the old marker on a later
+start-up — and the account markers that keep the first-run setup gate closed
+against a restore of a pre-owner backup.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every

@@ -177,6 +177,11 @@ CREATE TABLE IF NOT EXISTS floor_probes (
     name      TEXT PRIMARY KEY,
     probed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS marker_meta (
+    name  TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 ```
 
 `state` is the erasure's two-phase protocol: `pending` is written before the
@@ -188,6 +193,14 @@ waiting on, so the main database cannot say whether it happened, and the
 request behind the marker was authorised — and confirmed when the account
 is gone. `scope = messages` with `channel_id` and `cutoff` is B4-11's
 retention marker. `replays` counts the restores the marker undid.
+`marker_meta` holds one row, `erasure-key-fingerprint`: HMAC-SHA256 of the
+literal `owncord-marker-fingerprint` under the erasure key, so the file
+records which key its tokens were computed under without holding the key.
+The server refuses to open a file whose fingerprint is not the running key's,
+and refuses to adopt a key for a file that holds markers and no fingerprint
+(docs/security.md, "Erasure marker key") — under the wrong key every token
+misses, the replay erases nothing, and a restored backup's erased accounts
+serve on.
 
 `sequence_floors` keeps the `AUTOINCREMENT` counters (`sqlite_sequence`) of
 the tables whose ids the markers name, as they stood when a marker was

@@ -91,11 +91,20 @@ jobs:
       # package is tag-invariant and already covered by the race run above.
       # One leg is enough; no -race (the runtime under the tag is the concern,
       # not new concurrency).
+      #
+      # admin/logstream_alloc_test.go (OC-0398) carries the INVERSE tag
+      # `!race && !deadlock`: it needs a leg where NEITHER is set, which is
+      # neither of the two universal legs above (each sets exactly one of
+      # the two) nor this step's own -tags lines — so it gets its own plain
+      # line here. Server/ci_tags_test.go guards this class going forward:
+      # it fails if any tagged Server test file has no `go test` leg above
+      # that both sets its tag and runs its package.
       - name: Run tag-gated tests (-tags wazero, -tags otel)
         if: matrix.os == 'ubuntu-latest'
         run: |
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
+          go test -count=1 ./admin/...
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
@@ -198,6 +207,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # check-migrations.mjs diffs against origin/dev. The default shallow
+          # fetch has no such ref, and the script fails closed rather than
+          # passing blind, so this job needs the full history.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -208,6 +222,16 @@ jobs:
 
       - name: Documents must agree with the findings ledger
         run: node scripts/check-doc-counts.mjs
+
+      # OC-0395. A migration is recorded by filename with no content hash, so
+      # editing one that has already shipped repairs nothing for the
+      # installations that applied it and no error is ever raised. Self-tested
+      # first, for the same reason the count matcher is.
+      - name: Self-test the migration-immutability matcher
+        run: node scripts/check-migrations.mjs --selftest
+
+      - name: Shipped migrations must not be edited
+        run: node scripts/check-migrations.mjs
 
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
