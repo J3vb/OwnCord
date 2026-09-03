@@ -111,10 +111,14 @@ The `setup_completed` setting is (migration 043): it is written in the same
 transaction as the first Owner and never cleared by the server, so an emptied
 users table leaves setup closed rather than open to the first caller on an
 allowed network. An installation upgrading into that migration is judged the
-same way: a live user closes setup, and so does any audit row or `erasure_jobs`
-row, the two traces an erasure leaves behind — a server whose users table was
+same way: a live user closes setup, and so do the traces an erasure leaves
+behind — its `erasure_jobs` row, or a `server_setup`, `account_deleted` or
+`account_erasure_replayed` audit row — so a server whose users table was
 already emptied before the upgrade closes on those rather than reading as
-fresh.
+fresh. The audit evidence is deliberately those three actions and not any
+row: a server that has never been set up still writes `backup_create` from
+the scheduled-backup loop, and closing setup on that would deny it its own
+first run.
 
 A server with no accounts and the flag set is therefore locked, deliberately.
 Re-opening it is an operator action with filesystem access to the database,

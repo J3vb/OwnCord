@@ -1582,11 +1582,16 @@ decisions 3 and 4.
   the operator's deliberate, local act
   (`TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted`,
   `TestSetupService_AnEmptiedUserTableDoesNotReopenSetup`). Codex refuted
-  the migration's first predicate — an installation whose users table a
-  replay had already emptied would upgrade with the flag at `0` and read as
-  fresh — so it now also closes on the traces an erasure leaves: any audit
-  row (unlinked, never deleted) or any `erasure_jobs` row
-  (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`).
+  the migration's predicate twice. First it was too narrow: an installation
+  whose users table a replay had already emptied would upgrade with the flag
+  at `0` and read as fresh. Widening it to any audit row was then too broad:
+  a server that has never been set up still writes `backup_create` from the
+  scheduled-backup loop, so that would have denied a genuine first run. It
+  now closes on a live user, an `erasure_jobs` row, or a `server_setup`,
+  `account_deleted` or `account_erasure_replayed` audit row — the three an
+  account must have existed to produce
+  (`TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife`, with the
+  maintenance loop's own rows as the negative control).
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and

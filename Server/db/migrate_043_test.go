@@ -47,13 +47,45 @@ func TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife(t *testing.T) {
 			close: true,
 		},
 		{
-			name: "an audit row closes it, the users table having been emptied",
+			name: "the erasure's own audit row closes it, the users table having been emptied",
 			seed: func(t *testing.T, database *DB) {
 				if err := database.LogAuditEntry(ctx, AuditEntry{Action: "account_deleted", TargetType: "user", SubjectToken: "tok"}); err != nil {
 					t.Fatal(err)
 				}
 			},
 			close: true,
+		},
+		{
+			name: "the setup row closes it",
+			seed: func(t *testing.T, database *DB) {
+				if err := database.LogAuditEntry(ctx, AuditEntry{Action: "server_setup", TargetType: "server"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			close: true,
+		},
+		{
+			name: "a replayed erasure closes it",
+			seed: func(t *testing.T, database *DB) {
+				if err := database.LogAuditEntry(ctx, AuditEntry{Action: "account_erasure_replayed", TargetType: "user", SubjectToken: "tok"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			close: true,
+		},
+		{
+			// A server that was never set up still writes audit rows: the
+			// maintenance loop takes the scheduled backup migration 001
+			// enables by default, with actor 0 and no user in existence.
+			// Closing setup on those would deny it its own first run.
+			name: "the maintenance loop's own rows leave it open",
+			seed: func(t *testing.T, database *DB) {
+				for _, action := range []string{"backup_create", "backup_delete"} {
+					if err := database.LogAuditEntry(ctx, AuditEntry{Action: action, TargetType: "server", Detail: "scheduled backup saved: x"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
 		},
 		{
 			name: "an erasure job closes it",

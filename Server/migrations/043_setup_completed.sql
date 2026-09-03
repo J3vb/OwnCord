@@ -14,12 +14,18 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('setup_completed', '0');
 -- is the obvious evidence, but not the only one that has to count: an
 -- erasure can have emptied that table before this migration ever runs, and
 -- such a server must upgrade closed, not open. Two traces of a prior life
--- survive every erasure by design -- the audit rows, which are unlinked
--- rather than deleted and which the erasure adds to, and the erasure_jobs
--- row each erasure writes. A database that has none of the three has never
--- been set up.
+-- survive every erasure by design -- the erasure_jobs row each erasure
+-- writes, and the audit rows, which are unlinked rather than deleted.
+--
+-- The audit evidence has to be specific, though. A server that was never set
+-- up still writes audit rows on its own: the maintenance loop takes the
+-- scheduled backup migration 001 turns on by default and records
+-- backup_create with actor 0. Closing setup on any audit row would leave
+-- such an installation unable to run its own first-run wizard. Only the
+-- three actions that an account must have existed to produce count here.
 UPDATE settings SET value = '1'
  WHERE key = 'setup_completed'
    AND (EXISTS (SELECT 1 FROM users)
-     OR EXISTS (SELECT 1 FROM audit_log)
-     OR EXISTS (SELECT 1 FROM erasure_jobs));
+     OR EXISTS (SELECT 1 FROM erasure_jobs)
+     OR EXISTS (SELECT 1 FROM audit_log
+                 WHERE action IN ('server_setup', 'account_deleted', 'account_erasure_replayed')));
