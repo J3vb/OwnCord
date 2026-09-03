@@ -46,3 +46,19 @@ into commas — the migration splitter treats `;` as a statement boundary even
 in a comment (the `db-change` skill's trap) — and one column the draft did
 not have: `retention_runs.purge_pending`, the replay-purge journal (Codex's
 review of #1521); its `down` file stays here as the rollback.
+
+## The reversals moved when the migrations landed
+
+`Server/rollback/` is now the applied set: one reversal per migration, in the
+order to run them, rehearsed on a copy of the alpha snapshot by
+`TestMigrationRollbackRehearsalOnAlphaSnapshot` (the B4 exit gate's condition
+7). The `down` files in this directory stay as the historical record of the
+design — they are what was written when each shape was — and two of them are
+no longer what an operator should run:
+
+- none of them clears its own `schema_versions` row, so running one leaves the
+  database claiming a migration it no longer has;
+- `deletion_markers.down.sql` predates `sequence_floors` and `floor_probes`, so
+  it drops one of the marker file's three tables.
+
+`Server/rollback/` fixes both. Run those.

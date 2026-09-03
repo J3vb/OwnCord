@@ -485,6 +485,16 @@ The five drills are implemented as `TestHP4_D1`…`TestHP4_D5` in
 `Server/db/hp4_drills_test.go` (HP-4, 2026-09-02); the scorecard pastes their
 inventories.
 
+**The rollback rehearsal** (B4 exit, 2026-09-03) uses the same protocol for
+the other direction. The snapshot sits at migration `031`, so migrating a
+copy to HEAD is exactly the B4 delta and running `Server/rollback/` back down
+has to land on the snapshot's own schema — asserted on the schema, the
+applied-migration list, `settings` and the row counts of seven data classes,
+then re-migrated forward to check a rolled-back database is one a server can
+start on. `TestMigrationRollbackRehearsalOnAlphaSnapshot` and
+`TestMarkerFileRollback` in `Server/db/rollback_rehearsal_test.go`; the B4
+exit section of the HP-4 scorecard has the report.
+
 ## The private half
 
 Analysis that would name an exploitable weakness in shipped code is not in
