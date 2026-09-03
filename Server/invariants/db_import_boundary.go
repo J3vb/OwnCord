@@ -73,6 +73,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// owns the handle from open to close, and main.go no longer imports db.
 	"internal/app/app.go":         {"boundary", "", "the App holds the handle for its lifetime; no calls"},
 	"internal/app/database.go":    {"boundary", "", "opens the handle, migrates, clears stale state at boot"},
+	"internal/app/erasure.go":     {"boundary", "", "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)"},
 	"internal/app/hub.go":         {"boundary", "", "hands the handle to the hub and the service layer it builds"},
 	"internal/app/maintenance.go": {"boundary", "", "periodic worker: expired sessions, backups, orphan attachments"},
 	"internal/app/persistence.go": {"boundary", "", "event persister, audit writer and the boot seq seed own the handle"},
