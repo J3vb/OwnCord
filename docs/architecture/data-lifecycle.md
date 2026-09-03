@@ -49,13 +49,13 @@ counted, not described, in the last section.
 
 Each operation's model answers the same five questions, in this order:
 
-| #   | Axis                    | The question                                                                                                                                                                                                                                                 |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A1  | Interrupted             | The process is killed, or the request context is cancelled, part-way through. What is left?                                                                                                                                                                  |
-| A2  | Disk full / I/O error   | A write fails with `ENOSPC` or `EIO`. Which write, and what does the operation report?                                                                                                                                                                       |
-| A3  | Transaction vs. file    | The database transaction commits but a filesystem effect (or the reverse) does not. Can the two be reconciled?                                                                                                                                               |
-| A4  | Concurrent writer       | A second operation on the same subject, row or file runs at the same time. Frames already in the replay pipeline — the ring buffer, the persister's queue, the `member_ban` itself — are purged after the broadcast (`TestErasure_PurgesTheReplayPipeline`). |
-| A5  | Restore over newer data | A backup taken **before** the operation is restored **after** it. Does the operation's effect survive, or revert?                                                                                                                                            |
+| #   | Axis                    | The question                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | Interrupted             | The process is killed, or the request context is cancelled, part-way through. What is left?                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| A2  | Disk full / I/O error   | A write fails with `ENOSPC` or `EIO`. Which write, and what does the operation report?                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| A3  | Transaction vs. file    | The database transaction commits but a filesystem effect (or the reverse) does not. Can the two be reconciled?                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| A4  | Concurrent writer       | A second operation on the same subject, row or file runs at the same time. Frames already in the replay pipeline — the ring buffer, the persister's queue, the `member_ban` itself — are purged after the broadcast (`TestErasure_PurgesTheReplayPipeline`); a frame a producer hands the hub after the purge is dropped, and a client resuming from before the purge takes the full ready (`TestErasure_PurgeForcesFullResyncAndDropsLateFrames`); a failed purge is retried from the job (`TestErasureService_ReplayPurgeIsRetriedFromTheJournal`). |
+| A5  | Restore over newer data | A backup taken **before** the operation is restored **after** it. Does the operation's effect survive, or revert?                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 A row that reads "n/a" means the axis cannot occur for that operation, and
 says why.
@@ -113,17 +113,26 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
 
 After commit the runner broadcasts `member_ban` (every client drops the
 user; the subject's socket is closed) and then purges the replay pipeline
-behind it (`Hub.PurgeUserFromReplay`): the event persister is flushed as a
-barrier, so a frame queued before the erasure — or the `member_ban` itself
-— is on disk rather than in flight; the ring buffer's frames naming the
-subject are dropped (`EventRingBuffer.RemoveWhere`, the slot keeps its seq);
-and the persisted rows naming the subject are deleted again. A reconnect
-whose `last_seq` predates a removed row meets an interior gap in the cold
-tier and gets a full ready instead of a replay, which is the convergence an
-erasure wants. Then the runner removes each listed file through the upload
-storage (a missing file counts as removed) and marks the job `done`; a
-failure records the attempt and the job is resumed at startup and on every
-maintenance tick. The route writes the audit row (`account_deleted`, actor
+behind it (`Hub.PurgeUserFromReplay`, the job's first journaled step —
+`erasure_jobs.replay_purged`, migration 040 — retried from the journal
+until it succeeds): the dispatch loop is drained so the `member_ban` is
+sequenced, the event persister is flushed as a barrier so a frame queued
+before the erasure is on disk rather than in flight, then under the
+sequencing lock the subject joins the hub's tombstone set (a frame naming
+them that any producer hands the hub from now on is dropped instead of
+sequenced — the request that read its rows before the erasure and reached
+the hub after), the replay-purge watermark moves to the current seq (a
+client resuming from at or before it takes the full ready instead of a
+replay, `mustFullResync`), the ring buffer's frames naming the subject are
+dropped (`EventRingBuffer.RemoveWhere`; a replay whose range crosses a
+cleared slot returns nil, the full ready again), and the persisted rows
+naming the subject are deleted. A reconnect from the cold tier meets the
+interior gap and gets the full ready too. Without a hub — the start-up
+replay — the persisted rows alone are purged, nothing being buffered yet.
+Then the runner removes each listed file through the upload storage (a
+missing file counts as removed) and marks the job `done`; a failure of
+either half records the attempt and the job is resumed at startup and on
+every maintenance tick. The route writes the audit row (`account_deleted`, actor
 the subject; the admin route records the actor and `account erased by
 administrator`). The log carries the id only, never the username.
 

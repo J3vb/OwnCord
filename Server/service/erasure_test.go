@@ -577,3 +577,74 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 		t.Error("ErasureBroadcastsMemberBan with a hub")
 	}
 }
+
+// failingHub refuses the replay purge until allowed; the job must stay
+// listed with the purge outstanding and Resume must retry it.
+type failingHub struct {
+	recordingErasureHub
+	allow bool
+}
+
+func (h *failingHub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
+	if !h.allow {
+		return errors.New("purge unavailable")
+	}
+	return h.recordingErasureHub.PurgeUserFromReplay(ctx, userID)
+}
+
+func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, files := seedErasureMember(t, database, dir)
+	hub := &failingHub{}
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetHub(hub)
+
+	err := svc.Erase(ctx, uid)
+	if !errors.Is(err, ErrErasureFilesPending) {
+		t.Fatalf("Erase with a failing purge = %v, want ErrErasureFilesPending", err)
+	}
+	jobs, err := database.ListUnfinishedErasureJobs(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].ReplayPurged || jobs[0].Attempts != 1 || jobs[0].LastError == "" {
+		t.Fatalf("unfinished jobs after the failed purge = %+v, %v; want one with the purge outstanding", jobs, err)
+	}
+	for _, f := range files {
+		if !fileExists(t, filepath.Join(dir, f)) {
+			t.Errorf("%s removed before the purge succeeded", f)
+		}
+	}
+	hub.allow = true
+	if done, err := svc.Resume(ctx); done != 1 || err != nil {
+		t.Fatalf("Resume once the purge works = %d, %v; want 1", done, err)
+	}
+	job, err := database.GetErasureJob(ctx, jobs[0].ID)
+	if err != nil || !job.ReplayPurged || job.State != db.ErasureStateDone {
+		t.Fatalf("job after the resume = %+v, %v; want purged and done", job, err)
+	}
+	if fmt.Sprint(hub.calls) != fmt.Sprintf("[ban:%d purge:%d]", uid, uid) {
+		t.Errorf("hub calls = %v", hub.calls)
+	}
+	// Without a hub the persisted rows are purged directly and the job
+	// completes.
+	if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (99, 'typing', ?, 0)`, fmt.Sprintf(`{"seq":99,"type":"typing","payload":{"user_id":%d}}`, uid+50)); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := database.CreateUser(ctx, "purge-no-hub", "hash", 4)
+	if _, err := database.ExecContext(ctx, `UPDATE events SET payload = ? WHERE seq = 99`, fmt.Sprintf(`{"seq":99,"type":"typing","payload":{"user_id":%d}}`, other)); err != nil {
+		t.Fatal(err)
+	}
+	noHub := NewErasureService(database)
+	noHub.SetFiles(newTestStorage(t, dir))
+	if err := noHub.Erase(ctx, other); err != nil {
+		t.Fatalf("Erase without a hub: %v", err)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, other).Scan(&n); err != nil || n != 0 {
+		t.Errorf("events naming the user after a hub-less erasure = %d (%v), want 0", n, err)
+	}
+	if jobs, _ := database.ListUnfinishedErasureJobs(ctx); len(jobs) != 0 {
+		t.Errorf("unfinished jobs after the hub-less erasure: %+v", jobs)
+	}
+}

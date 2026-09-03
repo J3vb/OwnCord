@@ -20,5 +20,7 @@ The scorecard ([hp-4-scorecard-2026-09-02.md](../hp-4-scorecard-2026-09-02.md))
 records the decisions the shapes encode.
 
 Applied so far: `erasure_jobs` landed as `Server/migrations/037_erasure_jobs.sql`
-(B4-9, 2026-09-03), byte-for-byte the `up` draft; its `down` file stays here
-as the rollback.
+(B4-9, 2026-09-03), byte-for-byte the `up` draft; its `down` file stays here as
+the rollback. `040_erasure_replay_purge.sql` (#1517) adds
+`erasure_jobs.replay_purged` and the `idx_messages_reply_to` index the erasure's
+cascade needed — its own migration, so upgraded installations get both.

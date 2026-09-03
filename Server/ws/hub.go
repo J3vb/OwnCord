@@ -118,6 +118,17 @@ type Hub struct {
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
 
+	// replayPurgeSeq is the watermark of the last account-erasure replay
+	// purge (PurgeUserFromReplay): a client resuming from a seq at or
+	// before it may have missed the purged member_ban and takes the full
+	// ready, since the purge left holes replay cannot fill. Ratcheted like
+	// visibilityChangeSeq. purgedUsers is the tombstone set behind it: a
+	// frame naming one of these ids that a producer sequences after the
+	// purge is dropped instead of buffered and persisted. Both guarded by
+	// seqMu on the write side; purgedUsers is read under seqMu too.
+	replayPurgeSeq atomic.Uint64
+	purgedUsers    map[int64]struct{}
+
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	// settings is the read seam the cache below refreshes through —
 	// the B3-8 settings family owns the underlying reads.
