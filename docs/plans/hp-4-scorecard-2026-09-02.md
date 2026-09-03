@@ -28,28 +28,29 @@ of [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md).
 `dev` is squash-merge only; each step's pre-squash commits survive on its
 pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 
-| PR    | Step                                                                                                      | On `dev`                                   |
-| ----- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| #1497 | B4-0 — failure models, data-class inventory, drill protocol, alphasnap                                    | `d8653ea`                                  |
-| #1498 | B4-2 — absence proofs                                                                                     | `920b034`                                  |
-| #1499 | B4-3 — OC-0321, durable second factor, recovery codes                                                     | `9587c9e`                                  |
-| #1500 | B4-7 — sign-out-everywhere                                                                                | `21080e2`                                  |
-| #1501 | B4-12(d) — OC-0340, OC-0341                                                                               | `9515174`                                  |
-| #1502 | B4-12(a) — OC-0313, OC-0329                                                                               | `12dbc88`                                  |
-| #1503 | B4-12(b) — OC-0314                                                                                        | `366f199`                                  |
-| #1504 | B4-4 — admission budget                                                                                   | `eecf99b`                                  |
-| #1505 | B4-12(a) follow-up — quota-safe migrations                                                                | `a595786`                                  |
-| #1506 | owner decisions (closed; the content landed via #1507)                                                    | closed, not merged                         |
-| #1507 | B4-7 — new-login signal, OC-0354                                                                          | `dc69fbb`                                  |
-| #1508 | B4-1 — registration modes                                                                                 | `8bd4212`                                  |
-| #1510 | B4-8 — diagnostics inventory, egress-sites, no-telemetry capture                                          | `b5e9d4a`                                  |
-| #1509 | B4-12(c) — OC-0324                                                                                        | `fc4c562` (merged after measurement)       |
-| #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair | `2b6bfbf` (merged after measurement)       |
-| #1512 | B4-5 — recovery kit                                                                                       | `52f3df7` (merged after measurement)       |
-| #1513 | B4-6 — owner-assisted recovery                                                                            | `33f82a8` (merged after measurement)       |
-| #1514 | B4-8 review fixes                                                                                         | `5587454` (merged after measurement)       |
-| #1515 | HP-4 — this scorecard                                                                                     | `9598c51` (merged after measurement)       |
-| —     | B4-9 — complete account erasure (branch `feat/b4-9-account-erasure` from `9598c51`)                       | #1516 — open, draft; pre-squash head below |
+| PR    | Step                                                                                                              | On `dev`                             |
+| ----- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| #1497 | B4-0 — failure models, data-class inventory, drill protocol, alphasnap                                            | `d8653ea`                            |
+| #1498 | B4-2 — absence proofs                                                                                             | `920b034`                            |
+| #1499 | B4-3 — OC-0321, durable second factor, recovery codes                                                             | `9587c9e`                            |
+| #1500 | B4-7 — sign-out-everywhere                                                                                        | `21080e2`                            |
+| #1501 | B4-12(d) — OC-0340, OC-0341                                                                                       | `9515174`                            |
+| #1502 | B4-12(a) — OC-0313, OC-0329                                                                                       | `12dbc88`                            |
+| #1503 | B4-12(b) — OC-0314                                                                                                | `366f199`                            |
+| #1504 | B4-4 — admission budget                                                                                           | `eecf99b`                            |
+| #1505 | B4-12(a) follow-up — quota-safe migrations                                                                        | `a595786`                            |
+| #1506 | owner decisions (closed; the content landed via #1507)                                                            | closed, not merged                   |
+| #1507 | B4-7 — new-login signal, OC-0354                                                                                  | `dc69fbb`                            |
+| #1508 | B4-1 — registration modes                                                                                         | `8bd4212`                            |
+| #1510 | B4-8 — diagnostics inventory, egress-sites, no-telemetry capture                                                  | `b5e9d4a`                            |
+| #1509 | B4-12(c) — OC-0324                                                                                                | `fc4c562` (merged after measurement) |
+| #1511 | B4-1 review fixes the #1508 squash missed, the four cited tests, the untracked symlink, the README repair         | `2b6bfbf` (merged after measurement) |
+| #1512 | B4-5 — recovery kit                                                                                               | `52f3df7` (merged after measurement) |
+| #1513 | B4-6 — owner-assisted recovery                                                                                    | `33f82a8` (merged after measurement) |
+| #1514 | B4-8 review fixes                                                                                                 | `5587454` (merged after measurement) |
+| #1515 | HP-4 — this scorecard                                                                                             | `9598c51` (merged after measurement) |
+| #1516 | B4-9 — complete account erasure                                                                                   | `c9f06da` (merged after measurement) |
+| —     | B4-9 review fix — the replay-pipeline purge and the persisted-envelope predicate (#1517, `fix/b4-9-replay-purge`) | open — draft                         |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is
 serialized as the plan required; #1512 and #1513 carry #1511's commits until
@@ -293,11 +294,11 @@ Recorded as B4-9, B4-10 and B4-11 land; each step's pre-squash commits
 survive on its PR ref (`refs/pull/<n>/head`). The already-merged steps' PR
 refs are in the chain table above.
 
-| Step  | Branch                      | Pre-squash head                                  | PR    |
-| ----- | --------------------------- | ------------------------------------------------ | ----- |
-| B4-9  | `feat/b4-9-account-erasure` | `fae832b` (later fixes on `refs/pull/1516/head`) | #1516 |
-| B4-10 | —                           | —                                                | —     |
-| B4-11 | —                           | —                                                | —     |
+| Step  | Branch                      | Pre-squash head                                                                                                          | PR    |
+| ----- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----- |
+| B4-9  | `feat/b4-9-account-erasure` | `8032d70` → squash `c9f06da`; Codex's two findings fixed in `9880604`, which landed after the merge and follows as #1517 | #1516 |
+| B4-10 | —                           | —                                                                                                                        | —     |
+| B4-11 | —                           | —                                                                                                                        | —     |
 
 **Signed:** Accepted 2026-09-03 — the owner merged this scorecard as #1515
 (`9598c51`) with all six decisions standing; recorded by B4-9's PR, not

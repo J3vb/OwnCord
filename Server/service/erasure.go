@@ -25,12 +25,22 @@ type StorageLister interface {
 	List() ([]storage.Entry, error)
 }
 
+// ErasureHub is what the runner needs from the WebSocket hub: the
+// member_ban that drops the erased user from every client and closes their
+// socket, and the replay purge that follows it. *ws.Hub satisfies it.
+type ErasureHub interface {
+	BroadcastMemberBan(userID int64)
+	PurgeUserFromReplay(ctx context.Context, userID int64) error
+}
+
 // ErasureStore is the slice of Store the erasure runner needs.
 type ErasureStore interface {
 	EraseAccount(ctx context.Context, userID int64) (*db.ErasureJob, error)
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
+	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
+	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
 }
 
@@ -55,6 +65,7 @@ type ErasureService struct {
 	mu    syncutil.Mutex
 	st    ErasureStore
 	files FileRemover
+	hub   ErasureHub
 }
 
 // NewErasureService wires the runner over st. Files are removed only once
@@ -75,6 +86,19 @@ func (s *ErasureService) HasFiles() bool {
 	return s.files != nil
 }
 
+// SetHub installs the hub: from then on Erase broadcasts the member_ban
+// itself, right after the transaction, and purges the replay pipeline
+// behind it. Call it at the composition root before serving.
+func (s *ErasureService) SetHub(h ErasureHub) {
+	s.hub = h
+}
+
+// BroadcastsMemberBan reports whether Erase sends the member_ban itself;
+// a caller without a hub here sends its own.
+func (s *ErasureService) BroadcastsMemberBan() bool {
+	return s.hub != nil
+}
+
 // Erase erases userID: the database half, then this job's files. Errors from
 // the database half are the store's (db.ErrLastAdmin, db.ErrNotFound) and
 // mean nothing changed; ErrErasureFilesPending means the account is gone and
@@ -85,10 +109,17 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 		return err
 	}
 	slog.Info("account erased", "user_id", userID, "erasure_job", job.ID, "files", len(job.Files))
-	// The files outlive the request that started them: a cancelled context
-	// must not leave a half-removed job for the next tick when the process
-	// is right here to finish it.
-	if err := s.runJob(context.WithoutCancel(ctx), job); err != nil {
+	// The rest outlives the request that started it: a cancelled context
+	// must not leave the replay pipeline naming the subject or a
+	// half-removed job for the next tick when the process is right here.
+	bg := context.WithoutCancel(ctx)
+	if s.hub != nil {
+		// Drop the user from every client and close their socket. The purge
+		// of every frame naming them — the member_ban included — is the
+		// job's next step, retried from the journal until it succeeds.
+		s.hub.BroadcastMemberBan(userID)
+	}
+	if err := s.runJob(bg, job); err != nil {
 		return fmt.Errorf("%w: job %d: %w", ErrErasureFilesPending, job.ID, err)
 	}
 	return nil
@@ -122,6 +153,23 @@ func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !job.ReplayPurged {
+		if err := s.purgeReplay(ctx, job.UserID); err != nil {
+			slog.Warn("erasure: replay purge failed", "erasure_job", job.ID, "user_id", job.UserID, "err", err)
+			if recErr := s.st.RecordErasureJobAttempt(ctx, job.ID, job.FilesRemoved, err.Error()); recErr != nil {
+				return recErr
+			}
+			return err
+		}
+		if err := s.st.MarkErasureJobReplayPurged(ctx, job.ID); err != nil {
+			return err
+		}
+		job.ReplayPurged = true
+	}
+	if job.State == db.ErasureStateDone {
+		// Only the purge was outstanding.
+		return nil
+	}
 	if s.files == nil {
 		if len(job.Files) == 0 {
 			return s.finish(ctx, job, 0)
@@ -150,6 +198,18 @@ func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
 		return lastErr
 	}
 	return s.finish(ctx, job, removed)
+}
+
+// purgeReplay takes the erased user's frames out of the replay pipeline:
+// through the hub when one is installed (ring buffer, persister barrier,
+// events rows, the producer tombstone); without one — the start-up replay,
+// a test — the persisted rows alone, since nothing is buffered yet.
+func (s *ErasureService) purgeReplay(ctx context.Context, userID int64) error {
+	if s.hub != nil {
+		return s.hub.PurgeUserFromReplay(ctx, userID)
+	}
+	_, err := s.st.DeleteEventsForUser(ctx, userID)
+	return err
 }
 
 func (s *ErasureService) finish(ctx context.Context, job *db.ErasureJob, removed int) error {

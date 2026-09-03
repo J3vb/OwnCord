@@ -33,6 +33,13 @@ func (s *ModerationService) WithErasure(e *ErasureService) *ModerationService {
 	return s
 }
 
+// ErasureBroadcastsMemberBan reports whether the erasure runner sends the
+// member_ban itself (a hub is installed on it); the transport sends its own
+// only when it does not.
+func (s *ModerationService) ErasureBroadcastsMemberBan() bool {
+	return s.erasure != nil && s.erasure.BroadcastsMemberBan()
+}
+
 // EraseUser is the administrator-initiated account erasure (B4-9): the same
 // implementation as self-deletion, gated on ADMINISTRATOR plus the
 // actor-outranks-target hierarchy. An actor cannot erase itself here — that

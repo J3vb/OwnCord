@@ -49,13 +49,13 @@ counted, not described, in the last section.
 
 Each operation's model answers the same five questions, in this order:
 
-| #   | Axis                    | The question                                                                                                      |
-| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| A1  | Interrupted             | The process is killed, or the request context is cancelled, part-way through. What is left?                       |
-| A2  | Disk full / I/O error   | A write fails with `ENOSPC` or `EIO`. Which write, and what does the operation report?                            |
-| A3  | Transaction vs. file    | The database transaction commits but a filesystem effect (or the reverse) does not. Can the two be reconciled?    |
-| A4  | Concurrent writer       | A second operation on the same subject, row or file runs at the same time.                                        |
-| A5  | Restore over newer data | A backup taken **before** the operation is restored **after** it. Does the operation's effect survive, or revert? |
+| #   | Axis                    | The question                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | Interrupted             | The process is killed, or the request context is cancelled, part-way through. What is left?                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| A2  | Disk full / I/O error   | A write fails with `ENOSPC` or `EIO`. Which write, and what does the operation report?                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| A3  | Transaction vs. file    | The database transaction commits but a filesystem effect (or the reverse) does not. Can the two be reconciled?                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| A4  | Concurrent writer       | A second operation on the same subject, row or file runs at the same time. Frames already in the replay pipeline — the ring buffer, the persister's queue, the `member_ban` itself — are purged after the broadcast (`TestErasure_PurgesTheReplayPipeline`); a frame a producer hands the hub after the purge is dropped, and a client resuming from before the purge takes the full ready (`TestErasure_PurgeForcesFullResyncAndDropsLateFrames`); a failed purge is retried from the job (`TestErasureService_ReplayPurgeIsRetriedFromTheJournal`). |
+| A5  | Restore over newer data | A backup taken **before** the operation is restored **after** it. Does the operation's effect survive, or revert?                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 A row that reads "n/a" means the axis cannot occur for that operation, and
 says why.
@@ -95,8 +95,10 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    `channel_user_overrides`, `dm_participants`, `dm_open_state`, the
    subject's `invites` (an unused code stops working; who invited whom is
    what the erasure removes), `redeemed_by = NULL` on invites the subject
-   redeemed, and the subject's replay `events` rows (`json_extract` on
-   `$.user_id` / `$.user.id` — HP-4 decision 1);
+   redeemed, and the subject's replay `events` rows
+   (`db.EventNamesUserPredicate`: a persisted row is the wire envelope, so
+   the lookups are `$.payload.user_id`, `$.payload.user.id`,
+   `$.payload.from_user_id` and `$.payload.mentions` — HP-4 decision 1);
 7. `emoji.uploaded_by` — a server-wide asset — moves to the oldest remaining
    admin-class account, else to the oldest remaining account, else the rows
    are deleted and their files join the job;
@@ -109,14 +111,30 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
 10. write the `erasure_jobs` row (migration 037): `state = db_done`, `files`
     the JSON list from step 3 (and 7) — the only surviving handle on the blobs.
 
-After commit the runner removes each listed file through the upload storage
-(a missing file counts as removed) and marks the job `done`; a failure
-records the attempt and the job is resumed at startup and on every
-maintenance tick. The self-service route then writes the audit row
-(`account_deleted`, actor the subject; the admin route records the actor and
-`account erased by administrator`) and broadcasts `member_ban`, which also
-disconnects the subject's socket. The log carries the id only, never the
-username.
+After commit the runner broadcasts `member_ban` (every client drops the
+user; the subject's socket is closed) and then purges the replay pipeline
+behind it (`Hub.PurgeUserFromReplay`, the job's first journaled step —
+`erasure_jobs.replay_purged`, migration 040 — retried from the journal
+until it succeeds): the dispatch loop is drained so the `member_ban` is
+sequenced, the event persister is flushed as a barrier so a frame queued
+before the erasure is on disk rather than in flight, then under the
+sequencing lock the subject joins the hub's tombstone set (a frame naming
+them that any producer hands the hub from now on is dropped instead of
+sequenced — the request that read its rows before the erasure and reached
+the hub after), the replay-purge watermark moves to the current seq (a
+client resuming from at or before it takes the full ready instead of a
+replay, `mustFullResync`), the ring buffer's frames naming the subject are
+dropped (`EventRingBuffer.RemoveWhere`; a replay whose range crosses a
+cleared slot returns nil, the full ready again), and the persisted rows
+naming the subject are deleted. A reconnect from the cold tier meets the
+interior gap and gets the full ready too. Without a hub — the start-up
+replay — the persisted rows alone are purged, nothing being buffered yet.
+Then the runner removes each listed file through the upload storage (a
+missing file counts as removed) and marks the job `done`; a failure of
+either half records the attempt and the job is resumed at startup and on
+every maintenance tick. The route writes the audit row (`account_deleted`, actor
+the subject; the admin route records the actor and `account erased by
+administrator`). The log carries the id only, never the username.
 
 | Axis | Model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -319,7 +337,7 @@ cascade" is what `ON DELETE` would do if the `users` row were deleted
 | 17  | Blocks                     | `user_blocks`                                                                                                                                                                                                                                | `blocker_id`, `blocked_id`                       | Deleted, both directions.                                                                                                                                                                                                                                   | CASCADE                           | Done (B4-9).                                                                                                                                                             |
 | 18  | Per-user channel overrides | `channel_user_overrides`                                                                                                                                                                                                                     | `user_id`                                        | Deleted.                                                                                                                                                                                                                                                    | CASCADE                           | Done (B4-9).                                                                                                                                                             |
 | 19  | Voice state                | `voice_states`                                                                                                                                                                                                                               | `user_id`                                        | Deleted in the transaction; the hub also clears it on the `member_ban` disconnect.                                                                                                                                                                          | CASCADE                           | Done (B4-9).                                                                                                                                                             |
-| 20  | Replay events              | `events` (payload blobs)                                                                                                                                                                                                                     | user ids and content inside payloads             | The subject's rows (`$.user_id` / `$.user.id`) are deleted in the transaction (HP-4 decision 1).                                                                                                                                                            | —                                 | Done (B4-9); the pruner still bounds everyone else's.                                                                                                                    |
+| 20  | Replay events              | `events` (payload blobs)                                                                                                                                                                                                                     | user ids and content inside payloads             | The subject's rows (`db.EventNamesUserPredicate` over the envelope's `payload`) are deleted in the transaction, and again after the `member_ban` broadcast with the persister flushed and the ring buffer purged (HP-4 decision 1).                         | —                                 | Done (B4-9); the pruner still bounds everyone else's.                                                                                                                    |
 | 21  | Audit history              | `audit_log` (`actor_id`, `target_id`, free-text `detail`)                                                                                                                                                                                    | ids; usernames and IPs inside `detail`           | Untouched. O1 itself adds `account_deleted` with the IP in `detail`.                                                                                                                                                                                        | — (no FK since 003)               | B4-10: unlinkable retention — category, time, action class, integrity proof; subject mapping cryptographically erased; `detail` purged for the subject; no IP in detail. |
 | 22  | Server logs                | `slog` output (usernames, ids, IPs at Info; e.g. O1 logs `username=`)                                                                                                                                                                        | text                                             | The erasure path logs the id only; retention is the operator's (B4-8's diagnostics inventory).                                                                                                                                                              | —                                 | Done (B4-9).                                                                                                                                                             |
 | 23  | Plugin storage             | `plugin_kv`                                                                                                                                                                                                                                  | whatever a plugin stored                         | Untouched; opaque to the server.                                                                                                                                                                                                                            | —                                 | Out of B4 (plugins are off by default and compiled out of releases — [plugins.md](plugins.md)); recorded so the gap is a decision, not an oversight.                     |
@@ -470,13 +488,17 @@ SELECT COUNT(*) FROM user_blocks WHERE blocker_id = :uid OR blocked_id = :uid;
 SELECT COUNT(*) FROM channel_user_overrides WHERE user_id = :uid;
 -- 19 voice state
 SELECT COUNT(*) FROM voice_states WHERE user_id = :uid;
--- 20 replay events naming the subject: payloads are the wire JSON, which
---    carries the author as a nested "user":{"id":…} object on message frames
---    and as "user_id" on state frames (docs/protocol.md). json_extract is
---    SQLite's built-in JSON1, present in modernc.org/sqlite.
+-- 20 replay events naming the subject: a row is the wire envelope the hub
+--    sent ({"seq":…,"type":…,"payload":{…}}), so every id sits under
+--    payload — "user_id" on state frames, "user":{"id":…} on message
+--    frames, "mentions" on chat frames, "from_user_id" on a relayed E2EE
+--    offer (docs/protocol.md). db.EventNamesUserPredicate is this test as
+--    code; json_extract is SQLite's built-in JSON1.
 SELECT COUNT(*) FROM events
- WHERE json_extract(payload, '$.user_id') = :uid
-    OR json_extract(payload, '$.user.id') = :uid;
+ WHERE json_extract(payload, '$.payload.user_id') = :uid
+    OR json_extract(payload, '$.payload.user.id') = :uid
+    OR json_extract(payload, '$.payload.from_user_id') = :uid
+    OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE value = :uid);
 -- 21 audit rows about or by the subject (B4-10 keeps an unlinkable residue)
 SELECT COUNT(*) FROM audit_log WHERE actor_id = :uid OR (target_type = 'user' AND target_id = :uid);
 ```

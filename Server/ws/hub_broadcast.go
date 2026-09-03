@@ -26,6 +26,12 @@ type broadcastMsg struct {
 	// send, and the two racing would let the async global broadcast overwrite
 	// it. Ignored outside the channelID == 0 branch of deliverBroadcast.
 	excludeUserID int64
+	// barrier, when non-nil, makes this entry a dispatch barrier rather than
+	// a broadcast: deliverBroadcast closes it and sequences nothing. Because
+	// h.broadcast is FIFO on one dispatch goroutine, whoever waits on it
+	// knows every broadcast enqueued earlier has been sequenced, buffered
+	// and handed to the persister (awaitDispatch).
+	barrier chan struct{}
 	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
 	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
 	enqueuedAt time.Time
@@ -347,6 +353,9 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
 
+	if h.dropsForPurgedUser(msg) {
+		return
+	}
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	h.replayBuf.Push(seq, channelID, wrapped)
@@ -360,6 +369,10 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
 // in the replay buffer, and sends it to the appropriate clients via pub/sub.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
+	if bm.barrier != nil {
+		close(bm.barrier)
+		return
+	}
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
@@ -377,6 +390,13 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 					"channel_id", bm.channelID)
 				return 0, 0, false
 			}
+		}
+
+		// A frame naming an erased user, produced by a request that read
+		// its rows before the erasure and reached the hub after the purge,
+		// must not be sequenced: nothing it describes exists any more.
+		if h.dropsForPurgedUser(bm.msg) {
+			return 0, 0, false
 		}
 
 		seq = h.nextSeq()
