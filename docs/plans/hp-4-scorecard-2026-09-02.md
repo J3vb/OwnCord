@@ -451,6 +451,9 @@ Four limits, stated here so nobody has to infer them from silence:
 
 **Prepared:** 2026-09-03 by the B4 exit PR, measured at `1133a26`. The seven
 conditions and roadmap rule 2 are met, with the four limits above.
-**Awaiting the owner's sign-off** — recorded factually here rather than
-signed in the owner's name, the same way this scorecard's own acceptance was
-recorded.
+
+**Signed:** Accepted 2026-09-03 — the owner merged the exit PR #1528 as `dev`
+`0a14554`, having enabled auto-merge on it themselves, and the four limits
+above stand as recorded. Written down as what happened rather than signed in
+the owner's name, the same way this scorecard's own acceptance was recorded.
+Acceptance closes B4; HP-5 is next.
