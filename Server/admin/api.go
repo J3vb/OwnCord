@@ -266,7 +266,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			ownerOnlyMiddleware(handleCheckUpdate(u)).ServeHTTP(w, req)
 		}))
 		r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleApplyUpdate(database, u, hub, version)).ServeHTTP(w, req)
 		}))
 	})
 

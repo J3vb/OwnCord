@@ -55,6 +55,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/logstream.go":              {"boundary", "", "handle threaded to the SSE stream's auth check; no calls"},
 	"admin/middleware.go":             {"adapter", "", "Role/User/Session types in the request context; SessionService resolves the bearer token"},
 	"admin/types.go":                  {"adapter", "", "response DTOs only — its GetRoleByID went with the user family"},
+	"admin/update_handlers.go":        {"boundary", "", "audits the binary swap (OC-0391) with WriteAudit/LogAudit; no other calls"},
 	// ── api ───────────────────────────────────────────────────────────────
 	"api/channel_handler.go": {"adapter", "", "response types only; service owns the calls"},
 	"api/dm_handler.go":      {"adapter", "", "DM response types + pure status helpers"},
