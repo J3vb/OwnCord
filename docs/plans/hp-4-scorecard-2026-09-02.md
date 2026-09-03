@@ -55,7 +55,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1521 | B4-11 — retention                                                                                                                                                                         | `607fd4d` (merged after measurement) |
 | #1522 | B4-10 and B4-11 review fixes — the audit-writer barrier, replay past the last-admin guard, pending markers applied, id floors, the actor's token column, the swept messages' replay purge | `15ba7c9` (merged after measurement) |
 | #1523 | #1522's own review fixes — the unlink rule at commit time, seeded floors, the 038-era token backfill, first-run setup closed durably                                                      | `b973d21` (merged after measurement) |
-| #1524 | #1523's last review finding and the hardening its squash missed — an account marker closes the setup gate across a pre-setup restore; only `0` opens it                                   | open                                 |
+| #1524 | #1523's last review finding and the hardening its squash missed — an account marker closes the setup gate across a pre-setup restore; only `0` opens it                                   | `5263b13` (merged after measurement) |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is
 serialized as the plan required; #1512 and #1513 carry #1511's commits until
