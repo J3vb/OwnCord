@@ -417,18 +417,20 @@ function renderVoiceChannelItem(
         "data-voice-uid": String(user.userId),
       });
 
-      const initial = user.username.length > 0 ? user.username.charAt(0).toUpperCase() : "?";
-      const avatar = createElement("div", { class: "vu-avatar" }, initial);
-      avatar.style.background = pickAvatarColor(user.username);
-      row.appendChild(avatar);
-
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
       // falling back to the username. Security-sensitive surfaces (the E2EE
       // mismatch modal, the moderation menu below) intentionally keep
       // rendering user.username instead, since a nickname is user-settable.
       const member = membersStore.getState().members.get(user.userId);
-      const label = (member !== undefined ? memberDisplayName(member) : user.username) || "Unknown";
+      const resolved = member !== undefined ? memberDisplayName(member) : user.username;
+
+      const initial = resolved.length > 0 ? resolved.charAt(0).toUpperCase() : "?";
+      const avatar = createElement("div", { class: "vu-avatar" }, initial);
+      avatar.style.background = pickAvatarColor(resolved);
+      row.appendChild(avatar);
+
+      const label = resolved || "Unknown";
       const nameEl = createElement("span", { class: "vu-name" }, label);
       row.appendChild(nameEl);
 
@@ -1015,6 +1017,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       () => renderChannels(),
     );
     unsubscribers.push(unsubVoiceStructure);
+
+    // structSig above carries no identity field, so a rename (updateMemberProfile,
+    // which bumps roleRevision on every USER_UPDATE) leaves the voice roster's
+    // label stale until an unrelated structural event happens to re-render it
+    // (OC-0333). Re-render on roleRevision to pick up the new name/nickname.
+    const unsubMemberRevision = membersStore.subscribeSelector(
+      (s) => s.roleRevision ?? 0,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubMemberRevision);
 
     // Registered after the structural subscription so a structural change in
     // the same notification re-renders (and refreshes the row cache) first.

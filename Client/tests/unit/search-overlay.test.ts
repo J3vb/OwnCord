@@ -163,6 +163,29 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("renders a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent (OC-0325)", async () => {
+    // The server's SearchMessages returns the raw "YYYY-MM-DD HH:MM:SS" column,
+    // i.e. UTC with no zone designator. `new Date(ts)` would read that as
+    // local wall-clock, disagreeing with the message list's parseTimestamp()
+    // (which appends "Z") for any viewer not on UTC.
+    const bareResult = makeResult({ message_id: 1, timestamp: "2026-01-15 12:00:00" });
+    const zResult = makeResult({ message_id: 2, timestamp: "2026-01-15T12:00:00Z" });
+
+    const onSearch = vi.fn().mockResolvedValue([bareResult, zResult]);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const times = container.querySelectorAll(".search-result-time");
+    expect(times[0]!.textContent).toBe(times[1]!.textContent);
+
+    overlay.destroy?.();
+  });
+
   it("labels a DM result with the DM display name instead of a bare '#' (OC-0262)", async () => {
     // A 1:1 DM channel row has channels.name === "" server-side, so a search
     // hit inside a DM comes back with channel_name: "". Rendering it as

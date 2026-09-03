@@ -102,7 +102,7 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // dereferences must exist, because there is no request-time branch left to
 // fail closed in — the handler would simply panic. A service only a HANDLER
 // dereferences may be nil, because the handler checks it and answers 500
-// "… service unavailable"; those (Moderation, Roles, Channels) are
+// "… service unavailable"; those (Moderation, Roles, Channels, Settings) are
 // deliberately left alone, and the rows that pin their refusals construct
 // exactly that.
 //

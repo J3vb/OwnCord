@@ -16,6 +16,8 @@ import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
+import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveDisplayName } from "@lib/avatar";
 
 const log = createLogger("overlays");
 
@@ -67,16 +69,23 @@ function pickPinAvatarColor(username: string): string {
 
 export function mapToPinnedMessage(msg: {
   readonly id: number;
-  readonly user: { readonly username: string };
+  readonly user: {
+    readonly id: number;
+    readonly username: string;
+    readonly avatar: string | null;
+    readonly display_name?: string | null;
+  };
   readonly content: string;
   readonly created_at?: string;
   readonly timestamp?: string;
 }): PinnedMessage {
   return {
     id: msg.id,
-    author: msg.user.username,
+    author: resolveDisplayName(resolveAuthor(msg.user)),
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
+    // Hashed from the raw username (not the resolved display name) so the hue
+    // stays stable across renames — matches every other avatar-color surface.
     avatarColor: pickPinAvatarColor(msg.user.username),
   };
 }

@@ -78,6 +78,27 @@ export function createGifPicker(options: GifPickerOptions): {
   root.appendChild(gridArea);
   enableRovingNavigation(gridArea, ".gp-item", signal);
 
+  // Single delegated listener for the whole grid, registered once at mount
+  // time. renderGifs() discards and rebuilds every cell on each search (20
+  // cells per render); a listener bound directly to each cell would register
+  // (and, since it lives on the picker-lifetime `signal`, never release) one
+  // abort algorithm per discarded cell for the rest of the picker's life —
+  // the same pattern EmojiPicker's delegated click handler already fixes.
+  gridArea.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const cell = target.closest<HTMLElement>(".gp-item");
+      if (cell === null) return;
+      const fullUrl = cell.dataset.fullUrl;
+      if (fullUrl === undefined) return;
+      options.onSelect(fullUrl);
+      options.onClose();
+    },
+    { signal },
+  );
+
   // Loading indicator
   const loadingEl = createElement("div", { class: "gp-loading" });
   setText(loadingEl, "Loading...");
@@ -105,6 +126,9 @@ export function createGifPicker(options: GifPickerOptions): {
         // Same fallback as the img alt below — an untitled GIF still needs a
         // pronounceable accessible name.
         "aria-label": gif.title || "GIF",
+        // Read by the delegated click handler on gridArea (see mount-time
+        // listener above) instead of a per-cell listener.
+        "data-full-url": gif.fullUrl,
       });
       const img = createElement("img", {
         class: "gp-img",
@@ -113,15 +137,6 @@ export function createGifPicker(options: GifPickerOptions): {
         loading: "lazy",
       });
       item.appendChild(img);
-
-      item.addEventListener(
-        "click",
-        () => {
-          options.onSelect(gif.fullUrl);
-          options.onClose();
-        },
-        { signal },
-      );
 
       grid.appendChild(item);
     }

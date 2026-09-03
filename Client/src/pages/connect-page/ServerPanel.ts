@@ -90,6 +90,17 @@ export function createServerPanel(
   // Cached DOM references
   let serverListEl: HTMLDivElement;
 
+  // renderServerProfiles rebuilds every row from scratch on every profile
+  // load/add/delete/toggle. Per-row listeners must NOT be registered on the
+  // page-lifetime `signal`, which only aborts once, at page teardown --
+  // addEventListener({ signal }) keeps a detached row reachable via that
+  // signal's own retained abort-listener list until it fires, so every
+  // re-render would otherwise leak the previous generation's rows (OC-0336),
+  // the same defect already fixed in MemberList/ChannelSidebar/MessageList.
+  // renderAc is aborted and replaced at the top of every render, so only the
+  // CURRENT render's rows stay reachable.
+  let renderAc: AbortController | null = null;
+
   // ---------------------------------------------------------------------------
   // DOM construction
   // ---------------------------------------------------------------------------
@@ -120,6 +131,11 @@ export function createServerPanel(
   }
 
   function renderServerProfiles(profiles: readonly SimpleProfile[]): void {
+    renderAc?.abort();
+    const currentRenderAc = new AbortController();
+    renderAc = currentRenderAc;
+    const rowSignal = currentRenderAc.signal;
+
     clearChildren(serverListEl);
     healthElements.clear();
     for (const profile of profiles) {
@@ -176,7 +192,7 @@ export function createServerPanel(
             e.stopPropagation();
             onToggleAutoLogin(fullProfile.id!, !isAutoLogin);
           },
-          { signal },
+          { signal: rowSignal },
         );
         actions.appendChild(autoLoginBtn);
       }
@@ -196,7 +212,7 @@ export function createServerPanel(
             e.stopPropagation();
             onDeleteProfile(fullProfile.id!);
           },
-          { signal },
+          { signal: rowSignal },
         );
         actions.appendChild(deleteBtn);
       }
@@ -217,7 +233,7 @@ export function createServerPanel(
             }
           })();
         },
-        { signal },
+        { signal: rowSignal },
       );
 
       serverListEl.appendChild(item);
@@ -299,7 +315,19 @@ export function createServerPanel(
     appendChildren(modal, header, body, footer);
     overlay.appendChild(modal);
 
+    // Each open modal gets its own AbortController so closeModal() can
+    // release its listeners; registering them on the page-lifetime `signal`
+    // instead (which only aborts once, at page teardown) would keep every
+    // discarded modal subtree reachable until then (OC-0335). Chained to the
+    // page signal so an open modal is also torn down on page teardown.
+    const modalAc = new AbortController();
+    signal.addEventListener("abort", () => modalAc.abort(), {
+      once: true,
+      signal: modalAc.signal,
+    });
+
     function closeModal(): void {
+      modalAc.abort();
       overlay.remove();
     }
 
@@ -322,19 +350,19 @@ export function createServerPanel(
       closeModal();
     }
 
-    closeBtn.addEventListener("click", closeModal, { signal });
-    cancelBtn.addEventListener("click", closeModal, { signal });
-    saveBtn.addEventListener("click", handleSave, { signal });
+    closeBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
+    cancelBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
+    saveBtn.addEventListener("click", handleSave, { signal: modalAc.signal });
     overlay.addEventListener(
       "click",
       (e) => {
         if (e.target === overlay) closeModal();
       },
-      { signal },
+      { signal: modalAc.signal },
     );
 
     // Allow backdrop stop propagation on modal body
-    modal.addEventListener("click", (e) => e.stopPropagation(), { signal });
+    modal.addEventListener("click", (e) => e.stopPropagation(), { signal: modalAc.signal });
 
     // Enter key submits
     hostAddrInput.addEventListener(
@@ -342,7 +370,7 @@ export function createServerPanel(
       (e) => {
         if (e.key === "Enter") handleSave();
       },
-      { signal },
+      { signal: modalAc.signal },
     );
 
     // Mount onto the panel's closest connect-page root
@@ -362,7 +390,8 @@ export function createServerPanel(
     renderProfiles: renderServerProfiles,
     updateHealthStatus,
     destroy(): void {
-      // Cleanup is handled by the shared AbortSignal from the parent
+      renderAc?.abort();
+      renderAc = null;
     },
   };
 }

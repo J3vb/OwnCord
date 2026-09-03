@@ -281,9 +281,11 @@ export async function updatePttKey(vk: number): Promise<void> {
         // below) — record whether this is what muted the mic so the next
         // press may lift it (v006: never lift a mute the user asked for).
         void import("./livekitSession")
-          .then(({ setMuted }) => setMuted(true))
+          .then(({ setMuted }) => {
+            setMuted(true);
+            pttOwnsMute = !localMuted;
+          })
           .catch((e) => log.warn("Failed to gate mic after binding PTT key mid-call", e));
-        pttOwnsMute = !localMuted;
       }
     }
     if (vk === 0) {

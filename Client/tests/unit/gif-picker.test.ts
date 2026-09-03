@@ -368,6 +368,40 @@ describe("GifPicker", () => {
       });
       picker.destroy();
     });
+
+    // OC-0365: renderGifs replaces the whole cell set on every search, but a
+    // per-cell click listener bound to the picker-lifetime `signal` (which
+    // only aborts once, at destroy()) would keep every discarded cell from
+    // a prior search reachable — and its click handler still live — for the
+    // rest of the picker's life.
+    it("does not fire onSelect for a cell discarded by a later search (OC-0365)", async () => {
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ onSelect });
+      container.appendChild(picker.element);
+
+      // Flush trending
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const staleItem = picker.element.querySelector(".gp-item") as HTMLElement;
+      expect(staleItem).not.toBeNull();
+
+      // A search re-renders the grid, discarding the trending cells.
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      input.value = "cats";
+      input.dispatchEvent(new Event("input"));
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(picker.element.contains(staleItem)).toBe(false);
+
+      // Clicking the detached, stale cell must not still reach onSelect.
+      staleItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onSelect).not.toHaveBeenCalled();
+
+      picker.destroy();
+    });
   });
 
   // ── Escape key ────────────────────────────────────────────────────────────

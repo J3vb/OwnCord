@@ -89,6 +89,16 @@ const (
 // operations reserved for the owner.
 const OwnerRolePosition = 100
 
+// IsOwner reports whether a role with the given id and hierarchy position is
+// the owner role. Position alone is the ordinary test — the seeded owner role
+// (OwnerRoleID) is accepted too, so a database whose positions were edited by
+// hand still recognizes the real owner. This is the one predicate for "is the
+// owner"; every call site asking the question calls it instead of comparing
+// role.ID or role.Position itself (OC-0405).
+func IsOwner(roleID int64, position int) bool {
+	return roleID == OwnerRoleID || position >= OwnerRolePosition
+}
+
 // ─── Permission helper functions ─────────────────────────────────────────────
 
 // HasPerm reports whether rolePerms contains all bits in requiredPerm.

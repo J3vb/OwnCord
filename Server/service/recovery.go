@@ -408,7 +408,7 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 		slog.Error("recovery assist: GetRoleByID failed", "err", err, "actor_id", actor.ID)
 		return nil, ErrRecoveryAssistFailed
 	}
-	if role == nil || (role.ID != permissions.OwnerRoleID && role.Position < permissions.OwnerRolePosition) {
+	if role == nil || !permissions.IsOwner(role.ID, role.Position) {
 		return nil, ErrRecoveryAssistOwnerOnly
 	}
 	if !slices.Contains(RecoveryVerifications, verification) {

@@ -113,6 +113,36 @@ describe("emoji store", () => {
     expect(listCustomEmoji()).toEqual([]);
     expect(resolveEmoji("wave")).toBeNull();
   });
+
+  // OC-0362: clearCustomEmoji (MainPage.destroy, on logout/server switch)
+  // used to rewind rev to 0 (or, when the set was already empty, leave it
+  // untouched at 0), so a previous server's in-flight GET /emoji —
+  // snapshotted at rev 0 right after connecting, before the clear — could
+  // still match a freshly connected session's own rev-0 snapshot and
+  // clobber it. Starts from a genuinely fresh store (rev 0, empty set) to
+  // match the real repro: connect to A, GET /emoji is issued but has not
+  // replied yet, then switch to B before it lands.
+  it("clearCustomEmoji bumps the revision so a pre-clear snapshot can never match again", () => {
+    emojiStore.setState(() => ({ emoji: [], byShortcode: new Map(), rev: 0 }));
+    const revAtFetchA = emojiStore.getState().rev ?? 0; // snapshotted right after connecting to A
+
+    clearCustomEmoji(); // switch to server B before A's GET /emoji replies
+    emojiStore.flush();
+
+    const revAtFetchB = emojiStore.getState().rev ?? 0; // snapshotted right after connecting to B
+    expect(revAtFetchB).not.toBe(revAtFetchA);
+
+    // A's late reply, still carrying the revision snapshotted before the
+    // clear, must be rejected as stale rather than repopulating B's session.
+    setCustomEmoji([{ id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" }], revAtFetchA);
+    emojiStore.flush();
+    expect(resolveEmoji("wave")).toBeNull();
+
+    // B's own reply, carrying the revision snapshotted after the clear, still applies.
+    setCustomEmoji([{ id: 3, shortcode: "b_new", url: "/api/v1/emoji/3/image" }], revAtFetchB);
+    emojiStore.flush();
+    expect(resolveEmoji("b_new")).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

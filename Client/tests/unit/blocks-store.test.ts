@@ -5,6 +5,7 @@ import {
   setUserBlockedByMe,
   setUserBlockedByThem,
   clearBlockedByThem,
+  resetBlocksStore,
   dmComposerBlockReason,
   BLOCKED_BY_ME_REASON,
   BLOCKED_BY_THEM_REASON,
@@ -121,6 +122,31 @@ describe("blocksStore", () => {
       setBlockedByMe([1, 2], rev);
       expect(dmComposerBlockReason(blocksStore.getState(), 1)).toBe(BLOCKED_BY_ME_REASON);
       expect(dmComposerBlockReason(blocksStore.getState(), 2)).toBe(BLOCKED_BY_ME_REASON);
+    });
+
+    // OC-0366: resetBlocksStore (clearAuth, e.g. logout/server switch) used to
+    // rewind blockedByMeRev to 0, so a previous session's in-flight GET
+    // /blocks — snapshotted at rev 0 before the reset — could still match a
+    // freshly-signed-in session's own rev-0 snapshot and clobber it.
+    it("resetBlocksStore bumps the revision so a pre-reset snapshot can never match again", () => {
+      setBlockedByMe([7]); // server A: local user has blocked id 7, rev -> 1
+      const revBeforeReset = blocksStore.getState().blockedByMeRev ?? 0;
+
+      resetBlocksStore(); // logout / switch to server B
+
+      // Server B's ready-time GET /blocks snapshots the post-reset revision,
+      // not the pre-reset one.
+      const revAfterReset = blocksStore.getState().blockedByMeRev ?? 0;
+      expect(revAfterReset).not.toBe(revBeforeReset);
+
+      // Server A's late reply, still carrying the pre-reset revision, must be
+      // rejected as stale rather than repopulating B's session with A's block.
+      setBlockedByMe([7], revBeforeReset);
+      expect(dmComposerBlockReason(blocksStore.getState(), 7)).toBeNull();
+
+      // Server B's own reply, carrying the post-reset revision, still applies.
+      setBlockedByMe([9], revAfterReset);
+      expect(dmComposerBlockReason(blocksStore.getState(), 9)).toBe(BLOCKED_BY_ME_REASON);
     });
   });
 });

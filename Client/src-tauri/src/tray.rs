@@ -61,9 +61,11 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
 
 fn toggle_window_visibility<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        let minimized = window.is_minimized().unwrap_or(false);
+        if window.is_visible().unwrap_or(false) && !minimized {
             let _ = window.hide();
         } else {
+            let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
         }

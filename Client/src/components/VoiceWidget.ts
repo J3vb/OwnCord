@@ -515,6 +515,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
         () => render(),
       ),
     );
+    // render() reads the DM call's header name from dmStore, but nothing above
+    // fires when it changes — a DM rename/nickname update only touches dmStore,
+    // so the header went stale for the whole call (OC-0347).
+    unsubs.push(
+      dmStore.subscribeSelector(
+        (s) => s.channels,
+        () => render(),
+      ),
+    );
 
     container.appendChild(root);
   }

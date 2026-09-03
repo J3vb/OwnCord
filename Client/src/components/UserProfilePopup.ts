@@ -10,6 +10,7 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
+import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -363,28 +364,7 @@ export function createUserProfilePopup(
     );
 
     // Focus trap: keep focus inside popup
-    popup.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key !== "Tab" || popup === null) return;
-        const focusable = popup.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        if (focusable.length === 0) return;
-
-        const first = focusable[0]!;
-        const last = focusable[focusable.length - 1]!;
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      },
-      { signal },
-    );
+    trapFocus(popup, signal);
   }
 
   function destroy(): void {

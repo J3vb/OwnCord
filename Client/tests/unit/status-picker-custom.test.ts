@@ -144,4 +144,29 @@ describe("StatusPicker", () => {
     expect(input.value).toBe("from the server");
     expect(onCustomStatusChange).not.toHaveBeenCalled();
   });
+
+  it("does not clobber in-progress typing when the input is focused (OC-0369)", () => {
+    const onCustomStatusChange = vi.fn();
+    picker = createStatusPicker({
+      currentStatus: "online",
+      currentCustomStatus: "",
+      onStatusChange: vi.fn(),
+      onCustomStatusChange,
+    });
+    picker.mount(container);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    input.focus();
+    input.value = "on vacation";
+
+    // An unrelated store push (e.g. a role change) re-seeds the picker mid-edit.
+    picker.setCustomStatus("");
+
+    expect(input.value).toBe("on vacation");
+
+    // The pending commit must still fire with what was typed, not silently
+    // no-op against a watermark the push would otherwise have reset.
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCustomStatusChange).toHaveBeenCalledExactlyOnceWith("on vacation");
+  });
 });

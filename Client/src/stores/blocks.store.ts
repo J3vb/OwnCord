@@ -91,9 +91,14 @@ export function clearBlockedByThem(): void {
 
 /** Reset both block directions (called on clearAuth — user ids are only
  *  unique per-server, so a previous server's block list must not carry
- *  into the next session). */
+ *  into the next session).
+ *
+ *  Bumps `blockedByMeRev` rather than resetting it to 0 (OC-0366): a reset
+ *  would let a still-in-flight GET /blocks from the session being torn
+ *  down match the next session's ready-time snapshot (both 0) and clobber
+ *  it with the previous server's block list. */
 export function resetBlocksStore(): void {
-  blocksStore.setState(() => INITIAL);
+  blocksStore.setState((prev) => ({ ...INITIAL, blockedByMeRev: (prev.blockedByMeRev ?? 0) + 1 }));
 }
 
 /**

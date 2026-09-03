@@ -130,6 +130,22 @@ var firstPartyClientOrigins = []string{
 // non-browser) and the first-party desktop client's webview origins are
 // always permitted. Beyond those, an empty allowedOrigins list denies all
 // cross-origin requests (require explicit "*" wildcard to allow all).
+// stripDefaultPort removes a trailing ":443" (https) or ":80" (http) from
+// host, so an explicit default port and its implicit RFC 6454 equivalent
+// compare equal. A reverse proxy in front of the server may normalize one
+// side (nginx's $host strips the port) but not the other (a client-set
+// Origin keeps it), so both sides of an origin/host comparison need this.
+func stripDefaultPort(scheme, host string) string {
+	switch scheme {
+	case "https":
+		return strings.TrimSuffix(host, ":443")
+	case "http":
+		return strings.TrimSuffix(host, ":80")
+	default:
+		return host
+	}
+}
+
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -142,7 +158,7 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	// policy, which the chat WS endpoint already applies; web content on
 	// another origin can never present it (the browser pins Origin), so it
 	// does not widen the CSRF surface.
-	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(u.Host, r.Host) {
+	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(stripDefaultPort(u.Scheme, u.Host), stripDefaultPort(u.Scheme, r.Host)) {
 		return true
 	}
 	for _, firstParty := range firstPartyClientOrigins {
