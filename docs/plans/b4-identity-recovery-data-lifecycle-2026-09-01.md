@@ -1606,8 +1606,14 @@ decisions 3 and 4.
   marker file being the one piece of evidence a restore cannot touch
   (`TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore`, with
   a retention-markers-only file as the negative control). That finding, and
-  the hardening, land in #1524: #1523 merged at its previous head while the
-  review was in flight.
+  the hardening, landed in #1524 = `5263b13`: #1523 merged at its previous
+  head while the review was in flight, and its squash took the last commit
+  with green checks rather than the branch head, so a commit already pushed
+  was dropped — verified afterwards by diffing `dev`'s tree against the
+  branch, not by the merge notice. Codex's review of #1524 added one more,
+  on this plan's own claim rather than the code: only an unrecognised
+  _value_ fails closed, a missing row being the pre-migration case the user
+  count still decides.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and
