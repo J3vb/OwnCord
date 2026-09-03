@@ -27,7 +27,8 @@ cascade needed — its own migration, so upgraded installations get both.
 `audit_unlinking` landed as `Server/migrations/038_audit_unlinking.sql`
 (B4-10, 2026-09-03), verbatim. `deletion_markers` is applied by the server on
 the marker file itself (`Server/db/markers.go`, `OpenMarkerStore`), not by the
-migrations, with one addition to the draft: a `state` column
-(`pending`/`recorded`) for the two-phase write around the erasure transaction
-(`docs/schema.md`, "The deletion-marker file"); its `down` file is the
-rollback for that file.
+migrations, with two additions to the draft: a `state` column
+(`pending`/`recorded`) for the two-phase write around the erasure transaction,
+and a `sequence_floors` table holding the `AUTOINCREMENT` counters the
+markers' ids depend on, re-applied on every open (`docs/schema.md`, "The
+deletion-marker file"); its `down` file is the rollback for that file.

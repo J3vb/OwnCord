@@ -154,13 +154,29 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
     replays       INTEGER NOT NULL DEFAULT 0,
     last_replay   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sequence_floors (
+    name TEXT    PRIMARY KEY,
+    seq  INTEGER NOT NULL
+);
 ```
 
 `state` is the erasure's two-phase protocol: `pending` is written before the
-erasure transaction and becomes `recorded` after its commit; a pending marker
-left by a crash is resolved on the next open by whether the account still
-exists. `scope = messages` with `channel_id` and `cutoff` is B4-11's
+erasure transaction (after its refusals have been checked) and becomes
+`recorded` after the commit; a refused erasure discards its pending marker. A
+pending marker left by a crash is applied on the next open like a recorded
+one when its account is present — a restore can revert the commit it was
+waiting on, so the main database cannot say whether it happened, and the
+request behind the marker was authorised — and confirmed when the account
+is gone. `scope = messages` with `channel_id` and `cutoff` is B4-11's
 retention marker. `replays` counts the restores the marker undid.
+
+`sequence_floors` keeps the `AUTOINCREMENT` counters (`sqlite_sequence`) of
+the tables whose ids the markers name, as they stood when a marker was
+written. A restore rolls `sqlite_sequence` back with the rest of the file, and
+the next row would take an id a marker still names; every open raises the
+counters to these floors before the markers are replayed, so an id is never
+handed out twice across restored timelines.
 
 ---
 

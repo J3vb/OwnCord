@@ -38,6 +38,13 @@ type ErasureStore interface {
 	db.Auditor
 	db.EntryAuditor
 	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	EraseAccountPreflight(ctx context.Context, userID int64) error
+	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	UnlinkQueuedAudits(ctx context.Context, userID int64, token string) error
+	RelinkAudits(userID int64)
+	CountAdminClassAccounts(ctx context.Context) (int, error)
+	SequenceValue(ctx context.Context, table string) (int64, error)
+	RaiseSequences(ctx context.Context, floors map[string]int64) error
 	ListUserIDs(ctx context.Context) ([]int64, error)
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
@@ -126,19 +133,29 @@ func (s *ErasureService) BroadcastsMemberBan() bool {
 // the journal holds the rest. Logs the id only, never a name.
 func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	// The marker goes down first, pending, so a crash between the commit
-	// and the marker cannot leave an erasure that a restore could undo; the
-	// next open resolves a pending marker by whether the account still
-	// exists (MarkerStore.ReplayAccounts).
+	// and the marker cannot leave an erasure that a restore could undo. A
+	// pending marker is applied on the next open whether or not the
+	// transaction committed (MarkerStore.ReplayAccounts — a restore reverts
+	// a commit, so the main database cannot say), which is why the
+	// refusals run before it is written: a refused erasure must leave no
+	// marker a crash could turn into an erasure. The users sequence goes
+	// down with it, the floor below which no id is handed out again.
 	var token string
 	created := false
 	if s.markers != nil {
-		var err error
-		token, created, err = s.markers.RecordPendingAccount(ctx, userID)
+		if err := s.st.EraseAccountPreflight(ctx, userID); err != nil {
+			return err
+		}
+		seq, err := s.st.SequenceValue(ctx, db.SequenceFloorUsers)
+		if err != nil {
+			return fmt.Errorf("erasure: sequence: %w", err)
+		}
+		token, created, err = s.markers.RecordPendingAccount(ctx, userID, seq)
 		if err != nil {
 			return fmt.Errorf("erasure: marker: %w", err)
 		}
 	}
-	job, err := s.st.EraseAccount(ctx, userID, token)
+	job, err := s.eraseUnlinked(ctx, userID, token, s.st.EraseAccount)
 	if err != nil {
 		if created {
 			if dErr := s.markers.DiscardPending(context.WithoutCancel(ctx), token); dErr != nil {
@@ -149,35 +166,73 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	}
 	if s.markers != nil {
 		if cErr := s.markers.ConfirmAccount(context.WithoutCancel(ctx), token); cErr != nil {
-			// The account is gone; a pending marker is confirmed on the next
-			// open by that very fact, so this is loud but not fatal.
+			// The account is gone; a pending marker is applied on the next
+			// open either way, so this is loud but not fatal.
 			slog.Error("erasure: could not confirm the marker", "user_id", userID, "err", cErr)
 		}
 	}
 	return s.finishErasure(ctx, userID, job)
 }
 
-// eraseForReplay is Erase for a marker replay: the marker already exists,
-// so it is neither recorded nor discarded, and the audit row names the
-// replay.
+// eraseUnlinked runs one erasure transaction behind the audit-writer
+// barrier (db.UnlinkQueuedAudits): the writer's unlinking rule for the
+// subject is installed and everything it holds is flushed first, so an
+// entry naming the subject that was queued before the transaction goes
+// down unlinked instead of landing raw after the transaction's UPDATE, and
+// one a request enqueues after it is written unlinked by the rule. A
+// refused transaction withdraws the rule.
+func (s *ErasureService) eraseUnlinked(ctx context.Context, userID int64, token string, erase func(context.Context, int64, string) (*db.ErasureJob, error)) (*db.ErasureJob, error) {
+	if err := s.st.UnlinkQueuedAudits(ctx, userID, token); err != nil {
+		s.st.RelinkAudits(userID)
+		return nil, fmt.Errorf("erasure: audit barrier: %w", err)
+	}
+	job, err := erase(ctx, userID, token)
+	if err != nil {
+		s.st.RelinkAudits(userID)
+		return nil, err
+	}
+	return job, nil
+}
+
+// eraseForReplay is Erase for a marker replay: the marker already exists
+// and is authoritative, so it is neither recorded nor discarded; the
+// last-admin guard does not apply (db.ReplayEraseAccount: the erasure
+// passed it when it ran, and a restored backup from before the admin
+// handover must not keep the subject); the audit row names the replay. A
+// replay that leaves no admin-class account is the restored backup's
+// state, said loudly: the copy predates the handover.
 func (s *ErasureService) eraseForReplay(ctx context.Context, userID int64, token string) error {
-	job, err := s.st.EraseAccount(ctx, userID, token)
+	job, err := s.eraseUnlinked(ctx, userID, token, s.st.ReplayEraseAccount)
 	if err != nil {
 		return err
 	}
 	db.WriteAuditEntry(context.WithoutCancel(ctx), s.st, db.AuditEntry{
 		Action: "account_erasure_replayed", TargetType: "user", Detail: "erased again after a restore", SubjectToken: token,
 	})
+	if n, cErr := s.st.CountAdminClassAccounts(ctx); cErr != nil {
+		slog.Warn("erasure replay: could not count the remaining admin-class accounts", "err", cErr)
+	} else if n == 0 {
+		slog.Error("erasure replay: the erased account was the last admin-class account in the restored database — the backup predates the handover to another administrator; none remains", "user_id", userID)
+	}
 	return s.finishErasure(ctx, userID, job)
 }
 
-// ReplayMarkers applies every recorded deletion marker to the database —
-// at startup, before anything serves, so a restored backup cannot show an
-// erased account (data-lifecycle O4 A5). No marker store means nothing to
-// replay.
+// ReplayMarkers applies every deletion marker to the database — at
+// startup, before anything serves, so a restored backup cannot show an
+// erased account (data-lifecycle O4 A5) — after raising the id counters to
+// the floors the markers recorded, so a restore that rolled sqlite_sequence
+// back cannot hand an erased account's id, and its token, to a new one. No
+// marker store means nothing to replay.
 func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, error) {
 	if s.markers == nil {
 		return db.ReplayReport{}, nil
+	}
+	floors, err := s.markers.SequenceFloors(ctx)
+	if err != nil {
+		return db.ReplayReport{}, err
+	}
+	if err := s.st.RaiseSequences(ctx, floors); err != nil {
+		return db.ReplayReport{}, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
 	return s.markers.ReplayAccounts(ctx, s.st, s.eraseForReplay)
 }

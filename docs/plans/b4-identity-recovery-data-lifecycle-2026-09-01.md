@@ -1486,24 +1486,54 @@ PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
   open — the `deletion_markers` draft plus a `state` column. A marker names
   its subject as `SubjectToken` = HMAC-SHA256(key, `account:<id>`); the
   file names nobody without the key.
-- **Two-phase write around the erasure:** `ErasureService.Erase` records
-  the marker `pending`, runs `db.EraseAccount` with the token, then
-  confirms it `recorded`; a refused erasure discards the pending marker it
-  created, a replay leaves an existing one alone. A pending marker left by
-  a crash is resolved on the next open by whether the account exists — gone
-  means the commit happened (confirm), present means it did not (discard) —
-  so a crash can neither lose an erasure's marker nor erase an account
-  whose erasure never committed.
+- **Two-phase write around the erasure:** `ErasureService.Erase` checks
+  the refusals first (`db.EraseAccountPreflight`: the user exists, the
+  last-admin guard), records the marker `pending` together with the users
+  id counter (`sequence_floors`), runs `db.EraseAccount` with the token
+  behind the audit writer's barrier, then confirms it `recorded`; a refused
+  erasure discards the pending marker it created, a replay leaves an
+  existing one alone. A pending marker left by a crash is applied on the
+  next open like a recorded one when its account is present — the restore
+  is what the markers defend against, and it reverts the very commit the
+  marker was waiting on, so the main database cannot say whether it
+  happened; the request behind the marker was authorised before it was
+  written — and confirmed when the account is gone
+  (`TestErasureService_PendingMarkerSurvivesACrashAndARestore`).
 - **Replay on every open:** the `erasure-markers` start-up stage
   (`Server/internal/app/erasure.go`, between `migrate` and `telemetry`,
   before the hub, the router and any listener) loads the key, opens the
   file and runs `MarkerStore.ReplayAccounts`: every account whose id hashes
-  to a recorded marker is erased again through the full runner — rows,
-  audit unlinking, files — with an `account_erasure_replayed` audit row
-  carrying the token; `replays`/`last_replay` count it. A restore restarts
-  the process (`handleRestoreBackup`), so "after every restore" is this
-  stage. The routes' runner gets the same store (`SetMarkers`) so their
-  erasures record into it.
+  to a marker is erased again through the full runner — rows, audit
+  unlinking, files — with an `account_erasure_replayed` audit row carrying
+  the token; `replays`/`last_replay` count it. The replay runs
+  `db.ReplayEraseAccount`, the transaction without the last-admin guard: a
+  live-operation rule the erasure passed when it ran, and a backup from
+  before the handover to another administrator would otherwise keep the
+  subject for good — the replay erases them and logs that no admin-class
+  account remains (`TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup`).
+  Before the replay the id counters are raised to the floors the marker
+  file keeps (`MarkerStore.SequenceFloors`, `db.RaiseSequences`): a restore
+  rolls `sqlite_sequence` back, and the next account would otherwise
+  inherit an erased id and the marker's token
+  (`TestErasureService_ReplayMarkersRaisesTheSequenceFloors`, with the
+  negative control). A restore restarts the process
+  (`handleRestoreBackup`), so "after every restore" is this stage. The
+  routes' runner gets the same store (`SetMarkers`) so their erasures
+  record into it.
+- **The audit writer's barrier:** the production audit path is
+  asynchronous (`db.AuditWriter`), so an entry about the subject queued
+  just before the transaction would land raw after its `UPDATE`. The
+  erasure installs the writer's unlinking rule for the subject and takes
+  its flush barrier before the transaction (`db.UnlinkQueuedAudits`:
+  `AuditWriter.Unlink`, `Flush`); the rule outlives the barrier, so an
+  entry a producer enqueues after the erasure is written unlinked too, and
+  a refused erasure withdraws it (`RelinkAudits`) —
+  `TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked`,
+  `TestErasureService_QueuedAuditEntriesAreUnlinked`.
+- **Codex's review** (posted on #1521, whose diff carried this code; four
+  findings, all confirmed): the audit writer's queue, the last-admin guard
+  at replay, the discarded pending marker, and the id reuse across restored
+  timelines — the three bullets above are the fixes.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and

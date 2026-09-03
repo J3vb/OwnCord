@@ -46,8 +46,8 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 		_ = markers.Close()
 		return nil, fmt.Errorf("replaying erasure markers: %w", err)
 	}
-	if report.Erased > 0 || report.Confirmed > 0 || report.Discarded > 0 {
-		log.Warn("erasure markers replayed", "erased_again", report.Erased, "confirmed", report.Confirmed, "discarded", report.Discarded)
+	if report.Erased > 0 || report.Confirmed > 0 {
+		log.Warn("erasure markers replayed", "erased", report.Erased, "confirmed", report.Confirmed)
 	}
 	return markers, nil
 }

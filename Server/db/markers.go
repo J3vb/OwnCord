@@ -46,15 +46,26 @@ const (
 	MarkerScopeMessages = "messages"
 	// MarkerPending is written before the erasure transaction and resolved
 	// after it: confirmed when the transaction committed, discarded when it
-	// did not. A pending marker left by a crash is resolved on the next open
-	// by whether the account still exists.
+	// was refused. A pending marker left by a crash is applied on the next
+	// open like a recorded one (ReplayAccounts): whether the transaction
+	// committed cannot be read off the main database, since a restore
+	// reverts it, and the request the marker records was authorised.
 	MarkerPending  = "pending"
 	MarkerRecorded = "recorded"
 )
 
-// markerSchema is the deletion_markers table, the HP-4 deletion_markers
-// draft plus the state column the pending/recorded protocol needs.
-const markerSchema = `
+// Sequence floors the marker file keeps (RaiseSequenceFloor): the
+// AUTOINCREMENT counters of the tables whose ids the markers name.
+const (
+	SequenceFloorUsers    = "users"
+	SequenceFloorChannels = "channels"
+)
+
+// markerSchema is the marker file: deletion_markers, the HP-4
+// deletion_markers draft plus the state column the pending/recorded
+// protocol needs, and sequence_floors, the AUTOINCREMENT counters below
+// which no id may be handed out again (RaiseSequenceFloor).
+var markerSchema = []string{`
 CREATE TABLE IF NOT EXISTS deletion_markers (
     subject_token TEXT    PRIMARY KEY,
     scope         TEXT    NOT NULL CHECK (scope IN ('account', 'messages')),
@@ -64,7 +75,11 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
     erased_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     replays       INTEGER NOT NULL DEFAULT 0,
     last_replay   TEXT
-);`
+);`, `
+CREATE TABLE IF NOT EXISTS sequence_floors (
+    name TEXT    PRIMARY KEY,
+    seq  INTEGER NOT NULL
+);`}
 
 // OpenMarkerStore opens (creating if absent) the marker file at path with
 // the given 32-byte erasure key and applies its schema. The parent directory
@@ -85,9 +100,11 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 		return nil, fmt.Errorf("marker store: open: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if _, err := sqlDB.Exec(markerSchema); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("marker store: schema: %w", err)
+	for _, ddl := range markerSchema {
+		if _, err := sqlDB.Exec(ddl); err != nil {
+			_ = sqlDB.Close()
+			return nil, fmt.Errorf("marker store: schema: %w", err)
+		}
 	}
 	return &MarkerStore{sqlDB: sqlDB, key: append([]byte(nil), key...), path: path}, nil
 }
@@ -114,12 +131,19 @@ func (m *MarkerStore) SubjectToken(userID int64) string {
 }
 
 // RecordPendingAccount writes a pending account marker for userID before the
-// erasure transaction runs and returns its token, and whether this call
-// created it (false when a marker for the subject already exists — a
-// replay of a recorded marker, or a retry after a crash).
-func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64) (string, bool, error) {
+// erasure transaction runs — together with the users sequence floor
+// (usersSeq is DB.SequenceValue for the users table, the id space as it
+// stands with the subject in it) — and returns its token, and whether this
+// call created the marker (false when one for the subject already exists —
+// a replay of a recorded marker, or a retry after a crash).
+func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64, usersSeq int64) (string, bool, error) {
 	token := m.SubjectToken(userID)
-	res, err := m.sqlDB.ExecContext(ctx,
+	tx, err := m.sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("marker store: record pending: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO deletion_markers (subject_token, scope, state) VALUES (?, 'account', 'pending')`, token)
 	if err != nil {
 		return "", false, fmt.Errorf("marker store: record pending: %w", err)
@@ -128,7 +152,58 @@ func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64) (s
 	if err != nil {
 		return "", false, fmt.Errorf("marker store: record pending rows: %w", err)
 	}
+	if err := raiseSequenceFloor(ctx, tx, SequenceFloorUsers, usersSeq); err != nil {
+		return "", false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, fmt.Errorf("marker store: record pending commit: %w", err)
+	}
 	return token, n == 1, nil
+}
+
+// RaiseSequenceFloor records that table's AUTOINCREMENT counter stood at
+// seq when a marker was written: a restore rolls sqlite_sequence back with
+// the rest of the file, and the next row would take an id a marker still
+// names — the first account to inherit an erased user's id would be erased
+// by that user's marker on the next open. Every open re-applies the floors
+// to the main database (DB.RaiseSequences) before the markers are
+// replayed, so an id is never handed out twice across restored timelines.
+// A floor only ever moves up.
+func (m *MarkerStore) RaiseSequenceFloor(ctx context.Context, table string, seq int64) error {
+	return raiseSequenceFloor(ctx, m.sqlDB, table, seq)
+}
+
+// markerExecer is what raiseSequenceFloor needs from *sql.DB and *sql.Tx.
+type markerExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func raiseSequenceFloor(ctx context.Context, x markerExecer, table string, seq int64) error {
+	if _, err := x.ExecContext(ctx,
+		`INSERT INTO sequence_floors (name, seq) VALUES (?, ?)
+		 ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq)`, table, seq); err != nil {
+		return fmt.Errorf("marker store: sequence floor %s: %w", table, err)
+	}
+	return nil
+}
+
+// SequenceFloors returns every recorded floor by table name.
+func (m *MarkerStore) SequenceFloors(ctx context.Context) (map[string]int64, error) {
+	rows, err := m.sqlDB.QueryContext(ctx, `SELECT name, seq FROM sequence_floors`)
+	if err != nil {
+		return nil, fmt.Errorf("marker store: sequence floors: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	floors := make(map[string]int64)
+	for rows.Next() {
+		var name string
+		var seq int64
+		if err := rows.Scan(&name, &seq); err != nil {
+			return nil, fmt.Errorf("marker store: scan sequence floor: %w", err)
+		}
+		floors[name] = seq
+	}
+	return floors, rows.Err()
 }
 
 // ConfirmAccount marks the subject's marker recorded: the erasure committed.
@@ -140,7 +215,9 @@ func (m *MarkerStore) ConfirmAccount(ctx context.Context, token string) error {
 	return nil
 }
 
-// DiscardPending removes a pending marker whose erasure did not commit.
+// DiscardPending removes a pending marker whose erasure was refused — the
+// transaction returned an error, so nothing changed. Only the erasure that
+// wrote the marker may discard it; a replay never does (ReplayAccounts).
 func (m *MarkerStore) DiscardPending(ctx context.Context, token string) error {
 	if _, err := m.sqlDB.ExecContext(ctx,
 		`DELETE FROM deletion_markers WHERE subject_token = ? AND state = 'pending'`, token); err != nil {
@@ -171,23 +248,29 @@ func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 
 // ReplayReport is what one replay pass did.
 type ReplayReport struct {
-	// Erased counts accounts a recorded marker found present and erased again.
+	// Erased counts accounts a marker — recorded, or still pending — found
+	// present and erased; a pending one is recorded by it.
 	Erased int
 	// Confirmed counts pending markers whose account was already gone (the
 	// erasure had committed before a crash) and are now recorded.
 	Confirmed int
-	// Discarded counts pending markers whose account still existed (the
-	// erasure never committed) and were dropped.
-	Discarded int
 }
 
 // ReplayAccounts applies the account markers to the main database (data-
-// lifecycle O4 A5): every account whose id hashes to a recorded marker is
-// erased again through erase — after a restore, that is the resurrected
-// subject. Pending markers are resolved first by whether their account
-// exists: gone means the erasure committed (confirm), present means it did
-// not (discard). erase must be the full erasure (db.EraseAccount plus the
-// file half), given the marker's token so the audit rows unlink to it.
+// lifecycle O4 A5): every account whose id hashes to a marker is erased
+// again through erase — after a restore, that is the resurrected subject.
+// A pending marker is one an erasure wrote before its transaction and a
+// crash left unresolved. Whether that transaction committed cannot be read
+// off the main database — a restore reverts a commit, and a restore is
+// exactly when the markers matter — so a pending marker whose account is
+// present is applied like a recorded one and becomes recorded: the request
+// it records was authorised before it was written (the erasure's preflight
+// refuses first), and "done, then undone by a restore" and "never done"
+// end the same way. A pending marker whose account is gone is confirmed.
+// erase must be the full erasure (db.ReplayEraseAccount plus the file
+// half), given the marker's token so the audit rows unlink to it, and must
+// not apply the last-admin guard — a live-operation rule the erasure passed
+// when it ran.
 func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, erase func(ctx context.Context, userID int64, token string) error) (ReplayReport, error) {
 	var rep ReplayReport
 	markers, err := m.Markers(ctx)
@@ -214,17 +297,22 @@ func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, er
 	for token, mk := range byToken {
 		id, exists := present[token]
 		switch {
-		case mk.State == MarkerPending && !exists:
+		case !exists && mk.State == MarkerPending:
 			if err := m.ConfirmAccount(ctx, token); err != nil {
 				return rep, err
 			}
 			rep.Confirmed++
-		case mk.State == MarkerPending && exists:
-			if err := m.DiscardPending(ctx, token); err != nil {
+		case !exists:
+		case mk.State == MarkerPending:
+			slog.Warn("erasure marker: pending marker's account present in the database, erasing", "user_id", id)
+			if err := erase(ctx, id, token); err != nil {
+				return rep, fmt.Errorf("marker store: replay for user %d: %w", id, err)
+			}
+			if err := m.ConfirmAccount(ctx, token); err != nil {
 				return rep, err
 			}
-			rep.Discarded++
-		case exists:
+			rep.Erased++
+		default:
 			slog.Warn("erasure marker: erased account present in the database, erasing again", "user_id", id, "replays", mk.Replays)
 			if err := erase(ctx, id, token); err != nil {
 				return rep, fmt.Errorf("marker store: replay for user %d: %w", id, err)

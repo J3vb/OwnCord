@@ -390,8 +390,13 @@ does not claim").
   coming back is the deletion marker (B4-10, `Server/db/markers.go`):
   `data/erasure/markers.sqlite`, outside the file a restore overwrites,
   replayed on every start-up before anything serves, so a restored backup
-  is erased again (`TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure`).
-  A marker names its subject only as HMAC-SHA256 of the id under
+  is erased again (`TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure`)
+  — a marker left pending by a crash included, the last-admin rule set
+  aside (a backup from before the handover to another administrator is
+  erased to the state it had after it, and the log says no administrator
+  remains), and with the id counters raised first to the floors the marker
+  file keeps, so a new account never inherits an erased id. A marker names
+  its subject only as HMAC-SHA256 of the id under
   `data/erasure.key`, generated beside `totp.key`; the audit rows the
   subject appeared in keep their action, time and order with that token in
   place of the id (`audit_log.subject_token`), so the rows about one erased
