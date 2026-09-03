@@ -34,3 +34,9 @@ migrations, with two additions to the draft: a `state` column
 and a `sequence_floors` table holding the `AUTOINCREMENT` counters the
 markers' ids depend on, re-applied on every open (`docs/schema.md`, "The
 deletion-marker file"); its `down` file is the rollback for that file.
+`retention` landed as `Server/migrations/039_retention.sql` (B4-11,
+2026-09-03), the `up` draft with the semicolons inside its comments turned
+into commas — the migration splitter treats `;` as a statement boundary even
+in a comment (the `db-change` skill's trap) — and one column the draft did
+not have: `retention_runs.purge_pending`, the replay-purge journal (Codex's
+review of #1521); its `down` file stays here as the rollback.

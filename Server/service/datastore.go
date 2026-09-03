@@ -157,6 +157,21 @@ type Store interface {
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
 	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
+	// Retention (B4-11): the policy, the sweep and its run journal.
+	ServerRetentionDays(ctx context.Context) (int, error)
+	ListChannelRetention(ctx context.Context) ([]db.ChannelRetention, error)
+	GetChannelRetention(ctx context.Context, channelID int64) (*db.ChannelRetention, error)
+	SetChannelRetention(ctx context.Context, channelID int64, days int, updatedBy int64) error
+	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
+	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
+	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
+	SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
+	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
+	StartRetentionRun(ctx context.Context) (int64, error)
+	RecordRetentionRunFiles(ctx context.Context, runID int64, channels, deleted int, files []string) error
+	RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int64) error
+	FinishRetentionRun(ctx context.Context, runID int64, filesRemoved int, lastError string) error
+	ListUnfinishedRetentionRuns(ctx context.Context) ([]db.RetentionRun, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 
 	// ── Sessions ──

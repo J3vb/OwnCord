@@ -124,6 +124,62 @@ func (h *Hub) dropsForPurgedUser(msg []byte) bool {
 	return false
 }
 
+// dropsForPurgedMessage reports whether msg is about a message the last
+// retention sweep removed and must not be sequenced (dropsForPurgedUser's
+// twin for messages). Caller holds seqMu; an empty set parses nothing.
+func (h *Hub) dropsForPurgedMessage(msg []byte) bool {
+	if len(h.purgedMessages) == 0 {
+		return false
+	}
+	if eventNamesMessage(msg, h.purgedMessages) {
+		slog.Info("hub: dropped a frame about a message retention removed")
+		return true
+	}
+	return false
+}
+
+// PurgeMessagesFromReplay takes every frame about the given messages out of
+// the replay pipeline after a retention sweep removed them (B4-11): the
+// dispatch loop is drained and the persister flushed so a frame queued
+// before the sweep is where the purge can reach it, then under seqMu the
+// ids become the tombstone set (a frame about them that a producer
+// sequences from now on is dropped), the ring buffer's copies are dropped
+// and the persisted rows are deleted. A client resuming across the holes
+// this leaves falls through the ring's gap rule and the cold tier's row
+// count to the full ready, which no longer holds the messages. Idempotent;
+// the sweep journals the ids until this succeeds.
+func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := h.awaitDispatch(ctx); err != nil {
+		return fmt.Errorf("purge replay: %w", err)
+	}
+	if p := h.eventPersister.Load(); p != nil {
+		if err := p.Flush(ctx); err != nil {
+			return fmt.Errorf("purge replay: flush: %w", err)
+		}
+	}
+	set := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+	h.purgedMessages = set
+	dropped := h.replayBuf.RemoveWhere(func(data []byte) bool { return eventNamesMessage(data, set) })
+	var rows int64
+	if h.db != nil {
+		n, err := h.db.DeleteEventsForMessages(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("purge replay: %w", err)
+		}
+		rows = n
+	}
+	slog.Info("hub: replay purged for swept messages", "messages", len(ids), "buffered", dropped, "persisted", rows)
+	return nil
+}
+
 // PurgeUserFromReplay takes every frame naming userID out of the replay
 // pipeline after an account erasure (data-lifecycle O5, HP-4 decision 1),
 // in the order the pipeline runs: the dispatch loop is drained so the
@@ -211,6 +267,56 @@ func eventNamesUser(data []byte, userID int64) bool {
 		(pl.FromUserID != nil && *pl.FromUserID == userID) ||
 		(pl.User != nil && pl.User.ID == userID) ||
 		slices.Contains(pl.Mentions, userID)
+}
+
+// messageFamily lists the frame types that carry a message's content or
+// name one: what a retention purge removes and a tombstone drops.
+var messageFamily = map[string]struct{}{
+	MsgTypeChatMessage:     {},
+	MsgTypeChatEdited:      {},
+	MsgTypeChatDeleted:     {},
+	MsgTypeChatBulkDeleted: {},
+	MsgTypeReactionUpdate:  {},
+}
+
+// eventNamesMessage reports whether a wrapped broadcast frame is a
+// message-family frame about one of ids — the Go twin of
+// db.EventNamesMessagePredicate over the same envelope shape: payload.id
+// (chat_message), payload.message_id (chat_edited, chat_deleted,
+// reaction_update) or one of payload.ids (chat_bulk_deleted). An
+// unparseable frame is about nothing.
+func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {
+	var frame struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ID        *int64  `json:"id"`
+			MessageID *int64  `json:"message_id"`
+			IDs       []int64 `json:"ids"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return false
+	}
+	if _, ok := messageFamily[frame.Type]; !ok {
+		return false
+	}
+	pl := frame.Payload
+	if pl.ID != nil {
+		if _, ok := ids[*pl.ID]; ok {
+			return true
+		}
+	}
+	if pl.MessageID != nil {
+		if _, ok := ids[*pl.MessageID]; ok {
+			return true
+		}
+	}
+	for _, id := range pl.IDs {
+		if _, ok := ids[id]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // persistEvent enqueues a broadcast event for cold-storage persistence. Safe

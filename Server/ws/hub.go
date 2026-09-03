@@ -128,6 +128,12 @@ type Hub struct {
 	// seqMu on the write side; purgedUsers is read under seqMu too.
 	replayPurgeSeq atomic.Uint64
 	purgedUsers    map[int64]struct{}
+	// purgedMessages is the retention sweep's tombstone set
+	// (PurgeMessagesFromReplay): the ids of the last sweep's messages, so a
+	// frame about one of them that a producer sequences after the purge is
+	// dropped; replaced by the next sweep's ids, since a late frame reaches
+	// the hub within moments of the purge. Guarded by seqMu like purgedUsers.
+	purgedMessages map[int64]struct{}
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	// settings is the read seam the cache below refreshes through —

@@ -50,6 +50,19 @@ func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, pe
 	r.Post("/users/{id}/recovery-credential", ownerOnlyMiddleware(handleIssueRecoveryCredential(svc.Auth)).ServeHTTP)
 }
 
+// mountRetentionRoutes registers message retention (B4-11) under
+// MANAGE_SERVER: the policy, its effect preview and the per-channel
+// overrides — server management, not moderation.
+func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
+	r.Group(func(r chi.Router) {
+		r.Use(requirePerm(permissions.ManageServer))
+		r.Get("/retention", handleGetRetention(retention))
+		r.Get("/retention/preview", handleGetRetentionPreview(retention))
+		r.Put("/channels/{id}/retention", handlePutChannelRetention(retention))
+		r.Delete("/channels/{id}/retention", handleDeleteChannelRetention(retention))
+	})
+}
+
 // NewAdminAPI has no shutdown hook and is called directly by ~180 tests that
 // never capture one, so a parked goroutine here would leak under every
 // test's goleak check. time.AfterFunc self-rescheduling avoids that: between
@@ -188,6 +201,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			Post("/registrations/{id}/approve", handleApproveRegistration(svc.Users))
 		r.With(requirePerm(permissions.ManageServer)).
 			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
+		mountRetentionRoutes(r, svc.Retention)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))
