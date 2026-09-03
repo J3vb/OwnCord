@@ -267,12 +267,15 @@ func (m *MarkerStore) LocateSequenceFloor(ctx context.Context, table string, cei
 	return highest, false, nil
 }
 
-// FloorProbed reports whether a complete probe has already established
-// this table's floor. Once one has, every marker then present is covered
-// and every marker written since recorded its own floor, so the probe never
-// has to run again — and, equally, a floor row alone is not evidence of
-// that: a store can hold a floor written by a later erasure while an older
-// marker still names a higher id.
+// FloorProbed reports whether this table's floor is settled: a complete
+// probe established it, or an operator acknowledged one they established by
+// hand. Once either has happened every marker then present is covered, and
+// every marker written since recorded its own floor, so the probe never has
+// to run again — and, equally, a floor row alone is not evidence of that: a
+// store can hold a floor written by a later erasure while an older marker
+// still names a higher id. The acknowledgement is the row itself, which is
+// what an operator inserts to unblock a store whose markers reach past the
+// probe (docs/security.md, "Erasure marker sequence floors").
 func (m *MarkerStore) FloorProbed(ctx context.Context, table string) (bool, error) {
 	var one int
 	err := m.sqlDB.QueryRowContext(ctx, `SELECT 1 FROM floor_probes WHERE name = ?`, table).Scan(&one)

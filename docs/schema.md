@@ -187,7 +187,10 @@ handed out twice across restored timelines. A file written before the floors
 existed has none, or only ones a later erasure wrote: `floor_probes` records
 that the ids its markers name have been recovered from the tokens themselves
 (`MarkerStore.LocateSequenceFloor`) and the floor merged, which is what lets
-later opens skip that work — a floor row alone does not prove it.
+later opens skip that work — a floor row alone does not prove it. It is also
+the operator's acknowledgement of a floor they set by hand, the way out when
+a marker names an id past the probe's reach (`docs/security.md`, "Erasure
+marker sequence floors").
 
 ---
 

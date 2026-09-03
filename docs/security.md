@@ -123,6 +123,35 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 The next `POST /admin/api/setup` then creates a new Owner and sets the flag
 again.
 
+### Erasure marker sequence floors
+
+A deletion marker names its subject by a one-way token, and the id behind it
+must never be handed out again: a new account holding it would hash to the
+old marker and be erased on the next start-up. `sequence_floors` in the
+marker file keeps the id counters that prevents, and every marker written
+records its own. A marker file from before those floors existed records
+none, so the first start-up after the upgrade recovers them by hashing
+candidate ids against the markers' tokens until every marker is accounted
+for, then records the recovery in `floor_probes` so later start-ups skip it.
+
+If a marker names an id beyond the probe's reach (`SequenceFloorProbeCeiling`,
+16,777,216 — past any real id space), no floor can be proven safe and the
+server refuses to start rather than serve with one that only looks safe. The
+log names the two statements that resolve it. Only the operator can, because
+only they know the highest id their installation ever handed out; run both
+against the **marker file** (`data/erasure/markers.sqlite`), not the main
+database:
+
+```sql
+INSERT INTO sequence_floors (name, seq) VALUES ('users', <highest id ever handed out>)
+  ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq);
+INSERT OR IGNORE INTO floor_probes (name) VALUES ('users');
+```
+
+The second statement is the acknowledgement: it records that the floor is
+settled, so the next start-up honours it instead of probing again. Use
+`'channels'` in place of `'users'` when the refusal names that table.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every

@@ -515,13 +515,55 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 		t.Error("a refused probe was recorded as complete")
 	}
 
-	// With a ceiling that reaches it, the floor is established and start-up
-	// proceeds.
-	svc.floorProbeCeiling = 6000
+	// The operator's way out, which the refusal's log names: set the floor
+	// above the highest id ever handed out, then acknowledge it. The next
+	// start-up honours it instead of probing again — without that, the
+	// advertised remedy would not unblock anything (Codex's third review of
+	// #1523).
+	if err := markers.RaiseSequenceFloor(ctx, db.SequenceFloorUsers, 9000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplayMarkers(ctx); !errors.Is(err, ErrSequenceFloorUnresolved) {
+		t.Fatalf("ReplayMarkers with a raised but unacknowledged floor = %v, want the refusal to stand", err)
+	}
+	if err := markers.MarkFloorProbed(ctx, db.SequenceFloorUsers); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.ReplayMarkers(ctx); err != nil {
+		t.Fatalf("ReplayMarkers after the operator acknowledged the floor = %v", err)
+	}
+	if got, _ := database.SequenceValue(ctx, db.SequenceFloorUsers); got != 9000 {
+		t.Errorf("users counter after the acknowledged floor = %d, want it raised to 9000", got)
+	}
+	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != 9000 {
+		t.Errorf("floors = %v, want the operator's 9000 kept", floors)
+	}
+
+	// And with a ceiling that reaches the marker, the probe establishes the
+	// floor on its own.
+	fresh := newTestMarkers(t)
+	freshSvc := NewErasureService(database)
+	freshSvc.SetMarkers(fresh)
+	freshSvc.floorProbeCeiling = 6000
+	tok, _, err = fresh.RecordPendingAccount(ctx, 5000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.ConfirmAccount(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	rawFresh, err := sql.Open("sqlite", fresh.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawFresh.Close()
+	if _, err := rawFresh.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := freshSvc.ReplayMarkers(ctx); err != nil {
 		t.Fatalf("ReplayMarkers with a ceiling past the marker = %v", err)
 	}
-	if floors, _ := markers.SequenceFloors(ctx); floors[db.SequenceFloorUsers] != 5000 {
-		t.Errorf("floors = %v, want the users floor at the located 5000", floors)
+	if floors, _ := fresh.SequenceFloors(ctx); floors[db.SequenceFloorUsers] < 5000 {
+		t.Errorf("floors = %v, want the users floor at least the located 5000", floors)
 	}
 }

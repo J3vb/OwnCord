@@ -1561,7 +1561,12 @@ decisions 3 and 4.
   probe (`floor_probes`), the result is merged with the row and the counter,
   and a marker beyond the probe's ceiling fails the start-up stage
   (`ErrSequenceFloorUnresolved`) rather than persisting a floor that only
-  looks safe — the operator raises it themselves, knowing the id space.
+  looks safe. A third refutation followed: that refusal had no working way
+  out, since it returned before consulting any floor an operator had set, so
+  the advertised remedy left the server unable to start. `floor_probes` is
+  now the acknowledgement too — the operator raises the floor and records
+  it, both statements named in the log and written up in `security.md`
+  ("Erasure marker sequence floors").
   `TestErasureService_ReplayMarkersRecoversMissingFloors`,
   `TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor`,
   `TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor`,

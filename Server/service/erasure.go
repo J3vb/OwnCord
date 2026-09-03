@@ -267,9 +267,12 @@ func (s *ErasureService) ReplayMarkers(ctx context.Context) (db.ReplayReport, er
 // ErrSequenceFloorUnresolved is the refusal when a marker names an id the
 // probe cannot reach: no floor below it is safe, and accepting one would
 // leave that id free to be handed out again and its innocent holder erased
-// by the old marker on a later open. Start-up fails on it instead, and the
-// operator raises the floor themselves — they know the id space their
-// markers came from, and the log says so.
+// by the old marker on a later open. Start-up fails on it instead. The way
+// out is the operator's, because only they know the id space their markers
+// came from: they raise the floor and acknowledge it, which settles the
+// table and lets the next start-up through (MarkerStore.MarkFloorProbed,
+// docs/security.md, "Erasure marker sequence floors"). The message names
+// both statements.
 var ErrSequenceFloorUnresolved = errors.New("erasure markers: no safe sequence floor could be established from the markers")
 
 // recoverSequenceFloor is the floor for a table whose marker file has not
@@ -283,8 +286,11 @@ func (s *ErasureService) recoverSequenceFloor(ctx context.Context, table string,
 		return 0, fmt.Errorf("erasure: sequence floors: %w", err)
 	}
 	if !complete {
-		slog.Error("erasure markers: a marker names an id beyond the probe ceiling, so no safe sequence floor can be established; raise this table's floor by hand, above the highest id this installation ever handed out",
-			"table", table, "located_up_to", located, "ceiling", s.floorProbeCeiling)
+		slog.Error("erasure markers: a marker names an id beyond the probe ceiling, so no safe sequence floor can be established; set the floor above the highest id this installation ever handed out and acknowledge it, in the marker file (docs/security.md, \"Erasure marker sequence floors\")",
+			"table", table, "located_up_to", located, "ceiling", s.floorProbeCeiling,
+			"marker_file", s.markers.Path(),
+			"set_floor", fmt.Sprintf("INSERT INTO sequence_floors (name, seq) VALUES ('%s', <highest id ever handed out>) ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq);", table),
+			"acknowledge", fmt.Sprintf("INSERT OR IGNORE INTO floor_probes (name) VALUES ('%s');", table))
 		return 0, fmt.Errorf("%w: %s", ErrSequenceFloorUnresolved, table)
 	}
 	seq, err := s.st.SequenceValue(ctx, table)
