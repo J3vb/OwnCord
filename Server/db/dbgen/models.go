@@ -41,6 +41,7 @@ type AuditLog struct {
 	Detail       string  `json:"detail"`
 	CreatedAt    string  `json:"createdAt"`
 	SubjectToken *string `json:"subjectToken"`
+	ActorToken   *string `json:"actorToken"`
 }
 
 type Channel struct {

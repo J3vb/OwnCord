@@ -80,7 +80,8 @@ func (q *Queries) GetAllSettings(ctx context.Context) ([]Setting, error) {
 
 const getAuditLog = `-- name: GetAuditLog :many
 SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
-       a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token, a.created_at
+       a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token,
+       COALESCE(a.actor_token, '') AS actor_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
 ORDER BY a.id DESC
@@ -101,6 +102,7 @@ type GetAuditLogRow struct {
 	TargetID     int64  `json:"targetId"`
 	Detail       string `json:"detail"`
 	SubjectToken string `json:"subjectToken"`
+	ActorToken   string `json:"actorToken"`
 	CreatedAt    string `json:"createdAt"`
 }
 
@@ -122,6 +124,7 @@ func (q *Queries) GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]Get
 			&i.TargetID,
 			&i.Detail,
 			&i.SubjectToken,
+			&i.ActorToken,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -277,8 +280,8 @@ func (q *Queries) LogAudit(ctx context.Context, arg LogAuditParams) error {
 }
 
 const logAuditEntry = `-- name: LogAuditEntry :exec
-INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token, actor_token)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type LogAuditEntryParams struct {
@@ -288,6 +291,7 @@ type LogAuditEntryParams struct {
 	TargetID     int64   `json:"targetId"`
 	Detail       string  `json:"detail"`
 	SubjectToken *string `json:"subjectToken"`
+	ActorToken   *string `json:"actorToken"`
 }
 
 func (q *Queries) LogAuditEntry(ctx context.Context, arg LogAuditEntryParams) error {
@@ -298,6 +302,7 @@ func (q *Queries) LogAuditEntry(ctx context.Context, arg LogAuditEntryParams) er
 		arg.TargetID,
 		arg.Detail,
 		arg.SubjectToken,
+		arg.ActorToken,
 	)
 	return err
 }

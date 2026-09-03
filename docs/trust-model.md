@@ -399,7 +399,8 @@ does not claim").
   its subject only as HMAC-SHA256 of the id under
   `data/erasure.key`, generated beside `totp.key`; the audit rows the
   subject appeared in keep their action, time and order with that token in
-  place of the id (`audit_log.subject_token`), so the rows about one erased
+  place of the id (`audit_log.subject_token` where they were the target,
+  `actor_token` where they acted), so the rows about one erased
   subject remain linkable to each other, and to the identity only by whoever
   holds the key — the operator. Two operator duties follow: back up
   `erasure.key` and the marker file beside the database (a restore with

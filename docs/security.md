@@ -124,9 +124,11 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
-and `subject_token` carries the deletion marker's token — HMAC-SHA256 of the
-user id under `data/erasure.key` — so the trail re-identifies the subject only
-to whoever holds the key. The erasure's own `account_deleted` row is written
+and the deletion marker's token — HMAC-SHA256 of the user id under
+`data/erasure.key` — takes the id's place: `subject_token` where the subject
+was the target, `actor_token` where they acted, so a row naming two erased
+subjects keeps both, and the trail re-identifies a subject only to whoever
+holds the key. The erasure's own `account_deleted` row is written
 that way from the start, and `account_erasure_replayed` records a start-up
 that erased a restored backup's copy of the account again.
 

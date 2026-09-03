@@ -60,7 +60,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	if n := countAudit(t, database, `action = 'role_change' AND actor_id = ? AND target_id = 0 AND detail = '' AND subject_token = ?`, owner.ID, tok); n != 1 {
 		t.Errorf("queued role_change rows written unlinked = %d, want 1", n)
 	}
-	if n := countAudit(t, database, `action = 'message_delete' AND actor_id = 0 AND detail = '' AND subject_token = ?`, tok); n != 1 {
+	if n := countAudit(t, database, `action = 'message_delete' AND actor_id = 0 AND detail = '' AND actor_token = ? AND subject_token IS NULL`, tok); n != 1 {
 		t.Errorf("queued message_delete rows written unlinked = %d, want 1", n)
 	}
 
@@ -70,7 +70,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	if err := w.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n := countAudit(t, database, `action = 'user_login' AND actor_id = 0 AND target_id = 0 AND detail = '' AND subject_token = ?`, tok); n != 1 {
+	if n := countAudit(t, database, `action = 'user_login' AND actor_id = 0 AND target_id = 0 AND detail = '' AND subject_token = ? AND actor_token = ?`, tok, tok); n != 1 {
 		t.Errorf("late entry rows written unlinked = %d, want 1", n)
 	}
 	if n := countAudit(t, database, `actor_id = ? OR (target_type = 'user' AND target_id = ?)`, uid, uid); n != 0 {

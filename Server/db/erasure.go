@@ -305,15 +305,17 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 // every audit row the subject appears in — as actor, or as a user target —
 // keeps its action, time and position but loses the id and its free-text
 // detail, and carries the deletion marker's token instead (NULL when the
-// erasure ran without a marker store). "An erasure happened, by this actor
-// class, at this time" survives; "of whom" needs the erasure key.
+// erasure ran without a marker store): in actor_token where the subject
+// acted, in subject_token where they were the target, so a row naming two
+// erased subjects keeps both (migration 041). "An erasure happened, by this
+// actor class, at this time" survives; "of whom" needs the erasure key.
 func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
 	var token any
 	if subjectToken != "" {
 		token = subjectToken
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE audit_log SET actor_id = 0, detail = '', subject_token = ? WHERE actor_id = ?`, token, userID); err != nil {
+		`UPDATE audit_log SET actor_id = 0, detail = '', actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink audit actor: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,

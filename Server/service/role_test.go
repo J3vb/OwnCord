@@ -692,7 +692,8 @@ func assertAudit(t *testing.T, database *db.DB, action string) {
 	if err != nil {
 		t.Fatalf("GetAuditLog: %v", err)
 	}
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		if e.Action == action {
 			return
 		}

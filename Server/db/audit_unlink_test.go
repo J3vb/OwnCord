@@ -40,8 +40,8 @@ func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
 	if e := entries[0]; e.ActorID != 7 || e.TargetID != 0 || e.Detail != "" || e.SubjectToken != "tok-42" {
 		t.Errorf("entry naming the subject as target = %+v, want target 0, no detail, the token", e)
 	}
-	if e := entries[1]; e.ActorID != 0 || e.TargetID != 9 || e.Detail != "" || e.SubjectToken != "tok-42" {
-		t.Errorf("entry naming the subject as actor = %+v, want actor 0, no detail, the token", e)
+	if e := entries[1]; e.ActorID != 0 || e.TargetID != 9 || e.Detail != "" || e.ActorToken != "tok-42" || e.SubjectToken != "" {
+		t.Errorf("entry naming the subject as actor = %+v, want actor 0, no detail, the token on the actor side", e)
 	}
 	if e := entries[2]; e.ActorID != 7 || e.TargetID != 8 || e.Detail != "someone else" || e.SubjectToken != "" {
 		t.Errorf("entry about someone else = %+v, want untouched", e)
@@ -61,9 +61,20 @@ func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
 	if e := entries[3]; e.TargetID != 42 || e.Detail != "message 42" {
 		t.Errorf("message-target entry = %+v, want untouched", e)
 	}
-	if e := entries[4]; e.ActorID != 0 || e.TargetID != 0 || e.Detail != "" || e.SubjectToken != "tok-42" {
-		t.Errorf("late entry = %+v, want unlinked", e)
+	if e := entries[4]; e.ActorID != 0 || e.TargetID != 0 || e.Detail != "" || e.SubjectToken != "tok-42" || e.ActorToken != "tok-42" {
+		t.Errorf("late entry = %+v, want unlinked on both sides", e)
 	}
+	// An entry naming two erased subjects keeps both tokens.
+	w.Unlink(8, "tok-8")
+	w.Enqueue(42, "user_ban", "user", 8, "spam")
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	_, entries = store.snapshot()
+	if e := entries[len(entries)-1]; e.ActorID != 0 || e.TargetID != 0 || e.ActorToken != "tok-42" || e.SubjectToken != "tok-8" {
+		t.Errorf("entry naming two subjects = %+v, want actor token tok-42 and subject token tok-8", e)
+	}
+	w.Relink(8)
 
 	// Relink: the refused erasure's rule is withdrawn.
 	w.Relink(42)
@@ -72,7 +83,7 @@ func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
 		t.Fatalf("third Flush: %v", err)
 	}
 	_, entries = store.snapshot()
-	if e := entries[len(entries)-1]; e.ActorID != 42 || e.TargetID != 42 || e.Detail != "203.0.113.9" || e.SubjectToken != "" {
+	if e := entries[len(entries)-1]; e.ActorID != 42 || e.TargetID != 42 || e.Detail != "203.0.113.9" || e.SubjectToken != "" || e.ActorToken != "" {
 		t.Errorf("entry after Relink = %+v, want its ids back", e)
 	}
 

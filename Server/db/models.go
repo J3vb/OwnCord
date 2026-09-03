@@ -290,9 +290,12 @@ type AuditEntry struct {
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
 	// SubjectToken is the deletion-marker token of an erased subject the row
-	// was about (B4-10): set by the erasure on rows that lost their ids, and
-	// on the erasure's own rows. Empty on every other row.
+	// targeted (B4-10): set by the erasure on rows that lost their target id,
+	// and on the erasure's own rows. ActorToken is the same for an erased
+	// subject who acted, so a row naming two erased subjects keeps both.
+	// Both are empty on every other row.
 	SubjectToken string `json:"subject_token,omitempty"`
+	ActorToken   string `json:"actor_token,omitempty"`
 	CreatedAt    string `json:"created_at"`
 }
 

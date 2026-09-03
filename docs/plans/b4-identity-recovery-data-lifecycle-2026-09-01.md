@@ -1530,15 +1530,20 @@ PR #1520 to `dev` (draft). HP-4 decisions 3 and 4.
   a refused erasure withdraws it (`RelinkAudits`) —
   `TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked`,
   `TestErasureService_QueuedAuditEntriesAreUnlinked`.
-- **Codex's review** (posted on #1521, whose diff carried this code; four
-  findings, all confirmed): the audit writer's queue, the last-admin guard
-  at replay, the discarded pending marker, and the id reuse across restored
-  timelines — the three bullets above are the fixes.
+- **Codex's review** (on #1521, whose diff carried this code, and on
+  #1520; five findings, all confirmed): the audit writer's queue, the
+  last-admin guard at replay, the discarded pending marker, the id reuse
+  across restored timelines, and the one token column a second erasure
+  overwrote — the bullets above are the fixes.
 - **Unlinkable audit history (migration 038, the `audit_unlinking` draft
   verbatim):** inside the erasure transaction every audit row the subject
   appears in — as actor, or as a `user` target — keeps its action, time and
   position, gets `actor_id`/`target_id` = 0 and `detail = ''`, and carries
-  `subject_token`. The erasure's own `account_deleted` row is written
+  the token — in `subject_token` where the subject was the target, in
+  `actor_token` where they acted (migration 041, after Codex's review: the
+  draft's one column kept only the last erasure's token on a row naming two
+  erased subjects; `TestEraseAccount_TwoErasedPrincipalsKeepBothTokens`).
+  The erasure's own `account_deleted` row is written
   unlinked from the start (`db.WriteAuditEntry`: actor 0 for self-service,
   the administrator for the admin route, the target the token, no IP); the
   async audit writer carries the token. `GET /admin/api/audit-log` returns

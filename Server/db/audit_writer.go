@@ -37,6 +37,7 @@ type pendingAudit struct {
 	targetID     int64
 	detail       string
 	subjectToken string
+	actorToken   string
 }
 
 // AuditWriter batches audit entries and writes them to an AuditStore.
@@ -150,7 +151,7 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	default:
 	}
 	select {
-	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail, subjectToken: e.SubjectToken}:
+	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail, subjectToken: e.SubjectToken, actorToken: e.ActorToken}:
 	default:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: queue full",
@@ -264,13 +265,15 @@ func (w *AuditWriter) unlinkRules() map[int64]string {
 }
 
 // unlinkEntry applies the rule set to one entry: the same rewrite
-// erasureUnlinkAudit makes to a persisted row, actor side and target side.
+// erasureUnlinkAudit makes to a persisted row — the actor's token on the
+// actor side, the subject's on the target side, so an entry naming two
+// erased subjects keeps both.
 func unlinkEntry(e AuditEntry, rules map[int64]string) AuditEntry {
 	if len(rules) == 0 {
 		return e
 	}
 	if token, ok := rules[e.ActorID]; ok && e.ActorID != 0 {
-		e.ActorID, e.Detail, e.SubjectToken = 0, "", token
+		e.ActorID, e.Detail, e.ActorToken = 0, "", token
 	}
 	if token, ok := rules[e.TargetID]; ok && e.TargetID != 0 && e.TargetType == "user" {
 		e.TargetID, e.Detail, e.SubjectToken = 0, "", token
@@ -340,6 +343,7 @@ func (w *AuditWriter) run(ctx context.Context) {
 				TargetID:     a.targetID,
 				Detail:       a.detail,
 				SubjectToken: a.subjectToken,
+				ActorToken:   a.actorToken,
 			}, rules))
 		}
 		// One transaction per flush instead of one autocommit write per entry.

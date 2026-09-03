@@ -151,8 +151,10 @@ administrator`). The log carries the id only, never the username.
 
 **What the operation leaves** is the audit history — unlinked (B4-10): every
 row the subject appeared in keeps its action, time and position, loses the
-id and its free text, and carries `subject_token`, HMAC-SHA256 of the id
-under `data/erasure.key`; the erasure's own `account_deleted` row is written
+id and its free text, and carries HMAC-SHA256 of the id under
+`data/erasure.key` — in `subject_token` where the subject was the target, in
+`actor_token` where they acted, so a row about two erased subjects keeps
+both; the erasure's own `account_deleted` row is written
 that way from the start (actor 0 for self-service, the administrator for the
 admin route; the target is the token, never the id; no IP) — plus server
 logs (id only), backups (defused by the marker on the next open), the
