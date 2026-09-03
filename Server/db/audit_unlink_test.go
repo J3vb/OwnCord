@@ -8,12 +8,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Flush is the erasure's barrier and Unlink its rule (B4-10): an entry
-// about the subject queued before the erasure transaction is written under
-// the rule — id 0, detail cleared, the deletion marker's token in place —
-// and so is one enqueued after it; Relink withdraws the rule for a refused
-// erasure. The timer is an hour away, so the barrier is the only flush.
-func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
+// Flush is the erasure's barrier: everything enqueued before it is handed
+// to the store when it returns, as it was queued, with the timer an hour
+// away; a writer that never started, or a cancelled barrier, reports so
+// without touching the queue.
+func TestAuditWriter_FlushIsABarrier(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeAuditStore{}
 	w := db.NewAuditWriter(store, 64, 50, time.Hour)
@@ -25,69 +24,29 @@ func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
 
 	w.Enqueue(7, "role_change", "user", 42, "member → moderator")
 	w.Enqueue(42, "message_delete", "message", 9, "by the subject")
-	w.Enqueue(7, "role_change", "user", 8, "someone else")
 	if _, entries := store.snapshot(); len(entries) != 0 {
 		t.Fatalf("entries persisted before the barrier: %+v", entries)
 	}
-	w.Unlink(42, "tok-42")
 	if err := w.Flush(ctx); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
 	flushes, entries := store.snapshot()
-	if flushes != 1 || len(entries) != 3 {
-		t.Fatalf("after the barrier: %d flushes, %d entries; want 1 and 3", flushes, len(entries))
+	if flushes != 1 || len(entries) != 2 {
+		t.Fatalf("after the barrier: %d flushes, %d entries; want 1 and 2", flushes, len(entries))
 	}
-	if e := entries[0]; e.ActorID != 7 || e.TargetID != 0 || e.Detail != "" || e.SubjectToken != "tok-42" {
-		t.Errorf("entry naming the subject as target = %+v, want target 0, no detail, the token", e)
+	// As queued: the unlinking rule belongs to the store's insert, not to
+	// the writer (TestPersistAudits_AppliesTheUnlinkRulesAtInsert).
+	if e := entries[0]; e.ActorID != 7 || e.TargetID != 42 || e.Detail != "member → moderator" || e.SubjectToken != "" || e.ActorToken != "" {
+		t.Errorf("entry after the barrier = %+v, want it as queued", e)
 	}
-	if e := entries[1]; e.ActorID != 0 || e.TargetID != 9 || e.Detail != "" || e.ActorToken != "tok-42" || e.SubjectToken != "" {
-		t.Errorf("entry naming the subject as actor = %+v, want actor 0, no detail, the token on the actor side", e)
-	}
-	if e := entries[2]; e.ActorID != 7 || e.TargetID != 8 || e.Detail != "someone else" || e.SubjectToken != "" {
-		t.Errorf("entry about someone else = %+v, want untouched", e)
-	}
-
-	// A message target with the subject's numeric id is not a user: left alone.
-	w.Enqueue(7, "message_delete", "message", 42, "message 42")
-	// A late entry, after the barrier: the rule outlives it.
-	w.Enqueue(42, "user_login", "user", 42, "203.0.113.9")
+	w.Enqueue(1, "settings_change", "settings", 0, "retention")
 	if err := w.Flush(ctx); err != nil {
 		t.Fatalf("second Flush: %v", err)
 	}
-	_, entries = store.snapshot()
-	if len(entries) != 5 {
-		t.Fatalf("entries after the second barrier = %d, want 5", len(entries))
-	}
-	if e := entries[3]; e.TargetID != 42 || e.Detail != "message 42" {
-		t.Errorf("message-target entry = %+v, want untouched", e)
-	}
-	if e := entries[4]; e.ActorID != 0 || e.TargetID != 0 || e.Detail != "" || e.SubjectToken != "tok-42" || e.ActorToken != "tok-42" {
-		t.Errorf("late entry = %+v, want unlinked on both sides", e)
-	}
-	// An entry naming two erased subjects keeps both tokens.
-	w.Unlink(8, "tok-8")
-	w.Enqueue(42, "user_ban", "user", 8, "spam")
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
-	_, entries = store.snapshot()
-	if e := entries[len(entries)-1]; e.ActorID != 0 || e.TargetID != 0 || e.ActorToken != "tok-42" || e.SubjectToken != "tok-8" {
-		t.Errorf("entry naming two subjects = %+v, want actor token tok-42 and subject token tok-8", e)
-	}
-	w.Relink(8)
-
-	// Relink: the refused erasure's rule is withdrawn.
-	w.Relink(42)
-	w.Enqueue(42, "user_login", "user", 42, "203.0.113.9")
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("third Flush: %v", err)
-	}
-	_, entries = store.snapshot()
-	if e := entries[len(entries)-1]; e.ActorID != 42 || e.TargetID != 42 || e.Detail != "203.0.113.9" || e.SubjectToken != "" || e.ActorToken != "" {
-		t.Errorf("entry after Relink = %+v, want its ids back", e)
+	if _, entries := store.snapshot(); len(entries) != 3 {
+		t.Errorf("entries after the second barrier = %d, want 3", len(entries))
 	}
 
-	// A cancelled barrier reports it and leaves the writer running.
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	if err := w.Flush(cancelled); err == nil {
@@ -95,8 +54,67 @@ func TestAuditWriter_FlushBarrierWritesQueuedEntriesUnlinked(t *testing.T) {
 	}
 	var nilWriter *db.AuditWriter
 	nilWriter.Unlink(1, "x")
-	nilWriter.Relink(1)
 	if err := nilWriter.Flush(ctx); err != nil {
 		t.Errorf("nil writer Flush = %v", err)
 	}
+}
+
+// The unlinking rule (AuditWriter.Unlink) is applied by the store at insert
+// time, under the writer connection: an entry about the subject that the
+// batch path or the single-row path writes once the rule exists goes down
+// unlinked — the actor side to actor_token, the target side to
+// subject_token, both on an entry naming two erased subjects — while an
+// entry about anyone else, or a message target with a colliding id, is
+// untouched; without a writer the store writes as told.
+func TestPersistAudits_AppliesTheUnlinkRulesAtInsert(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	w := db.NewAuditWriter(database, 64, 50, time.Hour)
+	database.SetAuditWriter(w)
+	w.Unlink(42, "tok-42")
+	w.Unlink(8, "tok-8")
+	entries := []db.AuditEntry{
+		{ActorID: 7, Action: "role_change", TargetType: "user", TargetID: 42, Detail: "member → moderator"},
+		{ActorID: 42, Action: "message_delete", TargetType: "message", TargetID: 9, Detail: "by the subject"},
+		{ActorID: 42, Action: "user_ban", TargetType: "user", TargetID: 8, Detail: "spam"},
+		{ActorID: 7, Action: "message_pin", TargetType: "message", TargetID: 42, Detail: "message 42"},
+		{ActorID: 7, Action: "role_create", TargetType: "role", TargetID: 3, Detail: "someone else"},
+	}
+	if n, err := database.PersistAudits(ctx, entries); err != nil || n != 5 {
+		t.Fatalf("PersistAudits = %d, %v", n, err)
+	}
+	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_login", TargetType: "user", TargetID: 42, Detail: "203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	database.SetAuditWriter(nil)
+	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_logout", TargetType: "user", TargetID: 42, Detail: "bye"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byAction := map[string]db.AuditEntry{}
+	for _, e := range got {
+		byAction[e.Action] = e
+	}
+	check := func(action string, actor, target int64, detail, actorTok, subjectTok string) {
+		t.Helper()
+		e, ok := byAction[action]
+		if !ok {
+			t.Errorf("%s: no row", action)
+			return
+		}
+		if e.ActorID != actor || e.TargetID != target || e.Detail != detail || e.ActorToken != actorTok || e.SubjectToken != subjectTok {
+			t.Errorf("%s = actor %d target %d detail %q actor token %q subject token %q; want %d %d %q %q %q",
+				action, e.ActorID, e.TargetID, e.Detail, e.ActorToken, e.SubjectToken, actor, target, detail, actorTok, subjectTok)
+		}
+	}
+	check("role_change", 7, 0, "", "", "tok-42")
+	check("message_delete", 0, 9, "", "tok-42", "")
+	check("user_ban", 0, 0, "", "tok-42", "tok-8")
+	check("message_pin", 7, 42, "message 42", "", "")
+	check("role_create", 7, 3, "someone else", "", "")
+	check("user_login", 0, 0, "", "tok-42", "tok-42")
+	check("user_logout", 42, 42, "bye", "", "")
 }

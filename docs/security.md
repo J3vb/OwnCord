@@ -99,6 +99,30 @@ reset anyone's credentials. Issuance and use are audited
 
 Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
 
+## First-run setup
+
+`POST /admin/api/setup` is unauthenticated: it is how the first Owner account
+comes to exist, and until B4-10 the only thing standing in front of it was
+"no users exist". Account erasure can now empty that table — the
+administrator erases the last account, or a deletion marker is replayed
+against a restored backup whose only user is the erased owner (the replay
+does not apply the last-admin guard) — so the count is no longer the gate.
+The `setup_completed` setting is (migration 043): it is written in the same
+transaction as the first Owner and never cleared by the server, so an emptied
+users table leaves setup closed rather than open to the first caller on an
+allowed network.
+
+A server with no accounts and the flag set is therefore locked, deliberately.
+Re-opening it is an operator action with filesystem access to the database,
+not a network one:
+
+```sql
+UPDATE settings SET value = '0' WHERE key = 'setup_completed';
+```
+
+The next `POST /admin/api/setup` then creates a new Owner and sets the flag
+again.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every

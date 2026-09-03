@@ -53,7 +53,8 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1517 | B4-9 review fix — the replay-pipeline purge and the persisted-envelope predicate                                                                                                          | `7907c16` (merged after measurement) |
 | #1520 | B4-10 — deletion markers and unlinkable audit history                                                                                                                                     | `87ad997` (merged after measurement) |
 | #1521 | B4-11 — retention                                                                                                                                                                         | `607fd4d` (merged after measurement) |
-| #1522 | B4-10 and B4-11 review fixes — the audit-writer barrier, replay past the last-admin guard, pending markers applied, id floors, the actor's token column, the swept messages' replay purge | open                                 |
+| #1522 | B4-10 and B4-11 review fixes — the audit-writer barrier, replay past the last-admin guard, pending markers applied, id floors, the actor's token column, the swept messages' replay purge | `15ba7c9` (merged after measurement) |
+| #1523 | #1522's own review fixes — the unlink rule at commit time, seeded floors, the 038-era token backfill, first-run setup closed durably                                                      | open                                 |
 
 The chain's `service/auth.go` line — B4-3 → B4-4 → B4-5 → B4-6 — is
 serialized as the plan required; #1512 and #1513 carry #1511's commits until

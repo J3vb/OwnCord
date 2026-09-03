@@ -218,9 +218,17 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 
 // LogAuditEntry inserts an audit entry with every field, the tokens
 // included (B4-10); LogAudit is the token-less form the rest of the server
-// writes.
+// writes. The erasure's unlinking rules are applied under the writer
+// connection, once it is held: an entry about a subject whose erasure
+// committed while this call waited for the connection is written unlinked.
 func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
-	if err := d.q.LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("LogAuditEntry begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	e = unlinkEntry(e, d.auditUnlinkRules())
+	if err := dbgen.New(tx).LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
 		ActorID:      e.ActorID,
 		Action:       e.Action,
 		TargetType:   e.TargetType,
@@ -230,6 +238,9 @@ func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
 		ActorToken:   nullableToken(e.ActorToken),
 	}); err != nil {
 		return fmt.Errorf("LogAuditEntry: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("LogAuditEntry commit: %w", err)
 	}
 	return nil
 }
@@ -281,8 +292,13 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 		return fmt.Errorf("PersistAudits prepare: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
+	// The erasure's unlinking rules, read now that the writer connection is
+	// held: an erasure that committed while this batch waited for it has
+	// installed its rule, and the batch's entries about the subject go down
+	// unlinked instead of raw after the transaction's UPDATE.
+	rules := d.auditUnlinkRules()
 	for i := range entries {
-		e := &entries[i]
+		e := unlinkEntry(entries[i], rules)
 		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken, e.ActorToken); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)

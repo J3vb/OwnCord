@@ -144,8 +144,7 @@ type Store interface {
 	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
-	UnlinkQueuedAudits(ctx context.Context, userID int64, token string) error
-	RelinkAudits(userID int64)
+	FlushAudits(ctx context.Context) error
 	CountAdminClassAccounts(ctx context.Context) (int, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	RaiseSequences(ctx context.Context, floors map[string]int64) error

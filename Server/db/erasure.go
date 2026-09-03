@@ -149,6 +149,12 @@ func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string
 	if err != nil {
 		return nil, err
 	}
+	// The audit writer's rule for the subject, now that the transaction has
+	// committed and while this connection is still held: an audit entry
+	// about the subject that a flush inserts after the UPDATE above is
+	// written unlinked (AuditWriter.Unlink), and a refused transaction has
+	// installed nothing.
+	d.unlinkAuditsFor(userID, subjectToken)
 
 	// The WAL still holds the transaction's frames, erased bytes included,
 	// until a checkpoint copies them into the main file and TRUNCATE drops

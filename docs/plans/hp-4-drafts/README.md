@@ -27,7 +27,13 @@ cascade needed — its own migration, so upgraded installations get both.
 `audit_unlinking` landed as `Server/migrations/038_audit_unlinking.sql`
 (B4-10, 2026-09-03), verbatim; `041_audit_actor_token.sql` adds the actor's
 own token column beside it — a row names two principals, and the draft's
-single column kept only the last erasure's token (Codex's review of #1520). `deletion_markers` is applied by the server on
+single column kept only the last erasure's token (Codex's review of #1520)
+; `042_audit_actor_token_backfill.sql` then moves the actor-side tokens 038
+had put in `subject_token` over to it where the target is not an erased
+user. `043_setup_completed.sql` is not from a draft: it closes first-run
+setup durably, because the marker replay can empty the users table on a
+restored backup and the unauthenticated setup endpoint was gated on that
+table alone (Codex's security review of #1522). `deletion_markers` is applied by the server on
 the marker file itself (`Server/db/markers.go`, `OpenMarkerStore`), not by the
 migrations, with two additions to the draft: a `state` column
 (`pending`/`recorded`) for the two-phase write around the erasure transaction,
