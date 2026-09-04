@@ -169,8 +169,21 @@ jobs:
       # brace-expansion as CJS and v5 is not callable that way, which took out
       # vitest's coverage provider. Nothing here ships to users; revisit when
       # eslint and @vitest/coverage-v8 widen their minimatch ranges.
+      #
+      # Run through scripts/npm-audit-gate.sh rather than bare: `npm audit`
+      # exits 1 both for a finding and for an unreachable audit endpoint, so
+      # the bare command turned a registry outage ("audit endpoint returned an
+      # error") into a red check on a pull request that never touched the
+      # client. The script keeps the gate, retries a transport failure, and is
+      # fail-closed — only a recognised outage signature is forgiven.
       - name: Security audit (npm, shipped deps)
-        run: npm audit --omit=dev --audit-level=high
+        run: bash ../scripts/npm-audit-gate.sh
+
+      # The forgiveness above is exactly the shape that rots into a gate that
+      # never runs, so the classifier is self-tested on every PR, like the
+      # count and migration matchers in Docs & Ledger Consistency.
+      - name: Self-test the audit-outage classifier
+        run: bash ../scripts/npm-audit-gate.sh --selftest
 
       - name: Oxlint (fast correctness checks)
         run: npx oxlint src/
