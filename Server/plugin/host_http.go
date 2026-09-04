@@ -1,23 +1,24 @@
 // Phase C Step 9 — `http` host capability.
 //
 // Outbound HTTP requests proxied through the server. Each request is matched
-// against PluginsConfig.HTTPAllowlist (host suffix match) before being sent.
-// The wazero-tagged build invokes this from the plugin's `host_http_request`
+// against PluginsConfig.HTTPAllowlist (host suffix match) and then carried by
+// Server/safefetch, which owns the destination and resource policy — address
+// classification, the connect-to-validated-address binding, redirects, the
+// deadline, the byte ceilings and the content-type allowlist. The
+// wazero-tagged build invokes this from the plugin's `host_http_request`
 // import; the default build exposes it for testing.
 
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/safefetch"
 )
 
 // HTTPRequest is the plugin → host request envelope.
@@ -38,84 +39,86 @@ type HTTPResponse struct {
 const (
 	httpTimeout      = 10 * time.Second
 	maxResponseBytes = 5 * 1024 * 1024 // 5 MiB
+
+	// httpMaxRedirects is the hop budget. It matches what this capability
+	// followed before safefetch, except that every hop is now put through the
+	// whole destination check rather than only the host allowlist.
+	httpMaxRedirects = 5
+
+	// httpMaxConcurrent bounds plugin fetches in flight across every plugin
+	// and every registry. A plugin loop that fetches without waiting is
+	// otherwise a way to spend all of the server's sockets.
+	httpMaxConcurrent = 8
 )
 
 // ErrHTTPHostDenied is returned when a plugin HTTP request targets a host that
-// is not in the allowlist or resolves to a private/loopback/link-local address.
+// is not in the allowlist or resolves to a non-globally-routable address.
 var ErrHTTPHostDenied = errors.New("plugin http: host denied")
 
-// HTTPDo executes a plugin-initiated HTTP request after enforcing the host
-// allowlist declared in PluginsConfig and rejecting requests that resolve to
-// private, loopback, or link-local IP ranges (SSRF defense).
+// httpContentTypes is what a plugin may receive. It is deliberately wider
+// than the GIF proxy's list — a plugin fetches whatever its own upstream
+// serves — but it is still a list: an operator who allowlists a host has not
+// agreed to that host handing plugin code an arbitrary binary format.
+//
+// text/plain covers every textual format, because http.DetectContentType
+// reports it for all of them; the declared type is checked separately, so an
+// HTML page served as JSON is still refused.
+var httpContentTypes = []string{
+	"application/json",
+	"application/xml",
+	"application/xhtml+xml",
+	"application/javascript",
+	"application/x-www-form-urlencoded",
+	"application/octet-stream",
+	"text/plain",
+	"text/html",
+	"text/xml",
+	"text/csv",
+	"text/css",
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"image/svg+xml",
+}
+
+// httpFetcher carries every plugin request. One per process, so the
+// concurrency cap counts every plugin's fetches together; the per-request
+// AllowHost hook carries each registry's own operator allowlist.
+var httpFetcher = safefetch.MustNew(safefetch.Policy{
+	Schemes:              []string{"http", "https"},
+	Ports:                []int{80, 443},
+	ContentTypes:         httpContentTypes,
+	MaxRedirects:         httpMaxRedirects,
+	Deadline:             httpTimeout,
+	MaxBytes:             maxResponseBytes,
+	MaxDecompressedBytes: maxResponseBytes,
+	MaxConcurrent:        httpMaxConcurrent,
+})
+
+// HTTPDo executes a plugin-initiated HTTP request under the operator host
+// allowlist declared in PluginsConfig. Everything else — parsing, address
+// classification, the dial binding, redirects, the deadline, the byte
+// ceilings and the content-type allowlist — is Server/safefetch's.
+//
+// The allowlist is enforced once, as Request.AllowHost, which safefetch
+// consults for the plugin's own URL and for every redirect hop alike. An
+// earlier version also checked it here first; that second check was
+// redundant, and it made the wiring untestable — removing AllowHost left the
+// suite green, because this check refused the same requests on its own.
 func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) (*HTTPResponse, error) {
 	if !inst.Manifest.HasCapability(CapHTTP) {
 		return nil, ErrCapabilityNotGranted
 	}
-	parsed, err := url.Parse(req.URL)
+	resp, err := httpFetcher.Fetch(ctx, safefetch.Request{
+		Method:    req.Method,
+		URL:       req.URL,
+		Body:      req.Body,
+		Header:    req.Header,
+		AllowHost: r.allowHostPort,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("plugin http: invalid URL: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("plugin http: scheme %q not allowed", parsed.Scheme)
-	}
-	host := parsed.Hostname()
-	if host == "" {
-		return nil, fmt.Errorf("plugin http: empty host")
-	}
-	if !r.hostAllowed(host) {
-		return nil, fmt.Errorf("%w: %s", ErrHTTPHostDenied, host)
-	}
-	// No pre-resolve here: the transport's guarded dial resolves once,
-	// validates every address, and dials only vetted IPs — it is the
-	// authoritative SSRF check, and a second lookup would just cost an extra
-	// DNS round trip while re-opening the rebinding TOCTOU it exists to close.
-
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewReader(req.Body))
-	if err != nil {
-		return nil, fmt.Errorf("plugin http: build request: %w", err)
-	}
-	for k, v := range req.Header {
-		httpReq.Header.Set(k, v)
-	}
-	// Custom transport with a guarded DialContext: the host is resolved once,
-	// every candidate IP is validated against the blocklist, and the actual
-	// connection is made to a specific vetted IP — never re-resolved by
-	// hostname. This closes the DNS-rebinding TOCTOU window where a second
-	// lookup (the one net.Dialer would perform on a hostname) could return an
-	// internal IP after an earlier check had approved the name.
-	transport := &http.Transport{DialContext: GuardedDialContext()}
-	client := &http.Client{
-		Timeout:   httpTimeout,
-		Transport: transport,
-		// Refuse to follow redirects across hosts that the allowlist would
-		// reject — re-evaluate the new URL through the same checks.
-		CheckRedirect: func(redirReq *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("too many redirects")
-			}
-			h := redirReq.URL.Hostname()
-			if !r.hostAllowed(h) {
-				return fmt.Errorf("%w: redirect to %s", ErrHTTPHostDenied, h)
-			}
-			// Address vetting happens in the guarded dial the redirect will
-			// flow through — no pre-resolve needed here either.
-			return nil
-		},
-	}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("plugin http: do: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	// Cap body size so a hostile/large response cannot OOM the host. We
-	// LimitReader to maxResponseBytes+1 so we can detect truncation.
-	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, fmt.Errorf("plugin http: read body: %w", err)
-	}
-	if int64(len(body)) > maxResponseBytes {
-		return nil, fmt.Errorf("plugin http: response exceeds %d bytes", maxResponseBytes)
+		return nil, denialError(err)
 	}
 	hdr := make(map[string]string, len(resp.Header))
 	for k, v := range resp.Header {
@@ -123,11 +126,31 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 			hdr[k] = v[0]
 		}
 	}
-	return &HTTPResponse{
-		StatusCode: resp.StatusCode,
-		Body:       body,
-		Header:     hdr,
-	}, nil
+	return &HTTPResponse{StatusCode: resp.StatusCode, Body: resp.Body, Header: hdr}, nil
+}
+
+// denialError keeps ErrHTTPHostDenied the single sentinel a caller tests for
+// when a destination is refused, whether the allowlist or the address policy
+// refused it. Everything else — a timeout, a ceiling, an unreachable host —
+// stays distinguishable.
+func denialError(err error) error {
+	if errors.Is(err, safefetch.ErrHostNotAllowed) || errors.Is(err, safefetch.ErrBlockedAddress) ||
+		errors.Is(err, safefetch.ErrBlockedScheme) || errors.Is(err, safefetch.ErrBlockedPort) ||
+		errors.Is(err, safefetch.ErrCredentialsInURL) {
+		return fmt.Errorf("%w: %w", ErrHTTPHostDenied, err)
+	}
+	return fmt.Errorf("plugin http: %w", err)
+}
+
+// allowHostPort is the per-hop allowlist check safefetch calls. It takes a
+// "host:port" because that is what an origin is; the allowlist is written in
+// hostnames, so the port is dropped before matching.
+func (r *Registry) allowHostPort(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	return r.hostAllowed(host)
 }
 
 // hostAllowed reports whether host matches any allowlist entry. Matching is
@@ -155,96 +178,4 @@ func (r *Registry) hostAllowed(host string) bool {
 		}
 	}
 	return false
-}
-
-// lookupIPAddr and dialContext are swappable seams so the guarded dial can be
-// tested without real DNS or network reachability.
-var (
-	lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
-		return (&net.Resolver{}).LookupIPAddr(ctx, host)
-	}
-	dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		d := &net.Dialer{Timeout: httpTimeout}
-		return d.DialContext(ctx, network, addr)
-	}
-)
-
-// GuardedDialContext returns the SSRF-guarded dial used by HTTPDo's
-// transport. It is exported so every other outbound-HTTP call site in the
-// server (e.g. the GIF proxy in package api) shares one vetted dialer instead
-// of reaching for a bare net.Dialer.
-//
-// Behaviour: resolve once, validate every returned address, then dial vetted
-// concrete IPs. All addresses are validated before any dial (one poisoned
-// record among them refuses the whole request), and every vetted address is
-// tried in order — a dual-stack or round-robin host whose first record is
-// down must still connect via the next one.
-func GuardedDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		h, port, splitErr := net.SplitHostPort(addr)
-		if splitErr != nil {
-			return nil, splitErr
-		}
-		// IP literal: validate and dial as-is (no resolution happens).
-		if ip := net.ParseIP(h); ip != nil {
-			if err := ipAllowed(ip); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrHTTPHostDenied, err)
-			}
-			return dialContext(ctx, network, addr)
-		}
-		ips, lookupErr := lookupIPAddr(ctx, h)
-		if lookupErr != nil {
-			return nil, fmt.Errorf("%w: dns lookup failed: %w", ErrHTTPHostDenied, lookupErr)
-		}
-		if len(ips) == 0 {
-			return nil, fmt.Errorf("%w: no addresses for %s", ErrHTTPHostDenied, h)
-		}
-		for _, resolved := range ips {
-			if err := ipAllowed(resolved.IP); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrHTTPHostDenied, err)
-			}
-		}
-		var dialErr error
-		for _, resolved := range ips {
-			conn, err := dialContext(ctx, network, net.JoinHostPort(resolved.IP.String(), port))
-			if err == nil {
-				return conn, nil
-			}
-			dialErr = err
-		}
-		return nil, dialErr
-	}
-}
-
-// cgnRange covers RFC6598 carrier-grade NAT (100.64.0.0/10). net.IP.IsPrivate
-// does NOT include this range, but it is non-routable on the public internet
-// and may reach internal services on carrier networks.
-var cgnRange = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
-
-// ipAllowed reports nil if ip is a public, routable address. Loopback,
-// link-local, multicast, unspecified, RFC1918, RFC4193, and RFC6598 (CGN)
-// ranges are rejected.
-func ipAllowed(ip net.IP) error {
-	if ip == nil {
-		return fmt.Errorf("nil ip")
-	}
-	if ip.IsLoopback() {
-		return fmt.Errorf("loopback address %s", ip)
-	}
-	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return fmt.Errorf("link-local address %s", ip)
-	}
-	if ip.IsPrivate() {
-		return fmt.Errorf("private address %s", ip)
-	}
-	if ip.IsUnspecified() {
-		return fmt.Errorf("unspecified address %s", ip)
-	}
-	if ip.IsMulticast() {
-		return fmt.Errorf("multicast address %s", ip)
-	}
-	if v4 := ip.To4(); v4 != nil && cgnRange.Contains(v4) {
-		return fmt.Errorf("carrier-grade NAT address %s", ip)
-	}
-	return nil
 }

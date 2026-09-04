@@ -1,10 +1,12 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,9 +43,13 @@ func stubKlipy(t *testing.T, body string, status int) *lastRequest {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	// The production transport uses the SSRF-guarded dialer, which refuses the
-	// loopback address httptest binds to — supply a plain client for the stub.
-	restore := api.SetGIFUpstreamForTest(srv.URL, srv.Client())
+	// The production policy refuses loopback and plain http, which is what
+	// httptest binds to; the helper relaxes exactly those two and keeps every
+	// ceiling as production has them.
+	restore, err := api.SetGIFUpstreamForTest(srv.URL)
+	if err != nil {
+		t.Fatalf("SetGIFUpstreamForTest: %v", err)
+	}
 	t.Cleanup(restore)
 	return rec
 }
@@ -350,5 +356,119 @@ func TestGIFRateLimitBucketIsSeparate(t *testing.T) {
 	// untouched by the GIF traffic above.
 	if !limiter.Allow("127.0.0.1", 5, time.Minute) {
 		t.Error("GIF traffic consumed the shared rate-limit bucket")
+	}
+}
+
+// ─── The bounded boundary is actually in the path (B5-1) ─────────────────────
+
+// stubKlipyHandler is stubKlipy for a case that needs to control the upstream
+// response itself rather than just its body and status.
+func stubKlipyHandler(t *testing.T, h http.HandlerFunc) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	restore, err := api.SetGIFUpstreamForTest(srv.URL)
+	if err != nil {
+		t.Fatalf("SetGIFUpstreamForTest: %v", err)
+	}
+	t.Cleanup(restore)
+}
+
+// An upstream that streams far past the ceiling is a 502, not an OOM: the
+// GIF proxy's Fetcher carries the byte limit, so this proves the adoption and
+// not only the package.
+func TestGIFOversizedUpstreamBecomesBadGateway(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	var written atomic.Int64
+	stubKlipyHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		chunk := bytes.Repeat([]byte("A"), 64<<10)
+		for written.Load() < 64<<20 {
+			n, err := w.Write(chunk)
+			written.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if got := decodeGIFError(t, rr); got != "BAD_GATEWAY" {
+		t.Errorf("error = %q, want BAD_GATEWAY", got)
+	}
+	// The ceiling is 2 MiB; some slack for socket buffers, nothing like 64 MiB.
+	if got := written.Load(); got > 16<<20 {
+		t.Fatalf("upstream wrote %d bytes — the body was buffered before the ceiling applied", got)
+	}
+}
+
+// An upstream that answers HTML while claiming JSON is refused before the
+// decoder sees it.
+func TestGIFWrongContentTypeBecomesBadGateway(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	stubKlipyHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>captive portal</body></html>"))
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+
+// A redirect is not followed at all: the upstream host is a constant, so a
+// 302 is either a provider change or somebody moving the destination.
+func TestGIFUpstreamRedirectIsRefused(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	var hits atomic.Int64
+	stubKlipyHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(gifUpstreamBody))
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("upstream saw %d requests, want exactly 1 — the redirect must not be followed", got)
+	}
+}
+
+// The production Fetcher, not the test one, refuses the loopback stub: the
+// address policy is on by default and the test helper is the only thing that
+// relaxes it.
+func TestGIFProductionPolicyRefusesLoopback(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("the production policy must not reach a loopback upstream")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(gifUpstreamBody))
+	}))
+	t.Cleanup(srv.Close)
+	// Point only the base URL at the stub; the Fetcher stays the production one.
+	restore := api.SetGIFBaseURLForTest(srv.URL)
+	t.Cleanup(restore)
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
 	}
 }

@@ -633,6 +633,157 @@ behaviour** — the three BPR-062 names the first draft omitted. Cache
 partition and expiry are **not** in scope here and are recorded as B7's,
 because this boundary fills no cache.
 
+**Evidence, 2026-09-04** — branch `feature/b5-1-safefetch` from `dev`
+`cbebd37c`; PR to `dev` #1541 (draft, opened 2026-09-04), commits `b03ea9a`
+and `e673856`. Both premises were re-verified at
+that base before any code was written, and both held: `gif_handler.go` had
+`GuardedDialContext`, `ErrUseLastResponse`, a 10 s `Timeout` and a 2 MiB
+`LimitReader` on decode; `(*Registry).HTTPDo` took an arbitrary
+plugin-supplied URL with any method and body, guarded only by the
+default-empty operator host allowlist, following five redirects under a 5 MiB
+cap.
+
+- **The package.** `Server/safefetch` — `doc.go`, `policy.go`, `errors.go`,
+  `classify.go`, `destination.go`, `fetch.go`, `body.go`. One `Fetcher` per
+  call site, built from a `Policy` that `New` refuses when any ceiling is
+  missing, so a call site cannot end up unbounded by omission. Per hop, in
+  order, before a packet leaves: scheme and port allowlists; no embedded
+  credentials; every A and AAAA answer resolved and classified with
+  IPv4-mapped normalisation, refusing if **any** is non-global; the connect
+  bound to exactly those addresses, carried on the request context, with the
+  hostname kept for SNI and no second lookup — a dial that arrives without
+  them, or for a host they do not name, fails closed. Automatic redirects are
+  off (`http.ErrUseLastResponse`); hops are followed by hand, re-running the
+  whole check, refusing scheme downgrades and dropping credential headers
+  across an origin (scheme+host+**port**, stricter than net/http's
+  hostname-only rule). One total deadline covers connect through last byte.
+  Two independent byte ceilings are enforced while reading — one before
+  decompression, one after — and an encoding that is neither gzip nor
+  identity, or a doubled `Content-Encoding` header, is refused rather than
+  returned as opaque bytes. The media type is checked as declared **and** as
+  sniffed from the bytes received. Concurrency is capped twice: per Fetcher,
+  and once for the process, so more Fetchers do not buy more sockets.
+- **Classifier.** `ClassifyAddr` adds what `ipAllowed` missed: the
+  documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
+  `2001:db8::/32`, `3fff::/20`), benchmarking (`198.18.0.0/15`, and IPv6
+  benchmarking inside `2001::/23`), and `0.0.0.0/8`, `192.0.0.0/24`,
+  `192.88.99.0/24`, `240.0.0.0/4`, `2001:20::/28`, `2002::/16`,
+  `64:ff9b:1::/48`, `100::/64`, `5f00::/16`. `TestIPAllowedAcceptsPublic`
+  asserted `203.0.113.5` was **allowed**; that assertion was wrong and is
+  gone with the function it tested.
+- **Adoption 1 — the GIF proxy.** `gifClient` is replaced by a `Fetcher`:
+  https on 443 only, zero redirects (the upstream host is a constant), the
+  same 10 s deadline, 2 MiB on the wire and after inflation, JSON-only
+  content types, 8 concurrent. `fetchGIFs` unmarshals a body that is already
+  bounded and typed. The test seam swaps the Fetcher, not an `http.Client`,
+  and relaxes exactly two things — loopback and the stub's scheme/port —
+  keeping every ceiling. Four `api`-level cases prove the boundary is in the
+  handler's path and not only in the package: a 64 MiB upstream body becomes
+  a 502 with the upstream cut off long before it finishes writing, an HTML
+  page declared as JSON becomes a 502, a 302 is not followed (the upstream
+  sees exactly one request), and the **production** Fetcher — pointed at the
+  loopback stub with only the base URL swapped — refuses it.
+- **Adoption 2 — the plugin `http` capability.** `HTTPDo` keeps the operator
+  allowlist and hands everything else to the same package. The allowlist now
+  rides `Request.AllowHost`, so it is re-checked on **every** hop rather than
+  only on the URL the plugin supplied, and `ErrHTTPHostDenied` stays the
+  sentinel callers test for. `ipAllowed`, `GuardedDialContext`,
+  `lookupIPAddr` and `dialContext` are deleted; their coverage moved to
+  `Server/safefetch` and to four new `TestHTTPDo_*` cases. Three deliberate
+  tightenings on this path: a port other than 80 or 443, embedded credentials
+  in the URL, and a media type outside a fixed list are all refused now and
+  none was checked before. Blast radius today is nil — `plugins.enabled`
+  defaults false, the allowlist defaults empty, and no wazero host import is
+  wired, so no guest code can reach `HTTPDo` at all.
+- **The egress edit, as predicted.** Removing the dialing left
+  `api/gif_handler.go` and `plugin/host_http.go` with zero outbound
+  constructs, and `TestEgressAllowIsLive` failed both rows exactly as this
+  step said it would. Both are dropped and replaced by `safefetch/policy.go`
+  (`New`, `defaultDial`) and `safefetch/fetch.go` (`(*Fetcher).roundTrip`);
+  `docs/architecture/diagnostics.md`'s prose table is in step. The callers'
+  gates did not move, so the compiled defaults still reach nowhere.
+- **Acceptance, all of it.** 55 tests in `Server/safefetch`, green under
+  `-race`: every blocked class by name including IPv4-mapped forms; a
+  reachable host redirecting to a blocked target, asserting the hop was
+  refused by re-validation and not merely by the dial binding; mixed answer
+  sets; CNAME chains judged on the final answer with exactly one lookup; an
+  address that changes between validation and connect (one lookup, and the
+  dial goes to the validated address); a lying `Content-Length` (a hijacked
+  connection declaring 10 bytes and streaming 4 MiB); a decompression bomb;
+  a slow-loris body and a slow-loris header; a redirect loop; a scheme
+  downgrade; a sniffed type disagreeing with the declared one; the
+  concurrency cap and the process gate; cancellation; residual buffering (an
+  endless body, asserting the upstream never got to write it); and offline
+  behaviour for both a resolve failure and a dial failure, each
+  distinguishable from a policy refusal.
+- **Every control was revert-proved.** Twenty-four reverts across five
+  rounds: each control was deleted or neutered, its named test confirmed red
+  for the right reason, and the code restored. One round found two tests that
+  passed either way — the control could be removed and the test stayed green
+  — and both were strengthened rather than accepted: the IP-literal case now
+  asserts the refusal did not come back wrapped in a `*url.Error`, which is
+  what the dial-time re-check produces and the pre-dial check does not, and
+  the redirect case now asserts the error is not the dial binding's "was
+  validated" message. Two structural guards were proved the same way, each
+  against a probe file: `TestNoProductionOverrideOfSeams` walks the server
+  tree and fails if any non-test file sets `Policy.Classify`, `Resolve` or
+  `Dial` — the seams that would replace the boundary — and
+  `TestEveryProductionPolicyNamesContentTypes` fails a production `Policy`
+  literal that omits the media-type allowlist, since omitting it is how a
+  call site would silently accept any type.
+- **Deferred, per decision 2, and said so in the package doc.** Aggregate
+  cross-caller byte budgets and byte-weighted cache eviction are B7's. The
+  interface is shaped for them: one admission point (`Fetch`'s gate acquire)
+  where a budget is charged, one accounting point (`limitedReader`) where
+  bytes are already counted, and per-fetch numbers on `Policy` so a
+  process-wide budget is a new field plus a second gate, not a call-site
+  change. Cache partition and expiry are recorded as B7's here and in
+  `docs/trust-model.md`; this boundary fills no cache.
+
+- **An independent pass was briefed to refute the boundary** — told to assume
+  a bypass, a check running after the dial, a limit read off a header, and a
+  leftover unbounded path at one of the two call sites, and to bring
+  `file:line` evidence for each. It found **six defects, all fixed here**, and
+  reported ~35 failed attacks with the file and line that stopped each.
+  1. The seams guard was a text scan for lines starting with `Classify:`, and
+     the assignment form (`var p safefetch.Policy` then `p.Classify = ...`)
+     walked straight past it — so the guard on the one escape hatch that
+     disables the whole address policy proved nothing. It is now
+     `TestProductionPolicyShape`, parsed with `go/ast`: a production `Policy`
+     must be a composite literal, must name `ContentTypes`, and must set no
+     seam, in any spelling. All three evasions were re-run against it and all
+     three now fail.
+  2. **A real bypass.** `64:ff9b::/96` was allowed, so on any host with
+     NAT64/DNS64 — the default on IPv6-only cloud subnets —
+     `https://[64:ff9b::a9fe:a9fe]/` reached the cloud metadata service.
+     `fec0::/10` and `::/96` were allowed too. Fixed as described above.
+  3. Both byte ceilings were off by one _and_ framing-dependent:
+     `limitedReader` reports its breach on the read after the allowance runs
+     out, and an `http` body that returns its last bytes together with
+     `io.EOF` never gives it that read, so exactly `ceiling+1` bytes came back
+     accepted while `ceiling+2` was refused. `readBody` now checks the final
+     length as well; the streaming limiter still bounds memory. Boundary
+     cases at `ceiling-1`, `ceiling`, `ceiling+1` and `ceiling+2` were added
+     for both ceilings.
+  4. The scheme-downgrade **call site** was deletable with the suite green:
+     the "end to end" case was refused a hop earlier by the scheme allowlist
+     and `checkNoDowngrade` was never reached with a previous hop. There is
+     now a real `httptest.NewTLSServer` chain, and deleting the call site
+     turns it red.
+  5. `TestHTTPDo_AllowlistHoldsOnRedirects` issued no request at all — the
+     redundant pre-check in `HTTPDo` refused the URL before safefetch was
+     called, its `t.Error` was unreachable, and removing `Request.AllowHost`
+     left the suite green. The pre-check is gone, so one check does the work
+     and unwiring it now turns `TestHTTPDo_UnlistedHostIsDenied` red.
+  6. The zone check in `ClassifyAddr` was untested and deletable; it has cases
+     now.
+
+**Not included:** the client. C-09 clauses 1, 7 and 8 — the native broker
+owning renderer fetches, the typed minimum, and narrowing the `https://*`
+capability — are B7's under decision 1, and nothing under `Client/` is
+touched. No `findings-ledger` rows were added: SEC-03's register row is
+B5-12's. No configuration key was added, so no `gendocs` block moved.
+
 ## B5-2 — Upload quotas, reserved headroom, cleanup and pressure
 
 **Closes:** roadmap workstream 4; **SEC-04** (decision 12). **Blocked
