@@ -10,14 +10,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// journalOrderSpy wraps the real store and, once armed, snapshots
-// retention_runs.files (the current run's row) the instant the call'th
-// SweepRetention returns — i.e. right after that batch's DELETE has
-// committed, before the service gets a chance to journal *this* batch.
-// Seeing an earlier batch's names already there, and not this batch's,
-// proves the journal write for a batch happens before the next batch's
-// destructive step runs (OC-0403, and OC-0396's journal half on the
-// replay path).
+// journalOrderSpy snapshots retention_runs.files the instant a journaled
+// sweep returns — after that batch's deletion transaction committed but
+// before the service can perform another write. Seeing that batch's names
+// proves the deletion and its durable resume handle committed atomically.
 type journalOrderSpy struct {
 	*db.DB
 	calls      int
@@ -25,16 +21,16 @@ type journalOrderSpy struct {
 	filesAt    []byte // raw retention_runs.files read right after call snapshotAt
 }
 
-func (s *journalOrderSpy) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
-	ids, files, err := s.DB.SweepRetention(ctx, channelID, cutoff, limit)
+func (s *journalOrderSpy) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
+	activeRunID, ids, files, err := s.DB.SweepRetentionJournaled(ctx, runID, channelID, cutoff, limit, countChannel)
 	s.calls++
 	if s.calls == s.snapshotAt {
 		var raw string
-		if scanErr := s.DB.QueryRowContext(ctx, `SELECT files FROM retention_runs ORDER BY id DESC LIMIT 1`).Scan(&raw); scanErr == nil {
+		if scanErr := s.DB.QueryRowContext(ctx, `SELECT files FROM retention_runs WHERE id = ?`, activeRunID).Scan(&raw); scanErr == nil {
 			s.filesAt = []byte(raw)
 		}
 	}
-	return ids, files, err
+	return activeRunID, ids, files, err
 }
 
 func filesJSON(t *testing.T, raw []byte) []string {
@@ -49,12 +45,11 @@ func filesJSON(t *testing.T, raw []byte) []string {
 	return out
 }
 
-// Tick journals a channel's swept file names after every batch's commit,
-// not once after the whole run: a kill anywhere past a batch's commit still
-// finds that batch's names durably journaled (OC-0403). RetentionBatch is
-// 500, so 520 old messages force two batches; snapshotting the journal the
-// instant batch 2 returns must already show batch 1's 500 names.
-func TestRetention_TickJournalsEachBatchBeforeTheNext(t *testing.T) {
+// Tick journals a channel's swept file names inside every batch's deletion
+// transaction: a kill anywhere after commit still finds that same batch's
+// names. RetentionBatch is 500; snapshotting as batch 1 returns must already
+// show all 500 names without a service-layer journal write.
+func TestRetention_TickJournalsEachBatchInDeleteTransaction(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -63,7 +58,7 @@ func TestRetention_TickJournalsEachBatchBeforeTheNext(t *testing.T) {
 	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
 		t.Fatal(err)
 	}
-	spy := &journalOrderSpy{DB: database, snapshotAt: 2}
+	spy := &journalOrderSpy{DB: database, snapshotAt: 1}
 	svc := NewRetentionService(spy)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetClock(func() time.Time { return retentionNow })
@@ -80,9 +75,9 @@ func TestRetention_TickJournalsEachBatchBeforeTheNext(t *testing.T) {
 	if spy.calls < 2 {
 		t.Fatalf("SweepRetention called %d times, want at least 2 batches", spy.calls)
 	}
-	atBatch2 := filesJSON(t, spy.filesAt)
-	if len(atBatch2) != RetentionBatch {
-		t.Fatalf("journal before batch 2 = %d files, want %d (batch 1's names, journaled before batch 2's delete ran)", len(atBatch2), RetentionBatch)
+	atBatch1 := filesJSON(t, spy.filesAt)
+	if len(atBatch1) != RetentionBatch {
+		t.Fatalf("journal at batch 1 commit = %d files, want %d from that same deletion transaction", len(atBatch1), RetentionBatch)
 	}
 }
 
@@ -120,7 +115,7 @@ func seedStaleMarkerBacklog(t *testing.T, database *db.DB, uid int64, n int) (ch
 // "a restored backup ... loses them again before anything serves") does not
 // hold if the replay stops at a budget. The spy also pins, directly on the
 // replay path rather than only through Tick, that a batch's files are
-// journaled before the next batch's delete runs.
+// journaled in its own deletion transaction.
 func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
@@ -129,7 +124,7 @@ func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testi
 	chID := seedStaleMarkerBacklog(t, database, uid, backlog)
 	markers := newTestMarkers(t)
 	dir := t.TempDir()
-	spy := &journalOrderSpy{DB: database, snapshotAt: 2} // right after batch 2's DELETE commits
+	spy := &journalOrderSpy{DB: database, snapshotAt: 1}
 	svc := NewRetentionService(spy)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetMarkers(markers)
@@ -155,8 +150,8 @@ func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testi
 	if runs, _ := database.ListUnfinishedRetentionRuns(ctx); len(runs) != 0 {
 		t.Errorf("runs still listed after the replay: %+v", runs)
 	}
-	atBatch2 := filesJSON(t, spy.filesAt)
-	if len(atBatch2) != RetentionBatch {
-		t.Fatalf("journal before batch 2 of the replay = %d files, want %d (batch 1's names, journaled before batch 2's delete ran)", len(atBatch2), RetentionBatch)
+	atBatch1 := filesJSON(t, spy.filesAt)
+	if len(atBatch1) != RetentionBatch {
+		t.Fatalf("journal at replay batch 1 commit = %d files, want %d from that same deletion transaction", len(atBatch1), RetentionBatch)
 	}
 }

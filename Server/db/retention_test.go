@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -24,6 +25,56 @@ func seedAgedMessage(t *testing.T, database *db.DB, chID, uid int64, content str
 	}
 	id, _ := res.LastInsertId()
 	return id
+}
+
+// The run row is the only durable handle left on replay frames and blobs
+// after retention deletes their message and attachment rows. It must be
+// committed atomically with deletion, and a no-op lazy batch must not create
+// an empty run.
+func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid := seedUser(t, database, "retention-atomic-owner")
+	chID := seedChannel(t, database, "retention-atomic")
+	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	mid := seedAgedMessage(t, database, chID, uid, "must stay journaled", cutoff.Add(-time.Hour), false)
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id)
+		 VALUES ('atomic-att', ?, 'atomic', 'stored-atomic', 'text/plain', 1, ?)`, mid, uid); err != nil {
+		t.Fatal(err)
+	}
+
+	// A caller-provided run that does not exist makes the journal write fail;
+	// the deletion and its attachment removal must roll back with it.
+	if _, _, _, err := database.SweepRetentionJournaled(ctx, 999999, chID, cutoff, 10, true); err == nil {
+		t.Fatal("journaled sweep with a missing run succeeded")
+	}
+	if n, err := database.CountRetentionCandidates(ctx, chID, cutoff); err != nil || n != 1 {
+		t.Fatalf("candidates after rolled-back journal failure = %d, %v; want 1", n, err)
+	}
+	var attachments int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM attachments WHERE message_id = ?`, mid).Scan(&attachments); err != nil || attachments != 1 {
+		t.Fatalf("attachments after rolled-back journal failure = %d, %v; want 1", attachments, err)
+	}
+
+	if runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff.Add(-24*time.Hour), 10, true); err != nil || runID != 0 || len(ids) != 0 || len(files) != 0 {
+		t.Fatalf("empty lazy sweep = run %d, ids %v, files %v, %v; want no run", runID, ids, files, err)
+	}
+
+	runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff, 10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runID == 0 || !slices.Equal(ids, []int64{mid}) || !slices.Equal(files, []string{"stored-atomic"}) {
+		t.Fatalf("sweep = run %d, ids %v, files %v; want a run, [%d], [stored-atomic]", runID, ids, files, mid)
+	}
+	run, err := database.GetRetentionRun(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Channels != 1 || run.MessagesDeleted != 1 || !slices.Equal(run.PurgePending, ids) || !slices.Equal(run.Files, files) {
+		t.Fatalf("journal at deletion commit = %+v; want one channel, ids %v and files %v", run, ids, files)
+	}
 }
 
 func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
