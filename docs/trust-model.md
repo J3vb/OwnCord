@@ -224,7 +224,14 @@ The broker MUST:
    documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
    `2001:db8::/32`, `3fff::/20`), the benchmarking ranges (`198.18.0.0/15`,
    `2001:2::/48`) and the remaining reserved blocks that the old
-   `plugin/host_http.go` `ipAllowed` missed. The broker uses the same set.
+   `plugin/host_http.go` `ipAllowed` missed, plus `fec0::/10` and `::/96`.
+   RFC 6052's well-known NAT64 prefix `64:ff9b::/96` is **unwrapped rather
+   than blocked** — the embedded IPv4 address is what a translator delivers
+   to, so that is what gets classified; blocking the prefix would cut an
+   IPv6-only server off from every IPv4 upstream, and allowing it hands over
+   every range the list refuses. An operator-chosen network-specific prefix
+   (RFC 6052 §2.2) is indistinguishable from any other global address and is
+   outside what either implementation can see. The broker uses the same set.
 4. **Connect only to the validated addresses**, keeping the hostname for SNI
    and certificate checks. No second unconstrained lookup after validation
    (`Server/safefetch/destination.go`, `(*Fetcher).dial`, is the server-side

@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/safefetch"
@@ -95,13 +94,23 @@ func TestHTTPDo_AllowlistedHostResolvingPrivateIsDenied(t *testing.T) {
 	}
 }
 
-// A host the allowlist does not name never leaves the process.
+// A host the allowlist does not name never leaves the process — and is
+// refused by the allowlist rather than by failing to resolve, which is what
+// makes this the test that fails if Request.AllowHost stops being wired.
+// .invalid never resolves (RFC 6761), so an unwired allowlist shows up as a
+// DNS error instead of a denial.
 func TestHTTPDo_UnlistedHostIsDenied(t *testing.T) {
 	r := newTestRegistry([]string{"api.example.com"})
 	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
-	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://evil.example.org/"})
+	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://evil.invalid/"})
 	if !errors.Is(err, ErrHTTPHostDenied) {
 		t.Fatalf("want ErrHTTPHostDenied, got %v", err)
+	}
+	if !errors.Is(err, safefetch.ErrHostNotAllowed) {
+		t.Fatalf("the refusal must come from the allowlist, not from anything downstream: %v", err)
+	}
+	if errors.Is(err, safefetch.ErrResolve) {
+		t.Fatal("the host was resolved — the allowlist is no longer wired into the fetch")
 	}
 }
 
@@ -126,35 +135,54 @@ func TestHTTPDo_RequiresTheCapability(t *testing.T) {
 	}
 }
 
-// The allowlist holds on redirects, not only on the URL the plugin supplied:
-// the stub is allowlisted, its redirect target is not, and the target must
-// never be requested.
-func TestHTTPDo_AllowlistHoldsOnRedirects(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("the redirect target must never be requested")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer target.Close()
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL+"/x", http.StatusFound)
-	}))
-	defer origin.Close()
+// The allowlist is applied per hop, not only to the URL the plugin supplied.
+//
+// This cannot be driven through a real redirect from here: the production
+// policy's port allowlist is [80, 443], so no httptest stub is reachable at
+// all, and HTTPDo's own pre-check refuses a loopback host before safefetch is
+// even called. What this asserts is the wiring — that the function HTTPDo
+// hands to safefetch as Request.AllowHost is the allowlist, applied to a
+// "host:port" with the port stripped. That safefetch then consults it on
+// every hop is safefetch.TestFetch_AllowHostAppliesToEveryHop's job, and the
+// earlier version of this test claimed to do both and did neither.
+func TestAllowHostPortAppliesTheAllowlist(t *testing.T) {
+	r := newTestRegistry([]string{"api.example.com", "example.org"})
+	cases := []struct {
+		hostport string
+		ok       bool
+	}{
+		{"api.example.com:443", true},
+		{"api.example.com:80", true},
+		{"api.example.com", true},
+		{"v1.api.example.com:443", true},
+		{"sub.example.org:443", true},
+		{"evil-api.example.com:443", false},
+		{"api.example.com.evil.com:443", false},
+		{"127.0.0.1:8080", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := r.allowHostPort(c.hostport); got != c.ok {
+			t.Errorf("allowHostPort(%q) = %v, want %v", c.hostport, got, c.ok)
+		}
+	}
+}
 
-	// Both stubs are on loopback, which the production policy refuses outright
-	// — so this case asserts the allowlist decision that runs before the
-	// address check, on the hop the plugin did not choose.
-	r := newTestRegistry([]string{"127.0.0.1"})
-	if !r.allowHostPort("127.0.0.1:443") {
-		t.Fatal("the test allowlist should accept the stub host")
-	}
-	r2 := newTestRegistry([]string{"api.example.com"})
-	if r2.allowHostPort("127.0.0.1:443") {
-		t.Fatal("a host outside the allowlist must be refused on every hop")
-	}
+// HTTPDo actually passes that function through, rather than leaving
+// Request.AllowHost nil and losing the per-hop check. An allowlisted host
+// that resolves nowhere reaches safefetch, so the refusal that comes back
+// proves the request was built and handed over.
+func TestHTTPDo_PassesTheAllowlistToSafefetch(t *testing.T) {
+	r := newTestRegistry([]string{"example.com"})
 	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
-	_, err := r2.HTTPDo(context.Background(), inst, HTTPRequest{URL: origin.URL})
+
+	// A host the allowlist names, on a port the policy does not: safefetch
+	// refuses it, which it could only do having been called.
+	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://example.com:8443/"})
+	if !errors.Is(err, safefetch.ErrBlockedPort) {
+		t.Fatalf("want safefetch.ErrBlockedPort, got %v", err)
+	}
 	if !errors.Is(err, ErrHTTPHostDenied) {
-		t.Fatalf("want ErrHTTPHostDenied, got %v", err)
+		t.Fatalf("a destination refusal must still carry ErrHTTPHostDenied, got %v", err)
 	}
 }

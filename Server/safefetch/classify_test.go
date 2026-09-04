@@ -108,3 +108,58 @@ func TestClassifyAddr_ErrorIsBlockedAddress(t *testing.T) {
 		t.Errorf("refusal should name the address, got %q", err)
 	}
 }
+
+// A zone only ever names a scoped, non-global interface, and Unmap does not
+// clear it for a non-mapped address. Without this the check is deletable with
+// the suite green, which is how it was found.
+func TestClassifyAddr_RejectsZonedAddresses(t *testing.T) {
+	for _, s := range []string{"2606:4700:4700::1111%eth0", "fe80::1%eth0", "::1%lo"} {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			t.Fatalf("ParseAddr(%q): %v", s, err)
+		}
+		if err := ClassifyAddr(addr); err == nil {
+			t.Errorf("ClassifyAddr(%s) allowed a zoned address", s)
+		}
+	}
+}
+
+// RFC 6052's well-known prefix wraps an IPv4 address that a NAT64 translator
+// unwraps and delivers, so the embedded address is the one that decides. On
+// an IPv6-only host with NAT64/DNS64 — the default on IPv6-only cloud subnets
+// — 64:ff9b::a9fe:a9fe reaches 169.254.169.254 and the cloud metadata service
+// with it.
+func TestClassifyAddr_UnwrapsNAT64(t *testing.T) {
+	blocked := map[string]string{
+		"64:ff9b::7f00:1":    "127.0.0.1",
+		"64:ff9b::a00:5":     "10.0.0.5",
+		"64:ff9b::a9fe:a9fe": "169.254.169.254 (cloud metadata)",
+		"64:ff9b::c0a8:1":    "192.168.0.1",
+		"64:ff9b::c000:201":  "192.0.2.1 (documentation)",
+		"64:ff9b::6440:1":    "100.64.0.1 (carrier-grade NAT)",
+	}
+	for addr, why := range blocked {
+		if err := ClassifyAddr(netip.MustParseAddr(addr)); err == nil {
+			t.Errorf("ClassifyAddr(%s) allowed a NAT64 wrapper around %s", addr, why)
+		}
+	}
+	// A NAT64 wrapper around a routable address is how an IPv6-only server
+	// reaches an IPv4-only upstream; refusing the prefix outright would cut
+	// that off, so it has to be unwrapped rather than blocked.
+	for _, addr := range []string{"64:ff9b::808:808", "64:ff9b::5db8:d822"} {
+		if err := ClassifyAddr(netip.MustParseAddr(addr)); err != nil {
+			t.Errorf("ClassifyAddr(%s) refused a NAT64 wrapper around a public address: %v", addr, err)
+		}
+	}
+}
+
+// Two more non-global classes that neither the IANA special-purpose registry
+// rows nor Go's own predicates cover: deprecated IPv6 site-local, and the
+// deprecated IPv4-compatible form, which is another IPv4 address in disguise.
+func TestClassifyAddr_RejectsDeprecatedScopedForms(t *testing.T) {
+	for _, s := range []string{"fec0::1", "feff::1", "::7f00:1", "::a00:5", "::c0a8:1"} {
+		if err := ClassifyAddr(netip.MustParseAddr(s)); err == nil {
+			t.Errorf("ClassifyAddr(%s) allowed a deprecated non-global form", s)
+		}
+	}
+}

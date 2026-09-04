@@ -49,6 +49,12 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("100::/64"), "discard-only (RFC6666)"},
 	{netip.MustParsePrefix("2001::/23"), "IETF protocol assignments, including Teredo and IPv6 benchmarking (RFC2928)"},
 	{netip.MustParsePrefix("2001:20::/28"), "ORCHIDv2 (RFC7343)"},
+	{netip.MustParsePrefix("fec0::/10"), "deprecated site-local (RFC3879)"},
+	// ::/96 is the deprecated IPv4-compatible form — another IPv4 address in
+	// disguise, and unlike the IPv4-mapped form Unmap does not normalise it.
+	// It is listed before the loopback and unspecified rows below only
+	// because it contains them; the reason it reports is the accurate one.
+	{netip.MustParsePrefix("::/96"), "deprecated IPv4-compatible (RFC4291)"},
 	{netip.MustParsePrefix("2001:db8::/32"), "documentation (RFC3849)"},
 	{netip.MustParsePrefix("2002::/16"), "6to4 (RFC3056)"},
 	{netip.MustParsePrefix("3fff::/20"), "documentation (RFC9637)"},
@@ -57,6 +63,23 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("fe80::/10"), "link-local (RFC4291)"},
 	{netip.MustParsePrefix("ff00::/8"), "multicast (RFC4291)"},
 }
+
+// nat64WellKnown is RFC 6052's well-known prefix. An address inside it is a
+// wrapper: a NAT64 translator strips the prefix and delivers the packet to the
+// IPv4 address in the low 32 bits, so that embedded address is the one the
+// policy has to judge.
+//
+// Neither blocking nor allowing the prefix outright is right. Blocking it cuts
+// an IPv6-only server — the default on IPv6-only cloud subnets, where DNS64
+// synthesises these addresses for every IPv4-only host — off from every IPv4
+// upstream it has. Allowing it hands an attacker every range this table
+// refuses: 64:ff9b::a9fe:a9fe is 169.254.169.254 and the cloud metadata
+// service with it. So it is unwrapped and the embedded address classified.
+//
+// Known limit, and it is the C-09 contract's limit too: an operator-chosen
+// network-specific prefix (RFC 6052 §2.2) is indistinguishable from any other
+// global address, so a NAT64 deployment that uses one is invisible here.
+var nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
 
 // ClassifyAddr reports nil when addr is a globally routable unicast address
 // this server may dial, and a wrapped ErrBlockedAddress otherwise.
@@ -76,6 +99,14 @@ func ClassifyAddr(addr netip.Addr) error {
 	a := addr.Unmap()
 	if a.Zone() != "" {
 		return fmt.Errorf("%w: %s carries a zone, which only scoped (non-global) addresses do", ErrBlockedAddress, addr)
+	}
+	if nat64WellKnown.Contains(a) {
+		v4 := a.As16()
+		embedded := netip.AddrFrom4([4]byte(v4[12:16]))
+		if err := ClassifyAddr(embedded); err != nil {
+			return fmt.Errorf("%w (reached through the NAT64 address %s)", err, a)
+		}
+		return nil
 	}
 	for _, b := range blockedPrefixes {
 		if b.prefix.Contains(a) {

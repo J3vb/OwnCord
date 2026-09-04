@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -97,25 +96,20 @@ var httpFetcher = safefetch.MustNew(safefetch.Policy{
 	MaxConcurrent:        httpMaxConcurrent,
 })
 
-// HTTPDo executes a plugin-initiated HTTP request after enforcing the host
+// HTTPDo executes a plugin-initiated HTTP request under the operator host
 // allowlist declared in PluginsConfig. Everything else — parsing, address
 // classification, the dial binding, redirects, the deadline, the byte
-// ceilings and the content-type allowlist — is Server/safefetch's, applied
-// identically on every hop.
+// ceilings and the content-type allowlist — is Server/safefetch's.
+//
+// The allowlist is enforced once, as Request.AllowHost, which safefetch
+// consults for the plugin's own URL and for every redirect hop alike. An
+// earlier version also checked it here first; that second check was
+// redundant, and it made the wiring untestable — removing AllowHost left the
+// suite green, because this check refused the same requests on its own.
 func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) (*HTTPResponse, error) {
 	if !inst.Manifest.HasCapability(CapHTTP) {
 		return nil, ErrCapabilityNotGranted
 	}
-	// Checked here as well as per-hop so the caller gets the allowlist's own
-	// error for its own URL, rather than a redirect-shaped one.
-	parsed, err := url.Parse(req.URL)
-	if err != nil {
-		return nil, fmt.Errorf("plugin http: invalid URL: %w", err)
-	}
-	if host := parsed.Hostname(); !r.hostAllowed(host) {
-		return nil, fmt.Errorf("%w: %s", ErrHTTPHostDenied, host)
-	}
-
 	resp, err := httpFetcher.Fetch(ctx, safefetch.Request{
 		Method:    req.Method,
 		URL:       req.URL,

@@ -2,6 +2,7 @@ package safefetch
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -93,6 +94,15 @@ type Policy struct {
 	// Dial opens one connection to an already-validated concrete address.
 	// nil selects a plain net.Dialer. It never sees a hostname.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// TLSConfig is the client TLS configuration. nil selects the system
+	// roots and full verification, which every production policy uses.
+	//
+	// It is a seam on the same footing as the three above — a config that
+	// trusts a private CA, or worse skips verification, is an opt-out of
+	// certificate validation — so TestProductionPolicyShape refuses it in
+	// production code too. Tests use it to trust an httptest TLS stub.
+	TLSConfig *tls.Config
 }
 
 // Fetcher performs bounded fetches under one Policy. Build one per call site
@@ -143,6 +153,7 @@ func New(p Policy) (*Fetcher, error) {
 		// the kind of ambient authority a destination policy must not have.
 		Transport: &http.Transport{
 			DialContext:         f.dial,
+			TLSClientConfig:     p.TLSConfig,
 			DisableCompression:  true, // the body ceilings need to see the wire bytes
 			MaxIdleConns:        8,
 			MaxIdleConnsPerHost: 4,

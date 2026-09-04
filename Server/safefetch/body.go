@@ -57,6 +57,7 @@ func (f *Fetcher) readResponse(ctx context.Context, resp *http.Response, dest *d
 func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped bool) ([]byte, error) {
 	wire := &limitedReader{r: resp.Body, remaining: f.policy.MaxBytes + 1, over: ErrBodyTooLarge}
 	var src io.Reader = wire
+	limit, over := f.policy.MaxBytes, ErrBodyTooLarge
 	if gzipped {
 		zr, err := gzip.NewReader(wire)
 		if err != nil {
@@ -64,10 +65,19 @@ func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped boo
 		}
 		defer func() { _ = zr.Close() }()
 		src = &limitedReader{r: zr, remaining: f.policy.MaxDecompressedBytes + 1, over: ErrDecompressedTooLarge}
+		limit, over = f.policy.MaxDecompressedBytes, ErrDecompressedTooLarge
 	}
 	body, err := io.ReadAll(src)
 	if err != nil {
 		return nil, f.readError(ctx, err)
+	}
+	// limitedReader reports its breach on the read *after* the allowance runs
+	// out, and a source that returns its last bytes together with io.EOF —
+	// which net/http bodies do — never gives it that read. Without this check
+	// a body of exactly ceiling+1 came back accepted while ceiling+2 was
+	// refused, so whether the ceiling held depended on wire framing.
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("%w: %d bytes past a %d-byte ceiling", over, len(body), limit)
 	}
 	return body, nil
 }
@@ -153,8 +163,12 @@ func normaliseType(v string) string {
 // remaining bytes and then fails with over, so the ceiling applies while the
 // body streams rather than after it has been buffered.
 //
-// remaining is set to the ceiling plus one: a body of exactly the ceiling
-// reads to EOF and succeeds, and only the byte past it trips the error.
+// It is the streaming half of the ceiling: it stops an endless body after
+// ceiling+1 bytes so nothing larger ever reaches memory. It is not the whole
+// ceiling — a source that returns its last bytes together with io.EOF is never
+// asked for the read that would report the breach — so readBody checks the
+// final length as well. Both are needed: this one bounds memory, that one
+// makes the limit exact.
 //
 // B5 decision 2's deferred aggregate byte budget is charged here.
 type limitedReader struct {

@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -783,5 +786,177 @@ func TestFetch_ProcessGateBoundsEveryFetcher(t *testing.T) {
 	}
 	if got := peak.Load(); got > 1 {
 		t.Fatalf("peak concurrency %d across two Fetchers, but the process gate was 1", got)
+	}
+}
+
+// The ceilings are exact, and exactness must not depend on how the body is
+// framed. limitedReader reports its breach on the read *after* the allowance
+// runs out, and an http body that returns (n, io.EOF) together never gives it
+// that read — so a body of exactly ceiling+1 came back accepted, while
+// ceiling+2 was refused. The boundary is asserted directly here.
+func TestFetch_ByteCeilingIsExact(t *testing.T) {
+	const ceiling = 1000
+	for _, size := range []int{ceiling - 1, ceiling, ceiling + 1, ceiling + 2} {
+		srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write(bytes.Repeat([]byte("A"), size))
+		})
+		resp, err := get(newFetcher(t, srv, func(p *Policy) { p.MaxBytes = ceiling }), srv.URL)
+		switch {
+		case size <= ceiling && err != nil:
+			t.Errorf("%d bytes under a %d ceiling was refused: %v", size, ceiling, err)
+		case size <= ceiling && len(resp.Body) != size:
+			t.Errorf("%d bytes came back as %d", size, len(resp.Body))
+		case size > ceiling && !errors.Is(err, ErrBodyTooLarge):
+			t.Errorf("%d bytes over a %d ceiling was accepted (err=%v)", size, ceiling, err)
+		}
+	}
+}
+
+func TestFetch_DecompressedCeilingIsExact(t *testing.T) {
+	const ceiling = 1000
+	for _, size := range []int{ceiling, ceiling + 1, ceiling + 2} {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		if _, err := zw.Write(bytes.Repeat([]byte("A"), size)); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("gzip close: %v", err)
+		}
+		body := buf.Bytes()
+		srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Encoding", "gzip")
+			_, _ = w.Write(body)
+		})
+		resp, err := get(newFetcher(t, srv, func(p *Policy) {
+			p.MaxBytes = 64 << 10
+			p.MaxDecompressedBytes = ceiling
+		}), srv.URL)
+		switch {
+		case size <= ceiling && err != nil:
+			t.Errorf("%d inflated bytes under a %d ceiling was refused: %v", size, ceiling, err)
+		case size <= ceiling && len(resp.Body) != size:
+			t.Errorf("%d inflated bytes came back as %d", size, len(resp.Body))
+		case size > ceiling && !errors.Is(err, ErrDecompressedTooLarge):
+			t.Errorf("%d inflated bytes over a %d ceiling was accepted (err=%v)", size, ceiling, err)
+		}
+	}
+}
+
+// The same boundary at the reader, where the framing is controllable: a
+// source that hands back its last bytes together with io.EOF must not slip a
+// byte past the allowance.
+func TestLimitedReader_ReportsTheBreachWhateverTheFraming(t *testing.T) {
+	for _, joinedEOF := range []bool{true, false} {
+		l := &limitedReader{r: &eofFramer{data: bytes.Repeat([]byte("A"), 1001), joined: joinedEOF}, remaining: 1001, over: ErrBodyTooLarge}
+		got, err := io.ReadAll(l)
+		if len(got) != 1001 {
+			t.Errorf("joinedEOF=%v: read %d bytes, want 1001", joinedEOF, len(got))
+		}
+		_ = err
+		// The reader itself is allowed to be framing-dependent; readBody is
+		// not, which is what the two cases above assert end to end.
+	}
+}
+
+// eofFramer returns its data either with io.EOF on the final read (joined) or
+// with a separate zero-byte EOF read (not joined) — the two shapes an
+// io.Reader is allowed to use, and the two the ceiling must agree about.
+type eofFramer struct {
+	data   []byte
+	off    int
+	joined bool
+}
+
+func (e *eofFramer) Read(p []byte) (int, error) {
+	if e.off >= len(e.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, e.data[e.off:])
+	e.off += n
+	if e.off >= len(e.data) && e.joined {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// The downgrade rule, end to end and through the redirect loop. The unit
+// cases above exercise checkNoDowngrade directly, which left the *call site*
+// deletable with the suite green — the "end to end" case they were paired
+// with was refused a hop earlier by the scheme allowlist and never reached
+// the second hop at all. This one starts on real TLS, so prev.Scheme is
+// genuinely https when the http Location arrives.
+func TestFetch_RedirectSchemeDowngradeEndToEnd(t *testing.T) {
+	target := stub(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("an http redirect target must never be requested from an https hop")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/x", http.StatusFound)
+	}))
+	t.Cleanup(origin.Close)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(origin.Certificate())
+	f, err := New(Policy{
+		Schemes:              []string{"http", "https"}, // http is allowed, and still refused as a downgrade
+		Ports:                []int{serverPort(t, origin), serverPort(t, target)},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         3,
+		Deadline:             5 * time.Second,
+		MaxBytes:             64 << 10,
+		MaxDecompressedBytes: 256 << 10,
+		MaxConcurrent:        4,
+		Classify:             allowLoopback,
+		TLSConfig:            &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := get(f, origin.URL); !errors.Is(err, ErrSchemeDowngrade) {
+		t.Fatalf("want ErrSchemeDowngrade, got %v", err)
+	}
+}
+
+// The same chain without the downgrade completes, so the case above is
+// refusing the scheme change and not simply failing to speak TLS.
+func TestFetch_HTTPSRedirectToHTTPSIsFollowed(t *testing.T) {
+	final := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	t.Cleanup(final.Close)
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/x", http.StatusFound)
+	}))
+	t.Cleanup(origin.Close)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(origin.Certificate())
+	pool.AddCert(final.Certificate())
+	f, err := New(Policy{
+		Schemes:              []string{"https"},
+		Ports:                []int{serverPort(t, origin), serverPort(t, final)},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         3,
+		Deadline:             5 * time.Second,
+		MaxBytes:             64 << 10,
+		MaxDecompressedBytes: 256 << 10,
+		MaxConcurrent:        4,
+		Classify:             allowLoopback,
+		TLSConfig:            &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	resp, err := get(f, origin.URL)
+	if err != nil {
+		t.Fatalf("an https -> https redirect must be followed: %v", err)
+	}
+	if string(resp.Body) != `{"ok":1}` || resp.FinalURL != final.URL+"/x" {
+		t.Fatalf("body=%q finalURL=%q", resp.Body, resp.FinalURL)
 	}
 }

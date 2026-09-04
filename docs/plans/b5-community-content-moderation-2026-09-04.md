@@ -582,7 +582,7 @@ cap.
   (`New`, `defaultDial`) and `safefetch/fetch.go` (`(*Fetcher).roundTrip`);
   `docs/architecture/diagnostics.md`'s prose table is in step. The callers'
   gates did not move, so the compiled defaults still reach nowhere.
-- **Acceptance, all of it.** 47 tests in `Server/safefetch`, green under
+- **Acceptance, all of it.** 55 tests in `Server/safefetch`, green under
   `-race`: every blocked class by name including IPv4-mapped forms; a
   reachable host redirecting to a blocked target, asserting the hop was
   refused by re-validation and not merely by the dial binding; mixed answer
@@ -619,6 +619,44 @@ cap.
   process-wide budget is a new field plus a second gate, not a call-site
   change. Cache partition and expiry are recorded as B7's here and in
   `docs/trust-model.md`; this boundary fills no cache.
+
+- **An independent pass was briefed to refute the boundary** — told to assume
+  a bypass, a check running after the dial, a limit read off a header, and a
+  leftover unbounded path at one of the two call sites, and to bring
+  `file:line` evidence for each. It found **six defects, all fixed here**, and
+  reported ~35 failed attacks with the file and line that stopped each.
+  1. The seams guard was a text scan for lines starting with `Classify:`, and
+     the assignment form (`var p safefetch.Policy` then `p.Classify = ...`)
+     walked straight past it — so the guard on the one escape hatch that
+     disables the whole address policy proved nothing. It is now
+     `TestProductionPolicyShape`, parsed with `go/ast`: a production `Policy`
+     must be a composite literal, must name `ContentTypes`, and must set no
+     seam, in any spelling. All three evasions were re-run against it and all
+     three now fail.
+  2. **A real bypass.** `64:ff9b::/96` was allowed, so on any host with
+     NAT64/DNS64 — the default on IPv6-only cloud subnets —
+     `https://[64:ff9b::a9fe:a9fe]/` reached the cloud metadata service.
+     `fec0::/10` and `::/96` were allowed too. Fixed as described above.
+  3. Both byte ceilings were off by one _and_ framing-dependent:
+     `limitedReader` reports its breach on the read after the allowance runs
+     out, and an `http` body that returns its last bytes together with
+     `io.EOF` never gives it that read, so exactly `ceiling+1` bytes came back
+     accepted while `ceiling+2` was refused. `readBody` now checks the final
+     length as well; the streaming limiter still bounds memory. Boundary
+     cases at `ceiling-1`, `ceiling`, `ceiling+1` and `ceiling+2` were added
+     for both ceilings.
+  4. The scheme-downgrade **call site** was deletable with the suite green:
+     the "end to end" case was refused a hop earlier by the scheme allowlist
+     and `checkNoDowngrade` was never reached with a previous hop. There is
+     now a real `httptest.NewTLSServer` chain, and deleting the call site
+     turns it red.
+  5. `TestHTTPDo_AllowlistHoldsOnRedirects` issued no request at all — the
+     redundant pre-check in `HTTPDo` refused the URL before safefetch was
+     called, its `t.Error` was unreachable, and removing `Request.AllowHost`
+     left the suite green. The pre-check is gone, so one check does the work
+     and unwiring it now turns `TestHTTPDo_UnlistedHostIsDenied` red.
+  6. The zone check in `ClassifyAddr` was untested and deletable; it has cases
+     now.
 
 **Not included:** the client. C-09 clauses 1, 7 and 8 — the native broker
 owning renderer fetches, the typed minimum, and narrowing the `https://*`
