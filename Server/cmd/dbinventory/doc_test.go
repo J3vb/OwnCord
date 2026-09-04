@@ -260,6 +260,13 @@ func checkProse(t *testing.T, generated, prose string) {
 	}
 }
 
+// The layout-refactor supplement's four dispositions, spelled out in
+// DBImportEntry's doc comment in Server/invariants/db_import_boundary.go.
+// Not derived from DBImportAllow: the point of pinning them is to catch a row
+// going missing, and a disposition with no rows contributes nothing to derive
+// from.
+var dbImportDispositions = []string{"move", "adapter", "boundary", "remove"}
+
 // checkDispositionTable compares the document's disposition table -- the one
 // that was left contradicting the block underneath it -- against the inventory,
 // in both directions.
@@ -301,6 +308,24 @@ func checkDispositionTable(t *testing.T, n tallies, prose string) {
 	}
 	if len(documented) == 0 {
 		t.Fatalf("the disposition table in %s has a header and no rows", boundariesDoc)
+	}
+
+	// Every disposition must have a row, including the ones sitting at zero.
+	// A count comparison alone cannot see a DELETED zero row -- and `move` at
+	// 0 is B3-8's exit criterion, so losing that row erases the statement
+	// rather than contradicting it. An unknown row name is caught here too: a
+	// typo'd row at 0 would otherwise agree with an absent disposition.
+	for _, name := range dbImportDispositions {
+		if _, listed := documented[name]; !listed {
+			t.Errorf("the disposition table in %s has no `%s` row; all four dispositions must be listed, including the ones at 0",
+				boundariesDoc, name)
+		}
+	}
+	for name := range documented {
+		if !slices.Contains(dbImportDispositions, name) {
+			t.Errorf("the disposition table in %s has a `%s` row, which is not one of the four dispositions %v",
+				boundariesDoc, name, dbImportDispositions)
+		}
 	}
 
 	for name, want := range documented {
