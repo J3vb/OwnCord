@@ -58,10 +58,26 @@ default.
 | `ws/livekit_process.go` — `NewLiveKitProcess`, `(*LiveKitProcess).HealthCheck` | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there) | `voice.livekit_url`                                                                                                          | health probes of the LiveKit process — loopback under the default, the operator's host otherwise                                                           |
 | `ws/livekit.go` — `NewLiveKitClient`                                           | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there) | `voice.livekit_url`                                                                                                          | the room-service client's calls (remove/get/mute a participant, list participants, list rooms) — loopback under the default, the operator's host otherwise |
 | `api/livekit_proxy.go` — `proxyWebSocket`                                      | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there) | `voice.livekit_url`, and only while a signed-in client holds a voice session                                                 | that client's LiveKit signalling, proxied — it leaves the machine when the URL is remote                                                                   |
-| `plugin/host_http.go` — `(*Registry).HTTPDo`, the package-level dialer         | config   | hosts in `plugins.http_allowlist`                                                                          | `plugins.http_allowlist` (default empty = no outbound HTTP)                                                                  | whatever the plugin asks, through the SSRF-guarded dialer                                                                                                  |
-| `api/gif_handler.go` — the package-level client, `fetchGIFs`                   | config   | the GIF provider's API                                                                                     | `gif.api_key` (default empty = the route is not mounted)                                                                     | the user's search terms                                                                                                                                    |
+| `safefetch/policy.go` — `New`, `defaultDial`                                   | config   | only a destination a caller passed in, and only an address `ClassifyAddr` accepted                         | the caller's gate: `gif.api_key`, or `plugins.http_allowlist`                                                                | nothing of its own — the shared client, transport and dialer; `Fetcher.dial` connects to the vetted addresses and to nothing else                          |
+| `safefetch/fetch.go` — `(*Fetcher).roundTrip`                                  | config   | the same, one redirect hop at a time                                                                       | the caller's gate: `gif.api_key`, or `plugins.http_allowlist`                                                                | the GIF proxy's search terms, or whatever a plugin asks — bounded by the C-09 ceilings below                                                               |
 | `internal/app/healthcheck.go` — `RunHealthcheckCLI`                            | loopback | this server's `/health`                                                                                    | the `--healthcheck` flag                                                                                                     | nothing                                                                                                                                                    |
 | `telemetry/telemetry_otel.go` — the OTLP exporter import                       | config   | `telemetry.otlp_endpoint`                                                                                  | `-tags otel` + `telemetry.enabled` + `exporter: otlp`                                                                        | traces and metrics, to the operator's own collector                                                                                                        |
+
+Since B5-1 the last two rows are the _only_ outbound content path in the
+server. `api/gif_handler.go` and `plugin/host_http.go` used to dial for
+themselves and had rows of their own; both now go through `Server/safefetch`,
+which owns the whole per-fetch policy — scheme and port allowlists, no
+embedded credentials, every A and AAAA answer classified before any connect,
+a connect bound to those validated addresses with no second lookup, automatic
+redirects off with each hop re-checked and scheme downgrades refused, a total
+deadline, a streaming byte ceiling and a separate decompressed-size ceiling,
+a content-type allowlist checked against the sniffed type as well as the
+declared one, and a per-process concurrency cap. Their gates did not move:
+with no `gif.api_key` the route is not mounted, and with an empty
+`plugins.http_allowlist` every host is denied, so the compiled defaults still
+reach nowhere. The policy is written out as a contract in
+[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09-—-contract-for-b7),
+clauses 2 through 6.
 
 Two things are deliberately **not** in the table. The startup banner used to
 learn the machine's address by opening a UDP socket to a public DNS server

@@ -23,6 +23,10 @@ prometheus.
   `scripts/` holds shell/JS tooling only; no Go entry point lives there
 - `admin/` web admin panel · `updater/` self-update + signature verification ·
   `plugin/` WASM plugin runtime (`-tags wazero`) · `telemetry/` OTel (`-tags otel`)
+- `safefetch/` the one bounded outbound-content boundary (C-09 clauses 2-6).
+  Every server fetch of content the server did not choose goes through it —
+  the GIF proxy and the plugin `http` capability, and nothing else. A new
+  outbound content path adopts it rather than reaching for `http.Client`
 - `syncutil/` lock helpers that gain deadlock detection under `-tags deadlock`
 
 ## Gotchas
