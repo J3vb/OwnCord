@@ -85,9 +85,11 @@ var migrationFile = regexp.MustCompile(`\b(\d{3})_[a-z0-9_]+\.sql\b`)
 // the step that creates it. The check runs in both directions: an unlisted
 // missing path fails, and a listed path that now EXISTS fails too, because
 // that means the step landed and the exemption is stale.
-var plannedPaths = map[string]string{
-	"Server/safefetch": "B5-1",
-}
+//
+// Empty since B5-1 landed `Server/safefetch` (PR #1541): the exemption it held
+// was removed by the reverse check below, which is the whole point of having
+// one. Later steps add entries here for the packages they are about to create.
+var plannedPaths = map[string]string{}
 
 func TestCommunityServicesDocIsCurrent(t *testing.T) {
 	// Not a Skipf: a gate that excuses itself when its subject moves is worse

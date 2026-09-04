@@ -4,9 +4,9 @@
 **Base commit:** `e1781086` (`dev`; B4's exit was accepted 2026-09-03 at
 `0a14554` and today's CI-gate work — #1534, #1536, #1537 — is merged on top)
 — claims below verified at `e1781086`  
-**Status:** IN PROGRESS. **B5-0 is complete** (2026-09-04 — see its evidence
-block), which closes entry-gate item 3; no other step has started and no
-production code has landed. **All fourteen decisions were settled 2026-09-04**
+**Status:** IN PROGRESS. **B5-0 and B5-1 are complete** (both 2026-09-04 — see
+their evidence blocks). B5-0 closed entry-gate item 3; B5-1 landed
+`Server/safefetch` and closed SEC-03's server half. No other step has started. **All fourteen decisions were settled 2026-09-04**
 (the owner delegated them; thirteen as drafted, decision 7 strengthened), so no
 step is blocked on an unanswered question. Two owner _actions_ remain and
 neither is due before the exit — plus one B5-0 raised: two advisory-worthy
@@ -550,6 +550,22 @@ B3 and B4 did). Closes entry-gate item 3.
   sweeping, unconditionally, and says so in its own comment (behaviour safe,
   description wrong); and the appendix closes with "Classes 22-26 ... are not
   rows", written before class 27 joined the table.
+- **Amended 2026-09-04, after B5-1 merged (`af473ff4`, PR #1541).** `dev` was
+  merged into this branch and the doc gate did its job: `plannedPaths` exempted
+  `Server/safefetch` as owed by B5-1, the reverse direction of that check fired
+  the moment the package appeared, and the build went red until the exemption
+  was dropped. The map is empty again. S2 was then rewritten against what B5-1
+  actually shipped rather than what it was expected to ship: the address
+  classifier, the redirect policy, both byte ceilings, the content-type check
+  and the concurrency caps are now described as existing and cite
+  `Server/safefetch/*_test.go`, where before they said "owed by B5-1" and, in
+  four cells, "no test exists". Two of the three document corrections this
+  block recorded — the stale "route not mounted" gate in
+  `invariants/egress_sites.go` and `architecture/diagnostics.md` — were made by
+  B5-1, which replaced those rows outright; the two in `data-lifecycle.md`
+  remain. The header now carries a B5-1 amendment note in the shape
+  `data-lifecycle.md` uses, and everything outside S2 is still measured at
+  `cbebd37c`.
 - **Gates.** `npm run check` from the repository root, on Node 24 with the
   pinned Prettier: all four server build variants, `go vet`,
   `go test -race ./...`, the deadlock leg, both document gates at `-count=1`,
