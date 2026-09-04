@@ -339,6 +339,37 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	}
 }
 
+// The external marker is what prevents an older backup from resurrecting a
+// retention deletion. If it cannot be written, fail before deleting rows.
+func TestRetention_MarkerFailureDeletesNothing(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-marker-failure", "hash", 1)
+	chID, files := seedRetentionChannel(t, database, "marker-failure", uid, dir, 1)
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	markers := newTestMarkers(t)
+	if err := markers.Close(); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	rep, err := svc.Tick(ctx)
+	if err == nil {
+		t.Fatal("Tick with an unavailable marker store succeeded")
+	}
+	if rep.Messages != 0 || countMessages(t, database, chID) != 2 {
+		t.Fatalf("Tick = %+v, messages left = %d; marker failure deleted data", rep, countMessages(t, database, chID))
+	}
+	if !fileExists(t, filepath.Join(dir, files[0])) {
+		t.Fatal("marker failure removed the message's file")
+	}
+}
+
 // The restore interplay (HP-4 decision 6): a restored backup holding
 // messages older than a channel's recorded cutoff loses them again on
 // ReplayMarkers, files included.

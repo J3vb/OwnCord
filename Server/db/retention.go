@@ -197,52 +197,129 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 // — and the files; fewer ids than limit means the channel is swept for this
 // cutoff.
 func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
+	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false)
+	return ids, files, err
+}
+
+// SweepRetentionJournaled is the retention service's crash-safe batch. The
+// run row, deleted message ids and attachment filenames commit in the same
+// transaction as the message deletion. If runID is zero, the run is opened
+// lazily only when the batch finds something to delete. countChannel adds one
+// to the run's channel count when this is its first non-empty batch.
+func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
+	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel)
+}
+
+func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, journal, countChannel bool) (int64, []int64, []string, error) {
 	if limit < 1 {
-		return nil, nil, nil
+		return runID, nil, nil, nil
 	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
+		return runID, nil, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
 		channelID, cutoff.UTC().Format(sqliteTimeLayout), limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SweepRetention select: %w", err)
+		return runID, nil, nil, fmt.Errorf("SweepRetention select: %w", err)
 	}
 	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			rows.Close() //nolint:errcheck
-			return nil, nil, fmt.Errorf("SweepRetention scan: %w", err)
+			return runID, nil, nil, fmt.Errorf("SweepRetention scan: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	rows.Close() //nolint:errcheck
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("SweepRetention rows: %w", err)
+		return runID, nil, nil, fmt.Errorf("SweepRetention rows: %w", err)
 	}
 	if len(ids) == 0 {
-		return nil, nil, nil
+		return runID, nil, nil, nil
+	}
+	if journal && runID == 0 {
+		res, err := tx.ExecContext(ctx, `INSERT INTO retention_runs DEFAULT VALUES`)
+		if err != nil {
+			return 0, nil, nil, fmt.Errorf("SweepRetention start run: %w", err)
+		}
+		runID, err = res.LastInsertId()
+		if err != nil {
+			return 0, nil, nil, fmt.Errorf("SweepRetention run id: %w", err)
+		}
 	}
 	in, args := placeholdersFor(ids)
 
 	if err := reverseMentionCountsForMessages(ctx, tx, channelID, in, args); err != nil {
-		return nil, nil, err
+		return runID, nil, nil, err
 	}
 	files, err := collectAndDeleteAttachments(ctx, tx, in, args)
 	if err != nil {
-		return nil, nil, err
+		return runID, nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (`+in+`)`, args...); err != nil { //nolint:gosec // G202: placeholders only
-		return nil, nil, fmt.Errorf("SweepRetention delete: %w", err)
+		return runID, nil, nil, fmt.Errorf("SweepRetention delete: %w", err)
+	}
+	if journal {
+		if err := appendRetentionRunBatch(ctx, tx, runID, ids, files, countChannel); err != nil {
+			return runID, nil, nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("SweepRetention commit: %w", err)
+		return runID, nil, nil, fmt.Errorf("SweepRetention commit: %w", err)
 	}
-	return ids, files, nil
+	return runID, ids, files, nil
+}
+
+// appendRetentionRunBatch records every handle needed after message and
+// attachment rows disappear. It must stay in the deletion transaction: a
+// separate write after Commit leaves a process-kill window with no durable
+// way to purge replay frames or unlink the attachment blobs.
+func appendRetentionRunBatch(ctx context.Context, tx *sql.Tx, runID int64, ids []int64, files []string, countChannel bool) error {
+	var encodedFiles, encodedPending string
+	if err := tx.QueryRowContext(ctx, `SELECT files, purge_pending FROM retention_runs WHERE id = ?`, runID).
+		Scan(&encodedFiles, &encodedPending); err != nil {
+		return fmt.Errorf("SweepRetention journal run %d: %w", runID, err)
+	}
+	journalFiles := make([]string, 0, len(files))
+	if err := json.Unmarshal([]byte(encodedFiles), &journalFiles); err != nil {
+		return fmt.Errorf("SweepRetention decode files for run %d: %w", runID, err)
+	}
+	purgePending := make([]int64, 0, len(ids))
+	if err := json.Unmarshal([]byte(encodedPending), &purgePending); err != nil {
+		return fmt.Errorf("SweepRetention decode purge journal for run %d: %w", runID, err)
+	}
+	journalFiles = append(journalFiles, files...)
+	purgePending = append(purgePending, ids...)
+	encodedFilesBytes, err := json.Marshal(journalFiles)
+	if err != nil {
+		return fmt.Errorf("SweepRetention encode files for run %d: %w", runID, err)
+	}
+	encodedPendingBytes, err := json.Marshal(purgePending)
+	if err != nil {
+		return fmt.Errorf("SweepRetention encode purge journal for run %d: %w", runID, err)
+	}
+	channelDelta := 0
+	if countChannel {
+		channelDelta = 1
+	}
+	res, err := tx.ExecContext(ctx,
+		`UPDATE retention_runs
+		    SET channels = channels + ?, messages_deleted = messages_deleted + ?,
+		        files = ?, purge_pending = ?
+		  WHERE id = ?`, channelDelta, len(ids), string(encodedFilesBytes), string(encodedPendingBytes), runID)
+	if err != nil {
+		return fmt.Errorf("SweepRetention journal batch for run %d: %w", runID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("SweepRetention journal rows for run %d: %w", runID, err)
+	} else if n != 1 {
+		return fmt.Errorf("SweepRetention journal run %d: %w", runID, ErrNotFound)
+	}
+	return nil
 }
 
 func placeholdersFor(ids []int64) (string, []any) {
