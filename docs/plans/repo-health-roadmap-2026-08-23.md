@@ -10,7 +10,13 @@
 2026-09-01 to 2026-09-03**, all twelve steps merged to `dev`; its **exit was
 accepted 2026-09-03** — the "B4 exit" section of
 [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md), measured at
-`dev` `1133a26` and accepted at `0a14554`. HP-5 is next; B5–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+`dev` `1133a26` and accepted at `0a14554`. **B5 is next**: its execution plan
+is
+[b5-community-content-moderation-2026-09-04.md](b5-community-content-moderation-2026-09-04.md),
+drafted 2026-09-04 at `e1781086`, which schedules **HP-5 as B5's mid-phase
+hold point** between B5-5 and B5-6 — in front of every step whose topics HP-5
+names, and behind only the work that exposes no new surface. B6–B10 not
+started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
 in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
 [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
 is the implementation supplement for the B3, B7 and B9 structural workstreams
