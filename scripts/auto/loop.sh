@@ -57,9 +57,36 @@ done
 mkdir -p "$LOCKS" "$LOGS" "$ATTEMPTS" "$WORKTREES"
 [ -f "$CURSOR" ] || echo "B5-PLAN" > "$CURSOR"
 
-SESSIONS=0
-FAILURES=0
-declare -A DRAFT_SEEN=()
+# The only PR author whose branches this loop will touch. This repository is
+# public, so the `auto/` branch prefix alone is not a boundary — anyone can
+# name a branch that. Derived from the signed-in account rather than
+# hard-coded, and fatal if it cannot be established: an empty value here would
+# widen the filter to everybody.
+TRUSTED_AUTHOR="${AUTO_TRUSTED_AUTHOR:-$(gh api user --jq .login 2>/dev/null)}"
+if [ -z "$TRUSTED_AUTHOR" ]; then
+  echo "refusing to start: could not determine the signed-in GitHub user." >&2
+  echo "run 'gh auth login', or set AUTO_TRUSTED_AUTHOR explicitly." >&2
+  exit 3
+fi
+
+# Counters live on disk, not in variables. Each PR is handled in a subshell so
+# one bad PR cannot take the loop down, and a subshell's variable writes are
+# discarded on return — which would silently disable the session cap, the
+# consecutive-failure stop and draft resumption.
+COUNTERS="$STATE/counters"
+mkdir -p "$COUNTERS"
+echo 0 > "$COUNTERS/sessions"
+echo 0 > "$COUNTERS/failures"
+rm -f "${COUNTERS:?}"/draft-*
+
+# An empty file is not zero: `cat` succeeds and prints nothing, so the `||`
+# never fires and the caller compares "" with an integer.
+counter_get() { local v; v="$(cat "$COUNTERS/$1" 2>/dev/null)"; echo "${v:-0}"; }
+counter_bump() {
+  local n; n=$(( $(counter_get "$1") + 1 ))
+  echo "$n" > "$COUNTERS/$1"; echo "$n"
+}
+counter_zero() { echo 0 > "$COUNTERS/$1"; }
 
 # ------------------------------------------------------------- utilities ----
 # Goes to stderr on purpose: several helpers return a value on stdout via
@@ -106,10 +133,13 @@ workers_busy() {
   echo "$n"
 }
 
+# A rehearsal must not consume the real run's allowances: without the DRY
+# guards, --dry-run would burn the one permitted CI rerun and walk the PR
+# towards the stuck threshold without a worker ever running.
 attempts_of() { cat "$ATTEMPTS/$1" 2>/dev/null || echo 0; }
-attempts_bump() { echo $(( $(attempts_of "$1") + 1 )) > "$ATTEMPTS/$1"; }
+attempts_bump() { [ "$DRY" = 1 ] && return 0; echo $(( $(attempts_of "$1") + 1 )) > "$ATTEMPTS/$1"; }
 retried_already() { grep -qx "$2" "$ATTEMPTS/$1.runs" 2>/dev/null; }
-retried_mark() { echo "$2" >> "$ATTEMPTS/$1.runs"; }
+retried_mark() { [ "$DRY" = 1 ] && return 0; echo "$2" >> "$ATTEMPTS/$1.runs"; }
 
 mark_stuck() {
   local pr="$1" why="$2"
@@ -184,8 +214,8 @@ run_worker() {
   prompt="$(cat "$PROMPTS/rules.md" "$prompt_file")
 $context"
 
-  SESSIONS=$((SESSIONS + 1))
-  say "$role  $tag  starting ($model, session $SESSIONS/$MAX_SESSIONS)"
+  local used; used="$(counter_bump sessions)"
+  say "$role  $tag  starting ($model, session $used/$MAX_SESSIONS)"
 
   ( cd "$workdir" && claude -p "$prompt" \
       --model "$model" \
@@ -214,39 +244,57 @@ $context"
   local cost
   cost="$(grep -oE '"total_cost_usd":[0-9.]+' "$logfile" | head -1 | cut -d: -f2)"
   if [ "$rc" -ne 0 ]; then
-    FAILURES=$((FAILURES + 1))
+    counter_bump failures >/dev/null
     say "$role  $tag  FAILED (rc=$rc) — see $logfile"
     return 1
   fi
-  FAILURES=0
+  counter_zero failures
   say "$role  $tag  done${cost:+ (~\$$cost)}"
   return 0
 }
 
-# The coder gets a brand-new branch; the fixer and reviewer get the PR's own.
+# One worktree per BRANCH, never per role. A coder and the fixer that follows
+# it work the same branch, and git refuses to check a branch out twice — the
+# second caller would land on a detached `origin/<branch>` and its push would
+# fail with "You are not currently on a branch", losing the work while still
+# burning an attempt.
+# printf, not echo: echo's trailing newline becomes a trailing '-' under tr.
+# No extra prefix either — BRANCH_PREFIX already makes the name distinctive.
+worktree_path() { printf '%s/%s\n' "$WORKTREES" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-')"; }
+
 worktree_for() {
-  local name="$1" branch="$2" new="$3"
-  local wt="$WORKTREES/$name"
+  local branch="$1" new="$2"
+  local wt; wt="$(worktree_path "$branch")"
+
+  # Already checked out somewhere? Use that, wherever it is.
+  local existing
+  existing="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null \
+              | awk -v b="refs/heads/$branch" '
+                  /^worktree /{p=substr($0,10)} /^branch /{if(substr($0,8)==b) print p}' \
+              | head -1)"
+  if [ -n "$existing" ] && [ -d "$existing" ]; then echo "$existing"; return 0; fi
   if [ -d "$wt" ]; then echo "$wt"; return 0; fi
+
   # A rehearsal must leave nothing behind — no worktree, no branch.
   if [ "$DRY" = 1 ]; then
     say "DRY    would create a worktree at $wt on $branch ($new)"
     echo "$wt"; return 0
   fi
+
   if [ "$new" = new ]; then
     git -C "$ROOT" fetch origin "$BASE" --quiet
-    git -C "$ROOT" worktree add -b "$branch" "$wt" "origin/$BASE" --quiet 2>/dev/null \
-      || git -C "$ROOT" worktree add "$wt" "$branch" --quiet 2>/dev/null
+    git -C "$ROOT" worktree add -b "$branch" "$wt" "origin/$BASE" --quiet 2>/dev/null
   else
     git -C "$ROOT" fetch origin "$branch" --quiet
-    git -C "$ROOT" worktree add "$wt" "$branch" --quiet 2>/dev/null \
-      || git -C "$ROOT" worktree add "$wt" "origin/$branch" --quiet 2>/dev/null
+    # -B so the local branch is created or reset to the remote tip, and the
+    # worktree is always ON a branch that can be pushed.
+    git -C "$ROOT" worktree add -B "$branch" "$wt" "origin/$branch" --quiet 2>/dev/null
   fi
   [ -d "$wt" ] && echo "$wt"
 }
 
 worktree_drop() {
-  local wt="$WORKTREES/$1"
+  local wt; wt="$(worktree_path "$1")"
   [ -d "$wt" ] || return 0
   git -C "$ROOT" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
 }
@@ -258,6 +306,19 @@ merge_pr() {
 
   if [ "$base" != "$BASE" ]; then
     say "REFUSED merging #$pr — base is '$base', not '$BASE'"
+    return 1
+  fi
+  if [ "${branch#"$BRANCH_PREFIX"}" = "$branch" ]; then
+    say "REFUSED merging #$pr — branch '$branch' is not a $BRANCH_PREFIX branch"
+    return 1
+  fi
+
+  # Re-checked here rather than trusted from the listing: this is the one
+  # irreversible step, and it is worth one extra API call to be sure.
+  local who
+  who="$(gh_q pr view "$pr" -R "$REPO" --json author --jq '.author.login')"
+  if [ "$who" != "$TRUSTED_AUTHOR" ]; then
+    say "REFUSED merging #$pr — author is '${who:-unknown}', not '$TRUSTED_AUTHOR'"
     return 1
   fi
 
@@ -273,7 +334,7 @@ merge_pr() {
       echo "$next" > "$CURSOR"
       say "cursor -> $next"
     fi
-    worktree_drop "$(basename "$branch")"
+    worktree_drop "$branch"
     rm -f "$ATTEMPTS/$pr" "$ATTEMPTS/$pr.runs"
     return 0
   fi
@@ -291,7 +352,7 @@ start_coder() {
   branch="${BRANCH_PREFIX}${slug}"
 
   lock_take "coder-$slug" || return 1
-  wt="$(worktree_for "auto-$slug" "$branch" new)"
+  wt="$(worktree_for "$branch" new)"
   if [ -z "$wt" ]; then
     say "could not make a worktree for $branch"
     lock_free "coder-$slug"; return 1
@@ -324,9 +385,18 @@ handle_pr() {
   say "look   #$pr  ci=$ci threads=$blocking/$total_threads reviews=$total_reviews tries=$tries$draft_note"
 
   # --- given up on already -------------------------------------------------
-  if [ "$tries" -ge "$MAX_FIX_ATTEMPTS" ] && [ "$ci" != GREEN ]; then
-    mark_stuck "$pr" "still not green after $tries fix attempts"
-    return 0
+  # Both things a fixer is called for count. A fixer that disputes a review
+  # thread it cannot address leaves CI green and the thread live, and without
+  # the second clause it would be relaunched every tick forever.
+  if [ "$tries" -ge "$MAX_FIX_ATTEMPTS" ]; then
+    if [ "$ci" != GREEN ]; then
+      mark_stuck "$pr" "still not green after $tries fix attempts"
+      return 0
+    fi
+    if [ "$blocking" -gt 0 ]; then
+      mark_stuck "$pr" "$blocking review thread(s) unaddressed after $tries fix attempts"
+      return 0
+    fi
   fi
 
   # --- a conflict, or red CI ----------------------------------------------
@@ -347,7 +417,7 @@ handle_pr() {
     fi
 
     lock_take "$pr" || return 0
-    wt="$(worktree_for "auto-pr-$pr" "$branch" existing)"
+    wt="$(worktree_for "$branch" existing)"
     if [ -n "$wt" ]; then
       attempts_bump "$pr"
       run_worker fixer "$MODEL_FIXER" "$wt" "$PROMPTS/fixer.md" \
@@ -368,7 +438,7 @@ This is fix attempt $(attempts_of "$pr") of $MAX_FIX_ATTEMPTS." "pr$pr"
   # --- somebody is waiting on an answer -----------------------------------
   if [ "$blocking" -gt 0 ]; then
     lock_take "$pr" || return 0
-    wt="$(worktree_for "auto-pr-$pr" "$branch" existing)"
+    wt="$(worktree_for "$branch" existing)"
     if [ -n "$wt" ]; then
       attempts_bump "$pr"
       run_worker fixer "$MODEL_FIXER" "$wt" "$PROMPTS/fixer.md" \
@@ -392,12 +462,12 @@ Do not resolve threads yourself — reply, fix, and let the reviewer resolve." "
 
   # --- a draft nobody is working on = a coder that died --------------------
   if [ "$draft" = true ]; then
-    DRAFT_SEEN[$pr]=$(( ${DRAFT_SEEN[$pr]:-0} + 1 ))
-    if [ "${DRAFT_SEEN[$pr]}" -ge "$STALE_DRAFT_TICKS" ]; then
+    local seen; seen="$(counter_bump "draft-$pr")"
+    if [ "$seen" -ge "$STALE_DRAFT_TICKS" ]; then
       lock_take "$pr" || return 0
-      wt="$(worktree_for "auto-pr-$pr" "$branch" existing)"
+      wt="$(worktree_for "$branch" existing)"
       if [ -n "$wt" ]; then
-        DRAFT_SEEN[$pr]=0
+        counter_zero "draft-$pr"
         run_worker coder "$MODEL_CODER" "$wt" "$PROMPTS/coder.md" \
 "## Your assignment
 Repository: $REPO
@@ -415,7 +485,7 @@ Continue from 'Next'. Do not redo what 'Done' lists. Honour 'Decided'." "pr$pr"
   # --- green, but nobody has said a word ----------------------------------
   if [ "$total_threads" = 0 ] && [ "$total_reviews" = 0 ]; then
     lock_take "$pr" || return 0
-    wt="$(worktree_for "auto-pr-$pr" "$branch" existing)"
+    wt="$(worktree_for "$branch" existing)"
     if [ -n "$wt" ]; then
       run_worker reviewer "$MODEL_REVIEWER" "$wt" "$PROMPTS/reviewer.md" \
 "## Your assignment
@@ -441,24 +511,36 @@ Read the diff with: gh pr diff $pr" "pr$pr"
 
 # -------------------------------------------------------------- the tick ----
 tick() {
-  local rows any_open=0
+  local rows rc any_open=0
 
-  # Sweep up after PRs that closed while we were not looking.
-  local d
-  for d in "$WORKTREES"/auto-pr-*/; do
-    [ -d "$d" ] || continue
-    local n="${d##*auto-pr-}"; n="${n%/}"
-    case "$(gh_q pr view "$n" -R "$REPO" --json state --jq .state)" in
-      MERGED|CLOSED) worktree_drop "auto-pr-$n"; lock_free "$n"; say "cleaned up #$n" ;;
+  # Sweep up branches whose PR has closed since we last looked.
+  local br
+  while read -r br; do
+    [ -n "$br" ] || continue
+    case "$(gh_q pr list -R "$REPO" --state all --head "$br" --limit 1 --json state --jq '.[0].state')" in
+      MERGED|CLOSED) worktree_drop "$br"; say "cleaned up the worktree for $br" ;;
     esac
-  done
+  done < <(git -C "$ROOT" worktree list --porcelain 2>/dev/null \
+           | sed -n "s#^branch refs/heads/\(${BRANCH_PREFIX}.*\)#\1#p")
 
-  rows="$(gh_q pr list -R "$REPO" --state open --base "$BASE" --limit 30 \
+  # `--author` is the security boundary, not a convenience. This repository is
+  # public: without it, anyone may open a PR from a branch called `auto/…`
+  # against `dev`, and the loop would run a permission-bypassed model over
+  # their code and then merge it.
+  rows="$(gh pr list -R "$REPO" --state open --base "$BASE" --author "$TRUSTED_AUTHOR" --limit 30 \
           --json number,headRefName,isDraft,mergeable,title,baseRefName,author,labels \
           --jq '.[] | select(.headRefName | startswith("'"$BRANCH_PREFIX"'"))
                 | select([.labels[]?.name] | index("'"$STUCK_LABEL"'") | not)
-                | select(.author.login | test("dependabot|renovate") | not)
-                | [.number,.headRefName,(.isDraft|tostring),.mergeable,.baseRefName,.title] | @tsv')"
+                | select(.author.login == "'"$TRUSTED_AUTHOR"'")
+                | [.number,.headRefName,(.isDraft|tostring),.mergeable,.baseRefName,.title] | @tsv' 2>/dev/null)"
+  rc=$?
+
+  # An empty list and a failed call look identical. Treating a network or auth
+  # blip as "no PRs open" would start a second coder on top of a live one.
+  if [ "$rc" -ne 0 ]; then
+    say "could not list PRs (gh exit $rc) — skipping this tick rather than guessing"
+    return 0
+  fi
 
   while IFS=$'\t' read -r n branch draft mergeable base title; do
     [ -n "${n:-}" ] || continue
@@ -484,17 +566,18 @@ tick() {
 # start polling when it does.
 if [ "${AUTO_LOOP_SOURCED:-0}" = 1 ]; then return 0; fi
 
-say "auto-loop up — repo=$REPO base=$BASE window=${WINDOW_START}:00-${WINDOW_END}:00 dry=$DRY"
+say "auto-loop up — repo=$REPO base=$BASE author=$TRUSTED_AUTHOR window=${WINDOW_START}:00-${WINDOW_END}:00 dry=$DRY"
 say "cursor is at $(cat "$CURSOR")"
 
 while true; do
   if [ -f "$STOP" ]; then say "STOP file found — shutting down"; exit 0; fi
 
-  if [ "$SESSIONS" -ge "$MAX_SESSIONS" ]; then
+  # Read back from disk: the workers that increment these run in subshells.
+  if [ "$(counter_get sessions)" -ge "$MAX_SESSIONS" ]; then
     say "session cap ($MAX_SESSIONS) reached — done for the night"; exit 0
   fi
-  if [ "$FAILURES" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
-    say "$FAILURES workers failed in a row — stopping, see $LOGS"; exit 1
+  if [ "$(counter_get failures)" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
+    say "$(counter_get failures) workers failed in a row — stopping, see $LOGS"; exit 1
   fi
 
   if [ "$DRY" = 1 ] || [ "$ONCE" = 1 ] || in_window; then

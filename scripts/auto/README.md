@@ -63,7 +63,14 @@ the loop rebuilds it.
 
 ## What it will and will not do
 
-Touches only PRs whose branch starts with `auto/`, targeting `dev`. Your own
+Touches only PRs that target `dev`, sit on a branch starting with `auto/`,
+**and were opened by the signed-in GitHub account**. That last condition is a
+security boundary, not a convenience: this repository is public, so anyone can
+name a branch `auto/…` — without the author check a stranger's PR would be
+handed to a permission-bypassed model and then merged. The loop refuses to
+start if it cannot determine who it is signed in as.
+
+Your own
 PRs and Dependabot's are invisible to it.
 
 Merges only when CI is green, no review thread is both unresolved and still
