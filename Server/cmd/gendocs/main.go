@@ -332,6 +332,9 @@ func genSchema(w io.Writer) error {
 	defer closeDB()
 
 	ctx := context.Background()
+	if err := checkMigrationHistory(ctx, database); err != nil {
+		return err
+	}
 	// GLOB, not LIKE: LIKE's "_" is a wildcard, GLOB's is not.
 	tables, err := queryStrings(ctx, database,
 		`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_stat*' ORDER BY name`)
@@ -359,6 +362,76 @@ func genSchema(w io.Writer) error {
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Table", "Columns", "Indexes"}, rows)
 	return nil
+}
+
+// checkMigrationHistory fails when a migration the database actually applied
+// has no row in the hand-written "### Migration History" table of schema.md.
+// The descriptions there are editorial — several explain why a migration
+// exists, which no generator could reconstruct — so they stay hand-written and
+// only their completeness is gated. This is genConfig's rule for config keys,
+// applied to migrations: the generated block below is not evidence, because
+// the scan stops at the next "## " heading.
+//
+// It caught the real thing it was written for: migrations 033-043 shipped with
+// no row, in a table sitting immediately above a generated block, where
+// "make docs-verify" could not see it.
+func checkMigrationHistory(ctx context.Context, database *db.DB) error {
+	applied, err := queryStrings(ctx, database,
+		`SELECT version FROM schema_versions ORDER BY version`)
+	if err != nil {
+		return err
+	}
+	if len(applied) == 0 {
+		return errors.New("the migrated database reports no applied migrations; the schema_versions read is broken")
+	}
+	raw, err := os.ReadFile(schemaDoc)
+	if err != nil {
+		return err
+	}
+	documented := migrationHistoryFiles(string(raw))
+
+	var missing []string
+	for _, m := range applied {
+		if !documented[m] {
+			missing = append(missing, m)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%d migration(s) have no row under \"### Migration History\" in %s — add one describing what each does and why, then re-run:\n  %s",
+			len(missing), schemaDoc, strings.Join(missing, "\n  "))
+	}
+	return nil
+}
+
+// migrationFile matches a code span holding a migration filename, which is how
+// the history table names one.
+var migrationFile = regexp.MustCompile("`([0-9]{3}_[a-z0-9_]+\\.sql)`")
+
+// migrationHistoryFiles returns every migration filename named inside the
+// "### Migration History" section of schema.md. The scan starts at that
+// heading and stops at the next "## " heading, so neither the generated table
+// index nor any later prose can stand in for a real row.
+func migrationHistoryFiles(doc string) map[string]bool {
+	out := map[string]bool{}
+	inHistory := false
+	for line := range strings.Lines(doc) {
+		line = strings.TrimRight(line, "\n")
+		switch {
+		case strings.HasPrefix(line, "## "):
+			inHistory = false
+			continue
+		case strings.HasPrefix(line, "### "):
+			inHistory = line == "### Migration History"
+			continue
+		}
+		if !inHistory {
+			continue
+		}
+		for _, m := range migrationFile.FindAllStringSubmatch(line, -1) {
+			out[m[1]] = true
+		}
+	}
+	return out
 }
 
 // tableColumns renders one table's columns in declaration order as

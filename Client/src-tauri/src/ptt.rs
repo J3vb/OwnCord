@@ -41,10 +41,12 @@ fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
         return true;
     }
 
-    // Non-text navigation/control keys.
+    // Non-text navigation/control keys. Escape is excluded: it's also the
+    // Settings overlay's close key, so a capture in progress races the panel
+    // tearing down and can bind PTT to Escape with no visible confirmation
+    // (OC-0334).
     matches!(
         vk,
-        0x1B | // Escape
         0x20 | // Space
         0x21 | // Page Up
         0x22 | // Page Down
@@ -620,6 +622,9 @@ mod tests {
         assert!(!is_allowed_ptt_capture_vk(0x11)); // Ctrl
         assert!(!is_allowed_ptt_capture_vk(0x12)); // Alt
         assert!(!is_allowed_ptt_capture_vk(0x5B)); // Meta
+                                                   // Escape also closes the Settings overlay the capture UI lives in, so
+                                                   // it must never be capturable as a PTT key (OC-0334).
+        assert!(!is_allowed_ptt_capture_vk(0x1B)); // Escape
     }
 
     #[cfg(target_os = "linux")]

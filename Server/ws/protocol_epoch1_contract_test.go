@@ -66,11 +66,6 @@ package ws_test
 //     auth_error is the proof nothing follows; and resume-replay's "b" barriers
 //     where its recording window ends rather than where the journey does (the
 //     comment there says why moving it would be a flake, not a fix).
-//   - One position genuinely is not ordered by the server: a voice joiner's own
-//     voice_state arrives on the hub's asynchronous broadcast queue while the
-//     rest of its join burst is written directly by the handler goroutine. That
-//     frame is recorded on the peer's connection instead — see expectJoinBurst.
-//
 // Regenerate with:
 //
 //	go test ./ws -run TestEpoch1Fixtures -update
@@ -634,64 +629,6 @@ func (c *wsConn) authenticate(token string) {
 	c.record = was
 }
 
-// expectJoinBurst reads a voice_join's reply burst — one more frame than
-// `want` names — and records only the frames the server orders.
-//
-// A joiner's OWN voice_state reaches it through the hub's asynchronous
-// broadcast queue (broadcastVoiceEvent -> h.broadcast -> deliverBroadcast on
-// the hub goroutine) while voice_token, the existing participants' relayed
-// voice_state frames and voice_config are written straight to its send queue
-// by the handler goroutine. Nothing orders the two against each other: under
-// -tags deadlock a joiner's own voice_state was observed arriving after
-// voice_config roughly once in thirty runs. Its position on THIS socket is
-// therefore not part of the contract and is not recorded — the same frame is
-// recorded on the peer's connection, where it is the only thing in flight and
-// its position is well defined. The direct sends keep their relative order
-// (one goroutine, program order), and `want` asserts it.
-func (c *wsConn) expectJoinBurst(selfUserID int64, want ...string) {
-	c.t.Helper()
-	var got []string
-	skipped := false
-	for i := 0; i < len(want)+1; i++ {
-		frame := c.readRaw()
-		ty, _ := frame["type"].(string)
-		if !skipped && ty == "voice_state" && framePayloadUserID(c.t, frame) == selfUserID {
-			skipped = true
-			continue
-		}
-		if c.record {
-			c.tr.add(c.name, "s2c", frame)
-		}
-		got = append(got, ty)
-	}
-	if !skipped {
-		c.t.Fatalf("conn %q: join burst %v carried no voice_state for user %d", c.name, got, selfUserID)
-	}
-	if len(got) != len(want) {
-		c.t.Fatalf("conn %q: join burst %v, want %v", c.name, got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			c.t.Fatalf("conn %q: join burst %v, want %v", c.name, got, want)
-		}
-	}
-}
-
-// framePayloadUserID reads payload.user_id, or 0 when absent.
-func framePayloadUserID(t *testing.T, frame map[string]any) int64 {
-	t.Helper()
-	payload, _ := frame["payload"].(map[string]any)
-	n, ok := payload["user_id"].(json.Number)
-	if !ok {
-		return 0
-	}
-	v, err := n.Int64()
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
 // focus subscribes the connection to a channel's topic and, for an observer
 // whose subscription must be live before another connection acts, waits for a
 // ping/pong round trip. Frames on one connection are handled in order, so the
@@ -1083,11 +1020,12 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 // key and offers the room key to its peer, then leaves.
 //
 // The fixture carries both forms of voice_state: the sequenced broadcast a
-// room's audience receives, and the unsequenced copy the joiner is handed for
-// each participant already in the room. See expectJoinBurst for why a joiner's
-// own voice_state is recorded on its peer's connection rather than its own.
+// room's audience receives (sent synchronously to the joiner too, OC-0349 —
+// its position in the join burst is now part of the contract), and the
+// unsequenced copy the joiner is handed directly for each participant
+// already in the room.
 func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
-	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
+	_, bobID, aliceTok, bobTok := r.seedBaseline(t)
 
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
@@ -1096,23 +1034,28 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 
 	a.record, b.record = true, true
 
-	// alice joins an empty room: token, then room config.
+	// alice joins an empty room: token, her own state, then room config.
 	a.send(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": voiceChannelID},
 	})
-	a.expectJoinBurst(aliceID, "voice_token", "voice_config")
+	a.expect("voice_token")
+	a.expect("voice_state") // alice's own, sent synchronously (OC-0349)
+	a.expect("voice_config")
 	b.expect("voice_state") // alice's, broadcast to the room's audience
 
-	// bob joins an occupied room: token, the state of every participant already
-	// there, then room config. Reading his voice_config is also the barrier for
-	// the announce below — the voice-topic subscription he needs to receive it
-	// is made earlier in the same handler.
+	// bob joins an occupied room: token, his own state, the state of every
+	// participant already there, then room config. Reading his voice_config is
+	// also the barrier for the announce below — the voice-topic subscription
+	// he needs to receive it is made earlier in the same handler.
 	b.send(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": voiceChannelID},
 	})
-	b.expectJoinBurst(bobID, "voice_token", "voice_state", "voice_config")
+	b.expect("voice_token")
+	b.expect("voice_state") // bob's own, sent synchronously (OC-0349)
+	b.expect("voice_state") // alice's, relayed to the joiner
+	b.expect("voice_config")
 	a.expect("voice_state") // bob's, broadcast to the room's audience
 
 	// alice publishes her ECDH public key, signed by her identity key; the

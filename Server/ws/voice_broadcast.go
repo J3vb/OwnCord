@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
@@ -38,25 +39,17 @@ func qualityBitrate(quality string) int {
 	return voiceQualities["medium"]
 }
 
-// broadcastVoiceEvent enqueues a voice_state / voice_leave message for the
-// connected clients whose current role may READ channelID.
+// voiceEventAudience resolves who must receive a voice_state / voice_leave
+// for channelID: the connected clients whose current role may READ it,
+// unioned with the room's own current participants.
 //
-// These events used to go out via BroadcastToAll, which handed every
-// authenticated client the membership and camera/mute state of voice channels
-// that channel_overrides hides from their role — while the equivalent read path
-// (buildReady) deliberately filters voice states to readable channels. Tagging
-// the event with its real channel id also makes reconnect replay filter it,
-// where a channelID of 0 was replayed unconditionally.
-//
-// The audience is resolved here, on the caller's goroutine, so the hub's
-// dispatch loop never blocks on permission lookups.
-func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
-	// A room's own participants must always receive its voice_state /
-	// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
-	// READ filter can exclude a live participant — whose client then keeps a
-	// stale E2EE key holder, stalling rotation and locking new joiners out
-	// until e2ee_timeout. Union the READ audience with the room's current
-	// participants; what outsiders may observe is unchanged.
+// A room's own participants must always receive its voice_state /
+// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
+// READ filter can exclude a live participant — whose client then keeps a
+// stale E2EE key holder, stalling rotation and locking new joiners out
+// until e2ee_timeout. Union the READ audience with the room's current
+// participants; what outsiders may observe is unchanged.
+func (h *Hub) voiceEventAudience(ctx context.Context, channelID int64) []int64 {
 	audience := h.channelReadAudience(ctx, channelID)
 	seen := make(map[int64]struct{}, len(audience))
 	for _, uid := range audience {
@@ -69,7 +62,39 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []by
 		}
 	}
 	h.mu.RUnlock()
-	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
+	return audience
+}
+
+// broadcastVoiceEvent enqueues a voice_state / voice_leave message for
+// voiceEventAudience(channelID).
+//
+// These events used to go out via BroadcastToAll, which handed every
+// authenticated client the membership and camera/mute state of voice channels
+// that channel_overrides hides from their role — while the equivalent read path
+// (buildReady) deliberately filters voice states to readable channels. Tagging
+// the event with its real channel id also makes reconnect replay filter it,
+// where a channelID of 0 was replayed unconditionally.
+//
+// The audience is resolved here, on the caller's goroutine, so the hub's
+// dispatch loop never blocks on permission lookups.
+func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
+	h.broadcastChannelScopedTo(channelID, msg, h.voiceEventAudience(ctx, channelID), "voice event")
+}
+
+// sendVoiceEventSync stamps and delivers a voice_state / voice_leave for
+// voiceEventAudience(channelID) synchronously on the caller's own goroutine,
+// instead of enqueuing it on h.broadcast for the async dispatch goroutine to
+// pick up later. OC-0349: voiceJoinComplete sends the joiner four other
+// frames (voice_token, existing participants' voice_state, E2EE peer keys,
+// voice_config) directly via c.sendMsg, in program order; a joiner's own
+// voice_state relayed through the async queue instead has no fixed position
+// among them, since it depends on how backed up the dispatch goroutine is.
+// This shares deliverBroadcast's recipients-path delivery exactly (seqMu,
+// nextSeq, the replay buffer, SendToUser) — the only thing skipped is the
+// plugin dispatch hook, the same trade-off SequencedDMEvent already makes for
+// every synchronous per-recipient send (emit.go).
+func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID int64, msg []byte) {
+	h.sendSequencedToUsers(channelID, h.voiceEventAudience(ctx, channelID), msg)
 }
 
 // broadcastVoiceEventWithLeaver is broadcastVoiceEvent extended to guarantee
@@ -82,20 +107,8 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []by
 // would otherwise never learn the server already ended their call. Mirrors
 // CleanupVoiceForChannel's per-batch leaver union, for the single-leaver case.
 func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64, msg []byte, leaverID int64) {
-	audience := h.channelReadAudience(ctx, channelID)
-	seen := make(map[int64]struct{}, len(audience)+1)
-	for _, uid := range audience {
-		seen[uid] = struct{}{}
-	}
-	h.mu.RLock()
-	for uid, c := range h.clients {
-		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
-			seen[uid] = struct{}{}
-			audience = append(audience, uid)
-		}
-	}
-	h.mu.RUnlock()
-	if _, ok := seen[leaverID]; !ok {
+	audience := h.voiceEventAudience(ctx, channelID)
+	if !slices.Contains(audience, leaverID) {
 		audience = append(audience, leaverID)
 	}
 	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")

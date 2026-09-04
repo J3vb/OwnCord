@@ -157,6 +157,55 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
+  it("traps Tab inside the dialog even when the popup container itself still holds focus", () => {
+    // popup.focus() (mount) leaves document.activeElement === the popup
+    // container, not one of its buttons — Shift+Tab from there must still be
+    // caught, not fall through to the page behind the overlay.
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 200,
+      anchorY: 200,
+      onMessage: () => {},
+      onCall: () => {},
+    });
+    popup.mount(container);
+
+    const popupEl = container.querySelector('[data-testid="user-profile-popup"]') as HTMLElement;
+    expect(document.activeElement).toBe(popupEl);
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const prevented = !popupEl.dispatchEvent(event);
+    expect(prevented).toBe(true);
+
+    const callBtn = container.querySelector('[data-testid="upp-call-btn"]') as HTMLElement;
+    expect(document.activeElement).toBe(callBtn);
+
+    popup.destroy?.();
+  });
+
+  it("traps Tab even when the popup has no focusable control (own-row popup)", () => {
+    // MemberList omits both handlers for the actor's own row, so focusable
+    // is empty — Tab must still be swallowed instead of escaping to the page.
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 200,
+      anchorY: 200,
+    });
+    popup.mount(container);
+
+    const popupEl = container.querySelector('[data-testid="user-profile-popup"]') as HTMLElement;
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    const prevented = !popupEl.dispatchEvent(event);
+    expect(prevented).toBe(true);
+
+    popup.destroy?.();
+  });
+
   it("Escape key closes the popup", () => {
     const user = makeUser();
     const popup = createUserProfilePopup({

@@ -179,6 +179,46 @@ The second statement is the acknowledgement: it records that the floor is
 settled, so the next start-up honours it instead of probing again. Use
 `'channels'` in place of `'users'` when the refusal names that table.
 
+### Erasure marker key
+
+A marker names its subject by HMAC of the id under `data/erasure.key`, so the
+markers are only meaningful under the key they were written with. Opened under
+another key — one regenerated after the file was lost, or an
+`OWNCORD_ERASURE_KEY` pointed somewhere else — every token would miss: the
+start-up replay would erase nothing, report success, and leave a restored
+backup's erased accounts serving. So the file records `marker_meta`'s
+`erasure-key-fingerprint` (HMAC of a fixed label under the key; the key itself
+is never in the file) and the server refuses to start on a key that does not
+match it. Two refusals, both the operator's to resolve, and the log names the
+statement for each. Run them against the **marker file**
+(`data/erasure/markers.sqlite`), not the main database:
+
+- **The file records a different key.** Put the original `erasure.key` back —
+  the log prints the first 12 hex of both fingerprints so you can tell which
+  backup holds it. Only if that key is gone for good, and you accept that the
+  markers become unmatchable, repoint the file at the running key:
+
+  ```sql
+  UPDATE marker_meta SET value = '<running key fingerprint from the log>'
+    WHERE name = 'erasure-key-fingerprint';
+  ```
+
+- **The file holds markers and no fingerprint** — it was written before the
+  key was bound to the file. The server will not adopt a key it cannot prove,
+  because adopting the wrong one is the silent failure above. Confirm the
+  running key is the one those markers were written under, then bless the file:
+
+  ```sql
+  INSERT INTO marker_meta (name, value)
+    VALUES ('erasure-key-fingerprint', '<running key fingerprint from the log>');
+  ```
+
+Deleting or moving `markers.sqlite` is not a way past either refusal. The file
+also carries `sequence_floors` — without them an erased account's id is handed
+out again and its innocent new holder is erased by the old marker on a later
+start-up — and the account markers that keep the first-run setup gate closed
+against a restore of a pre-owner backup.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every
@@ -200,7 +240,8 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `update_apply`,
+  `update_applied`, `update_failed`, `ws_connect`
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,

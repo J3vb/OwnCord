@@ -126,8 +126,8 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	if info.ChecksumURL == "" {
 		t.Error("expected non-empty ChecksumURL")
 	}
-	// Server binary asset is only selected on Windows and Linux.
-	if want := serverDownloadAssetName(runtime.GOOS); want != "" {
+	// Server binary asset is only selected on Windows and Linux, amd64 only.
+	if want := serverDownloadAssetName(runtime.GOOS, runtime.GOARCH); want != "" {
 		if info.DownloadURL == "" {
 			t.Error("expected non-empty DownloadURL")
 		}
@@ -450,17 +450,22 @@ func TestParseChecksumFileAny_FirstMatch(t *testing.T) {
 
 func TestServerDownloadAssetName(t *testing.T) {
 	tests := []struct {
-		goos string
-		want string
+		goos   string
+		goarch string
+		want   string
 	}{
-		{"windows", "chatserver.exe"},
-		{"linux", "chatserver-linux-amd64.tar.gz"},
-		{"darwin", ""},
-		{"freebsd", ""},
+		{"windows", "amd64", "chatserver.exe"},
+		{"linux", "amd64", "chatserver-linux-amd64.tar.gz"},
+		{"darwin", "amd64", ""},
+		{"freebsd", "amd64", ""},
+		// No arm64 asset is published; an arm64 host must not receive the
+		// amd64 binary it cannot execute (OC-0320).
+		{"linux", "arm64", ""},
+		{"windows", "arm64", ""},
 	}
 	for _, tc := range tests {
-		if got := serverDownloadAssetName(tc.goos); got != tc.want {
-			t.Errorf("serverDownloadAssetName(%q) = %q, want %q", tc.goos, got, tc.want)
+		if got := serverDownloadAssetName(tc.goos, tc.goarch); got != tc.want {
+			t.Errorf("serverDownloadAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
 		}
 	}
 }

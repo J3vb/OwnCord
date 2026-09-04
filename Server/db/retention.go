@@ -15,6 +15,19 @@ import (
 // window in days; 0 (the default, seeded by migration 039) keeps everything.
 const RetentionDaysKey = "retention_days"
 
+// RetentionMaxDays is the largest window ServerRetentionDays and the
+// per-channel override read back before treating the row as malformed
+// (OC-0393): converted into the sweep's cutoff (-time.Duration(days) *
+// 24 * time.Hour, service/retention.go), a day count past this overflows
+// the multiplication and the cutoff wraps into the future, matching every
+// unpinned message as "old" instead of none. service.RetentionMaxDays is
+// this same constant — the two write paths that validate a day count
+// before it is stored (SetChannelPolicy, Patch) live in service and import
+// db already, so it is defined once here and mirrored there, not
+// duplicated: a value this file forgot to raise in step could otherwise
+// silently truncate a legitimately larger window an admin just set.
+const RetentionMaxDays = 3650
+
 // ChannelRetention is a per-channel retention policy (B4-11, owner decision
 // 4): days overrides the server window in either direction, 0 meaning keep
 // forever.
@@ -35,8 +48,8 @@ type RetentionWindow struct {
 	Source string `json:"source"`
 }
 
-// ServerRetentionDays reads the server-wide window; a missing or malformed
-// row is 0, keep forever — a typo must never start deleting.
+// ServerRetentionDays reads the server-wide window; a missing, malformed or
+// out-of-range row is 0, keep forever — a typo must never start deleting.
 func (d *DB) ServerRetentionDays(ctx context.Context) (int, error) {
 	v, err := d.GetSetting(ctx, RetentionDaysKey)
 	if err != nil {
@@ -46,8 +59,8 @@ func (d *DB) ServerRetentionDays(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	days, convErr := strconv.Atoi(strings.TrimSpace(v))
-	if convErr != nil || days < 0 {
-		return 0, nil //nolint:nilerr // a malformed value keeps everything on purpose; a typo must never start deleting
+	if convErr != nil || days < 0 || days > RetentionMaxDays {
+		return 0, nil //nolint:nilerr // a malformed or out-of-range value keeps everything on purpose; a typo must never start deleting
 	}
 	return days, nil
 }
@@ -136,8 +149,17 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 			return nil, fmt.Errorf("RetentionWindows scan: %w", err)
 		}
 		switch {
-		case override != nil:
+		case override != nil && *override <= RetentionMaxDays:
 			w.Days, w.Source = *override, "channel"
+		case override != nil:
+			// Out-of-range like ServerRetentionDays above: SetChannelRetention
+			// itself has no upper bound, only SetChannelPolicy's caller-side
+			// check does, so a direct write or a restored/migrated row can
+			// carry anything. The explicit-override semantics (0 = keep
+			// forever, overriding the server window) are what a malformed
+			// override should fail safe into, not a silent fall-back to the
+			// server's window.
+			w.Days, w.Source = 0, "channel"
 		default:
 			w.Days, w.Source = serverDays, "server"
 		}

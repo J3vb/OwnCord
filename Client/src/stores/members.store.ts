@@ -239,12 +239,16 @@ export function clearTyping(channelId: number, userId: number): void {
   });
 }
 
-/** Selector: members where status is not "offline". */
+/**
+ * Selector: members who read as online to everybody, including, in the
+ * member list, to themselves — invisible folds into offline (OC-0348),
+ * matching MemberList's isAwayStatus/statusPriority grouping.
+ */
 export function getOnlineMembers(): readonly Member[] {
   return membersStore.select((s) => {
     const result: Member[] = [];
     for (const member of s.members.values()) {
-      if (member.status !== "offline") {
+      if (member.status !== "offline" && member.status !== "invisible") {
         result.push(member);
       }
     }

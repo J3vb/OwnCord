@@ -23,6 +23,10 @@ import (
 // and a DM id answer an identical 404 (A-2026-08-02). Returns nil when a
 // response has already been written.
 func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
+	if channels == nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+		return nil
+	}
 	id, err := pathInt64(r, "id")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
@@ -52,6 +56,10 @@ func writeChannelErr(w http.ResponseWriter, err error) {
 
 func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if channels == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			return
+		}
 		guildChannels, err := channels.AdminListChannels(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
@@ -77,6 +85,10 @@ var createChannelPostCommitHook func()
 
 func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if channels == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			return
+		}
 		var req createChannelRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
@@ -212,6 +224,10 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 
 func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if settings == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			return
+		}
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 

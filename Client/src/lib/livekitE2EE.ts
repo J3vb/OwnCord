@@ -355,6 +355,23 @@ export class E2EEManager {
       log.warn("E2EE: reconnect re-announce superseded before keypair publish — aborting");
       return;
     }
+    // The announce below is a single unacknowledged send with no retry for a
+    // key holder (see the non-holder confirm timer further down) — if the WS
+    // isn't actually open, the frame is silently dropped (ws.ts's sendRaw)
+    // and the freshly generated pair would be adopted locally while nobody
+    // else ever learns its public half, permanently splitting the holder from
+    // every peer. Keep the pre-reconnect keypair instead; the retained room
+    // key still gets re-applied so audio keeps working. Forward secrecy for
+    // this one reconnect attempt is lost, but that beats an unrecoverable
+    // room-key mismatch.
+    const wsState = this.deps.getWs()?.getState?.();
+    if (wsState !== undefined && wsState !== "connected") {
+      log.warn("E2EE: reconnect re-announce skipped — WS not connected, keeping current keypair");
+      if (this._roomKey) {
+        await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
+      }
+      return;
+    }
     this._ecdhKeyPair = pair;
     // Peers' ECDH public keys and their TOFU verifications survive: they are
     // unaffected by regenerating OUR pair, and ECDH still works (our new

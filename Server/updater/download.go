@@ -249,8 +249,14 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 }
 
 // serverDownloadAssetName returns the GitHub release asset file name for the
-// server binary on the given GOOS (windows, linux). Other values return "".
-func serverDownloadAssetName(goos string) string {
+// server binary on the given GOOS/GOARCH (windows, linux; amd64 only — no
+// other architecture is published). Other values return "" so the caller
+// treats the update as unavailable rather than installing a foreign-arch
+// binary it cannot execute.
+func serverDownloadAssetName(goos, goarch string) string {
+	if goarch != "amd64" {
+		return ""
+	}
 	switch goos {
 	case "windows":
 		return windowsServerBinary

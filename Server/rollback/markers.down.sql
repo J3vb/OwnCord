@@ -9,11 +9,35 @@
 -- counters the markers' tokens are computed against, and floor_probes,
 -- recording that a floor was recovered by probing.
 --
+-- marker_meta binds the file to the erasure key its tokens were computed
+-- under (OC-0388), so the store refuses to open under a key that would make
+-- every marker unmatchable. It goes with the tables it guards.
+--
 -- Dropping these forfeits the anti-resurrection guarantee for every erasure
 -- so far: a restore of an older backup brings erased subjects back with
 -- nothing left to stop them (drill D2). Deleting the file outright does the
 -- same thing. An operator rolling this back records it in the server's audit
 -- log first.
+--
+-- IT ALSO REOPENS FIRST-RUN SETUP. The account markers are the only evidence
+-- outside the database that this installation was ever set up: on every open
+-- ErasureService.closeSetupGateForMarkers reads them and closes the gate that
+-- POST /admin/api/setup is protected by. With them gone, restoring a backup
+-- taken before the first owner existed leaves setup_completed absent and the
+-- users table empty, and the unauthenticated wizard reopens — the first caller
+-- on a configured setup network mints an Owner. That is exactly what migration
+-- 043 exists to prevent. Close the gate in the SERVER database before running
+-- this, and check it afterwards:
+--
+--   sqlite3 data/owncord.db "INSERT INTO settings (key, value)
+--     VALUES ('setup_completed','1')
+--     ON CONFLICT(key) DO UPDATE SET value = '1'"
+--
+-- (the statement above is deliberately written without its trailing statement
+-- separator: the reversal runner splits this file on that character and does
+-- not skip comments, so one inside a comment is executed as a fragment)
+--
 DROP TABLE IF EXISTS floor_probes;
 DROP TABLE IF EXISTS sequence_floors;
+DROP TABLE IF EXISTS marker_meta;
 DROP TABLE IF EXISTS deletion_markers;

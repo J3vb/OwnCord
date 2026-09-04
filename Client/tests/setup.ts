@@ -52,3 +52,11 @@ if (typeof globalThis.localStorage === "undefined") {
     writable: true,
   });
 }
+
+// jsdom never lays anything out, so it doesn't implement scrollIntoView at
+// all (not even as a no-op) — components that call it (e.g. the mention/emoji
+// autocomplete's arrow-key scroll) throw "is not a function" under jsdom.
+// Every real browser has it; this just fills the gap.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}

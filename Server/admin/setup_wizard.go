@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -236,6 +237,22 @@ func wizardSettingUpdates(wr *setupWizardRequest) map[string]string {
 		updates["voice_quality"] = *wr.VoiceQuality
 	}
 	return updates
+}
+
+// wizardSettingKeys returns the sorted keys wizardSettingUpdates would write,
+// for the server_setup audit row — naming which settings the wizard applied,
+// never their values.
+func wizardSettingKeys(wr *setupWizardRequest) []string {
+	if wr == nil {
+		return nil
+	}
+	updates := wizardSettingUpdates(wr)
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // buildConfigPatch maps the wizard payload onto config.yaml keys. When the

@@ -62,7 +62,7 @@ func (r Rule) inScope(dir string) bool {
 }
 
 // Rules is the registry every gate runs.
-var Rules = []Rule{syncutilLocks, dbImportBoundary, authzChokepoint, egressSites}
+var Rules = []Rule{syncutilLocks, dbImportBoundary, authzChokepoint, egressSites, fileSizes}
 
 // importNames returns the local identifiers this file binds to the import
 // path, and separately every dot-import of it (import . "p"), which binds no

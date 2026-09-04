@@ -295,3 +295,27 @@ func TestLoadOrGenerateACME_HTTPRedirect(t *testing.T) {
 		t.Errorf("redirect should point to HTTPS, got: %s", loc)
 	}
 }
+
+func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.TLSConfig{
+		Mode:         "acme",
+		Domain:       "chat.example.com",
+		AcmeCacheDir: filepath.Join(tmpDir, "acme_certs"),
+		HTTPSPort:    8443,
+	}
+
+	result, err := auth.LoadOrGenerate(cfg)
+	if err != nil {
+		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/some/path", nil)
+	rec := httptest.NewRecorder()
+	result.HTTPHandler.ServeHTTP(rec, req)
+
+	loc := rec.Header().Get("Location")
+	if want := "https://chat.example.com:8443/some/path"; loc != want {
+		t.Errorf("redirect Location = %q, want %q", loc, want)
+	}
+}

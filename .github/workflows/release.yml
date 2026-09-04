@@ -423,6 +423,11 @@ jobs:
   release-server-docker:
     name: Build & Push Server Docker Image
     needs: verify-versions
+    # The `release` environment carries a required reviewer; naming it here
+    # is what gates this job's ghcr.io push behind that approval, the same
+    # way it gates the `publish` job below — without this line the push to
+    # :latest goes out on every tag with no human in the loop.
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       contents: read

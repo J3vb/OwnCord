@@ -171,6 +171,17 @@ func TestIsOriginAllowed_SameHostDifferentPortDenied(t *testing.T) {
 	}
 }
 
+// An explicit default port (as the client's proxy synthesizes behind a
+// reverse proxy that strips the port from Host, e.g. nginx's $host) must be
+// treated as equivalent to the implicit default port, on either side.
+func TestIsOriginAllowed_ExplicitDefaultPortMatchesImplicit(t *testing.T) {
+	r := httptest.NewRequest("GET", "https://chat.example.com/livekit/", nil)
+	r.Header.Set("Origin", "https://chat.example.com:443")
+	if !isOriginAllowed(r, nil) {
+		t.Error("expected true for explicit :443 origin against a port-stripped Host")
+	}
+}
+
 // A lookalike origin must NOT ride along with the first-party allowance.
 func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
 	for _, origin := range []string{

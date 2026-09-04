@@ -2,12 +2,14 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"golang.org/x/mod/semver"
 )
@@ -40,7 +42,16 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 var applyRestartDelay = 5 * time.Second
 
 // handleApplyUpdate downloads and applies a server update.
-func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
+//
+// It is audited, which is why it takes a database handle it otherwise has no
+// use for. Replacing the running binary is the largest change an owner
+// credential can make — strictly larger than plugin_install, which B2-6 chose
+// to audit — and until OC-0391 it was the one owner-only mutation on this
+// router that wrote no audit row at all, on any path. Both halves are
+// recorded: update_apply when the verified binary is staged and the swap
+// becomes inevitable, update_applied or update_failed for what actually
+// happened.
+func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// In a container the running binary is image content: the staged
 		// replacement dies with the container and the restart comes back as
@@ -124,6 +135,17 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			return
 		}
 
+		// Audited here rather than on entry: everything above can refuse the
+		// request, and a row per refused attempt would bury the one that
+		// matters. From this point the binary is staged and verified and the
+		// swap happens in the background, so this is the last moment the
+		// request context is still alive to carry it.
+		actor := actorFromContext(r)
+		auditCtx := context.WithoutCancel(r.Context())
+		slog.Info("server update applying", "actor_id", actor, "from", info.Current, "to", info.Latest)
+		db.WriteAudit(auditCtx, database, actor, "update_apply", "server", 0,
+			fmt.Sprintf("applying server update %s -> %s", info.Current, info.Latest))
+
 		// Respond to the client before shutting down.
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "applying",
@@ -134,7 +156,7 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		// goroutine takes over the busy state claimed above, so the deferred
 		// release must stand down.
 		claimed = false
-		go applyAndRestart(hub, exePath, oldPath, newPath, stagedHash)
+		go applyAndRestart(auditCtx, database, actor, info.Latest, hub, exePath, oldPath, newPath, stagedHash)
 	})
 }
 
@@ -144,17 +166,37 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 // exclusive slot claimed by the handler so a corrected release can be applied
 // without a manual restart (the corrective update_aborted broadcast is sent
 // by applyStagedUpdate's deferred guard).
-func applyAndRestart(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
+func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
 	if hub != nil {
 		hub.BroadcastServerRestart("update", 5)
 	}
 	time.Sleep(applyRestartDelay)
 	if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+		// Synchronous, like the backup restore's row and for the same reason:
+		// the next thing this process does is hand itself over to the restart
+		// coordinator, and a row still sitting in the async writer's buffer
+		// would go with it. A failed write is logged, never a reason to leave
+		// a swapped binary unstarted.
+		auditUpdateOutcome(ctx, database, actor, "update_applied",
+			fmt.Sprintf("server binary replaced with %s, restarting", version))
 		commitRestartPending()
 		requestRestart("update")
 		return
 	}
+	auditUpdateOutcome(ctx, database, actor, "update_failed",
+		fmt.Sprintf("staged server update %s was not applied, the running binary is unchanged", version))
 	abortRestartSensitiveOp()
+}
+
+// auditUpdateOutcome writes the outcome row synchronously. database is nil in
+// tests that exercise the swap without a store.
+func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, action, detail string) {
+	if database == nil {
+		return
+	}
+	if err := database.LogAudit(ctx, actor, action, "server", 0, detail); err != nil {
+		slog.Error("update: writing the outcome audit row failed", "action", action, "error", err)
+	}
 }
 
 // applyStagedUpdate performs the on-disk swap: verified staged binary ->

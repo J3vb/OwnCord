@@ -345,6 +345,17 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 	s.limiter.Reset(ctx, at.ipFail)
 	s.limiter.Reset(ctx, at.userFail)
 
+	// The revoked sessions are gone; drop the socket(s) they authenticated
+	// now rather than at the hub's next 30-second sweep — the same gap
+	// handleRevokeAllSessions closes for sign-out-everywhere (Codex P1 on
+	// PR #1500), and recovery is precisely the takeover case it matters
+	// most for (OC-0394).
+	if revoked > 0 {
+		if d, ok := s.broadcaster.(sessionDisconnector); ok {
+			d.DisconnectRevokedUser(user.ID)
+		}
+	}
+
 	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {
 		// The recovery committed; the user signs in with the new password.
@@ -397,7 +408,7 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 		slog.Error("recovery assist: GetRoleByID failed", "err", err, "actor_id", actor.ID)
 		return nil, ErrRecoveryAssistFailed
 	}
-	if role == nil || (role.ID != permissions.OwnerRoleID && role.Position < permissions.OwnerRolePosition) {
+	if role == nil || !permissions.IsOwner(role.ID, role.Position) {
 		return nil, ErrRecoveryAssistOwnerOnly
 	}
 	if !slices.Contains(RecoveryVerifications, verification) {

@@ -66,6 +66,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
+	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
 	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
@@ -147,6 +148,9 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM recovery_assists WHERE user_id = ? AND issued_by = 0`, sub.other); n != 1 {
 		t.Errorf("assisted credential issued by the subject: want kept with issued_by = 0")
+	}
+	if n := count(`SELECT COUNT(*) FROM channel_retention WHERE channel_id = ? AND days = 30 AND updated_by = 0`, sub.channel); n != 1 {
+		t.Errorf("channel retention policy set by the subject: want kept in effect with updated_by = 0")
 	}
 	if n := count(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needleword'`); n != 0 {
 		t.Errorf("FTS still finds the subject's text")

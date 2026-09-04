@@ -148,7 +148,9 @@ func (a *App) startDataDir() error {
 // challenge handler the acme stage serves) and prints the startup banner
 // above the init logs, as run() did. Nothing to close.
 func (a *App) startTLS() error {
-	tlsResult, err := auth.LoadOrGenerate(a.cfg.TLS)
+	tlsCfg := a.cfg.TLS
+	tlsCfg.HTTPSPort = a.cfg.Server.Port
+	tlsResult, err := auth.LoadOrGenerate(tlsCfg)
 	if err != nil {
 		return fmt.Errorf("configuring TLS: %w", err)
 	}

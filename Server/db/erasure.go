@@ -267,6 +267,10 @@ var erasureStatements = []struct {
 	// becomes the system actor, as audit rows do.
 	{"recovery_assists issuer", `UPDATE recovery_assists SET issued_by = 0 WHERE issued_by = ?`},
 	{"voice_states", `DELETE FROM voice_states WHERE user_id = ?`},
+	// Retention policy setter (migration 039, B4-11): no FK, so the id
+	// otherwise outlives the erasure. The policy stays in effect — only the
+	// link to who set it is cut, as with the recovery_assists issuer above.
+	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},

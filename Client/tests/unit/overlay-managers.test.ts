@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
+import { setMembers } from "@stores/members.store";
 
 // ---------------------------------------------------------------------------
 // Mocks (vi.hoisted so they're available in vi.mock factories)
@@ -690,10 +691,14 @@ describe("mapInviteResponse", () => {
 // ---------------------------------------------------------------------------
 
 describe("mapToPinnedMessage", () => {
+  afterEach(() => {
+    setMembers([]);
+  });
+
   it("maps a pinned message with created_at", () => {
     const result = mapToPinnedMessage({
       id: 1,
-      user: { username: "Alice" },
+      user: { id: 101, username: "Alice", avatar: null },
       content: "Hello",
       created_at: "2024-01-01",
     });
@@ -708,7 +713,7 @@ describe("mapToPinnedMessage", () => {
   it("falls back to timestamp when created_at is undefined", () => {
     const result = mapToPinnedMessage({
       id: 2,
-      user: { username: "Bob" },
+      user: { id: 102, username: "Bob", avatar: null },
       content: "World",
       timestamp: "2024-02-15",
     });
@@ -719,7 +724,7 @@ describe("mapToPinnedMessage", () => {
   it("falls back to empty string when neither created_at nor timestamp is set", () => {
     const result = mapToPinnedMessage({
       id: 3,
-      user: { username: "Charlie" },
+      user: { id: 103, username: "Charlie", avatar: null },
       content: "No timestamp",
     });
 
@@ -727,18 +732,63 @@ describe("mapToPinnedMessage", () => {
   });
 
   it("generates deterministic avatar color for same username", () => {
-    const a = mapToPinnedMessage({ id: 1, user: { username: "Alice" }, content: "" });
-    const b = mapToPinnedMessage({ id: 2, user: { username: "Alice" }, content: "" });
+    const a = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
+    const b = mapToPinnedMessage({
+      id: 2,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
 
     expect(a.avatarColor).toBe(b.avatarColor);
   });
 
   it("generates different colors for different usernames", () => {
-    const a = mapToPinnedMessage({ id: 1, user: { username: "Alice" }, content: "" });
-    const b = mapToPinnedMessage({ id: 2, user: { username: "Bob" }, content: "" });
+    const a = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
+    const b = mapToPinnedMessage({
+      id: 2,
+      user: { id: 102, username: "Bob", avatar: null },
+      content: "",
+    });
 
     // Not guaranteed to be different in theory, but these specific names will differ
     expect(a.avatarColor).not.toBe(b.avatarColor);
+  });
+
+  it("renders the live membersStore nickname, not the raw payload username (OC-0330)", () => {
+    setMembers([
+      {
+        id: 101,
+        username: "bob",
+        avatar: null,
+        role: "member",
+        status: "online",
+        display_name: "Bobby",
+      },
+    ]);
+
+    const result = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "bob", avatar: null },
+      content: "Hello",
+    });
+
+    expect(result.author).toBe("Bobby");
+    // Avatar hue stays keyed off the raw username, stable across renames.
+    expect(result.avatarColor).toBe(
+      mapToPinnedMessage({
+        id: 2,
+        user: { id: 999, username: "bob", avatar: null },
+        content: "",
+      }).avatarColor,
+    );
   });
 });
 

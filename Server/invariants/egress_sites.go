@@ -47,6 +47,9 @@ var EgressAllow = map[string]EgressEntry{
 	"ws/livekit_download.go": {"config", "github.com/livekit/livekit release assets", "voice.auto_download_livekit (compiled default false; the generated config sets true) with voice.livekit_binary unset",
 		"downloads the pinned, checksum-verified livekit-server binary once",
 		[]string{"fetchLimited", "downloadTo"}},
+	"ws/livekit.go": {"config", "voice.livekit_url (ws://localhost:7880 by default; a remote LiveKit when the operator points it there)", "voice.livekit_url",
+		"the room-service client behind RemoveParticipant, GetParticipant, MutePublishedTrack, ListParticipants and ListRooms; the SDK builds its own *http.Client, so only its construction is syntactically visible here",
+		[]string{"NewLiveKitClient"}},
 	"ws/livekit_process.go": {"config", "voice.livekit_url (ws://localhost:7880 by default; a remote LiveKit when the operator points it there)", "voice.livekit_url",
 		"health probes of the LiveKit process; loopback under the default, the operator's LiveKit host otherwise",
 		[]string{"NewLiveKitProcess", "(*LiveKitProcess).HealthCheck"}},
@@ -94,6 +97,9 @@ var egressPackages = map[string]struct {
 	},
 	"google.golang.org/grpc": {
 		calls: map[string]bool{"Dial": true, "DialContext": true, "NewClient": true},
+	},
+	"github.com/livekit/server-sdk-go/v2": {
+		calls: map[string]bool{"NewRoomServiceClient": true},
 	},
 }
 

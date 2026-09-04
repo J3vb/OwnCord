@@ -26,13 +26,6 @@ func NewModerationService(st Store, perms *PermissionService) *ModerationService
 	return &ModerationService{st: st, perms: perms}
 }
 
-// WithErasure installs the erasure runner EraseUser delegates to; New does
-// this for the shared bundle, tests do it by hand.
-func (s *ModerationService) WithErasure(e *ErasureService) *ModerationService {
-	s.erasure = e
-	return s
-}
-
 // ErasureBroadcastsMemberBan reports whether the erasure runner sends the
 // member_ban itself (a hub is installed on it); the transport sends its own
 // only when it does not.

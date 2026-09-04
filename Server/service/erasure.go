@@ -213,7 +213,18 @@ func (s *ErasureService) eraseForReplay(ctx context.Context, userID int64, token
 	} else if n == 0 {
 		slog.Error("erasure replay: the erased account was the last admin-class account in the restored database — the backup predates the handover to another administrator; none remains", "user_id", userID)
 	}
-	return s.finishErasure(ctx, userID, job)
+	if err := s.finishErasure(ctx, userID, job); err != nil {
+		if errors.Is(err, ErrErasureFilesPending) {
+			// The account is gone from the database; the journal finishes
+			// the files on a later Resume, same as the live routes
+			// (DeleteAccount, EraseUser). A replay must not abort start-up
+			// over a store that is merely down right now.
+			slog.Warn("erasure replay: files pending", "user_id", userID, "err", err)
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ReplayMarkers applies every deletion marker to the database — at

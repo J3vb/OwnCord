@@ -36,6 +36,17 @@ and SQLite reports "incomplete input".
 in comment prose orphans the rest of that comment as a bogus statement
 ("near <word>: syntax error").
 
+**A migration that has merged is immutable, and its number is its position.**
+`migrate.go` records an applied migration by filename and keeps no content
+hash, so editing one repairs nothing for an installation that already ran it —
+it keeps the old schema forever while fresh installs get the new one, and
+nothing errors (OC-0395: 039 was rewritten in place and cost those installs
+`retention_runs.purge_pending`). Unapplied files are also applied in
+lexicographic order, so a number that skips ahead of an unwritten one gives
+two installations two different orders (OC-0414). Write a new migration
+numbered one past the last on `dev`, and add its row to the Migration History
+table in `docs/schema.md`. `node scripts/check-migrations.mjs` enforces both.
+
 **Regenerate from a tree where the query files carry only YOUR change.**
 sqlc regenerates every `dbgen/` file from every query file on each run, so
 unrelated working-tree edits to any `queries/*.sql` — a parallel agent's

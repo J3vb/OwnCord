@@ -364,7 +364,7 @@ func handleGetMe() http.HandlerFunc {
 			RoleName:     role.Name,
 			RolePosition: role.Position,
 			Permissions:  role.Permissions,
-			IsOwner:      role.Position >= permissions.OwnerRolePosition,
+			IsOwner:      permissions.IsOwner(role.ID, role.Position),
 		})
 	}
 }

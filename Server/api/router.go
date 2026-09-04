@@ -331,25 +331,34 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 // member_ban and purges the replay pipeline behind an erasure; then makes
 // the self-service route run through that same runner, as the admin route
 // and the maintenance loop's resume already do. A nil store (upload storage failed to open) leaves the
-// file half journaled for the maintenance loop's fallback storage.
+// file half journaled for the maintenance loop's fallback storage. svc.Erasure
+// and svc.Retention are guarded independently — one being absent from the
+// bundle must not also leave the other unwired — and a missing svc.Erasure is
+// logged rather than left for AuthService's private per-instance runner to
+// swallow quietly (see UseErasure).
 func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storage.Storage, hub *ws.Hub) {
 	svc.Auth = authSvc
-	if svc.Erasure == nil {
-		return
-	}
 	if store != nil {
-		svc.Erasure.SetFiles(store)
+		if svc.Erasure != nil {
+			svc.Erasure.SetFiles(store)
+		}
 		if svc.Retention != nil {
 			svc.Retention.SetFiles(store)
 		}
 	}
 	if hub != nil {
-		svc.Erasure.SetHub(hub)
+		if svc.Erasure != nil {
+			svc.Erasure.SetHub(hub)
+		}
 		if svc.Retention != nil {
 			svc.Retention.SetHub(hub)
 		}
 	}
-	authSvc.UseErasure(svc.Erasure)
+	if svc.Erasure != nil {
+		authSvc.UseErasure(svc.Erasure)
+	} else {
+		slog.Error("wireAuth: bundle has no erasure runner; account deletion will run through AuthService's private runner, which records no deletion marker — a restore can resurrect an erased account")
+	}
 }
 
 // routerUploadRoutes mounts the file upload and serving routes and returns the

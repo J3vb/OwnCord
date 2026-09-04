@@ -249,9 +249,19 @@
 <div class="auth-overlay" id="loginOverlay">
   <div class="auth-box">
     <h2>OwnCord Admin</h2>
-    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
-    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
-    <button class="btn btn-accent" id="loginBtn" style="width:100%">Sign In</button>
+    <div id="loginStep1">
+      <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <button class="btn btn-accent" id="loginBtn" style="width:100%">Sign In</button>
+    </div>
+    <!-- Second step of a two-factor sign-in. Hidden until the login response
+         says the account has TOTP enabled. -->
+    <div id="loginTotpStep" class="hidden">
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:14px">Enter the 6-digit code from your authenticator app, or one of your emergency recovery codes.</p>
+      <div class="form-group"><label class="form-label" for="loginTotp">Authentication code</label><input class="form-input" id="loginTotp" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" placeholder="000000"></div>
+      <button class="btn btn-accent" id="totpBtn" style="width:100%">Verify</button>
+      <button class="btn btn-ghost" id="totpCancelBtn" style="width:100%;margin-top:8px">Back</button>
+    </div>
     <div class="auth-error" id="loginErr"></div>
   </div>
 </div>
@@ -311,7 +321,7 @@ const I={
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
-  me:null,
+  me:null,partialToken:'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
@@ -365,6 +375,12 @@ function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/
    Without this a name containing ' breaks out of the string literal (XSS). */
 function jsq(s){return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"))}
 function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
+/* SQLite's datetime('now') writes "YYYY-MM-DD HH:MM:SS" — UTC with no zone
+   marker — and new Date() reads that non-ISO form as LOCAL time, shifting the
+   rendered clock by the viewer's offset. Add the marker the string is missing;
+   a value that already carries one (or an offset) is passed through unchanged,
+   so this is a no-op on the columns the server formats itself. */
+function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(v)?v:v.replace(' ','T')+'Z')}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
@@ -372,6 +388,21 @@ function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.incl
    Roles section and by openEditUser) and only then the seeded map — otherwise a
    custom role renders as "Member" in its own colour. */
 function roleFromCache(rid){return (state.roleList||[]).find(r=>r.id===rid)||null}
+/* Nothing clears users.banned when a temporary ban lapses — expiry is decided
+   lazily, by auth.IsEffectivelyBanned and by db.notBannedClause's
+   `replace(ban_expires,' ','T') <= strftime(...)` arm. So a row keeps
+   banned=1 with a past ban_expires for life while the account is fully active
+   everywhere else, and this panel was the one surface still calling it
+   banned. Apply the same rule here: banned, and either no expiry or an expiry
+   still in the future. The replace() matches notBannedClause's normalisation
+   of SQLite's space-separated form. */
+function effectiveBan(u){
+  if(!(u.Banned||u.banned))return false;
+  const exp=u.ban_expires||u.BanExpires;
+  if(!exp)return true;
+  const t=utcDate(String(exp).replace(' ','T')).getTime();
+  return isNaN(t)||t>Date.now();
+}
 function roleColor(rid){
   const r=roleFromCache(rid);
   if(r&&r.color)return r.color;
@@ -405,7 +436,16 @@ function closeModal(){
 
 /* ═══ Auth ═══ */
 function hideAll(){['setupOverlay','setupSuccessOverlay','loginOverlay'].forEach(id=>document.getElementById(id).classList.remove('visible'));document.getElementById('adminShell').classList.add('hidden')}
-function showOverlay(id){hideAll();document.getElementById(id).classList.add('visible')}
+function showOverlay(id){hideAll();if(id==='loginOverlay')resetLoginSteps();document.getElementById(id).classList.add('visible')}
+/* Back to the username/password step, dropping any outstanding 2FA
+   challenge. Deliberately leaves #loginErr alone: handleSessionExpired writes
+   its message before calling showOverlay. */
+function resetLoginSteps(){
+  state.partialToken='';
+  const t=document.getElementById('loginTotp');if(t)t.value='';
+  const s1=document.getElementById('loginStep1');if(s1)s1.classList.remove('hidden');
+  const s2=document.getElementById('loginTotpStep');if(s2)s2.classList.add('hidden');
+}
 function showApp(){hideAll();document.getElementById('adminShell').classList.remove('hidden')}
 
 async function checkAuth(){
@@ -656,10 +696,55 @@ document.getElementById('loginBtn').onclick=async()=>{
   if(btn.disabled)return;
   btn.disabled=true;
   try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
+    /* A TOTP account is answered with 200 and {partial_token,requires_2fa}
+       and NO token — the session token comes from the second leg below.
+       Without this branch the panel stored `undefined`, and every retry ended
+       at a false "session expired": an operator who turned two-factor on
+       could never open /admin again, which is where the owner-assisted
+       recovery that would let them back in lives. */
+    if(d.requires_2fa&&d.partial_token){showLoginTotp(d.partial_token);return}
+    if(!d.token)throw new Error('Login failed');
     state.token=d.token;localStorage.setItem('admin_token',state.token);await enterApp();
   }catch(e){err.textContent=e.message}
   finally{btn.disabled=false}
 };
+
+function showLoginTotp(partialToken){
+  state.partialToken=partialToken;
+  document.getElementById('loginErr').textContent='';
+  document.getElementById('loginStep1').classList.add('hidden');
+  document.getElementById('loginTotpStep').classList.remove('hidden');
+  const t=document.getElementById('loginTotp');t.value='';t.focus();
+}
+
+/* Second leg: POST /api/v1/auth/verify-totp authenticated with the partial
+   token, exactly the exchange Client/src/lib/api.ts verifyTotp makes. The one
+   field takes either the authenticator's 6-digit code or an emergency
+   recovery code — the two have different shapes and AuthService.VerifyTOTP
+   routes on that, so nothing here has to choose. The partial token is NOT
+   cleared on a rejected code: the code is single-use, the challenge is not,
+   so a retry has to keep working. */
+document.getElementById('totpBtn').onclick=async()=>{
+  const btn=document.getElementById('totpBtn');
+  const err=document.getElementById('loginErr');
+  const code=document.getElementById('loginTotp').value.trim();
+  err.textContent='';
+  if(!code){err.textContent='Enter your authentication code.';return}
+  if(!state.partialToken){resetLoginSteps();err.textContent='That sign-in expired — start again.';return}
+  if(btn.disabled)return;
+  btn.disabled=true;
+  try{
+    const r=await fetch('/api/v1/auth/verify-totp',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+state.partialToken},body:JSON.stringify({code})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.message||'Verification failed');
+    if(!d.token)throw new Error('Verification failed');
+    state.partialToken='';
+    state.token=d.token;localStorage.setItem('admin_token',state.token);await enterApp();
+  }catch(e){err.textContent=e.message}
+  finally{btn.disabled=false}
+};
+document.getElementById('totpCancelBtn').onclick=()=>{resetLoginSteps();document.getElementById('loginErr').textContent=''};
+document.getElementById('loginTotp').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('totpBtn').click()});
 
 /* Wizard inputs bind Enter dynamically in renderWizard(). */
 ['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
@@ -681,6 +766,7 @@ const NAV=[
   {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
   {id:'logs',label:'Server Logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'retention',label:'Retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'backups',label:'Backups',icon:I.backup,allowed:isOwner},
   {id:'updates',label:'Updates',icon:I.updates,allowed:isOwner},
   {sep:true},
@@ -745,7 +831,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -803,9 +889,15 @@ async function decideRegistration(id,action){
 }
 async function renderUsers(){
   const offset=(state.usersPage-1)*PAGE_SIZE;
-  let users;
-  try{users=await api('GET','/users?limit='+PAGE_SIZE+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
-  const totalPages=Math.max(1,Math.ceil(users.length/PAGE_SIZE));
+  /* Fetch one row past the page: a page of exactly PAGE_SIZE rows is
+     otherwise indistinguishable from "a full page and nothing after it", and
+     the ">" button offered a phantom empty page at every exact multiple.
+     Same shape as MessageService.GetMessages (limit+1, hasMore from the
+     overflow); limit=51 is inside the server's 1..500 clamp. */
+  let rows;
+  try{rows=await api('GET','/users?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  const hasMore=rows.length>PAGE_SIZE;
+  const users=rows.slice(0,PAGE_SIZE);
   let html='<div class="page-title">Users</div><div class="page-desc">Manage server members</div>';
   /* Approval-mode applications wait here until someone with MANAGE_SERVER
      decides; the card only appears when there is something to decide. */
@@ -826,7 +918,7 @@ async function renderUsers(){
   if(!users.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No users found</td></tr>';
   users.forEach(u=>{
     const uid=u.id||u.ID;const uname=u.Username||u.username||'';const rid=u.role_id||u.RoleID||4;
-    const status=u.Status||u.status||'offline';const banned=u.Banned||u.banned||false;
+    const status=u.Status||u.status||'offline';const banned=effectiveBan(u);
     const statusDot=banned?'banned':status;const statusLabel=banned?'Banned':status==='online'?'Online':'Offline';
     const initial=uname?uname[0].toUpperCase():'?';
     html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:var(--accent)">'+initial+'</div><strong>'+esc(uname)+'</strong></div></td>';
@@ -848,13 +940,20 @@ async function renderUsers(){
       if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
       else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
     }
+    /* Erasure (B4-9) is the only irreversible action in the panel, so it sits
+       last behind a gap rather than beside Force Logout — a slip aimed at a
+       reversible control must not be able to reach it. ADMINISTRATOR matches
+       the route's gate; the service refuses erasing yourself, so that row
+       does not offer it. */
+    if(can(PERM.ADMINISTRATOR)&&uid!==(state.me&&state.me.id))
+      html+='<span style="display:inline-block;width:14px"></span><button class="act-btn danger" title="Erase account permanently" onclick="openEraseUser('+uid+',\''+jsq(uname)+'\')">'+I.trash+'</button>';
     html+='</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   html+='<div class="pagination"><div class="pagination-info">Page '+state.usersPage+'</div><div class="pagination-btns">';
   html+='<button class="page-btn" '+(state.usersPage<=1?'disabled':'')+' onclick="state.usersPage--;renderContent()">&lt;</button>';
   html+='<button class="page-btn active">'+state.usersPage+'</button>';
-  html+='<button class="page-btn" '+(users.length<PAGE_SIZE?'disabled':'')+' onclick="state.usersPage++;renderContent()">&gt;</button>';
+  html+='<button class="page-btn" '+(hasMore?'':'disabled')+' onclick="state.usersPage++;renderContent()">&gt;</button>';
   html+='</div></div>';
   return html;
 }
@@ -910,6 +1009,28 @@ async function confirmBan(uid){
 
 async function unbanUser(uid){
   try{await api('PATCH','/users/'+uid,{banned:false});showToast('User unbanned');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* Account erasure (B4-9) hard-deletes the account and everything
+   attributable to it — this is not the anonymising ban path it replaces, and
+   no backup taken afterwards brings any of it back. The confirmation names
+   what goes and asks for the username to be typed, so the action cannot be
+   completed by clicking through. */
+function openEraseUser(uid,uname){
+  openModal('<div class="modal-header"><h3>Erase Account</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<p style="color:var(--text-muted)">Permanently erase <strong style="color:white">'+esc(uname)+'</strong>. <strong style="color:var(--red)">This cannot be undone</strong> — nothing erased here can be recovered afterwards.</p>'
+    +'<p style="color:var(--text-muted);margin-top:10px">Deleted for good: the account, every message and direct message it sent, its uploads and avatar, its reactions, read state, sessions, API tokens, two-factor secrets and recovery codes, and the invites it created.</p>'
+    +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Kept: its audit-log entries, with the account no longer named, and any custom emoji it uploaded, reassigned to another admin.</p>'
+    +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="eraseConfirm">Type <strong style="color:white">'+esc(uname)+'</strong> to confirm</label><input class="form-input" id="eraseConfirm" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmEraseUser('+uid+',\''+jsq(uname)+'\')">Erase permanently</button></div>');
+}
+
+async function confirmEraseUser(uid,uname){
+  const typed=(document.getElementById('eraseConfirm')?.value||'').trim();
+  if(typed!==uname){showToast('Type the username exactly to confirm','error');return}
+  try{await api('DELETE','/users/'+uid);closeModal();showToast('Account erased permanently');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 async function forceLogout(uid){
@@ -1343,9 +1464,19 @@ function openRoleModal(id){
   const name=role?role.name:'';
   const color=(role&&role.color)?role.color:'';
   const perms=role?role.permissions:0;
-  /* A new role defaults to just below the caller, which is what the server
-     does for an omitted position — shown so the number is never a surprise. */
-  const position=role?role.position:Math.max(0,myPosition()-1);
+  /* A new role defaults to the highest free slot below the caller — the same
+     walk-down CreateRole does for an omitted position, shown so the number is
+     never a surprise. Prefilling myPosition()-1 unconditionally handed the
+     server a slot the previous new role already holds, and CreateRole refuses
+     an explicitly requested position that is taken, so every role after the
+     first was rejected on its own default. */
+  let position;
+  if(role)position=role.position;
+  else{
+    const taken={};(state.roleList||[]).forEach(r=>{taken[r.position]=true});
+    position=Math.max(0,myPosition()-1);
+    while(position>0&&taken[position])position--;
+  }
 
   let grid='';
   PERM_GROUPS.forEach(g=>{
@@ -1430,12 +1561,22 @@ async function confirmDeleteRole(id){
 /* ═══ Audit Log ═══ */
 async function renderAudit(){
   const offset=(state.auditPage-1)*PAGE_SIZE;
+  // Over-fetched like the Users page, so the ">" button never offers an
+  // empty page at an exact multiple of PAGE_SIZE. The cache keeps the sliced
+  // page so the "N entries on this page" label stays accurate.
   let entries;
-  try{entries=await api('GET','/audit-log?limit='+PAGE_SIZE+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
-  state.auditCache=entries||[];
+  try{entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  const hasMore=!!entries&&entries.length>PAGE_SIZE;
+  state.auditCache=(entries||[]).slice(0,PAGE_SIZE);
 
   // Collect unique action types for the filter dropdown.
-  const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean))].sort();
+  // The options come from the fetched page but the filter is global, so a
+  // filtered action that does not occur on this page would leave no option
+  // `selected`: the control would read "All Actions" with the filter still
+  // applied, and picking "All Actions" would fire no change event because the
+  // element's value already was "all". Keeping the active filter in the set
+  // makes the control and the state impossible to diverge.
+  const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean).concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
 
   // Client-side filter on fetched page.
   const filtered=state.auditCache.filter(e=>{
@@ -1468,7 +1609,7 @@ async function renderAudit(){
   html+='<div class="pagination"><div class="pagination-info">Page '+state.auditPage+(state.auditSearch||state.auditActionFilter!=='all'?' ('+filtered.length+' of '+state.auditCache.length+' shown)':'')+'</div><div class="pagination-btns">';
   html+='<button class="page-btn" '+(state.auditPage<=1?'disabled':'')+' onclick="state.auditPage--;renderContent()">&lt;</button>';
   html+='<button class="page-btn active">'+state.auditPage+'</button>';
-  html+='<button class="page-btn" '+(!entries||entries.length<PAGE_SIZE?'disabled':'')+' onclick="state.auditPage++;renderContent()">&gt;</button>';
+  html+='<button class="page-btn" '+(hasMore?'':'disabled')+' onclick="state.auditPage++;renderContent()">&gt;</button>';
   html+='</div></div>';
   return html;
 }
@@ -1656,6 +1797,123 @@ async function saveSettings(){
   }
 }
 
+/* ═══ Message Retention (B4-11) ═══ */
+/* Retention deletes message history continuously and irreversibly, so this
+   page leads with GET /retention/preview: per channel with an effective
+   window, how many messages the next sweep takes under the policy as it
+   stands. The server-wide window is the retention_days setting; a channel may
+   override it in either direction, and 0 on a channel keeps that channel
+   forever even under a server window. DMs are never in scope — the server
+   refuses a policy on one — so they are not listed. */
+function retentionLabel(days){return days>0?days+' day'+(days===1?'':'s'):'Kept forever'}
+
+async function renderRetention(){
+  let policy,preview;
+  try{policy=await api('GET','/retention');preview=await api('GET','/retention/preview')}
+  catch(e){return'<div class="page-title">Message Retention</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  /* The channel list is MANAGE_CHANNELS while this page is MANAGE_SERVER, so
+     a principal holding only the latter cannot read it. Degrade to the
+     channels the policy and the preview already name rather than failing the
+     whole page over an affordance. */
+  let channels=null;
+  try{channels=await api('GET','/channels')}catch(e){}
+  const serverDays=(policy&&policy.server_days)||0;
+  state.retentionPolicyChannels=(policy&&policy.channels)||[];
+  const overrides={};state.retentionPolicyChannels.forEach(c=>{overrides[c.channel_id]=c.days});
+  const windows={};let totalDue=0;
+  (preview||[]).forEach(w=>{windows[w.channel_id]=w;totalDue+=w.would_delete||0});
+  const rows=[];const seen={};
+  (channels||[]).forEach(ch=>{
+    const id=ch.id||ch.ID;const type=ch.type||ch.Type||'text';
+    if(type==='dm')return;
+    seen[id]=true;rows.push({id:id,name:ch.name||ch.Name||('#'+id)});
+  });
+  Object.keys(overrides).concat(Object.keys(windows)).forEach(k=>{
+    const id=parseInt(k,10);
+    if(seen[id])return;
+    seen[id]=true;
+    rows.push({id:id,name:(windows[id]&&windows[id].channel_name)||('#'+id)});
+  });
+  rows.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+
+  let html='<div class="page-title">Message Retention</div><div class="page-desc">Messages older than the window are deleted permanently on every maintenance sweep. Pinned messages are exempt, and direct messages are never in scope.</div>';
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Keep messages for</div><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
+  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Apply</button></div></div>';
+  html+='<div style="color:var(--text-faint);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
+  html+='</div></div>';
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Effect preview</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body">';
+  if(!preview||!preview.length)html+='<div style="color:var(--text-faint);font-size:13px">No channel has a retention window, so the next sweep removes nothing.</div>';
+  else if(totalDue===0)html+='<div style="color:var(--text-faint);font-size:13px">A window applies to '+preview.length+' channel'+(preview.length===1?'':'s')+', but nothing is past it yet — the next sweep removes nothing.</div>';
+  else html+='<div style="color:var(--yellow);font-size:13px">The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> message'+(totalDue===1?'':'s')+' across '+preview.length+' channel'+(preview.length===1?'':'s')+'. This cannot be undone.</div>';
+  html+='</div></div>';
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Channels</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Window</th><th>Source</th><th>Next sweep removes</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!rows.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No channels</td></tr>';
+  rows.forEach(r=>{
+    const w=windows[r.id];
+    const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
+    const days=has?overrides[r.id]:serverDays;
+    const due=w?(w.would_delete||0):0;
+    html+='<tr><td><strong>'+esc(r.name)+'</strong></td>';
+    html+='<td>'+esc(retentionLabel(days))+'</td>';
+    html+='<td>'+(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')+'</td>';
+    html+='<td'+(due?' style="color:var(--red)"':' style="color:var(--text-faint)"')+'>'+due.toLocaleString()+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openChannelRetention('+r.id+',\''+jsq(r.name)+'\')">'+(has?'Edit override':'Override')+'</button>';
+    if(has)html+='<button class="btn btn-ghost" onclick="clearChannelRetention('+r.id+')">Use server policy</button>';
+    html+='</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+/* Changing the server window is confirmed against what it means, not toggled
+   past on the Settings page: the sweep is continuous and the deletion is
+   permanent. */
+function openApplyRetention(){
+  const el=document.getElementById('retentionDays');
+  const days=parseInt(el?el.value:'',10);
+  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
+  const body=days===0
+    ?'<p style="color:var(--text-muted)">Stop deleting old messages server-wide. Channels with their own override keep it.</p>'
+    :'<p style="color:var(--text-muted)">Every message older than <strong style="color:white">'+days+' day'+(days===1?'':'s')+'</strong> will be deleted permanently, in every channel without its own override, and the sweep keeps running from now on. <strong style="color:var(--red)">Deleted messages cannot be recovered.</strong></p>'
+      +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Pinned messages and direct messages are exempt. Saving refreshes the effect preview with the number of messages the next sweep will remove.</p>';
+  openModal('<div class="modal-header"><h3>Apply retention window</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'+body+'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="applyRetention('+days+')">Apply window</button></div>');
+}
+
+async function applyRetention(days){
+  try{await api('PATCH','/settings',{retention_days:String(days)});closeModal();showToast('Retention window updated');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
+function openChannelRetention(id,name){
+  const row=(state.retentionPolicyChannels||[]).find(c=>c.channel_id===id);
+  const current=row?row.days:0;
+  openModal('<div class="modal-header"><h3>Retention — #'+esc(name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">An override replaces the server-wide window for this channel, in either direction. <strong style="color:white">0 keeps this channel forever</strong>, even under a server window. <strong style="color:var(--red)">Messages the window removes are deleted permanently.</strong></p>'
+    +'<div class="form-group"><label class="form-label" for="chRetDays">Keep messages for (days)</label><input class="form-input" id="chRetDays" type="number" min="0" max="3650" value="'+esc(current)+'"></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Save override</button></div>');
+}
+
+async function saveChannelRetention(id){
+  const el=document.getElementById('chRetDays');
+  const days=parseInt(el?el.value:'',10);
+  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
+  try{await api('PUT','/channels/'+id+'/retention',{days:days});closeModal();showToast('Channel retention updated');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
+async function clearChannelRetention(id){
+  try{await api('DELETE','/channels/'+id+'/retention');showToast('Channel follows the server policy');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
 /* ═══ Backups ═══ */
 async function renderBackups(){
   let backups;
@@ -1701,7 +1959,7 @@ async function confirmDeleteBackup(name){
 /* ═══ API Tokens ═══ */
 function tokenStatus(t){
   if(t.revoked_at)return'<span class="badge badge-red">Revoked</span>';
-  if(t.expires_at&&new Date(t.expires_at)<new Date())return'<span class="badge badge-yellow">Expired</span>';
+  if(t.expires_at&&utcDate(t.expires_at)<new Date())return'<span class="badge badge-yellow">Expired</span>';
   return'<span class="badge badge-green">Active</span>';
 }
 async function renderTokens(){
@@ -1714,9 +1972,9 @@ async function renderTokens(){
   else tokens.forEach(t=>{
     const revoked=!!t.revoked_at;
     html+='<tr><td>'+esc(t.label||'—')+'</td><td>'+esc(t.username)+'</td>';
-    html+='<td>'+(t.created_at?new Date(t.created_at).toLocaleString():'')+'</td>';
-    html+='<td>'+(t.last_used?new Date(t.last_used).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
-    html+='<td>'+(t.expires_at?new Date(t.expires_at).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
+    html+='<td>'+(t.created_at?utcDate(t.created_at).toLocaleString():'')+'</td>';
+    html+='<td>'+(t.last_used?utcDate(t.last_used).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
+    html+='<td>'+(t.expires_at?utcDate(t.expires_at).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
     html+='<td>'+tokenStatus(t)+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">'+(revoked?'':'<button class="act-btn danger" title="Revoke" onclick="confirmRevokeToken('+t.id+',\''+jsq(t.label)+'\')">'+I.trash+'</button>')+'</div></td></tr>';
   });
@@ -2037,7 +2295,16 @@ async function confirmApplyUpdate(){
 /* ═══ Keyboard + Init ═══ */
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape')closeModal();
-  if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}}
+  /* "/" jumps to the page's search box — but only from outside a text
+     field. The filter boxes are themselves .filter-search, so an unguarded
+     preventDefault dropped every "/" typed into the very input it focuses
+     (no log line filterable by path), and the login overlay inherited the
+     swallow because hideAll() leaves #content's markup in place. */
+  if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){
+    const t=e.target;
+    if(t&&(t.isContentEditable||/^(input|textarea|select)$/i.test(t.tagName)))return;
+    const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}
+  }
 });
 document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal()});
 

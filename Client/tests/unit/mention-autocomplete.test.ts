@@ -182,6 +182,21 @@ describe("createMentionAutocomplete", () => {
     );
   });
 
+  it("scrolls the active row into view on ArrowDown/ArrowUp, so a highlight past the visible window isn't invisible", () => {
+    // jsdom doesn't implement layout/scrollIntoView; stub it to assert the
+    // call rather than the resulting scroll position.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    popup.setQuery("al");
+    scrollIntoView.mockClear();
+    popup.handleKeydown(key("ArrowDown"));
+    const activeRow = popup.element.querySelectorAll(".ma-item")[1];
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(activeRow);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
+
   it("wraps backwards with ArrowUp", () => {
     popup.setQuery("al");
     popup.handleKeydown(key("ArrowUp"));

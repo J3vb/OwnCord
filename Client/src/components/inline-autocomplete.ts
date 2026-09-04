@@ -150,6 +150,14 @@ export function createInlineAutocomplete<T>(
         input.removeAttribute("aria-activedescendant");
       }
     }
+    // .ma-list is a fixed-height scroller (app.css) showing fewer rows than
+    // MAX_MENTION_SUGGESTIONS can return — arrow keys must drag the active
+    // row into view, or the highlight can land off-screen.
+    if (suggestions.length > 0) {
+      (list.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
+    }
   }
 
   function setQuery(query: string): boolean {

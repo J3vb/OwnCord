@@ -984,7 +984,7 @@
   justify-content: flex-end;
   gap: 8px;
 }
-.btn-cancel {
+.btn-modal-cancel {
   padding: 8px 16px;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -992,7 +992,7 @@
   font-size: 13px;
   transition: all 0.15s;
 }
-.btn-cancel:hover {
+.btn-modal-cancel:hover {
   color: var(--text-normal);
   text-decoration: underline;
 }

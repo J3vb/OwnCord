@@ -152,8 +152,11 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		warnings = append(boot.Warnings, warnings...)
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid, "wizard", req.Wizard != nil, "restart", restartRequired)
-		setup.RecordSetup(r.Context(), uid,
-			"initial setup: owner account created, default channel and invite generated")
+		detail := "initial setup: owner account created, default channel and invite generated"
+		if keys := wizardSettingKeys(req.Wizard); len(keys) > 0 {
+			detail += "; settings applied: " + strings.Join(keys, ", ")
+		}
+		setup.RecordSetup(r.Context(), uid, detail)
 
 		writeJSON(w, http.StatusCreated, setupResponse{
 			Token:           token,

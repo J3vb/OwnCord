@@ -104,6 +104,51 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 	}
 }
 
+// OC-0393: a row above RetentionMaxDays is malformed by the same fail-safe
+// contract as a negative or non-numeric one — the write paths
+// (ApplySettings here bypasses them the same way a hand-edited or migrated
+// row would) never let it through, but the read path must still refuse it,
+// because past the class boundary the cutoff math
+// (-time.Duration(days)*24*time.Hour) overflows and lands in the future,
+// which would match every unpinned message as "old".
+func TestServerRetentionDays_OutOfRangeKeepsForever(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
+		t.Fatal(err)
+	}
+	if days, err := database.ServerRetentionDays(ctx); err != nil || days != 0 {
+		t.Fatalf("ServerRetentionDays with an out-of-range row = %d, %v; want 0 (keep forever)", days, err)
+	}
+}
+
+// The same class of corrupt row reaches RetentionWindows through a
+// channel_retention override — SetChannelRetention has no upper bound, only
+// SetChannelPolicy's caller-side check does, so a direct write (or a
+// restored/migrated row) can carry any value. It must be dropped from the
+// effective windows, not applied raw and not fallen back to the server
+// window.
+func TestRetentionWindows_OutOfRangeOverrideKeepsForever(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	owner := seedUser(t, database, "ret-owner-huge")
+	ch := seedChannel(t, database, "huge-override")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channel_retention (channel_id, days, updated_by, updated_at) VALUES (?, ?, ?, datetime('now'))`,
+		ch, 200000, owner); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := database.RetentionWindows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		if w.ChannelID == ch {
+			t.Fatalf("out-of-range channel override still a live window: %+v", w)
+		}
+	}
+}
+
 func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
