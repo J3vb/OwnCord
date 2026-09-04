@@ -73,6 +73,31 @@ func TestOwnerRolePosition(t *testing.T) {
 	}
 }
 
+// TestIsOwner locks the single "is the owner" predicate (OC-0405): true by
+// position, true by the seeded owner ID even at a lower position (a database
+// whose positions were edited by hand), false otherwise.
+func TestIsOwner(t *testing.T) {
+	tests := []struct {
+		name     string
+		roleID   int64
+		position int
+		want     bool
+	}{
+		{"owner id at owner position", permissions.OwnerRoleID, permissions.OwnerRolePosition, true},
+		{"owner id at a lower position", permissions.OwnerRoleID, 10, true},
+		{"non-owner id at owner position", permissions.AdminRoleID, permissions.OwnerRolePosition, true},
+		{"non-owner id below owner position", permissions.AdminRoleID, 99, false},
+		{"non-owner id far below", permissions.MemberRoleID, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := permissions.IsOwner(tc.roleID, tc.position); got != tc.want {
+				t.Errorf("IsOwner(%d, %d) = %v, want %v", tc.roleID, tc.position, got, tc.want)
+			}
+		})
+	}
+}
+
 // ─── HasPerm tests ────────────────────────────────────────────────────────────
 
 func TestHasPerm_MatchingBitReturnsTrue(t *testing.T) {

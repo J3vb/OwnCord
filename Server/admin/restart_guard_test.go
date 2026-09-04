@@ -80,7 +80,7 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(hub, exePath, oldPath, newPath, stagedHash)
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath, stagedHash)
 
 	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != "update" {
 		t.Fatalf("restartCalls = %+v, want exactly the update countdown", hub.restartCalls)
@@ -109,7 +109,7 @@ func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(hub, exePath, oldPath, newPath,
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath,
 		"0000000000000000000000000000000000000000000000000000000000000000")
 
 	if got := reasons(); len(got) != 0 {

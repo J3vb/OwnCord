@@ -203,7 +203,7 @@ func (c *LiveKitClient) MuteParticipantAudio(ctx context.Context, channelID, use
 	}
 
 	for _, t := range p.Tracks {
-		if t.Type != livekit.TrackType_AUDIO {
+		if t.Type != livekit.TrackType_AUDIO || t.Source == livekit.TrackSource_SCREEN_SHARE_AUDIO {
 			continue
 		}
 		if _, mErr := c.roomSvc.MutePublishedTrack(ctx, &livekit.MuteRoomTrackRequest{

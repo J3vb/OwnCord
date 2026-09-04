@@ -971,6 +971,17 @@ Exit sizes, measured on this branch:
 | `hub.go`           |         866 |   361 | < 400 ✓ |
 | `hub_broadcast.go` |        1032 |   424 | < 500 ✓ |
 
+**OC-0400, 2026-09-03.** The exit table above recorded `hub.go` at 361 with
+nothing enforcing it afterward: seven small commits (528ae260..15ba7c9a)
+drifted it to 403, one at a time, none individually alarming. Fixed by
+`invariants.FileSizeLimits` (`Server/invariants/file_sizes.go`), a
+`TestServerInvariants` rule that fails CI on any of these three files over
+its exit target — the check the plan's letter never added. `hub.go`'s
+accessor/stats methods (`IsUserConnected`, `GetClient`, `ClientCount`,
+`BroadcastDropCount`, `DispatchAlive`, `BackpressureStats`,
+`ConnRejectCount`, `EventPersisterStats`, `topicRateLimitPerSecond`) moved to
+new `hub_stats.go`, bringing it back to 335.
+
 New files: `replay.go` 496, `hub_registry.go` 253, `hub_visibility.go`
 487, `hub_presence.go` 153, `hub_options.go` 174, `hub_settings.go` 45;
 grown files: `serve_auth.go` 105 → 207, `serve_ready.go` 375 → 564,

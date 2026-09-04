@@ -6,6 +6,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import { parseTimestamp } from "@components/message-list/formatting";
 
 export interface PinnedMessage {
   readonly id: number;
@@ -24,7 +25,7 @@ export interface PinnedMessagesOptions {
 }
 
 function formatPinTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseTimestamp(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }

@@ -259,6 +259,12 @@ type TLSConfig struct {
 	KeyFile      string `koanf:"key_file"`
 	Domain       string `koanf:"domain"`
 	AcmeCacheDir string `koanf:"acme_cache_dir"`
+
+	// HTTPSPort is the port the HTTPS listener actually binds (cfg.Server.Port),
+	// set by the caller before LoadOrGenerate — not a config file key. ACME
+	// mode's HTTP->HTTPS redirect needs it because the HTTPS port is not
+	// necessarily 443.
+	HTTPSPort int `koanf:"-"`
 }
 
 // UploadConfig holds file upload settings.
@@ -603,11 +609,32 @@ func unknownFileKeys(cfgPath string, knownKeys map[string]struct{}) []string {
 	}
 	var unknown []string
 	for _, key := range fileK.Keys() {
-		if _, ok := knownKeys[key]; !ok {
-			unknown = append(unknown, key)
+		if _, ok := knownKeys[key]; ok {
+			continue
 		}
+		// A section header whose children are all commented out (or
+		// omitted) parses to a nil value and koanf emits it as a bare leaf
+		// key ("voice") rather than recursing into its (absent) children.
+		// That bare key is a real, known section — not a typo — as long as
+		// some known key is nested under it.
+		if isKnownSection(knownKeys, key) {
+			continue
+		}
+		unknown = append(unknown, key)
 	}
 	return unknown
+}
+
+// isKnownSection reports whether prefix names a known config section, i.e.
+// some key in knownKeys is prefix followed by ".".
+func isKnownSection(knownKeys map[string]struct{}, prefix string) bool {
+	want := prefix + "."
+	for key := range knownKeys {
+		if strings.HasPrefix(key, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not

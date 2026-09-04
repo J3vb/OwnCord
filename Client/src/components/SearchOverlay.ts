@@ -8,6 +8,7 @@ import { createElement, setText, appendChildren, clearChildren } from "@lib/dom"
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { parseTimestamp } from "@components/message-list/formatting";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,7 +55,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatTimestamp(ts: string): string {
     try {
-      const d = new Date(ts);
+      const d = parseTimestamp(ts);
       return (
         d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
         " " +

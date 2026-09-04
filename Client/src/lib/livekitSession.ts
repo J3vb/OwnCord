@@ -149,8 +149,6 @@ export class LiveKitSession {
   /** Max auto-reconnect attempts before giving up and showing error. */
   private static readonly MAX_RECONNECT_ATTEMPTS = 2;
   private static readonly RECONNECT_DELAY_MS = 3000;
-  /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
-  private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
 
@@ -1769,7 +1767,7 @@ export class LiveKitSession {
     return buildSessionDebugInfo({
       room: this._room,
       currentChannelId: this._currentChannelId,
-      outputVolumeMultiplier: this.outputVolumeMultiplier,
+      outputVolumeMultiplier: this._audioElements.getOutputVolumeMultiplier(),
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });

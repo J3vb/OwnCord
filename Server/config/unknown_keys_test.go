@@ -35,6 +35,9 @@ databsae:
   path: "oops.db"
 backup:
   dir: "elsewhere"
+voice:
+  # livekit_url: "ws://localhost:7880"
+  # quality: "medium"
 `
 	if err := os.WriteFile(cfgPath, []byte(yamlBody), 0o600); err != nil {
 		t.Fatal(err)

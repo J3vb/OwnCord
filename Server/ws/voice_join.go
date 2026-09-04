@@ -134,6 +134,28 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
+	// Advisory capacity pre-flight for the switch case, mirroring
+	// handleVoiceModMoveV2's pre-flight (voice_moderation.go): without it,
+	// voiceJoinLeaveCurrent below tears the caller out of their current call
+	// before voiceJoinPersist's atomic check ever runs, so a switch to a full
+	// channel ends the old call for nothing (OC-0351). Same-channel re-join
+	// stays gated by ALREADY_JOINED in voiceJoinLeaveCurrent, not here — this
+	// only guards the destructive leave a genuine switch would trigger. The
+	// atomic JoinVoiceChannelIfCapacity check in voiceJoinPersist remains the
+	// authority for the race; this is advisory, exactly as in the move path.
+	if cur := c.getVoiceChID(); cur > 0 && cur != channelID && ch.VoiceMaxUsers > 0 {
+		count, cErr := h.voice.CountInChannel(ctx, channelID)
+		if cErr != nil {
+			slog.Error("ws voice_join: capacity pre-check failed", "err", cErr, "channel_id", channelID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check channel capacity"))
+			return 0, nil, false
+		}
+		if count >= ch.VoiceMaxUsers {
+			c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+			return 0, nil, false
+		}
+	}
+
 	// Ensure authenticated user is present before any state changes.
 	// This guard covers all downstream paths (LiveKit configured or not)
 	// that dereference c.user (e.g. c.user.Username in the success log).
@@ -452,7 +474,14 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	h.updateKeyHolder(channelID)
 
 	// Broadcast the joiner's state to the clients allowed to see this channel.
-	h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
+	//
+	// OC-0349: sent synchronously (sendVoiceEventSync), not via the async
+	// broadcastVoiceEvent queue, so it lands in program order on the joiner's
+	// own socket among the four other direct sends below it (voice_token
+	// above, existing states, peer keys, voice_config) — the async queue gave
+	// it no fixed position relative to them, depending on how backed up the
+	// dispatch goroutine was.
+	h.sendVoiceEventSync(ctx, channelID, buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
 	//

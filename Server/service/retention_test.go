@@ -114,6 +114,40 @@ func TestRetention_IndefiniteByDefault(t *testing.T) {
 	}
 }
 
+// OC-0393: a retention_days row above RetentionMaxDays reaches Tick only
+// through a hand-edited, migrated or restored row — SetChannelPolicy and
+// Patch both refuse it at write time — but the read path
+// (db.ServerRetentionDays -> RetentionWindows -> cutoff) must still fail
+// closed. Left unclamped, days=106752 overflows the -days*24h cutoff math
+// into the future and the sweep would hard-delete every unpinned message in
+// every channel with a window. Clamping to RetentionMaxDays instead of
+// treating it as keep-forever is just as wrong: it activates a live
+// 10-year deletion window from a row that was never validated.
+func TestRetention_OutOfRangeServerWindowDeletesNothing(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner-huge", "hash", 1)
+	chID, files := seedRetentionChannel(t, database, "huge-window", uid, dir, 3)
+	// Bypasses the service-layer bound check the same way a corrupt row
+	// would: db.ApplySettings (called directly, not through Patch) applies
+	// whatever string it is given.
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
+		t.Fatal(err)
+	}
+	svc := newRetention(t, database, dir)
+	rep, err := svc.Tick(ctx)
+	if err != nil || rep.Messages != 0 || rep.Channels != 0 {
+		t.Fatalf("Tick with an out-of-range server window = %+v, %v; want nothing removed", rep, err)
+	}
+	if countMessages(t, database, chID) != 4 || !fileExists(t, filepath.Join(dir, files[0])) {
+		t.Fatal("an out-of-range retention window deleted messages or files")
+	}
+	if p, err := svc.Preview(ctx); err != nil || len(p) != 0 {
+		t.Errorf("preview with an out-of-range server window = %v, %v; want nothing", p, err)
+	}
+}
+
 // The sweep: a server window, a channel opting out, a channel shorter than
 // the server, pinned and DM content untouched, files removed, a marker per
 // swept channel, and the effect preview matching what the tick removes.
@@ -221,9 +255,9 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	}
 }
 
-// The tick is bounded and restart-safe: a budget stops it mid-channel and the
-// next tick continues; a run whose replay ids and files committed atomically
-// with the deleted rows is resumed on the next tick.
+// The tick is bounded and restart-safe: a budget stops it mid-channel with
+// no marker written for that channel, the next tick continues; a run whose
+// files were never removed is resumed on the next tick.
 func TestRetention_BudgetAndResume(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
@@ -234,16 +268,15 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The database half only, as a crash after commit leaves it: replay ids
-	// and files are already journaled by that same commit, none removed.
+	// The database half only, as a crash after commit leaves it: the run
+	// is journaled with its files, none removed.
 	runID, _ := database.StartRetentionRun(ctx)
-	ids, swept, err := database.SweepRetentionJournaled(ctx, runID, chID, retentionNow.Add(-7*24*time.Hour), 2)
+	ids, swept, err := database.SweepRetention(ctx, chID, retentionNow.Add(-7*24*time.Hour), 2)
 	if err != nil || len(ids) != 2 {
 		t.Fatal(err)
 	}
-	journal, err := database.GetRetentionRun(ctx, runID)
-	if err != nil || len(journal.Files) != len(swept) || len(journal.PurgePending) != len(ids) {
-		t.Fatalf("journal at commit = %+v, %v; want %d files and %d purge ids", journal, err, len(swept), len(ids))
+	if err := database.RecordRetentionRunFiles(ctx, runID, 1, 2, swept); err != nil {
+		t.Fatal(err)
 	}
 	for _, f := range swept {
 		if !fileExists(t, filepath.Join(dir, f)) {

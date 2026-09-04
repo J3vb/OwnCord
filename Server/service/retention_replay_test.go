@@ -212,6 +212,38 @@ func TestRetention_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	}
 }
 
+// Start-up marker replay is the last gate before the server can serve a
+// restored database. It resumes a deletion that committed before the prior
+// process died even when there are no marker rows left to replay.
+func TestRetention_ReplayMarkersResumesPendingRunBeforeServing(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	runID, err := database.StartRetentionRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.RecordRetentionRunPurge(ctx, runID, []int64{991}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.FinishRetentionRun(ctx, runID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := &recordingRetentionHub{}
+	svc := NewRetentionService(database)
+	svc.SetHub(hub)
+	svc.SetMarkers(newTestMarkers(t))
+	if n, err := svc.ReplayMarkers(ctx); err != nil || n != 0 {
+		t.Fatalf("ReplayMarkers = %d, %v; want a successful journal-only resume", n, err)
+	}
+	if got := hub.all(); !slices.Equal(got, []int64{991}) {
+		t.Fatalf("start-up purge = %v, want [991]", got)
+	}
+	if run, err := database.GetRetentionRun(ctx, runID); err != nil || len(run.PurgePending) != 0 {
+		t.Fatalf("run after start-up resume = %+v, %v", run, err)
+	}
+}
+
 // The start-up replay of a retention marker takes the re-swept messages'
 // persisted rows out too: a restored backup holds their replay events as
 // well as their rows.

@@ -118,7 +118,7 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 }
 
 // ownerOnlyMiddleware wraps a handler to require the Owner role
-// (position == permissions.OwnerRolePosition). It consumes the *db.Role that
+// (permissions.IsOwner). It consumes the *db.Role that
 // adminAuthMiddleware resolved and stored in the request context — the same
 // contract as requirePerm, so no second role read runs and no read-fault
 // error mapping exists here at all: OC-0345's 503 branch died with the query
@@ -133,7 +133,7 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if role.Position < permissions.OwnerRolePosition {
+		if !permissions.IsOwner(role.ID, role.Position) {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
 			return
 		}

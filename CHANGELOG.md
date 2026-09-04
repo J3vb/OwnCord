@@ -41,8 +41,11 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-User-visible: one change to how updates roll out, and two new documents.
-Not user-visible: the protocol now carries a version number.
+User-visible: you can now recover your own account without an email server,
+two-factor sign-in survives a server restart, the operator chooses who may
+register, messages can be set to expire, and deleting an account really
+deletes it. Not user-visible: the protocol carries a version number, and the
+server's internals were reorganised behind service boundaries.
 
 ### Login & connection
 
@@ -57,12 +60,78 @@ Not user-visible: the protocol now carries a version number.
   releases that speak its own protocol epoch, so a protocol-changing release
   reaches clients once the server runs it. Releases that do not change the
   protocol are offered as before.
+- Signing in from a new device is flagged, so the client can tell you about a
+  session you did not start.
+- Under heavy load the server now refuses expensive sign-in work with a "busy,
+  try again" instead of queueing it until everything slows down.
+
+### Accounts & sign-in
+
+- **Two-factor sign-in survives a restart.** Used one-time codes, half-finished
+  logins and pending enrolments are stored, so a restart can no longer let a
+  code be replayed or drop you mid-enrolment.
+- If the server cannot read its two-factor key it now refuses to start rather
+  than quietly generating a new one — which would have locked out every
+  account that had two-factor enabled.
+- **Ten one-time recovery codes** can be generated for a two-factor account, so
+  losing your phone is no longer the end of the account.
+- **Recovery kit.** You can create a recovery secret, held only by you; the
+  server keeps a verifier it cannot reverse. Redeeming it resets your password
+  and signs out every session, without a second factor and without any email
+  server. The kit is single-use and must be replaced after it is redeemed.
+- **Owner-assisted recovery.** The server owner can issue a 15-minute,
+  single-use recovery credential for an account, after recording how they
+  verified the person — in person, voice call, video call, or trusted contact.
+  There is no free-text field, so nothing about the conversation can end up in
+  the audit log.
+- **Sign out everywhere** revokes every session including the one you are
+  using, and drops the live connections immediately rather than waiting for
+  the next sweep.
+- Changing your password or two-factor settings now tells you when part of the
+  change did not apply, instead of reporting success.
+- Repeated failed logins for one username are counted against one lockout,
+  however the name was capitalised.
+- An API token can no longer be created with a negative lifetime, and a token
+  whose label is a number can be revoked again.
+
+### Privacy & data
+
+- **Deleting an account now really deletes it.** Every class of data the
+  account owned — messages, files, reactions, DMs, sessions, tokens, voice
+  state — is removed, not just hidden. The file half is journaled, so an
+  interrupted deletion resumes on the next start instead of stranding files.
+  Administrators can do this for an account from the admin panel.
+- **A backup restore can no longer resurrect a deleted account.** Deletions are
+  recorded outside the database file and re-applied whenever the server opens
+  it, including after a restore of a backup taken before the deletion.
+- Audit history about a deleted account keeps its integrity — what happened and
+  when — without keeping who.
+- **Message retention.** Off by default: messages are kept forever unless you
+  say otherwise. An operator can set a server-wide window and override it per
+  channel in either direction. Pinned messages are exempt and DMs are never in
+  scope. The admin panel previews what a policy would remove before you apply
+  it. The sweep is bounded, restart-safe, and swept messages disappear from
+  reconnect history too.
+- The server no longer contacts a public DNS server on startup to work out its
+  own address; it reads the interface table instead. A default install makes no
+  outbound connection you did not configure.
+- Per-user volume settings and DM notes saved by an older client are now
+  carried across to this version instead of being left behind.
 
 ### Admin panel
 
+- **Who may register is now a choice**: closed, invite only, approval, or open.
+  Fresh installs default to invite only. Existing servers keep the behaviour
+  they had — a server that required an invite still requires one, and
+  registration is never opened by the upgrade. Switching mode is audited.
+- **Approval mode** adds a queue: applicants can be listed, approved or denied,
+  and cannot sign in until approved.
+- Retention can be read, set and cleared per channel, with a server-wide
+  default and an effect preview.
 - Creating or revoking an invite, and installing or uninstalling a plugin, now
   show up in the audit log. Invite entries name the invite by id, never by
   code.
+- The owner check no longer costs a second database lookup on every request.
 
 ### Documentation
 
@@ -72,12 +141,25 @@ Not user-visible: the protocol now carries a version number.
   or test behind it.
 - `docs/architecture/plugins.md`: plugins are experimental, off by default,
   compiled out of release binaries, and carry no API promise.
+- `docs/architecture/data-lifecycle.md` models what happens to your data when a
+  destructive operation is interrupted, runs out of disk, crashes, races
+  another writer, or is undone by a restore.
+- `docs/architecture/diagnostics.md` lists every diagnostic surface the server
+  has and where its data goes, and states the support-bundle contract.
+- `docs/architecture/server-boundaries.md` records which parts of the server
+  may talk to the database directly.
 
 ### Repository
 
 - `protocol/schema.json` declares `protocol_epoch`; `npm run generate` emits it
   as `ws.ProtocolEpoch` and `PROTOCOL_EPOCH`. Rules for bumping it:
   `docs/protocol.md`, Compatibility.
+- The server's route table, database tables and configuration keys are now
+  generated into the docs and checked for drift in CI.
+- CI gained a coverage floor, a nightly Docker smoke test of `dev`, seeded
+  simulation and fuzz targets, and four static invariant rules covering lock
+  discipline, database-import boundaries, permission chokepoints and outbound
+  network sites.
 
 ## v1.2.0-alpha.4
 

@@ -63,8 +63,9 @@ const (
 
 // markerSchema is the marker file: deletion_markers, the HP-4
 // deletion_markers draft plus the state column the pending/recorded
-// protocol needs, and sequence_floors, the AUTOINCREMENT counters below
-// which no id may be handed out again (RaiseSequenceFloor).
+// protocol needs; sequence_floors, the AUTOINCREMENT counters below
+// which no id may be handed out again (RaiseSequenceFloor); and
+// marker_meta, which binds the file to one erasure key (bindMarkerKey).
 var markerSchema = []string{`
 CREATE TABLE IF NOT EXISTS deletion_markers (
     subject_token TEXT    PRIMARY KEY,
@@ -83,7 +84,51 @@ CREATE TABLE IF NOT EXISTS sequence_floors (
 CREATE TABLE IF NOT EXISTS floor_probes (
     name      TEXT PRIMARY KEY,
     probed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`, `
+CREATE TABLE IF NOT EXISTS marker_meta (
+    name  TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );`}
+
+// markerKeyFingerprintName is the marker_meta row that binds a marker file
+// to the erasure key its tokens were computed under (OC-0388). Nothing in
+// the file is otherwise key-derived, so a regenerated or swapped key makes
+// every token miss: the replay matches nothing, reports {Erased:0} with a
+// nil error, and the account a restored backup brought back keeps serving.
+// The fingerprint is what makes that state loud instead of silent.
+const markerKeyFingerprintName = "erasure-key-fingerprint"
+
+// markerKeyFingerprint names the key without revealing it: hex of
+// HMAC-SHA256(key, "owncord-marker-fingerprint"). It shares no preimage with
+// SubjectToken or MessagesToken, so the row tells an attacker with the file
+// nothing about the subjects it holds.
+func markerKeyFingerprint(key []byte) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("owncord-marker-fingerprint"))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// fingerprintPrefix is how much of a fingerprint the operator messages
+// print — enough to tell two keys apart, and bounded so a corrupt or
+// hand-edited row cannot panic the branch whose whole job is to report it.
+func fingerprintPrefix(fp string) string { return fp[:min(12, len(fp))] }
+
+// ErrMarkerKeyMismatch is the refusal when the marker file records a
+// different erasure key than the one the server is running: its tokens name
+// nobody this key can match, so a replay would erase nothing and a restored
+// backup's accounts would serve. Start-up fails on it instead of replaying
+// into the void. The way out is the operator's — put the original key back,
+// or bless this one against the file by hand (docs/security.md, "Erasure
+// marker key"). The message names both.
+var ErrMarkerKeyMismatch = errors.New("marker store: the marker file was created under a different erasure key")
+
+// ErrMarkerKeyUnverified is the refusal when a marker file holds markers but
+// records no key fingerprint: a file written before OC-0388 was closed.
+// Adopting whatever key is present would be the defect itself — if the key
+// was regenerated in between, the wrong one silently becomes the file's key
+// of record and every marker is voided. Only the operator can say the key is
+// the one those markers were written under, so only they can bless it.
+var ErrMarkerKeyUnverified = errors.New("marker store: the marker file holds markers but records no erasure key")
 
 // OpenMarkerStore opens (creating if absent) the marker file at path with
 // the given 32-byte erasure key and applies its schema. The parent directory
@@ -110,7 +155,64 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 			return nil, fmt.Errorf("marker store: schema: %w", err)
 		}
 	}
+	if err := bindMarkerKey(sqlDB, path, markerKeyFingerprint(key)); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
 	return &MarkerStore{sqlDB: sqlDB, key: append([]byte(nil), key...), path: path}, nil
+}
+
+// markerFileEscapeHatch is the warning every refusal below carries: the
+// obvious way out — delete the file and let a fresh one appear — throws away
+// more than the markers.
+const markerFileEscapeHatch = "do not delete or move markers.sqlite to get past this: it also carries sequence_floors (without them an erased account's id is handed out again and its innocent new holder is erased by the old marker) and the account markers that keep the first-run setup gate closed against a restore of a pre-owner backup"
+
+// bindMarkerKey holds the marker file to one erasure key (OC-0388). An empty
+// file adopts the key it is first opened under — that is how a new
+// installation gets its fingerprint. A file that already holds markers must
+// prove the key: a recorded fingerprint must match, and a file from before
+// the fingerprint existed is refused rather than adopted, because adopting
+// there is exactly the defect (a key regenerated in between would silently
+// become the key of record and void every marker). Both refusals are the
+// operator's to resolve, and the log names the statement that does it —
+// mirroring the floor-probe acknowledgement (docs/security.md).
+func bindMarkerKey(sqlDB *sql.DB, path, fp string) error {
+	var stored string
+	err := sqlDB.QueryRow(`SELECT value FROM marker_meta WHERE name = ?`, markerKeyFingerprintName).Scan(&stored)
+	switch {
+	case err == nil:
+		if hmac.Equal([]byte(stored), []byte(fp)) {
+			return nil
+		}
+		slog.Error("erasure markers: this marker file was created under a different erasure key, so every marker in it names a subject the running key cannot match; the start-up replay would erase nothing and a restored backup would leave its erased accounts serving. Start with the erasure key this file was written under — or, if the key really was rotated and this one is now the key of record, repoint the file at it with the statement below, run against the marker file (docs/security.md, \"Erasure marker key\")",
+			"marker_file", path,
+			"file_key_fingerprint", fingerprintPrefix(stored),
+			"running_key_fingerprint", fingerprintPrefix(fp),
+			"restore_the_original_key", "put the erasure.key whose fingerprint begins "+fingerprintPrefix(stored)+" back at <data-dir>/erasure.key, or point OWNCORD_ERASURE_KEY at it",
+			"adopt_this_key_instead", fmt.Sprintf("UPDATE marker_meta SET value = '%s' WHERE name = '%s';  -- only if the original key is gone for good: the markers become unmatchable, so a restore can resurrect the accounts they guard", fp, markerKeyFingerprintName),
+			"warning", markerFileEscapeHatch)
+		return fmt.Errorf("%w: %s", ErrMarkerKeyMismatch, path)
+	case errors.Is(err, sql.ErrNoRows):
+		var markers int
+		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM deletion_markers`).Scan(&markers); err != nil {
+			return fmt.Errorf("marker store: counting markers for the key fingerprint: %w", err)
+		}
+		if markers > 0 {
+			slog.Error("erasure markers: this marker file holds markers but records no erasure key — it was written before the key was bound to the file — and the running key cannot be proven to be the one those markers were computed under. Adopting it unchecked is the failure this check exists to stop: a key regenerated since would silently become the file's key of record, and every marker would stop matching the account it guards. Confirm this is the original erasure key, then bless the file with the statement below, run against the marker file (docs/security.md, \"Erasure marker key\")",
+				"marker_file", path,
+				"markers", markers,
+				"running_key_fingerprint", fingerprintPrefix(fp),
+				"acknowledge", fmt.Sprintf("INSERT INTO marker_meta (name, value) VALUES ('%s', '%s');", markerKeyFingerprintName, fp),
+				"warning", markerFileEscapeHatch)
+			return fmt.Errorf("%w: %s", ErrMarkerKeyUnverified, path)
+		}
+		if _, err := sqlDB.Exec(`INSERT INTO marker_meta (name, value) VALUES (?, ?)`, markerKeyFingerprintName, fp); err != nil {
+			return fmt.Errorf("marker store: recording the key fingerprint: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("marker store: reading the key fingerprint: %w", err)
+	}
 }
 
 // Close releases the file.

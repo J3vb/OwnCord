@@ -16,6 +16,10 @@ import (
 
 func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if settings == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			return
+		}
 		all, err := settings.List(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get settings")
@@ -27,6 +31,10 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 
 func handlePatchSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if settings == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			return
+		}
 		var updates map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")

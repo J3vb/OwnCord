@@ -142,7 +142,17 @@ const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
 
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.
-const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], "."), ...LEDGER_VERIFY];
+const CHECK_DOCS = [
+  step("node", ["scripts/check-doc-counts.mjs"], "."),
+  // OC-0395. A shipped migration is immutable: migrate.go tracks one by
+  // filename and keeps no content hash, so editing it changes nothing for any
+  // installation that already applied it. Nothing else can see that — a fresh
+  // database applies the new text and every test passes. `step`, not
+  // `optional`: it is Node, and this file is Node.
+  step("node", ["scripts/check-migrations.mjs", "--selftest"], "."),
+  step("node", ["scripts/check-migrations.mjs"], "."),
+  ...LEDGER_VERIFY,
+];
 
 // Repository-wide formatting and script/workflow lint (RL-19 / L-13, S-05).
 //
@@ -173,6 +183,13 @@ const CHECK_HYGIENE = [
   // Repository Hygiene job rather than needing a new required check.
   step("node", ["scripts/check-workflow-guards.mjs", "--selftest"], "."),
   step("node", ["scripts/check-workflow-guards.mjs"], "."),
+  // OC-0397 / R-09. A job in release.yml that pushes an image or cuts a
+  // GitHub Release must carry `environment: release`, or it publishes with
+  // no required-reviewer approval. Same rationale as the guard check above:
+  // Node checking Node, run here so it rides the pinned Repository Hygiene
+  // job instead of a new required check.
+  step("node", ["scripts/check-release-environment.mjs", "--selftest"], "."),
+  step("node", ["scripts/check-release-environment.mjs"], "."),
 ];
 
 const TASKS = {

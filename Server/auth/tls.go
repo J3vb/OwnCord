@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -194,9 +195,15 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 	}
 
 	// HTTP handler serves ACME HTTP-01 challenges on port 80 and redirects
-	// all other traffic to HTTPS.
+	// all other traffic to HTTPS. The HTTPS listener does not necessarily
+	// bind 443 (the default is 8443), so the redirect must name the
+	// configured port explicitly.
+	host := cfg.Domain
+	if cfg.HTTPSPort != 0 && cfg.HTTPSPort != 443 {
+		host = net.JoinHostPort(cfg.Domain, strconv.Itoa(cfg.HTTPSPort))
+	}
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := "https://" + cfg.Domain + r.URL.RequestURI()
+		target := "https://" + host + r.URL.RequestURI()
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 

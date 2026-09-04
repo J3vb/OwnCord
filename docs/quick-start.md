@@ -34,7 +34,11 @@ Get OwnCord running with the fewest possible steps.
 4. Complete the setup wizard: it creates the Owner account and configures the
    basics (server name, port, security, uploads, voice). Your choices are
    written to `config.yaml` automatically — no manual editing needed.
-5. Create invite codes and share them.
+5. Create invite codes and share them. A new server is **invite only** — the
+   admin panel offers four choices under Settings: `closed` (nobody may
+   register), `invite` (an invite code is required, the default), `approval`
+   (anyone may apply, an admin approves each one) and `open` (anyone may
+   register). Changing the mode is recorded in the audit log.
 
 ## Option B: Docker (Linux server)
 

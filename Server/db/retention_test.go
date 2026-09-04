@@ -28,9 +28,9 @@ func seedAgedMessage(t *testing.T, database *db.DB, chID, uid int64, content str
 }
 
 // The run row is the only durable handle left on replay frames and blobs
-// after retention deletes their message and attachment rows. A missing run
-// must therefore roll the deletion back, and a successful commit must expose
-// the complete journal immediately.
+// after retention deletes their message and attachment rows. It must be
+// committed atomically with deletion, and a no-op lazy batch must not create
+// an empty run.
 func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
@@ -44,7 +44,9 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := database.SweepRetentionJournaled(ctx, 999999, chID, cutoff, 10); err == nil {
+	// A caller-provided run that does not exist makes the journal write fail;
+	// the deletion and its attachment removal must roll back with it.
+	if _, _, _, err := database.SweepRetentionJournaled(ctx, 999999, chID, cutoff, 10, true); err == nil {
 		t.Fatal("journaled sweep with a missing run succeeded")
 	}
 	if n, err := database.CountRetentionCandidates(ctx, chID, cutoff); err != nil || n != 1 {
@@ -55,23 +57,23 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 		t.Fatalf("attachments after rolled-back journal failure = %d, %v; want 1", attachments, err)
 	}
 
-	runID, err := database.StartRetentionRun(ctx)
+	if runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff.Add(-24*time.Hour), 10, true); err != nil || runID != 0 || len(ids) != 0 || len(files) != 0 {
+		t.Fatalf("empty lazy sweep = run %d, ids %v, files %v, %v; want no run", runID, ids, files, err)
+	}
+
+	runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff, 10, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids, files, err := database.SweepRetentionJournaled(ctx, runID, chID, cutoff, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(ids, []int64{mid}) || !slices.Equal(files, []string{"stored-atomic"}) {
-		t.Fatalf("sweep = ids %v, files %v; want [%d], [stored-atomic]", ids, files, mid)
+	if runID == 0 || !slices.Equal(ids, []int64{mid}) || !slices.Equal(files, []string{"stored-atomic"}) {
+		t.Fatalf("sweep = run %d, ids %v, files %v; want a run, [%d], [stored-atomic]", runID, ids, files, mid)
 	}
 	run, err := database.GetRetentionRun(ctx, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(run.PurgePending, ids) || !slices.Equal(run.Files, files) || run.MessagesDeleted != 1 {
-		t.Fatalf("journal at deletion commit = %+v; want ids %v and files %v", run, ids, files)
+	if run.Channels != 1 || run.MessagesDeleted != 1 || !slices.Equal(run.PurgePending, ids) || !slices.Equal(run.Files, files) {
+		t.Fatalf("journal at deletion commit = %+v; want one channel, ids %v and files %v", run, ids, files)
 	}
 }
 
@@ -150,6 +152,51 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 	}
 	if err := database.SetChannelRetention(ctx, shorter, -1, owner); err == nil {
 		t.Error("negative days accepted")
+	}
+}
+
+// OC-0393: a row above RetentionMaxDays is malformed by the same fail-safe
+// contract as a negative or non-numeric one — the write paths
+// (ApplySettings here bypasses them the same way a hand-edited or migrated
+// row would) never let it through, but the read path must still refuse it,
+// because past the class boundary the cutoff math
+// (-time.Duration(days)*24*time.Hour) overflows and lands in the future,
+// which would match every unpinned message as "old".
+func TestServerRetentionDays_OutOfRangeKeepsForever(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
+		t.Fatal(err)
+	}
+	if days, err := database.ServerRetentionDays(ctx); err != nil || days != 0 {
+		t.Fatalf("ServerRetentionDays with an out-of-range row = %d, %v; want 0 (keep forever)", days, err)
+	}
+}
+
+// The same class of corrupt row reaches RetentionWindows through a
+// channel_retention override — SetChannelRetention has no upper bound, only
+// SetChannelPolicy's caller-side check does, so a direct write (or a
+// restored/migrated row) can carry any value. It must be dropped from the
+// effective windows, not applied raw and not fallen back to the server
+// window.
+func TestRetentionWindows_OutOfRangeOverrideKeepsForever(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	owner := seedUser(t, database, "ret-owner-huge")
+	ch := seedChannel(t, database, "huge-override")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channel_retention (channel_id, days, updated_by, updated_at) VALUES (?, ?, ?, datetime('now'))`,
+		ch, 200000, owner); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := database.RetentionWindows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		if w.ChannelID == ch {
+			t.Fatalf("out-of-range channel override still a live window: %+v", w)
+		}
 	}
 }
 

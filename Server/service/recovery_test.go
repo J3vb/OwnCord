@@ -62,46 +62,6 @@ func recoverWith(svc *AuthService, username, secret, ip string) (*AuthResult, er
 	})
 }
 
-type recordingRecoveryDisconnector struct {
-	disconnected []int64
-}
-
-func (*recordingRecoveryDisconnector) BroadcastMemberBan(int64) {}
-
-func (r *recordingRecoveryDisconnector) DisconnectRevokedUser(userID int64) {
-	r.disconnected = append(r.disconnected, userID)
-}
-
-// Recovery is a session-compromise boundary: deleting the rows is not enough
-// for a socket that already authenticated. The replacement session is issued
-// only after the old live connection has been cut off.
-func TestRecoveryKit_DisconnectsRevokedLiveSocket(t *testing.T) {
-	ctx := context.Background()
-	svc, user, _ := newKitService(t, false)
-	disconnector := &recordingRecoveryDisconnector{}
-	svc.broadcaster = disconnector
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
-	wrong, _, err := auth.GenerateRecoveryKitSecret()
-	if err != nil {
-		t.Fatalf("GenerateRecoveryKitSecret: %v", err)
-	}
-	if _, err := recoverWith(svc, "kitholder", wrong, "203.0.113.4"); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("wrong kit = %v, want the uniform refusal", err)
-	}
-	if len(disconnector.disconnected) != 0 {
-		t.Fatalf("failed recovery disconnected %v", disconnector.disconnected)
-	}
-	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.5"); err != nil {
-		t.Fatalf("RecoverWithKit: %v", err)
-	}
-	if len(disconnector.disconnected) != 1 || disconnector.disconnected[0] != user.ID {
-		t.Fatalf("disconnected = %v, want [%d]", disconnector.disconnected, user.ID)
-	}
-}
-
 func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	ctx := context.Background()
 	svc, user, logs := newKitService(t, true)
@@ -186,6 +146,63 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	}
 	if !actions["recovery_kit_issued"] || !actions["recovery_kit_used"] {
 		t.Fatalf("audit actions = %v, want recovery_kit_issued and recovery_kit_used", actions)
+	}
+}
+
+// recordingRecoveryDisconnector is an AuthBroadcaster that also implements
+// the hub's DisconnectRevokedUser, like *ws.Hub does — a redemption that
+// disconnects the live socket type-asserts the broadcaster to this shape,
+// the same way handleRevokeAllSessions does with SessionDisconnector.
+type recordingRecoveryDisconnector struct {
+	mu           sync.Mutex
+	disconnected []int64
+}
+
+func (r *recordingRecoveryDisconnector) BroadcastMemberBan(int64) {}
+
+func (r *recordingRecoveryDisconnector) DisconnectRevokedUser(userID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disconnected = append(r.disconnected, userID)
+}
+
+// TestRecoveryKit_DisconnectsLiveSocketOnRedeem is OC-0394: redemption
+// deletes the session rows but, without this, never drops the live
+// WebSocket an attacker holds on a now-revoked session — it would keep
+// working until the hub's 30-second sweep. DELETE /api/v1/users/me/sessions
+// already closes this gap (profile_handler.go); recovery must too.
+func TestRecoveryKit_DisconnectsLiveSocketOnRedeem(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	hash, err := auth.HashPassword(kitPassword)
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	uid, err := database.CreateUser(ctx, "kitholder", hash, 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, uid, "tok-laptop", "laptop", "10.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	user, _ := database.GetUserByID(ctx, uid)
+
+	disc := &recordingRecoveryDisconnector{}
+	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), disc)
+	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	if err != nil {
+		t.Fatalf("EnrolRecoveryKit: %v", err)
+	}
+
+	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.5"); err != nil {
+		t.Fatalf("RecoverWithKit: %v", err)
+	}
+
+	disc.mu.Lock()
+	got := append([]int64(nil), disc.disconnected...)
+	disc.mu.Unlock()
+	if len(got) != 1 || got[0] != user.ID {
+		t.Fatalf("disconnected = %v, want [%d] — the attacker's live socket must be dropped on redemption, not left for the sweep", got, user.ID)
 	}
 }
 

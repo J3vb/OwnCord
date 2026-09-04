@@ -973,9 +973,10 @@ On success, server sends:
 3. Existing `voice_state` messages -- one per existing participant (to joiner only)
 4. `voice_config` -- channel audio settings (to joiner only)
 
-Items 1, 3 and 4 are written directly and keep that relative order; item 2
-travels through the hub's broadcast queue, so its position relative to the
-other three on the joiner's own socket is not guaranteed.
+All four keep the order above on the joiner's own socket: item 2 is
+delivered synchronously (same call, same seq mechanism as any other
+broadcast) rather than handed to the hub's asynchronous broadcast queue, so
+it is written before item 3 in the same program order as items 1 and 4.
 
 ### voice_token (Server -> Client, direct)
 

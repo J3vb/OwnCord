@@ -28,6 +28,25 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
             "bitrate": 64000,
             "channel_id": 2,
             "max_users": 0,
@@ -161,6 +180,25 @@
             "url": "/livekit"
           },
           "type": "voice_token"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "bob"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
         }
       },
       {

@@ -253,7 +253,7 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 
 	var downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string
 	assets := make([]Asset, 0, len(release.Assets))
-	wantBinary := serverDownloadAssetName(runtime.GOOS)
+	wantBinary := serverDownloadAssetName(runtime.GOOS, runtime.GOARCH)
 	for _, asset := range release.Assets {
 		assets = append(assets, Asset{
 			Name:        asset.Name,

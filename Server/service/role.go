@@ -405,7 +405,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 	// reach (nothing is above position 100), but the seeded owner is named
 	// explicitly so a database whose positions were edited by hand cannot make
 	// the server ownerless.
-	if role.ID == permissions.OwnerRoleID || role.Position >= permissions.OwnerRolePosition {
+	if permissions.IsOwner(role.ID, role.Position) {
 		return nil, nil, nil, fmt.Errorf("%w: the Owner role cannot be deleted", ErrBadRequest)
 	}
 	if role.IsDefault {

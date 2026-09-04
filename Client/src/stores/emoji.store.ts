@@ -93,9 +93,16 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
   });
 }
 
-/** Drop every custom emoji (logout, or a switch to another server). */
+/**
+ * Drop every custom emoji (logout, or a switch to another server).
+ *
+ * Bumps `rev` rather than resetting it to 0 (OC-0362): a reset would let a
+ * still-in-flight GET /emoji from the session being torn down match the
+ * next session's ready-time snapshot (both 0) and clobber it with the
+ * previous server's emoji.
+ */
 export function clearCustomEmoji(): void {
-  emojiStore.setState((prev) => (prev.emoji.length === 0 ? prev : INITIAL));
+  emojiStore.setState((prev) => ({ ...INITIAL, rev: (prev.rev ?? 0) + 1 }));
 }
 
 /**

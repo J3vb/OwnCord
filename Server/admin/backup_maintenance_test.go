@@ -142,6 +142,43 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	}
 }
 
+// TestMaintainBackups_OutOfRangeRetentionPrunesNothing is OC-0393's second
+// instance: pruneExpiredBackups builds its cutoff with the identical
+// now.Add(-days*24h) arithmetic as the message-retention sweep, and
+// backup_retention is on the admin PATCH whitelist with no numeric
+// validation at all — unlike retention_days, this one is reachable today by
+// an admin typing an extra digit. Past the overflow boundary the cutoff
+// lands in the future and every backup but the newest would be unlinked;
+// it must instead disable pruning, the same as the existing days<=0 case.
+func TestMaintainBackups_OutOfRangeRetentionPrunesNothing(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	ctx := context.Background()
+
+	mustSetSetting(t, database, "backup_schedule", "off")
+	mustSetSetting(t, database, "backup_retention", "106752")
+
+	older := filepath.Join(dir, "chatserver_a.db")
+	newer := filepath.Join(dir, "chatserver_b.db")
+	for _, p := range []string{older, newer} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, older, 400*24*time.Hour)
+	backdate(t, newer, 200*24*time.Hour)
+
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	got := listBackupFiles(t, dir)
+	if len(got) != 2 {
+		t.Fatalf("files = %v, want both kept (an out-of-range retention window must disable pruning, not overflow into the future)", got)
+	}
+}
+
 func mustSetSetting(t *testing.T, database interface {
 	SetSetting(ctx context.Context, key, value string) error
 }, key, value string,

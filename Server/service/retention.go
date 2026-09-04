@@ -22,7 +22,7 @@ type RetentionStore interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
-	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
+	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
 	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
@@ -33,12 +33,14 @@ type RetentionStore interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 }
 
-// Retention bounds: the smallest window the policy accepts (owner decision
-// 4) and the largest, which keeps the day arithmetic away from overflow.
-const (
-	RetentionMinDays = 1
-	RetentionMaxDays = 3650
-)
+// RetentionMinDays is the smallest window the policy accepts (owner
+// decision 4). RetentionMaxDays mirrors db.RetentionMaxDays — one source,
+// since the db package's read paths (ServerRetentionDays, RetentionWindows)
+// must fail closed on the identical ceiling this write-side check enforces,
+// and a copy here could drift from it silently (OC-0393).
+const RetentionMinDays = 1
+
+const RetentionMaxDays = db.RetentionMaxDays
 
 // RetentionTickBudget is how many messages one maintenance tick removes at
 // most, across channels, in batches of RetentionBatch; the rest waits for
@@ -237,16 +239,10 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 	if len(windows) == 0 {
 		return rep, nil
 	}
-	runID, err := s.st.StartRetentionRun(ctx)
-	if err != nil {
-		return rep, err
-	}
-	var files []string
-	var purgePending []int64
-	budget := RetentionTickBudget
+	run := &sweepRun{budget: RetentionTickBudget}
 	var sweepErr error
 	for _, w := range windows {
-		if budget <= 0 {
+		if run.budget <= 0 {
 			rep.Budgeted = true
 			break
 		}
@@ -261,27 +257,23 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 				break
 			}
 		}
-		removed, swept, exhausted, err := s.sweepChannel(ctx, runID, w.ChannelID, cutoff, &budget, &purgePending)
-		files = append(files, swept...)
+		removed, exhausted, err := s.sweepChannel(ctx, run, w.ChannelID, cutoff)
 		if err != nil {
 			sweepErr = err
 			break
-		}
-		if removed > 0 {
-			rep.Channels++
-			rep.Messages += removed
 		}
 		if !exhausted {
 			rep.Budgeted = true
 		}
 	}
-	if len(purgePending) > 0 && sweepErr == nil {
-		sweepErr = fmt.Errorf("replay purge pending for %d messages, retried next tick", len(purgePending))
+	rep.Channels = run.channels
+	rep.Messages = run.messages
+	if len(run.pending) > 0 && sweepErr == nil {
+		sweepErr = fmt.Errorf("replay purge pending for %d messages, retried next tick", len(run.pending))
 	}
-	if err := s.st.RecordRetentionRunFiles(ctx, runID, rep.Channels, rep.Messages, files); err != nil {
-		return rep, err
-	}
-	removedFiles, fileErr := s.removeFiles(files)
+	// The run's file and replay journals are already current: every batch
+	// records them in the same transaction as its deletions.
+	removedFiles, fileErr := s.removeFiles(run.files)
 	rep.FilesRemoved = removedFiles
 	errText := ""
 	if sweepErr != nil {
@@ -289,11 +281,13 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 	} else if fileErr != nil {
 		errText = fileErr.Error()
 	}
-	if err := s.st.FinishRetentionRun(ctx, runID, removedFiles, errText); err != nil {
-		return rep, err
+	if run.runID != 0 {
+		if err := s.st.FinishRetentionRun(ctx, run.runID, removedFiles, errText); err != nil {
+			return rep, err
+		}
 	}
 	if rep.Messages > 0 {
-		slog.Info("retention: swept", "run", runID, "channels", rep.Channels, "messages", rep.Messages, "files_removed", removedFiles, "budgeted", rep.Budgeted)
+		slog.Info("retention: swept", "run", run.runID, "channels", rep.Channels, "messages", rep.Messages, "files_removed", removedFiles, "budgeted", rep.Budgeted)
 	}
 	if sweepErr != nil {
 		return rep, sweepErr
@@ -301,37 +295,64 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 	return rep, fileErr
 }
 
+// sweepRun is the mutable state one retention run accumulates as Tick or a
+// marker-replay pass sweeps channels into it in batches: the budget left,
+// the run's row (runID is 0 until something needs journaling — a pass that
+// removes nothing never opens one, OC-0396's no-op-boot half), the totals
+// and file names journaled so far, and any replay purges a failed purge
+// left pending for the next tick.
+type sweepRun struct {
+	runID    int64
+	budget   int
+	channels int
+	messages int
+	files    []string
+	pending  []int64
+}
+
 // sweepChannel removes messages older than cutoff in batches until the
 // channel is clean or the budget is spent, taking each batch's frames out
 // of the replay tiers behind the run's purge journal. exhausted reports the
-// former. A purge that fails leaves its ids journaled in pending for the
-// next tick; the rows are gone either way.
-func (s *RetentionService) sweepChannel(ctx context.Context, runID, channelID int64, cutoff time.Time, budget *int, pending *[]int64) (removed int, files []string, exhausted bool, err error) {
-	for *budget > 0 {
-		limit := min(RetentionBatch, *budget)
-		ids, batchFiles, err := s.st.SweepRetentionJournaled(ctx, runID, channelID, cutoff, limit)
+// former. A purge that fails leaves its ids journaled in run.pending for
+// the next tick; the rows are gone either way.
+//
+// SweepRetentionJournaled appends run.files and the replay ids inside each
+// batch's deletion transaction, so a kill after commit always leaves both
+// durable resume handles. The run opens lazily in that transaction when
+// run.runID is zero, so a pass that finds nothing creates no empty row.
+func (s *RetentionService) sweepChannel(ctx context.Context, run *sweepRun, channelID int64, cutoff time.Time) (removed int, exhausted bool, err error) {
+	counted := false
+	for run.budget > 0 {
+		limit := min(RetentionBatch, run.budget)
+		runID, ids, batchFiles, err := s.st.SweepRetentionJournaled(ctx, run.runID, channelID, cutoff, limit, !counted)
 		if err != nil {
-			return removed, files, false, err
+			return removed, false, err
 		}
+		run.runID = runID
 		removed += len(ids)
-		*budget -= len(ids)
-		files = append(files, batchFiles...)
+		run.budget -= len(ids)
 		if len(ids) > 0 {
-			if err := s.purgeJournaled(ctx, runID, ids, pending); err != nil {
-				return removed, files, false, err
+			run.messages += len(ids)
+			run.files = append(run.files, batchFiles...)
+			if !counted {
+				run.channels++
+				counted = true
+			}
+			if err := s.purgeJournaled(ctx, run.runID, ids, &run.pending); err != nil {
+				return removed, false, err
 			}
 		}
 		if len(ids) < limit {
-			return removed, files, true, nil
+			return removed, true, nil
 		}
 	}
-	return removed, files, false, nil
+	return removed, false, nil
 }
 
-// purgeJournaled purges the replay tiers for ids already placed in the run's
-// journal by SweepRetentionJournaled's deletion transaction. A successful
-// purge clears this batch while preserving earlier failed batches; a failed
-// purge stays journaled for the next tick.
+// purgeJournaled purges the replay tiers for ids already appended to the
+// run's journal by the deletion transaction. A successful purge clears this
+// batch while preserving earlier failed batches; a failed purge stays
+// journaled for the next tick.
 func (s *RetentionService) purgeJournaled(ctx context.Context, runID int64, ids []int64, pending *[]int64) error {
 	if err := s.purgeReplay(ctx, ids); err != nil {
 		slog.Warn("retention: replay purge failed, journaled for the next tick", "run", runID, "messages", len(ids), "err", err)
@@ -438,8 +459,9 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// A previous start may have died after a journaled deletion. Finish that
-	// work before applying the marker again or allowing the server to serve.
+	// A previous process may have died after an atomic journaled deletion but
+	// before its replay purge or file removals. Finish that work before the
+	// marker replay completes and the server is allowed to serve.
 	if err := s.resumeRuns(ctx); err != nil {
 		return 0, fmt.Errorf("resume retention runs before marker replay: %w", err)
 	}
@@ -451,49 +473,40 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 		if ch, err := s.st.GetChannel(ctx, channelID); err != nil || ch == nil {
 			return 0, nil //nolint:nilerr // a marker for a channel that no longer exists has nothing to sweep
 		}
-		runID, err := s.st.StartRetentionRun(ctx)
-		if err != nil {
-			return 0, err
-		}
 		total := 0
-		var files []string
-		var pending []int64
 		for {
-			batchIDs, batchFiles, err := s.st.SweepRetentionJournaled(ctx, runID, channelID, t, RetentionBatch)
-			if err != nil {
-				return total, err
+			// One pass = one fresh RetentionTickBudget, its own run, journaled
+			// and finished before the next pass opens. However large the
+			// backlog behind the marker, the whole thing is still removed by
+			// the time this loop returns — only one pass' worth of ids and
+			// file names is ever held in memory at a time (OC-0396).
+			run := &sweepRun{budget: RetentionTickBudget}
+			removed, exhausted, sweepErr := s.sweepChannel(ctx, run, channelID, t)
+			total += removed
+			if len(run.pending) > 0 && sweepErr == nil {
+				sweepErr = fmt.Errorf("replay purge pending for %d messages, retried next tick", len(run.pending))
 			}
-			total += len(batchIDs)
-			files = append(files, batchFiles...)
-			if len(batchIDs) > 0 {
-				if err := s.purgeJournaled(ctx, runID, batchIDs, &pending); err != nil {
-					return total, err
+			if run.runID != 0 {
+				// Something was swept this pass: close its run. A pass that
+				// swept nothing never opened one (no empty retention_runs row
+				// for a no-op boot).
+				removedFiles, fileErr := s.removeFiles(run.files)
+				errText := ""
+				if sweepErr != nil {
+					errText = sweepErr.Error()
+				} else if fileErr != nil {
+					errText = fileErr.Error()
+				}
+				if err := s.st.FinishRetentionRun(ctx, run.runID, removedFiles, errText); err != nil && sweepErr == nil {
+					sweepErr = err
 				}
 			}
-			if len(batchIDs) < RetentionBatch {
-				break
+			if sweepErr != nil {
+				return total, sweepErr
+			}
+			if exhausted {
+				return total, nil
 			}
 		}
-		if err := s.st.RecordRetentionRunFiles(ctx, runID, 1, total, files); err != nil {
-			return total, err
-		}
-		removed, fileErr := s.removeFiles(files)
-		var replayErr error
-		if len(pending) > 0 {
-			replayErr = fmt.Errorf("replay purge pending for %d messages", len(pending))
-		}
-		errText := ""
-		if replayErr != nil {
-			errText = replayErr.Error()
-		} else if fileErr != nil {
-			errText = fileErr.Error()
-		}
-		if err := s.st.FinishRetentionRun(ctx, runID, removed, errText); err != nil {
-			return total, err
-		}
-		if replayErr != nil {
-			return total, replayErr
-		}
-		return total, fileErr
 	})
 }

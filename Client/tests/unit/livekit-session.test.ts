@@ -604,6 +604,17 @@ describe("LiveKitSession", () => {
       expect(info.hasRNNoiseProcessor).toBe(false);
       expect(info.currentChannelId).toBeNull();
     });
+
+    it("[OC-0360] reflects a setOutputVolume change instead of the app-startup value", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      session.setOutputVolume(40);
+
+      const info = session.getSessionDebugInfo();
+      expect(info.outputVolumeMultiplier).toBe(0.4);
+    });
   });
 
   describe("handleVoiceToken", () => {

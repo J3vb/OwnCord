@@ -5265,6 +5265,9 @@ ul.md-list-nested {
 .quick-switch-modal {
   width: 380px;
   max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
   border: 1px solid var(--border-glow, var(--border));
   border-radius: var(--radius-lg);
@@ -5287,6 +5290,8 @@ ul.md-list-nested {
 }
 .quick-switch-list {
   padding: 0 12px 8px;
+  overflow-y: auto;
+  min-height: 0;
 }
 .quick-switch-item {
   display: flex;
@@ -5361,6 +5366,50 @@ ul.md-list-nested {
   text-align: center;
   font-size: 12px;
   color: var(--text-micro);
+}
+
+/* ── Quick Switcher (Ctrl+K) ── */
+.quick-switcher {
+  width: 480px;
+  max-width: 90vw;
+  margin-top: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-glow, var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.quick-switcher__input {
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 15px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+}
+.quick-switcher__input::placeholder {
+  color: var(--text-micro);
+}
+.quick-switcher__results {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.quick-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.quick-switcher__item--active {
+  background: var(--bg-modifier-selected, var(--bg-hover));
+  color: var(--text-normal);
+}
+.quick-switcher__category {
+  margin-left: auto;
+  color: var(--text-micro);
+  font-size: 12px;
 }
 
 /* ── Channel feature flags ── */

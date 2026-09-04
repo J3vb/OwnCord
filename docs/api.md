@@ -304,9 +304,7 @@ revoked, the kit is spent (or the credential consumed) and a
 `recovery_kit_used` / `recovery_assist_used` audit row is written — all in
 one transaction — and a fresh session is issued **without** the second
 factor, so an account with 2FA enrolled signs in from this response and can
-disable or re-enrol 2FA in Settings. Any live WebSocket authenticated by one
-of the revoked sessions is disconnected before that replacement session is
-issued. A spent kit is worthless; the holder
+disable or re-enrol 2FA in Settings. A spent kit is worthless; the holder
 issues a new one while signed in. A kit recovery withdraws an outstanding
 credential; a credential recovery leaves the kit enrolled.
 

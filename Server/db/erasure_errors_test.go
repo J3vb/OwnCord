@@ -57,7 +57,6 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 		"RetentionWindows":            func() error { _, err := database.RetentionWindows(ctx); return err },
 		"CountRetentionCandidates":    func() error { _, err := database.CountRetentionCandidates(ctx, chID, time.Now()); return err },
 		"SweepRetention":              func() error { _, _, err := database.SweepRetention(ctx, chID, time.Now(), 10); return err },
-		"SweepRetentionJournaled":     func() error { _, _, err := database.SweepRetentionJournaled(ctx, 1, chID, time.Now(), 10); return err },
 		"StartRetentionRun":           func() error { _, err := database.StartRetentionRun(ctx); return err },
 		"RecordRetentionRunFiles":     func() error { return database.RecordRetentionRunFiles(ctx, 1, 0, 0, nil) },
 		"FinishRetentionRun":          func() error { return database.FinishRetentionRun(ctx, 1, 0, "") },

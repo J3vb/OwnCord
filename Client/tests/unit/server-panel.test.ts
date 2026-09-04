@@ -698,6 +698,28 @@ describe("ServerPanel", () => {
       panel.renderProfiles([]);
       expect(container.querySelectorAll(".server-item").length).toBe(0);
     });
+
+    // OC-0336: renderServerProfiles rebuilds every row from scratch on each
+    // call, but a per-row click listener bound to the page-lifetime `signal`
+    // (which only aborts once, when the connect page is destroyed) would
+    // keep every discarded row from a prior render reachable — and its
+    // click handler still live — until then.
+    it("does not fire onServerClick for a row discarded by a later render (OC-0336)", () => {
+      const onServerClick = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const staleItem = container.querySelector(".server-item") as HTMLElement;
+      expect(staleItem).not.toBeNull();
+
+      panel.renderProfiles([SIMPLE_PROFILES[1]!]);
+      expect(container.contains(staleItem)).toBe(false);
+
+      // Clicking the detached, stale row must not still reach the handler
+      // it closed over.
+      staleItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onServerClick).not.toHaveBeenCalled();
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -980,6 +1002,36 @@ describe("ServerPanel", () => {
       saveBtn.click();
 
       expect(onAddProfile).toHaveBeenCalledWith("Trimmed Server", "trimmed.com:8443");
+    });
+
+    // OC-0335: handleAddServer builds a fresh modal on every "+ Add Server"
+    // click, but its listeners were bound to the page-lifetime `signal`
+    // (which only aborts once, when the connect page is destroyed) and
+    // closeModal() only removed the overlay from the DOM. A closed modal's
+    // save button therefore kept its listener live — and the modal
+    // reachable through it — for the rest of the connect page's life.
+    it("does not fire onAddProfile from a closed modal's stale save button (OC-0335)", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "Stale Server";
+      inputs[1]!.value = "stale.example.com:8443";
+
+      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
+      const cancelBtn = container.querySelector(".btn-ghost") as HTMLElement;
+      cancelBtn.click();
+
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+
+      // Clicking the closed modal's stale save button must not still reach
+      // the handler it closed over.
+      saveBtn.click();
+      expect(onAddProfile).not.toHaveBeenCalled();
     });
 
     it("focuses the name input on modal open", () => {

@@ -141,16 +141,13 @@ fn set_with(
                     "{SERVICE}: credential store returned a different secret than was written \
                      for account '{account}' — falling back"
                 );
-                // Purge it. `get` reads the credential store first, so leaving
-                // a value we did not write in place would shadow the fallback
-                // copy written below — handing the caller an identity key whose
-                // public half was never published, which is the exact failure
-                // this module exists to prevent.
-                if let Err(e) = keyring_delete(account) {
-                    log::warn!(
-                        "{SERVICE}: could not remove the mismatched entry for '{account}': {e}"
-                    );
-                }
+                // Purge it — but, as with the write-failure arm below, not
+                // until fallback_set has actually committed the replacement.
+                // `get` reads the credential store first, so leaving a value
+                // we did not write in place would shadow the fallback copy;
+                // deleting eagerly here would, if the fallback write also
+                // fails, destroy the last good copy of the secret.
+                purge_stale_keyring_after_fallback_commits = true;
             }
             Ok(None) => log::error!(
                 "{SERVICE}: credential store accepted the write for account '{account}' \
@@ -616,6 +613,35 @@ mod tests {
         assert!(
             !delete_called.get(),
             "a failed keyring write must not delete the existing entry until the fallback \
+             write has actually committed a replacement copy"
+        );
+    }
+
+    #[test]
+    fn set_with_keeps_the_mismatched_keyring_entry_when_the_fallback_also_fails() {
+        // The bug: a mismatched read-back must not delete the existing
+        // keyring entry before the fallback write it is handing off to has
+        // actually committed — same ordering invariant as the write-failure
+        // arm's mirror test above. If the fallback write also fails,
+        // deleting first destroys the only good copy of the secret.
+        use std::cell::Cell;
+        let delete_called = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "mine",
+            |_, _| Ok(()),
+            |_| Ok(Some("someone-elses-secret".to_string())),
+            |_| {
+                delete_called.set(true);
+                Ok(())
+            },
+            |_, _| Err("fallback failed too".to_string()),
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert!(
+            !delete_called.get(),
+            "a mismatched read-back must not delete the existing entry until the fallback \
              write has actually committed a replacement copy"
         );
     }
