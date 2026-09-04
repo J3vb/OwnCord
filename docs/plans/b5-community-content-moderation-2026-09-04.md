@@ -515,7 +515,8 @@ partition and expiry are **not** in scope here and are recorded as B7's,
 because this boundary fills no cache.
 
 **Evidence, 2026-09-04** — branch `feature/b5-1-safefetch` from `dev`
-`cbebd37c`; PR to `dev` #PR_NUMBER (draft). Both premises were re-verified at
+`cbebd37c`; PR to `dev` #1541 (draft, opened 2026-09-04), commits `b03ea9a`
+and `e673856`. Both premises were re-verified at
 that base before any code was written, and both held: `gif_handler.go` had
 `GuardedDialContext`, `ErrUseLastResponse`, a 10 s `Timeout` and a 2 MiB
 `LimitReader` on decode; `(*Registry).HTTPDo` took an arbitrary
