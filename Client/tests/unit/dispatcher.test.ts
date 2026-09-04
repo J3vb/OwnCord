@@ -5,6 +5,7 @@ import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 // bundle-hygiene assertion, without pulling in node:fs.
 import dispatcherSource from "../../src/lib/dispatcher.ts?raw";
 import { createMockWsClient } from "../helpers/mock-ws";
+import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
@@ -783,16 +784,12 @@ describe("WS Dispatcher", () => {
   // handshake and gets silently swallowed by the replay gate — worst when
   // serverClockSkewMs is still 0 (nothing has been sampled yet this
   // session), since nothing else offsets the bias. Pin a real east-of-UTC
-  // zone to observe it; skip where the pin isn't honored (see the probe in
-  // renderers.test.ts's DST block for why a worker-thread pool can't).
-  const oc0315OriginalTZ = process.env.TZ;
-  process.env.TZ = "Asia/Tokyo";
-  const oc0315PinHonored = new Date(2026, 0, 15).getTimezoneOffset() === -540;
-  if (oc0315OriginalTZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = oc0315OriginalTZ;
-  }
+  // zone to observe it. The probe throws rather than skipping if the pin is
+  // not honored, so this block cannot quietly stop running (helpers/tz-pin.ts).
+  const oc0315PinHonored = tzPinHonored(
+    "Asia/Tokyo",
+    () => new Date(2026, 0, 15).getTimezoneOffset() === -540,
+  );
 
   describe.skipIf(!oc0315PinHonored)(
     "[OC-0315] naive-UTC server timestamps vs a non-UTC viewer clock",
@@ -804,12 +801,11 @@ describe("WS Dispatcher", () => {
         vi.mocked(mockNotifyIncomingMessage).mockClear();
       });
 
+      // restoreTZ, not a bare delete: deleting TZ leaves Date pinned to Tokyo
+      // for the rest of this forked worker's life, and vitest reuses a worker
+      // across test files. See helpers/tz-pin.ts.
       afterEach(() => {
-        if (originalTZ === undefined) {
-          delete process.env.TZ;
-        } else {
-          process.env.TZ = originalTZ;
-        }
+        restoreTZ(originalTZ);
       });
 
       it("does not misclassify a live message as a replay when serverClockSkewMs is still 0 (cold, never sampled)", () => {

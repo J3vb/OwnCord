@@ -104,6 +104,12 @@ const CHECK_SERVER = [
   step("go", ["vet", "./..."], "Server"),
   step("go", ["test", "-race", "./..."], "Server"),
   step("go", ["test", "-tags", "deadlock", "-count=1", "./ws/"], "Server"),
+  // -count=1 is load-bearing: TestServerBoundariesDocIsCurrent compares a
+  // document that lives outside the Server module, so Go's test cache does not
+  // record it as an input and `go test -race ./...` above answers a doc-only
+  // change from cache. No `-run` filter: `go test -run` exits 0 when the name
+  // matches nothing, so a rename would green this forever.
+  step("go", ["test", "-count=1", "./cmd/dbinventory/"], "Server"),
   optional(
     "golangci-lint",
     "golangci-lint",

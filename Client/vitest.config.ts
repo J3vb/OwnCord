@@ -30,6 +30,17 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // "forks" is vitest 4's default; pinning it makes the dependency explicit
+    // so a future default flip is a deliberate edit here rather than a silent
+    // behaviour change. Two things need child processes rather than worker
+    // threads. `process.env.TZ` only reaches Date's local-time engine on a
+    // process main thread, so the TZ-pinned regression blocks in
+    // tests/unit/{dispatcher,renderers}.test.ts measure nothing under threads
+    // — tests/helpers/tz-pin.ts throws rather than skipping if that happens.
+    // And the NODE_OPTIONS flag above is a process start-up flag: a worker
+    // thread inherits the variable but not its effect (today jsdom supplies
+    // the globals anyway, so that half is belt-and-braces, not load-bearing).
+    pool: "forks",
     // Asserts the NODE_OPTIONS flag below actually arrived; see its comment
     // and tests/setup.ts's header.
     setupFiles: ["./tests/setup.ts"],

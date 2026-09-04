@@ -42,6 +42,7 @@ Client/reports/
 
 # Server runtime artifacts
 Server/chatserver.exe
+dbinventory.exe
 Server/chatserver.exe~
 Server/owncord-server.exe
 Server/server.exe

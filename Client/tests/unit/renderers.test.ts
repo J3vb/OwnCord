@@ -25,6 +25,7 @@ import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
+import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -1224,23 +1225,18 @@ describe("renderers", () => {
   });
 
   // Probe once, before the suite is even registered: `process.env.TZ`
-  // mutations only reach Date's local-time engine on the main thread/forks
-  // pool. A worker-thread pool (e.g. Stryker's vitest runner) spawns an
-  // isolate that never observes the change, even though the assignment
-  // itself succeeds. Skip the whole block there instead of failing on a pool
-  // limitation nothing in this file can fix; `npx vitest run` (forks, the
-  // documented way to run this suite) always honors the pin and runs it for
-  // real.
-  const dstProbeOriginalTZ = process.env.TZ;
-  process.env.TZ = "America/New_York";
-  const dstTZPinHonored =
-    new Date(2026, 0, 15).getTimezoneOffset() === 300 &&
-    new Date(2026, 6, 15).getTimezoneOffset() === 240;
-  if (dstProbeOriginalTZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = dstProbeOriginalTZ;
-  }
+  // mutations only reach Date's local-time engine on a process main thread.
+  // A worker-thread pool spawns an isolate that never observes the change,
+  // even though the assignment itself succeeds — which used to skip this
+  // block silently. vitest.config.ts pins `pool: "forks"` and the probe now
+  // throws instead of skipping, except under the one sanctioned opt-out
+  // (Stryker, which hard-codes a thread pool). See helpers/tz-pin.ts.
+  const dstTZPinHonored = tzPinHonored(
+    "America/New_York",
+    () =>
+      new Date(2026, 0, 15).getTimezoneOffset() === 300 &&
+      new Date(2026, 6, 15).getTimezoneOffset() === 240,
+  );
 
   describe.skipIf(!dstTZPinHonored)("formatMessageTimestamp — DST day boundaries", () => {
     // These cases only exist in a DST-observing zone, so pin one for the
@@ -1253,13 +1249,12 @@ describe("renderers", () => {
       vi.useFakeTimers();
     });
 
+    // restoreTZ, not a bare delete: deleting TZ leaves Date pinned to New York
+    // for the rest of this forked worker's life, and vitest reuses a worker
+    // across test files. See helpers/tz-pin.ts.
     afterEach(() => {
       vi.useRealTimers();
-      if (originalTZ === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = originalTZ;
-      }
+      restoreTZ(originalTZ);
     });
 
     function assertEasternTime(): void {
