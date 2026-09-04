@@ -110,6 +110,10 @@ const CHECK_SERVER = [
   // change from cache. No `-run` filter: `go test -run` exits 0 when the name
   // matches nothing, so a rename would green this forever.
   step("go", ["test", "-count=1", "./cmd/dbinventory/"], "Server"),
+  // Same rule, same reason: TestCommunityServicesDocIsCurrent (B5-0) reads
+  // docs/architecture/community-services.md, which is outside this module, so
+  // the -race run above answers a doc-only edit from cache.
+  step("go", ["test", "-count=1", "./migrations/"], "Server"),
   optional(
     "golangci-lint",
     "golangci-lint",
