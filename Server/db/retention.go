@@ -284,11 +284,11 @@ func appendRetentionRunBatch(ctx context.Context, tx *sql.Tx, runID int64, ids [
 		Scan(&encodedFiles, &encodedPending); err != nil {
 		return fmt.Errorf("SweepRetention journal run %d: %w", runID, err)
 	}
-	var journalFiles []string
+	journalFiles := make([]string, 0, len(files))
 	if err := json.Unmarshal([]byte(encodedFiles), &journalFiles); err != nil {
 		return fmt.Errorf("SweepRetention decode files for run %d: %w", runID, err)
 	}
-	var purgePending []int64
+	purgePending := make([]int64, 0, len(ids))
 	if err := json.Unmarshal([]byte(encodedPending), &purgePending); err != nil {
 		return fmt.Errorf("SweepRetention decode purge journal for run %d: %w", runID, err)
 	}
