@@ -25,6 +25,15 @@ type AuthBroadcaster interface {
 	BroadcastMemberBan(userID int64)
 }
 
+// AuthSessionDisconnector is the optional live-session half of
+// AuthBroadcaster. *ws.Hub satisfies it. Keeping it as a separate interface
+// lets tests and non-WebSocket callers provide the roster broadcast alone,
+// while security-sensitive session revocations can still cut off an already
+// authenticated socket synchronously.
+type AuthSessionDisconnector interface {
+	DisconnectRevokedUser(userID int64)
+}
+
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
 // request. Session is nil for an API-token principal.
 type Principal struct {

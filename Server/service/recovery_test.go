@@ -62,6 +62,46 @@ func recoverWith(svc *AuthService, username, secret, ip string) (*AuthResult, er
 	})
 }
 
+type recordingRecoveryDisconnector struct {
+	disconnected []int64
+}
+
+func (*recordingRecoveryDisconnector) BroadcastMemberBan(int64) {}
+
+func (r *recordingRecoveryDisconnector) DisconnectRevokedUser(userID int64) {
+	r.disconnected = append(r.disconnected, userID)
+}
+
+// Recovery is a session-compromise boundary: deleting the rows is not enough
+// for a socket that already authenticated. The replacement session is issued
+// only after the old live connection has been cut off.
+func TestRecoveryKit_DisconnectsRevokedLiveSocket(t *testing.T) {
+	ctx := context.Background()
+	svc, user, _ := newKitService(t, false)
+	disconnector := &recordingRecoveryDisconnector{}
+	svc.broadcaster = disconnector
+	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	if err != nil {
+		t.Fatalf("EnrolRecoveryKit: %v", err)
+	}
+	wrong, _, err := auth.GenerateRecoveryKitSecret()
+	if err != nil {
+		t.Fatalf("GenerateRecoveryKitSecret: %v", err)
+	}
+	if _, err := recoverWith(svc, "kitholder", wrong, "203.0.113.4"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("wrong kit = %v, want the uniform refusal", err)
+	}
+	if len(disconnector.disconnected) != 0 {
+		t.Fatalf("failed recovery disconnected %v", disconnector.disconnected)
+	}
+	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.5"); err != nil {
+		t.Fatalf("RecoverWithKit: %v", err)
+	}
+	if len(disconnector.disconnected) != 1 || disconnector.disconnected[0] != user.ID {
+		t.Fatalf("disconnected = %v, want [%d]", disconnector.disconnected, user.ID)
+	}
+}
+
 func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	ctx := context.Background()
 	svc, user, logs := newKitService(t, true)

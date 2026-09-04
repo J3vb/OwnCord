@@ -175,6 +175,22 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 // — and the files; fewer ids than limit means the channel is swept for this
 // cutoff.
 func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
+	return d.sweepRetention(ctx, 0, channelID, cutoff, limit)
+}
+
+// SweepRetentionJournaled is SweepRetention for the retention service. The
+// message ids needed to purge replay events and the stored filenames needed
+// to remove blobs are appended to runID inside the same transaction that
+// deletes their rows. A process kill can therefore leave either both the rows
+// and no journal entry, or deleted rows with a complete durable resume handle.
+func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
+	if runID <= 0 {
+		return nil, nil, fmt.Errorf("SweepRetentionJournaled: invalid run id %d", runID)
+	}
+	return d.sweepRetention(ctx, runID, channelID, cutoff, limit)
+}
+
+func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
 	if limit < 1 {
 		return nil, nil, nil
 	}
@@ -217,10 +233,52 @@ func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Ti
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (`+in+`)`, args...); err != nil { //nolint:gosec // G202: placeholders only
 		return nil, nil, fmt.Errorf("SweepRetention delete: %w", err)
 	}
+	if runID > 0 {
+		if err := appendRetentionRunBatch(ctx, tx, runID, ids, files); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("SweepRetention commit: %w", err)
 	}
 	return ids, files, nil
+}
+
+// appendRetentionRunBatch records the only handles that remain after the
+// message and attachment rows are deleted. It must run in the deletion
+// transaction: moving it after Commit recreates the crash window this journal
+// exists to close.
+func appendRetentionRunBatch(ctx context.Context, tx *sql.Tx, runID int64, ids []int64, files []string) error {
+	var encodedFiles, encodedPending string
+	if err := tx.QueryRowContext(ctx, `SELECT files, purge_pending FROM retention_runs WHERE id = ?`, runID).
+		Scan(&encodedFiles, &encodedPending); err != nil {
+		return fmt.Errorf("SweepRetention journal run %d: %w", runID, err)
+	}
+	var journalFiles []string
+	if err := json.Unmarshal([]byte(encodedFiles), &journalFiles); err != nil {
+		return fmt.Errorf("SweepRetention decode files for run %d: %w", runID, err)
+	}
+	var purgePending []int64
+	if err := json.Unmarshal([]byte(encodedPending), &purgePending); err != nil {
+		return fmt.Errorf("SweepRetention decode purge journal for run %d: %w", runID, err)
+	}
+	journalFiles = append(journalFiles, files...)
+	purgePending = append(purgePending, ids...)
+	encodedFilesBytes, err := json.Marshal(journalFiles)
+	if err != nil {
+		return fmt.Errorf("SweepRetention encode files for run %d: %w", runID, err)
+	}
+	encodedPendingBytes, err := json.Marshal(purgePending)
+	if err != nil {
+		return fmt.Errorf("SweepRetention encode purge journal for run %d: %w", runID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE retention_runs
+		    SET files = ?, purge_pending = ?, messages_deleted = messages_deleted + ?
+		  WHERE id = ?`, string(encodedFilesBytes), string(encodedPendingBytes), len(ids), runID); err != nil {
+		return fmt.Errorf("SweepRetention journal batch for run %d: %w", runID, err)
+	}
+	return nil
 }
 
 func placeholdersFor(ids []int64) (string, []any) {

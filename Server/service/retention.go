@@ -22,7 +22,7 @@ type RetentionStore interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
-	SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
+	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
 	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
@@ -251,6 +251,16 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 			break
 		}
 		cutoff := s.cutoff(w.Days)
+		// The marker is the durable retention intent that survives a restore.
+		// Write it before deleting anything: a crash after this point makes the
+		// next start finish the sweep, while a marker failure leaves the rows
+		// untouched instead of silently losing the anti-resurrection guarantee.
+		if s.markers != nil {
+			if err := s.recordMessagesMarker(ctx, w.ChannelID, cutoff); err != nil {
+				sweepErr = err
+				break
+			}
+		}
 		removed, swept, exhausted, err := s.sweepChannel(ctx, runID, w.ChannelID, cutoff, &budget, &purgePending)
 		files = append(files, swept...)
 		if err != nil {
@@ -260,12 +270,6 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		if removed > 0 {
 			rep.Channels++
 			rep.Messages += removed
-			// The marker records the cutoff only once the channel is fully
-			// swept to it; a budgeted channel records nothing and continues
-			// next tick.
-			if exhausted && s.markers != nil {
-				s.recordMessagesMarker(ctx, w.ChannelID, cutoff)
-			}
 		}
 		if !exhausted {
 			rep.Budgeted = true
@@ -305,7 +309,7 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 func (s *RetentionService) sweepChannel(ctx context.Context, runID, channelID int64, cutoff time.Time, budget *int, pending *[]int64) (removed int, files []string, exhausted bool, err error) {
 	for *budget > 0 {
 		limit := min(RetentionBatch, *budget)
-		ids, batchFiles, err := s.st.SweepRetention(ctx, channelID, cutoff, limit)
+		ids, batchFiles, err := s.st.SweepRetentionJournaled(ctx, runID, channelID, cutoff, limit)
 		if err != nil {
 			return removed, files, false, err
 		}
@@ -324,15 +328,11 @@ func (s *RetentionService) sweepChannel(ctx context.Context, runID, channelID in
 	return removed, files, false, nil
 }
 
-// purgeJournaled purges the replay tiers for ids behind the run's journal:
-// the ids are written to purge_pending first, so a crash between the sweep's
-// commit and the purge leaves them for the next tick, and taken out again
-// once the purge succeeds. A failed purge stays journaled (logged, not an
-// error of the sweep: the rows are gone, only the frames wait).
+// purgeJournaled purges the replay tiers for ids already placed in the run's
+// journal by SweepRetentionJournaled's deletion transaction. A successful
+// purge clears this batch while preserving earlier failed batches; a failed
+// purge stays journaled for the next tick.
 func (s *RetentionService) purgeJournaled(ctx context.Context, runID int64, ids []int64, pending *[]int64) error {
-	if err := s.st.RecordRetentionRunPurge(ctx, runID, append(append([]int64{}, *pending...), ids...)); err != nil {
-		return err
-	}
 	if err := s.purgeReplay(ctx, ids); err != nil {
 		slog.Warn("retention: replay purge failed, journaled for the next tick", "run", runID, "messages", len(ids), "err", err)
 		*pending = append(*pending, ids...)
@@ -356,17 +356,18 @@ func (s *RetentionService) purgeReplay(ctx context.Context, ids []int64) error {
 	return err
 }
 
-// recordMessagesMarker writes the channel's messages marker with the
-// channels sequence as its floor; loud but not fatal, the sweep itself is
-// done.
-func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID int64, cutoff time.Time) {
+// recordMessagesMarker writes the channel's retention intent with the
+// channels sequence as its floor. It runs before deletion and is required:
+// without it a restored backup could resurrect data the sweep removed.
+func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID int64, cutoff time.Time) error {
 	seq, err := s.st.SequenceValue(ctx, db.SequenceFloorChannels)
 	if err != nil {
-		slog.Error("retention: could not read the channels sequence for the marker", "channel_id", channelID, "err", err)
+		return fmt.Errorf("retention marker sequence for channel %d: %w", channelID, err)
 	}
-	if mErr := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format("2006-01-02 15:04:05"), seq); mErr != nil {
-		slog.Error("retention: could not record the messages marker", "channel_id", channelID, "err", mErr)
+	if err := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format("2006-01-02 15:04:05"), seq); err != nil {
+		return fmt.Errorf("retention marker for channel %d: %w", channelID, err)
 	}
+	return nil
 }
 
 // removeFiles unlinks the journaled files; a missing file counts as removed.
@@ -437,6 +438,11 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A previous start may have died after a journaled deletion. Finish that
+	// work before applying the marker again or allowing the server to serve.
+	if err := s.resumeRuns(ctx); err != nil {
+		return 0, fmt.Errorf("resume retention runs before marker replay: %w", err)
+	}
 	return s.markers.ReplayMessages(ctx, func(ctx context.Context, channelID int64, cutoff string) (int, error) {
 		t, err := time.Parse("2006-01-02 15:04:05", cutoff)
 		if err != nil {
@@ -445,44 +451,49 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 		if ch, err := s.st.GetChannel(ctx, channelID); err != nil || ch == nil {
 			return 0, nil //nolint:nilerr // a marker for a channel that no longer exists has nothing to sweep
 		}
+		runID, err := s.st.StartRetentionRun(ctx)
+		if err != nil {
+			return 0, err
+		}
 		total := 0
 		var files []string
-		var ids []int64
+		var pending []int64
 		for {
-			batchIDs, batchFiles, err := s.st.SweepRetention(ctx, channelID, t, RetentionBatch)
+			batchIDs, batchFiles, err := s.st.SweepRetentionJournaled(ctx, runID, channelID, t, RetentionBatch)
 			if err != nil {
 				return total, err
 			}
 			total += len(batchIDs)
-			ids = append(ids, batchIDs...)
 			files = append(files, batchFiles...)
+			if len(batchIDs) > 0 {
+				if err := s.purgeJournaled(ctx, runID, batchIDs, &pending); err != nil {
+					return total, err
+				}
+			}
 			if len(batchIDs) < RetentionBatch {
 				break
 			}
 		}
-		if total > 0 {
-			runID, err := s.st.StartRetentionRun(ctx)
-			if err != nil {
-				return total, err
-			}
-			if err := s.st.RecordRetentionRunFiles(ctx, runID, 1, total, files); err != nil {
-				return total, err
-			}
-			// The persisted replay rows, behind the journal; nothing is
-			// buffered before the hub exists.
-			var pending []int64
-			if err := s.purgeJournaled(ctx, runID, ids, &pending); err != nil {
-				return total, err
-			}
-			removed, fileErr := s.removeFiles(files)
-			errText := ""
-			if fileErr != nil {
-				errText = fileErr.Error()
-			}
-			if err := s.st.FinishRetentionRun(ctx, runID, removed, errText); err != nil {
-				return total, err
-			}
+		if err := s.st.RecordRetentionRunFiles(ctx, runID, 1, total, files); err != nil {
+			return total, err
 		}
-		return total, nil
+		removed, fileErr := s.removeFiles(files)
+		var replayErr error
+		if len(pending) > 0 {
+			replayErr = fmt.Errorf("replay purge pending for %d messages", len(pending))
+		}
+		errText := ""
+		if replayErr != nil {
+			errText = replayErr.Error()
+		} else if fileErr != nil {
+			errText = fileErr.Error()
+		}
+		if err := s.st.FinishRetentionRun(ctx, runID, removed, errText); err != nil {
+			return total, err
+		}
+		if replayErr != nil {
+			return total, replayErr
+		}
+		return total, fileErr
 	})
 }

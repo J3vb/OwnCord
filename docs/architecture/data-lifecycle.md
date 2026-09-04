@@ -315,7 +315,7 @@ purges the row (class 5).
 
 | Axis | Requirement                                                                                                                                                                                                                                                                                                         |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1   | Consuming a recovery kit, resetting the password, revoking every session and writing the audit row commit in **one** transaction: a kill leaves either the old kit valid and the old sessions live, or the new state complete — never a reset password beside live old sessions.                                    |
+| A1   | Consuming a recovery kit, resetting the password, revoking every session and writing the audit row commit in **one** transaction: a kill leaves either the old kit valid and the old sessions live, or the new state complete — never a reset password beside live old sessions. After commit, the hub synchronously disconnects any socket authenticated by a revoked session before the replacement session is issued. |
 | A2   | The transaction rolls back; the kit is not consumed; the user retries.                                                                                                                                                                                                                                              |
 | A3   | Enrolment generates the kit client-side and stores only a verifier server-side; a lost response means the user holds a kit the server never stored. The account's own state must make that visible ("no recovery kit enrolled") so the user re-enrols rather than trusting a dead kit.                              |
 | A4   | Two concurrent redemptions of one kit admit at most one (the consume is a conditional `UPDATE … WHERE used_at IS NULL` whose affected-row count decides); two concurrent enrolments leave exactly one verifier valid.                                                                                               |
@@ -329,31 +329,34 @@ where an administrator wrote one (`channel_retention`, migration 039). Each
 maintenance tick `RetentionService.Tick` (`Server/service/retention.go`)
 computes the effective window per non-DM channel — the channel override
 where present, in either direction (`0` = keep forever), else the server
-window — and for each channel with a window calls `DB.SweepRetention` in
+window — and for each channel with a window calls
+`DB.SweepRetentionJournaled` in
 batches of 500 under a 5,000-message budget per tick: the oldest messages
 older than `now − window` (UTC, `messages.timestamp` compared bytewise;
 pinned messages exempt; tombstones included), each batch one writer
 transaction that reverses the mention counts those messages raised
 (OC-0294), deletes their attachment rows and returns the `stored_as`
 names, and deletes the rows (the FTS trigger drops the index entries;
-`reply_to` on later messages becomes NULL). The run is journaled in
-`retention_runs` — counts and the file list, before any unlink — then the
-files are removed through the upload storage (a missing file counts as
-removed) and the run is finished. Each batch's frames leave the replay
+`reply_to` on later messages becomes NULL). That same transaction appends
+the ids and filenames to `retention_runs.purge_pending` and
+`retention_runs.files`; the deletion cannot commit without its durable replay
+and blob handles. The files are then removed through the upload storage (a
+missing file counts as removed) and the run is finished. Each batch's frames leave the replay
 pipeline as well (`Hub.PurgeMessagesFromReplay`): the dispatch loop is
 drained, the persister flushed, the ring buffer's copies dropped, the
 `events` rows deleted (`DB.DeleteEventsForMessages`, the message-family
 frames — `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`,
 `reaction_update` — naming those ids), and the ids become the hub's tombstone
 set until the next sweep, so a frame about a swept message that a producer
-hands the hub after the purge is dropped; the ids are journaled in
-`retention_runs.purge_pending` before the purge and cleared after it, so a
+hands the hub after the purge is dropped; the ids were journaled by the
+deletion transaction and are cleared after the purge, so a
 purge that fails or is interrupted is retried on the next tick. A client
 resuming across the holes falls to the full ready, which no longer holds
-the messages. A channel swept clean to its cutoff gets a
+the messages. Before the first batch for a channel, the service records the
 `messages`-scoped deletion marker (`MarkerStore.RecordMessagesSweep`, the
-cutoff only ever moving forward); a budgeted channel records nothing and
-continues next tick. At start-up the `erasure-markers` stage replays those
+cutoff only ever moving forward). The marker is required: a write failure
+aborts before rows are removed, while a crash after the marker makes the next
+start finish the authorised sweep. At start-up the `erasure-markers` stage replays those
 markers too: a restored backup holding messages past a channel's recorded
 cutoff loses them again before anything serves, their persisted replay rows
 with them (nothing is buffered before the hub exists); the marker carries
@@ -367,11 +370,11 @@ the marker file's `scope` column keep the two apart.
 
 | Axis | Model                                                                                                                                                                                                                                                                                                                                                                         |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1   | Rows go per batch, each its own transaction; a kill between batches leaves earlier batches gone and later ones for the next tick, which recomputes the same cutoff. A kill between the commit and the unlinks leaves the run's file list journaled: `resumeRuns` on the next tick removes them (`TestRetention_BudgetAndResume`).                                             |
+| A1   | Rows go per batch, each its own transaction; the replay ids and file names are appended to the run inside that transaction. A journal failure rolls the deletion back; a kill after commit leaves complete resume handles, and `resumeRuns` removes the replay frames and files before start-up marker replay or on the next maintenance tick (`TestSweepRetentionJournaled_IsAtomicWithDeletion`, `TestRetention_BudgetAndResume`). |
 | A2   | `SQLITE_FULL` in a batch rolls that batch back and ends the tick; deleting frees space, so the next tick's smaller batches proceed. A failed unlink is recorded on the run (`last_error`) and retried next tick.                                                                                                                                                              |
-| A3   | The files follow the journal, never a directory listing; the erasure's reconciliation pass (O3 A3) catches anything a crash strands anyway.                                                                                                                                                                                                                                   |
+| A3   | The files follow the transactionally committed journal, never a directory listing; the erasure's reconciliation pass (O3 A3) remains a defence in depth for storage outside the database contract.                                                                                                                                                                            |
 | A4   | The tick holds one mutex: it cannot overlap itself or the start-up replay. A message arriving at the boundary is compared against the same UTC cutoff the batch used; the exactly-at-cutoff message stays (`timestamp < cutoff`), `TestSweepRetention_RemovesOnlyPastWindowUnpinned`.                                                                                         |
-| A5   | A restored backup brings deleted messages back — and the `messages` marker per channel, kept outside the restored file, sweeps them again to the recorded cutoff on the next open (`TestRetention_ReplayMarkersResweepsARestoredBackup`). A backup that predates the policy itself restores the policy-less state; the marker still carries the cutoff the sweep had reached. |
+| A5   | A restored backup brings deleted messages back — and the required `messages` marker per channel, kept outside the restored file and written before deletion, sweeps them again to the recorded cutoff on the next open (`TestRetention_MarkerFailureDeletesNothing`, `TestRetention_ReplayMarkersResweepsARestoredBackup`). A backup that predates the policy itself restores the policy-less state; the marker still carries the latest authorised cutoff. |
 
 ## Data-class inventory at `aabac60` (Today column as of B4-9)
 

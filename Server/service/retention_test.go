@@ -221,9 +221,9 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	}
 }
 
-// The tick is bounded and restart-safe: a budget stops it mid-channel with
-// no marker written for that channel, the next tick continues; a run whose
-// files were never removed is resumed on the next tick.
+// The tick is bounded and restart-safe: a budget stops it mid-channel and the
+// next tick continues; a run whose replay ids and files committed atomically
+// with the deleted rows is resumed on the next tick.
 func TestRetention_BudgetAndResume(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
@@ -234,15 +234,16 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The database half only, as a crash after commit leaves it: the run
-	// is journaled with its files, none removed.
+	// The database half only, as a crash after commit leaves it: replay ids
+	// and files are already journaled by that same commit, none removed.
 	runID, _ := database.StartRetentionRun(ctx)
-	ids, swept, err := database.SweepRetention(ctx, chID, retentionNow.Add(-7*24*time.Hour), 2)
+	ids, swept, err := database.SweepRetentionJournaled(ctx, runID, chID, retentionNow.Add(-7*24*time.Hour), 2)
 	if err != nil || len(ids) != 2 {
 		t.Fatal(err)
 	}
-	if err := database.RecordRetentionRunFiles(ctx, runID, 1, 2, swept); err != nil {
-		t.Fatal(err)
+	journal, err := database.GetRetentionRun(ctx, runID)
+	if err != nil || len(journal.Files) != len(swept) || len(journal.PurgePending) != len(ids) {
+		t.Fatalf("journal at commit = %+v, %v; want %d files and %d purge ids", journal, err, len(swept), len(ids))
 	}
 	for _, f := range swept {
 		if !fileExists(t, filepath.Join(dir, f)) {
@@ -302,6 +303,37 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	}
 	if fileExists(t, filepath.Join(dir, "stored-again")) {
 		t.Error("the journaled file survived the resume")
+	}
+}
+
+// The external marker is what prevents an older backup from resurrecting a
+// retention deletion. If it cannot be written, fail before deleting rows.
+func TestRetention_MarkerFailureDeletesNothing(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-marker-failure", "hash", 1)
+	chID, files := seedRetentionChannel(t, database, "marker-failure", uid, dir, 1)
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	markers := newTestMarkers(t)
+	if err := markers.Close(); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	rep, err := svc.Tick(ctx)
+	if err == nil {
+		t.Fatal("Tick with an unavailable marker store succeeded")
+	}
+	if rep.Messages != 0 || countMessages(t, database, chID) != 2 {
+		t.Fatalf("Tick = %+v, messages left = %d; marker failure deleted data", rep, countMessages(t, database, chID))
+	}
+	if !fileExists(t, filepath.Join(dir, files[0])) {
+		t.Fatal("marker failure removed the message's file")
 	}
 }
 

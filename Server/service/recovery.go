@@ -344,6 +344,14 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 	}
 	s.limiter.Reset(ctx, at.ipFail)
 	s.limiter.Reset(ctx, at.userFail)
+	// The database transaction revoked every session, but a WebSocket that
+	// authenticated before it committed can otherwise keep issuing commands
+	// until its ten-message recheck or the next 30-second sweep. Recovery is a
+	// compromised-credential boundary: cut that socket off before issuing the
+	// replacement session, using the same immediate path as sign-out-everywhere.
+	if d, ok := s.broadcaster.(AuthSessionDisconnector); ok {
+		d.DisconnectRevokedUser(user.ID)
+	}
 
 	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {

@@ -179,6 +179,13 @@ The second statement is the acknowledgement: it records that the floor is
 settled, so the next start-up honours it instead of probing again. Use
 `'channels'` in place of `'users'` when the refusal names that table.
 
+Retention writes its channel marker before deleting the first message for a
+cutoff and refuses that sweep if the marker cannot be persisted. The message
+ids needed for replay removal and the filenames needed for blob removal then
+commit to `retention_runs` in the same transaction as the row deletion. This
+keeps a crash or marker-store fault from creating a deletion that an older
+backup can silently undo or whose replay/file cleanup can no longer be named.
+
 ## Diagnostics and Telemetry
 
 OwnCord sends no automatic product or usage telemetry (BPR-055). Every
