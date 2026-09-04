@@ -22,6 +22,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -64,27 +65,39 @@ func main() {
 	root := flag.String("root", ".", "Server module root")
 	flag.Parse()
 
-	fset := token.NewFileSet()
-	dbKinds, err := declKinds(fset, filepath.Join(*root, "db"))
+	rows, err := inventory(*root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
-	files, err := productionFiles(*root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if printTable(os.Stdout, rows) > 0 {
 		os.Exit(1)
+	}
+}
+
+// inventory returns one row per production file under root that imports db,
+// sorted by path. Split out of main so the doc gate
+// (TestServerBoundariesDocIsCurrent) can render the same block the command
+// prints without shelling out to it.
+func inventory(root string) ([]fileUse, error) {
+	fset := token.NewFileSet()
+	dbKinds, err := declKinds(fset, filepath.Join(root, "db"))
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := productionFiles(root)
+	if err != nil {
+		return nil, err
 	}
 
 	// Pass 1: parse everything, collect struct fields typed *db.DB per package.
 	parsed := map[string]*ast.File{}
 	fieldsByPkg := map[string]map[string]bool{}
 	for _, rel := range files {
-		f, err := parser.ParseFile(fset, filepath.Join(*root, rel), nil, 0)
+		f, err := parser.ParseFile(fset, filepath.Join(root, rel), nil, 0)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return nil, err
 		}
 		parsed[rel] = f
 		alias := dbAlias(f)
@@ -111,7 +124,7 @@ func main() {
 		rows = append(rows, analyze(f, rel, alias, dbKinds, fieldsByPkg[path.Dir(rel)]))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].rel < rows[j].rel })
-	printTable(rows)
+	return rows, nil
 }
 
 // productionFiles returns slash-separated .go paths under root, excluding
@@ -385,13 +398,17 @@ func sum(m map[string]int) int {
 	return n
 }
 
-func printTable(rows []fileUse) {
+// printTable renders the Markdown block between the dbinventory markers in
+// docs/architecture/server-boundaries.md and returns the number of problems
+// found (unlisted importers, stale allowlist rows) -- nonzero means the
+// command exits 1.
+func printTable(w io.Writer, rows []fileUse) int {
 	byPkg := map[string]int{}
 	byDisposition := map[string]int{}
 	byFamily := map[string]int{}
 	typeOnly, unlisted := 0, 0
-	fmt.Println("| File | `db.*` types | `db.*` funcs and sentinels | `*db.DB` method calls | Shape | Disposition | Family | Why |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- |")
+	_, _ = fmt.Fprintln(w, "| File | `db.*` types | `db.*` funcs and sentinels | `*db.DB` method calls | Shape | Disposition | Family | Why |")
+	_, _ = fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- |")
 	for _, r := range rows {
 		byPkg[path.Dir(r.rel)]++
 		shape := "calls"
@@ -412,12 +429,12 @@ func printTable(rows []fileUse) {
 		if family == "" {
 			family = "—"
 		}
-		fmt.Printf("| `%s` | %s | %s | %s | %s | %s | %s | %s |\n",
+		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s | %s | %s | %s |\n",
 			r.rel, joined(r.types), mergeFV(r), joined(r.methods), shape, entry.Disposition, family, entry.Note)
 	}
-	fmt.Printf("\n%d files import `db` outside `db/` and `service/` (%s); %d are type-only; %d unlisted.\n",
+	_, _ = fmt.Fprintf(w, "\n%d files import `db` outside `db/` and `service/` (%s); %d are type-only; %d unlisted.\n",
 		len(rows), countList(byPkg), typeOnly, unlisted)
-	fmt.Printf("Dispositions: %s. Move targets: %s.\n", countList(byDisposition), countList(byFamily))
+	_, _ = fmt.Fprintf(w, "Dispositions: %s. Move targets: %s.\n", countList(byDisposition), countList(byFamily))
 	stale := 0
 	present := map[string]bool{}
 	for _, r := range rows {
@@ -426,12 +443,10 @@ func printTable(rows []fileUse) {
 	for rel := range invariants.DBImportAllow {
 		if !present[rel] {
 			stale++
-			fmt.Printf("STALE allowlist row (file no longer imports db): `%s`\n", rel)
+			_, _ = fmt.Fprintf(w, "STALE allowlist row (file no longer imports db): `%s`\n", rel)
 		}
 	}
-	if unlisted > 0 || stale > 0 {
-		os.Exit(1)
-	}
+	return unlisted + stale
 }
 
 // countList renders a count map as "a 1, b 2", keys sorted.
