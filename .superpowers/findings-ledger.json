@@ -8528,13 +8528,20 @@
       "why": "getRecentEmoji applies a display-time filter that drops `:shortcode:` entries which do not resolve against the *current* server's emojiStore. addRecentEmoji feeds that filtered list straight back into localStorage.setItem, so a read-side presentation filter becomes a destructive write against the single, host-unscoped `owncord:recent-emoji` key.",
       "repro": "On server A (which defines custom emoji :blob:), use :blob: — recents become [\":blob:\", \"😀\"]. Switch to server B, which has no :blob:. Open the picker and click any plain unicode emoji. addRecentEmoji calls getRecentEmoji(), whose line-531 filter drops \":blob:\" because resolveEmoji returns null on B, and line 543 writes the shortened list back. Returning to server A, :blob: is gone from Recent forever. The same wipe happens on server A itself if the picker is used before the ready-time GET /emoji resolves, or after it fails (dispatcher.ts:574's .catch only logs \"Failed to load custom emoji\"), since emojiStore is empty and every stored shortcode fails to resolve. The existing test (tests/unit/emoji-picker.test.ts:330) only pins the display filter, not the write-back.",
       "evidence": "EmojiPicker.ts:509  const RECENT_KEY = \"owncord:recent-emoji\";\nEmojiPicker.ts:531  .filter((e) => !(e.startsWith(\":\") && e.endsWith(\":\")) || resolveEmoji(e) !== null)\nEmojiPicker.ts:539-543\nfunction addRecentEmoji(emoji: string): void {\n  const recent = getRecentEmoji().filter((e) => e !== emoji);\n  recent.unshift(emoji);\n  try {\n    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)));\nemoji.store.ts:111  return emojiStore.getState().byShortcode.get(name) ?? null;   // current server only",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "hotspot-server-db",
       "suggestedFix": "Split the read paths in Client/src/components/EmojiPicker.ts: add a `readStoredRecent()` that only parses/validates the JSON string array (no resolveEmoji filter), have `addRecentEmoji` build its list from that, and keep the `resolveEmoji` filter inside `getRecentEmoji()` for display only.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "5c5dcbd0",
+        "test": "Client/tests/unit/emoji-picker.test.ts — a plain-emoji click no longer rewrites an unresolvable :shortcode: out of storage, and that entry is usable again once its server's emoji load",
+        "revertProof": "adversarial review + gates green; both tests fail against the pre-fix read path"
+      },
+      "note": "Split the read paths: readStoredRecent() is what is on disk and is what addRecentEmoji writes back; getRecentEmoji() is that plus the OC-0308 resolve filter, for display only. The deeper cause — one host-unscoped `owncord:recent-emoji` key shared by every server — is left alone deliberately: scoping the key per host would need a migration and is a larger change than the defect warrants. The 20-entry write cap still bounds the list, so unresolvable entries from other servers age out by use rather than being deleted on sight."
     },
     {
       "id": "OC-0364",
