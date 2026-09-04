@@ -37,7 +37,7 @@ var goTestLineRe = regexp.MustCompile(`\bgo test\b(.*)$`)
 
 func parseGoTestInvocations(ciYML string) []goTestInvocation {
 	var out []goTestInvocation
-	for _, raw := range strings.Split(ciYML, "\n") {
+	for raw := range strings.SplitSeq(ciYML, "\n") {
 		m := goTestLineRe.FindStringSubmatch(strings.TrimSpace(raw))
 		if m == nil {
 			continue
@@ -51,13 +51,13 @@ func parseGoTestInvocations(ciYML string) []goTestInvocation {
 				inv.tags["race"] = true
 			case f == "-tags":
 				if i+1 < len(fields) {
-					for _, tag := range strings.Split(fields[i+1], ",") {
+					for tag := range strings.SplitSeq(fields[i+1], ",") {
 						inv.tags[tag] = true
 					}
 					i++
 				}
 			case strings.HasPrefix(f, "-tags="):
-				for _, tag := range strings.Split(strings.TrimPrefix(f, "-tags="), ",") {
+				for tag := range strings.SplitSeq(strings.TrimPrefix(f, "-tags="), ",") {
 					inv.tags[tag] = true
 				}
 			case strings.HasPrefix(f, "./"), f == "...":
@@ -131,7 +131,7 @@ func isConstraintCovered(expr constraint.Expr, pkgDir string, invocations []goTe
 // itself allows a leading comment block and blank lines before the
 // constraint, as long as it precedes `package`.
 func buildConstraintLine(src []byte) string {
-	for _, line := range strings.Split(string(src), "\n") {
+	for line := range strings.SplitSeq(string(src), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "package ") {
 			return ""

@@ -58,9 +58,10 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
         # outside the repository. That made every one of these checks abort
         # in a git worktree, which is where this repository's own guidance
         # says to do branch work.
-        (cd Server && go run ./cmd/genprotocol) \
-            && git diff --exit-code Server/ws/message_types.go Client/src/lib/protocolTypes.ts \
-            || fail "protocol constants are stale — run 'go run ./cmd/genprotocol' in Server/ and stage the result"
+        if ! (cd Server && go run ./cmd/genprotocol) \
+            || ! git diff --exit-code Server/ws/message_types.go Client/src/lib/protocolTypes.ts; then
+            fail "protocol constants are stale — run 'go run ./cmd/genprotocol' in Server/ and stage the result"
+        fi
     else
         printf 'pre-commit: WARNING: go not installed; skipping the protocol-constants check. CI will run it.\n' >&2
     fi
@@ -80,9 +81,10 @@ if printf '%s\n' "$staged" | grep -qE '^Server/(api|admin)/.*\.go$|^Server/(migr
     if command -v go >/dev/null 2>&1; then
         # Root-relative paths, and the diff outside the subshell — see the
         # GIT_DIR note on the protocol check above.
-        (cd Server && go run -tags otel,wazero ./cmd/gendocs) \
-            && git diff --exit-code docs/api.md docs/schema.md docs/server-configuration.md \
-            || fail "generated docs blocks are stale, or a config key is undocumented — if gendocs named keys above, document them in docs/server-configuration.md; otherwise run 'go run -tags otel,wazero ./cmd/gendocs' in Server/ and stage the result"
+        if ! (cd Server && go run -tags otel,wazero ./cmd/gendocs) \
+            || ! git diff --exit-code docs/api.md docs/schema.md docs/server-configuration.md; then
+            fail "generated docs blocks are stale, or a config key is undocumented — if gendocs named keys above, document them in docs/server-configuration.md; otherwise run 'go run -tags otel,wazero ./cmd/gendocs' in Server/ and stage the result"
+        fi
     else
         printf 'pre-commit: WARNING: go not installed; skipping the generated-docs check. CI will run it.\n' >&2
     fi

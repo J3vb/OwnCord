@@ -622,8 +622,8 @@ mod tests {
         assert!(!is_allowed_ptt_capture_vk(0x11)); // Ctrl
         assert!(!is_allowed_ptt_capture_vk(0x12)); // Alt
         assert!(!is_allowed_ptt_capture_vk(0x5B)); // Meta
-        // Escape also closes the Settings overlay the capture UI lives in, so
-        // it must never be capturable as a PTT key (OC-0334).
+                                                   // Escape also closes the Settings overlay the capture UI lives in, so
+                                                   // it must never be capturable as a PTT key (OC-0334).
         assert!(!is_allowed_ptt_capture_vk(0x1B)); // Escape
     }
 
