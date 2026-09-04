@@ -218,17 +218,18 @@ The broker MUST:
 3. **Resolve, then classify every answer** — all A and AAAA records,
    normalised (IPv4-mapped IPv6 included). Reject if **any** address is
    loopback, private, link-local, unspecified, multicast, carrier-grade NAT,
-   documentation, benchmarking, or otherwise non-global. The server's
-   `ipAllowed` (`Server/plugin/host_http.go:224-249`) is the starting point,
-   not the whole list: it rejects loopback, private, link-local, unspecified,
-   multicast and carrier-grade NAT, and **does not** reject the documentation
-   ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
-   `2001:db8::/32`), the benchmarking range (`198.18.0.0/15`) or the other
-   reserved non-global blocks. The broker adds those; extending `ipAllowed`
-   to match is a separate server change.
+   documentation, benchmarking, or otherwise non-global. The server side of
+   this is done: `safefetch.ClassifyAddr`
+   (`Server/safefetch/classify.go`) is the whole list, including the
+   documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
+   `2001:db8::/32`, `3fff::/20`), the benchmarking ranges (`198.18.0.0/15`,
+   `2001:2::/48`) and the remaining reserved blocks that the old
+   `plugin/host_http.go` `ipAllowed` missed. The broker uses the same set.
 4. **Connect only to the validated addresses**, keeping the hostname for SNI
    and certificate checks. No second unconstrained lookup after validation
-   (`host_http.go:182-216` is the server-side shape).
+   (`Server/safefetch/destination.go`, `(*Fetcher).dial`, is the server-side
+   shape: the vetted addresses ride the request context, and a dial that
+   arrives without them, or for a host they do not name, fails closed).
 5. **Disable automatic redirects.** Follow at most a small fixed number by
    hand, re-running steps 2–4 on every hop; reject scheme downgrades.
 6. **Bound time, bytes and concurrency** — a total deadline, a streaming byte
@@ -249,7 +250,27 @@ address that changes between validation and connect, and boundary tests for
 the redirect count, deadline, byte ceiling, content types and TLS validity —
 against the real preview, avatar and external-image entry points.
 
-Status: contract (this document, B2-7); implementation B7; tracked as C-09 in
+**Server side, done in B5-1.** Clauses 2 through 6 are implemented once, in
+`Server/safefetch`, and adopted by both of the server's outbound content
+paths — the GIF proxy (`Server/api/gif_handler.go`) and the plugin `http`
+capability (`Server/plugin/host_http.go`). The `egress-sites` invariant has
+the two rows to match, and the package's own suite is the regression coverage
+listed above, plus a lying `Content-Length`, a decompression bomb, a
+slow-loris body, a redirect loop, a scheme downgrade, a sniffed type
+disagreeing with the declared one, the concurrency cap under `-race`,
+cancellation, residual buffering and offline behaviour. Clauses 1, 7 and 8 —
+the desktop broker owning renderer fetches, returning a typed minimum, and
+narrowing the `https://*` capability — are unchanged and stay B7's, so the
+client is exactly where it was.
+
+Aggregate cross-caller byte budgets and byte-weighted cache eviction are
+deliberately **not** in the server boundary (B5 decision 2): the server's
+outbound surface is one hard-coded host plus a default-empty operator
+allowlist, and the consumer that needs them is B7's broker. `Server/safefetch`
+is shaped so B7 adds them without a rewrite.
+
+Status: contract (this document, B2-7); server half implemented B5-1, desktop
+broker B7; tracked as C-09 in
 [plans/repo-health-issue-register-2026-08-23.md](plans/repo-health-issue-register-2026-08-23.md).
 
 ## At rest
@@ -475,7 +496,7 @@ destination. Anything else on the wire is a finding.
 | STUN and cloud-metadata endpoints — external-address discovery by the **LiveKit subprocess** the server supervises                                                                     | LiveKit start-up, because the generated config sets `use_external_ip: true` unconditionally | learn the public address to advertise in ICE candidates                                                                                                                                                                       | not running LiveKit (as below); setting `voice.node_ip` advertises that address but does not turn discovery off (`Server/ws/livekit_process.go:130-133`)                                                                                                                                                           | `Server/ws/livekit_process.go:130-133`; `Server/config/config.go:160`                                                |
 | participants' addresses — WebRTC media from the **LiveKit subprocess** the server supervises, UDP 50000–60000 and TCP 7881                                                             | a call is in progress                                                                       | encrypted media frames (E2EE); ICE/TURN                                                                                                                                                                                       | not running LiveKit (leave `voice.livekit_binary` unset and `voice.auto_download_livekit: false`) or hosting it elsewhere                                                                                                                                                                                          | `Server/ws/livekit_process.go:123-144` (`port_range_start`/`end`); ports in `docs/deployment.md` §Firewall and Ports |
 | LiveKit at `voice.livekit_url` (default `ws://localhost:7880`)                                                                                                                         | a user joins voice; health probe of the supervised process                                  | media SFU signalling                                                                                                                                                                                                          | **none today**: empty credentials are replaced by random ones and an empty URL defaults to `ws://localhost:7880` (`Server/config/config.go:645-662`), so a voice join always attempts `voice.livekit_url`; with no LiveKit running the attempt fails on loopback. A real `voice.enabled` switch is a server change | `Server/api/livekit_proxy.go:23-28`; `Server/ws/livekit_process.go:47-52`, `:361-366`                                |
-| hosts on `plugins.http_allowlist`                                                                                                                                                      | an installed plugin with the `http` capability calls out                                    | plugin feature                                                                                                                                                                                                                | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                                                                                                                                                                                                                   | `Server/plugin/host_http.go:66`, `:136-155`                                                                          |
+| hosts on `plugins.http_allowlist`                                                                                                                                                      | an installed plugin with the `http` capability calls out                                    | plugin feature                                                                                                                                                                                                                | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                                                                                                                                                                                                                   | `Server/plugin/host_http.go:115`, `:169-187`                                                                         |
 | `acme-v02.api.letsencrypt.org`                                                                                                                                                         | startup and renewal, only when `tls.mode: acme`                                             | certificate issuance                                                                                                                                                                                                          | any other `tls.mode` (default `self_signed`)                                                                                                                                                                                                                                                                       | `Server/auth/tls.go:164-193`                                                                                         |
 | operator's OTLP collector (`telemetry.otlp_endpoint`)                                                                                                                                  | startup, only when `telemetry.exporter: otlp`                                               | traces and metrics to a collector the operator runs                                                                                                                                                                           | `telemetry.exporter: none` (default)                                                                                                                                                                                                                                                                               | `Server/config/config.go:107-114`; `Server/main.go:373`                                                              |
 | `8.8.8.8:80` (UDP, **no packet is sent**)                                                                                                                                              | startup banner                                                                              | asks the OS which local address routes out, to print the LAN URL                                                                                                                                                              | none                                                                                                                                                                                                                                                                                                               | `Server/main.go:1005-1012`                                                                                           |
@@ -494,10 +515,10 @@ is cut, never on an operator's machine.
 
 Two of the GitHub paths (`updater.go`, `livekit_download.go`) use a plain
 `http.Client` against fixed, prefix-validated GitHub URLs; the Klipy proxy and
-plugin HTTP go through the guarded dialer that refuses private and loopback
-answers (`Server/plugin/host_http.go:182-249`; tests
-`TestGuardedDial_FallsBackAcrossVettedIPs`,
-`TestGuardedDial_PrivateRecordRefusesBeforeAnyDial`).
+plugin HTTP go through `Server/safefetch`, which classifies every resolved
+answer, connects only to the ones it vetted, and bounds time, bytes,
+redirects, content types and concurrency (`Server/safefetch/classify.go`,
+`destination.go`, `body.go`; tests `TestClassifyAddr_*`, `TestFetch_*`).
 
 The **desktop client** reaches, on its own: the server; LiveKit **signalling**
 through the server's `/livekit/*` proxy for remote servers, or **directly** to

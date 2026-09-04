@@ -2,8 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/netip"
+	"net/url"
+	"strconv"
 
+	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -66,12 +71,55 @@ func BroadcastEmojiSetForTest(ctx context.Context, svc *service.Services, broadc
 }
 
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
-// restore func. The production transport uses the SSRF-guarded dialer, which
-// refuses loopback addresses, so tests must supply their own client too.
-func SetGIFUpstreamForTest(baseURL string, client *http.Client) func() {
-	prevBase, prevClient := gifAPIBase, gifClient
-	gifAPIBase, gifClient = baseURL, client
-	return func() { gifAPIBase, gifClient = prevBase, prevClient }
+// restore func.
+//
+// The stub is an httptest server on loopback over plain http, and the
+// production policy refuses both, so the test fetcher relaxes exactly two
+// things — the scheme/port pair and the loopback classification — and keeps
+// every ceiling, the redirect budget and the content-type allowlist as
+// production has them. Nothing outside a _test.go file may set
+// safefetch.Policy.Classify; TestNoProductionOverrideOfSeams enforces that.
+func SetGIFUpstreamForTest(baseURL string) (func(), error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return nil, fmt.Errorf("stub upstream %q has no port: %w", baseURL, err)
+	}
+	policy := safefetch.Policy{
+		Schemes:              []string{u.Scheme},
+		Ports:                []int{port},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         0,
+		Deadline:             gifUpstreamTimeout,
+		MaxBytes:             gifMaxResponseBytes,
+		MaxDecompressedBytes: gifMaxResponseBytes,
+		MaxConcurrent:        gifMaxConcurrentUpstream,
+		Classify: func(addr netip.Addr) error {
+			if addr.Unmap().IsLoopback() {
+				return nil
+			}
+			return safefetch.ClassifyAddr(addr)
+		},
+	}
+	stub, err := safefetch.New(policy)
+	if err != nil {
+		return nil, err
+	}
+	prevBase, prevFetcher := gifAPIBase, gifFetcher
+	gifAPIBase, gifFetcher = baseURL, stub
+	return func() { gifAPIBase, gifFetcher = prevBase, prevFetcher }, nil
+}
+
+// SetGIFBaseURLForTest points the GIF proxy at a stub upstream while leaving
+// the production Fetcher in place, so a test can show that the real policy
+// refuses what the relaxed one reaches.
+func SetGIFBaseURLForTest(baseURL string) func() {
+	prev := gifAPIBase
+	gifAPIBase = baseURL
+	return func() { gifAPIBase = prev }
 }
 
 // SecurityHeaders is SecurityHeadersWithTLS with TLS disabled (no HSTS).

@@ -14,7 +14,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -24,7 +23,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -47,19 +46,33 @@ const (
 	// gifMaxResponseBytes caps the upstream body we are willing to read so a
 	// hostile or oversized response cannot exhaust server memory.
 	gifMaxResponseBytes = 2 << 20 // 2 MiB
+
+	// gifMaxConcurrentUpstream bounds how many upstream calls this server
+	// makes at once. The picker searches on every debounced keystroke, so
+	// without a cap a room full of typing users is an amplifier.
+	gifMaxConcurrentUpstream = 8
 )
 
-// gifClient performs the upstream call. It reuses the same SSRF-guarded dialer
-// as the plugin host_http capability (resolve once, reject private/loopback/
-// link-local/CGN addresses, dial only vetted IPs) rather than a bare
-// http.Get, and refuses to follow redirects — the upstream host is fixed.
-var gifClient = &http.Client{
-	Timeout:   gifUpstreamTimeout,
-	Transport: &http.Transport{DialContext: plugin.GuardedDialContext()},
-	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
-}
+// gifFetcher performs the upstream call under the whole outbound-content
+// policy (Server/safefetch): https on 443 only, every resolved address
+// classified before the connect, no redirects at all — the upstream host is a
+// constant, so a redirect is either a provider change or an attack — a 10 s
+// total deadline, a streaming 2 MiB ceiling on the wire and after inflation,
+// a JSON-only content-type allowlist, and a concurrency cap.
+//
+// text/plain rides along in the allowlist because http.DetectContentType
+// reports it for every textual format, JSON included; the pairing still
+// refuses an HTML error page served with a JSON Content-Type.
+var gifFetcher = safefetch.MustNew(safefetch.Policy{
+	Schemes:              []string{"https"},
+	Ports:                []int{443},
+	ContentTypes:         []string{"application/json", "text/plain"},
+	MaxRedirects:         0,
+	Deadline:             gifUpstreamTimeout,
+	MaxBytes:             gifMaxResponseBytes,
+	MaxDecompressedBytes: gifMaxResponseBytes,
+	MaxConcurrent:        gifMaxConcurrentUpstream,
+})
 
 // gifMediaFormat is a single renderable variant of a GIF.
 type gifMediaFormat struct {
@@ -164,27 +177,21 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 // It never returns the upstream error to the caller and never logs the request
 // URL, because that URL carries the API key.
 func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) ([]gifResult, error) {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstreamURL, nil)
+	resp, err := gifFetcher.Fetch(r.Context(), safefetch.Request{URL: upstreamURL})
 	if err != nil {
-		slog.Warn("gif proxy: building upstream request failed", "error", redactKey(err.Error(), apiKey))
-		return nil, err
-	}
-
-	resp, err := gifClient.Do(req)
-	if err != nil {
-		// url.Error embeds the request URL, which contains the API key.
+		// The error embeds the request URL, which contains the API key.
 		slog.Warn("gif proxy: upstream request failed", "error", redactKey(err.Error(), apiKey))
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("gif proxy: upstream returned non-200", "status", resp.StatusCode)
 		return nil, errGIFUpstream
 	}
 
+	// The body is already inside the byte ceilings and already type-checked,
+	// so there is nothing left to bound here.
 	var upstream gifResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, gifMaxResponseBytes)).Decode(&upstream); err != nil {
+	if err := json.Unmarshal(resp.Body, &upstream); err != nil {
 		slog.Warn("gif proxy: decoding upstream response failed", "error", redactKey(err.Error(), apiKey))
 		return nil, err
 	}

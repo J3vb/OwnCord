@@ -59,12 +59,21 @@ var EgressAllow = map[string]EgressEntry{
 	"updater/assets.go": {"manual", "api.github.com and github.com release assets (github.owner/github.repo)", "an admin's update check or apply, or a client asking /api/v1/client-update",
 		"release metadata and asset fetches for the two rows above; refuses any other host",
 		[]string{"(*Updater).fetchBody"}},
-	"plugin/host_http.go": {"config", "hosts in plugins.http_allowlist", "plugins.http_allowlist (default empty = no outbound HTTP)",
-		"a plugin's host_http capability; SSRF-guarded dialer shared with the GIF proxy",
-		[]string{"(*Registry).HTTPDo", "(file scope)"}},
-	"api/gif_handler.go": {"config", "the GIF provider's API", "gif.api_key (default empty = route not mounted)",
-		"proxies a user's GIF search; no key, no route",
-		[]string{"(file scope)", "fetchGIFs"}},
+	// B5-1 moved the dialing out of api/gif_handler.go and
+	// plugin/host_http.go and into Server/safefetch, so both of those rows
+	// are gone and these two carry what they used to. Neither file chooses a
+	// destination: safefetch has no configuration and no call sites of its
+	// own, and its gate is whichever caller asked. The callers' own gates are
+	// unchanged — gif.api_key (default empty = the route is not mounted) for
+	// the GIF proxy, plugins.http_allowlist (default empty = every host
+	// denied) for the plugin http capability — so the compiled defaults still
+	// reach nowhere.
+	"safefetch/policy.go": {"config", "only a destination a caller passed in, and only an address ClassifyAddr accepted", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+		"the shared client, transport and dialer; Fetcher.dial connects to the addresses the destination check vetted and to nothing else",
+		[]string{"New", "defaultDial"}},
+	"safefetch/fetch.go": {"config", "the same, one redirect hop at a time", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+		"one bounded request per hop, under the deadline, byte ceilings and content-type allowlist in docs/trust-model.md's C-09 contract",
+		[]string{"(*Fetcher).roundTrip"}},
 	"internal/app/healthcheck.go": {"loopback", "this server's /health", "the --healthcheck CLI flag",
 		"container orchestrators' liveness probe",
 		[]string{"RunHealthcheckCLI"}},
