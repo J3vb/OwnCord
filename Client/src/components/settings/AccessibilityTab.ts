@@ -5,6 +5,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
 import { syncOsMotionListener } from "@lib/os-motion";
+import { applyFontSize } from "@lib/appearance";
 
 type ToggleItem = {
   readonly key: string;
@@ -61,8 +62,12 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
     label: "Large Font",
     desc: "Use larger text throughout the app for better readability",
     fallback: false,
+    // The class is a state marker only — an inline `--font-size` on the same
+    // element outranks any class rule, so the size itself must go through
+    // appearance.ts's single writer, which savePref has already fed (OC-0319).
     sideEffect: (nowOn) => {
       document.documentElement.classList.toggle("large-font", nowOn);
+      applyFontSize();
     },
   },
 ];

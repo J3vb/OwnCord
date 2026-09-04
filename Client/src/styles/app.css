@@ -5247,10 +5247,12 @@ ul.md-list-nested {
   --bg-active: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* Accessibility: large font */
-.large-font {
-  --font-size: 18px;
-}
+/* Accessibility: large font — no CSS rule here on purpose. --font-size is
+   written as an inline style on documentElement, which outranks any class
+   rule, so this could only ever be a silent no-op. appearance.ts's
+   applyFontSize() is the single writer and derives the size from both the
+   slider and the toggle (OC-0319). The .large-font class stays as a state
+   marker for anything that wants to hang non-font-size styling off it. */
 
 /* ── Quick-Switch Overlay ── */
 .quick-switch-backdrop {
