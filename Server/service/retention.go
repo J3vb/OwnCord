@@ -257,7 +257,7 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 				break
 			}
 		}
-		removed, exhausted, err := s.sweepChannel(ctx, run, w.ChannelID, cutoff)
+		_, exhausted, err := s.sweepChannel(ctx, run, w.ChannelID, cutoff)
 		if err != nil {
 			sweepErr = err
 			break
