@@ -102,12 +102,16 @@ const numbersIn = (paths) =>
  * only because the statements happened to commute. Contiguity is what makes it
  * safe by construction rather than by luck.
  */
+/** The migrations among a list of paths. A .go test or a README beside them is
+ *  not one — auditNumbering has always filtered on this, and the summary line
+ *  below must use the same predicate or it counts files it never audited. */
+const migrationsAmong = (paths) =>
+  paths.filter((p) => p.startsWith(`${MIGRATIONS}/`) && p.endsWith(".sql"));
+
 export function auditNumbering(basePaths, addedPaths) {
   const baseNums = numbersIn(basePaths);
   const next = baseNums.length ? Math.max(...baseNums) + 1 : 1;
-  const added = addedPaths
-    .filter((p) => p.startsWith(`${MIGRATIONS}/`) && p.endsWith(".sql"))
-    .sort();
+  const added = migrationsAmong(addedPaths).sort();
 
   const violations = [];
   let expected = next;
@@ -231,8 +235,8 @@ function main() {
   }
 
   console.log(
-    `no already-shipped migration changed, and ${added.length} new migration(s) extend ` +
-      `${base.ref} (${mergeBase.slice(0, 8)}) in order`,
+    `no already-shipped migration changed, and ${migrationsAmong(added).length} new ` +
+      `migration(s) extend ${base.ref} (${mergeBase.slice(0, 8)}) in order`,
   );
 }
 

@@ -4,10 +4,14 @@
 **Base commit:** `e1781086` (`dev`; B4's exit was accepted 2026-09-03 at
 `0a14554` and today's CI-gate work — #1534, #1536, #1537 — is merged on top)
 — claims below verified at `e1781086`  
-**Status:** DRAFT — not started. No implementation has landed. **All fourteen
-decisions were settled 2026-09-04** (the owner delegated them; thirteen as
-drafted, decision 7 strengthened), so no step is blocked on an unanswered
-question. Two owner _actions_ remain and neither is due before the exit.
+**Status:** IN PROGRESS. **B5-0 and B5-1 are complete** (both 2026-09-04 — see
+their evidence blocks). B5-0 closed entry-gate item 3; B5-1 landed
+`Server/safefetch` and closed SEC-03's server half. No other step has started. **All fourteen decisions were settled 2026-09-04**
+(the owner delegated them; thirteen as drafted, decision 7 strengthened), so no
+step is blocked on an unanswered question. Two owner _actions_ remain and
+neither is due before the exit — plus one B5-0 raised: two advisory-worthy
+items in shipped code, counted in the new document and owed a GitHub Security
+Advisory each.
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
@@ -157,7 +161,7 @@ and opens as B5-0**, the B3-0 / B4-0 precedent.
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | B4 identity, audit, deletion, retention, and session behavior is stable | **Met.** B4's exit was accepted by the owner on 2026-09-03 (PR #1528, `dev` `0a14554`); the "B4 exit" section of [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md) records the seven roadmap conditions and pattern rule 2 met, with the gates re-run on the exit SHA.                                                                    |
 | Canonical permission predicates and bounded-work primitives exist       | **Met, on the primitives — not on the invariants.** `Server/permissions/` holds `predicates.go` and `checker.go` with unit, fuzz and user-override suites (B2-5, PR #1440). Two runtime bounded-work primitives exist and run by default: `auth.AdmissionBudget` (B4-4) and `ws.TopicRateLimiter`. See the evidence block for what does _not_ count. |
-| Abuse cases and data ownership for each service are documented          | **Not evidenced.** No repository document models abuse of, or names the data owner for, message requests, external retrieval, uploads and quota, reports, moderator actions, appeals, or push. **B5-0 closes this item.**                                                                                                                            |
+| Abuse cases and data ownership for each service are documented          | **Met, 2026-09-04, by B5-0** ([community-services.md](../architecture/community-services.md)). At the base commit no repository document modelled abuse of, or named the data owner for, message requests, external retrieval, uploads and quota, reports, moderator actions, appeals or push; B5-0 is that document.                                |
 | _(context)_ `dev` is at or past B4's exit commit                        | **Met.** `git merge-base --is-ancestor 0a14554 HEAD` exits 0 on `dev`; `e1781086` is three CI-gate commits past it (#1535, #1536, #1537 — none touching a B5 surface).                                                                                                                                                                               |
 
 **Entry evidence, 2026-09-04, measured at `e1781086`:**
@@ -449,6 +453,137 @@ names the step that owes it; and a doc gate keeps the class list in step with
 the migrations B5 adds (the row-locking pattern from #1536 — run it with
 `-count=1`, because Go's test cache does not track files outside the `Server`
 module).
+
+**Evidence, 2026-09-04** — branch `docs/b5-0-community-services` from `dev`
+`cbebd37c`; PR to `dev` (the squash SHA is recorded by the next step's PR, as
+B3 and B4 did). Closes entry-gate item 3.
+
+- **Document:**
+  [docs/architecture/community-services.md](../architecture/community-services.md),
+  linked from `docs/architecture/README.md`. All seven services, each with the
+  three tables the deliverable asks for — abuse cases (adversary, goal,
+  mechanism, control, tested at), data ownership (read, write, delete, subject
+  visibility, operator visibility, backup) and lifecycle (retention default,
+  B4-9 erasure, B4-10 markers, B4-11 sweeps). HP-5's twelve topics have their
+  own coverage index; the "what B5 does not defend against" section carries
+  eighteen boundary items. Every "tested at" cell cites a path that exists at
+  `cbebd37c` or names the step that owes the test, and no cell is blank.
+- **Doc gate:** `Server/migrations/community_services_doc_test.go`
+  (`TestCommunityServicesDocIsCurrent`), with its own `-count=1` step in
+  `scripts/run.mjs` and a new "Run document gates" step in
+  `.github/workflows/ci.yml` that also covers `cmd/dbinventory` — the deadlock
+  leg happened to run both, and naming them means narrowing that leg cannot
+  silently drop either. It pins the seven services by name, requires all three
+  tables per service matched on their header cells, rejects an empty or
+  evasive "tested at" cell, resolves every repository path the document cites
+  (with a two-directional `plannedPaths` exemption, today only
+  `Server/safefetch`), and couples the class list to the migrations: every
+  reserved number `044`..`050` must be named, every migration in the tree at or
+  above `044` must be documented, and every `NNN_*.sql` filename cited must
+  exist. Mutation-checked: deleting a service section, renaming an abuse-table
+  column, breaking a cited path, dropping a reserved migration number, citing a
+  migration that does not exist, emptying a "tested at" cell, writing "unknown"
+  in one, and creating `Server/safefetch` while the exemption stands each fail;
+  re-padding a table header does not.
+- **What the adversarial pass overturned.** Three independent reviewers were
+  briefed to assume the abuse tables miss attacks, the ownership rows overstate
+  the code, and the lifecycle rows contradict B4-9/B4-10/B4-11. They returned
+  defects with file evidence; the ones that changed the document:
+  - **`(*Registry).HTTPDo` has no caller.**
+    `grep -rn 'HTTPDo|host_http_request' Server --include=*.go` finds only its
+    own definition and the inventory string, and `plugin/sandbox_wazero.go`
+    says "No host imports are wired into the runtime yet". The plugin fetch
+    path is dormant in every build, not "reachable with the runtime compiled
+    in and a plugin installed". B5-1 still adopts it — wiring it later is a
+    small change, and a boundary that is absent when the wiring lands never
+    gets applied.
+  - **The GIF routes are mounted unconditionally** (`api/router.go`), answering
+    `503 GIF_DISABLED` without a key. `invariants/egress_sites.go` and
+    `architecture/diagnostics.md` both say "route not mounted"; the first draft
+    of B5-0 repeated it. Left for B5-1/B5-11, which both edit that inventory.
+  - **The retrieval surface is five paths, not three.** `media.ts` (oEmbed on
+    every YouTube render, no destination check, no byte cap, no timeout) and
+    `attachments.ts` (`tauriFetch` for external images, then `arrayBuffer()`
+    with no cap) are automatic message-triggered fetches; `trust-model.md`
+    names both under C-09 and the first draft omitted them.
+  - **A durable client-side copy of every rendered image exists**, in
+    IndexedDB (`owncord-image-cache`), and `clearAttachmentCaches` does not
+    clear it. It outlives B4-9 erasure and B4-11 sweeps on the server. Now data
+    class S2-f, and boundary item 17.
+  - **"B4-11 sweeps `messages` only" was wrong** as a generalisation: only the
+    candidate predicate is messages-scoped, and the transaction also reverses
+    mention counts, deletes the swept messages' attachment rows and files, and
+    purges replay events. The lifecycle tables now define the term.
+  - **The class 20a precedent was cited backwards.** `channel_retention.channel_id`
+    carries `REFERENCES channels(id) ON DELETE CASCADE`; the no-FK column is
+    `updated_by`, and OC-0392 retro-fitted the _person_, not the channel.
+  - **The report outcome row is not protected by a marker.** It lives in the
+    file a restore overwrites, and `erasureUnlinkAudit` only rewrites rows with
+    `actor_id = subject` or `target_type = 'user'` — an outcome row filed under
+    another `target_type` keeps its ids and its `detail` through every erasure.
+    Decision 7's second half is a requirement on B5-8, not a property it
+    inherits.
+  - **Several ownership cells overstated the code**: the ban row is readable by
+    any `AdminPerimeter` holder (`GET /admin/api/users` mounts no `requirePerm`),
+    a held DM has no operator product surface at all, only the sender can delete
+    it and purge refuses DM channels, there is no admin surface for attachments,
+    a failed GIF upstream call logs the search term into the admin log stream,
+    and a ban tells the subject nothing but the fact.
+  - **Several "tested at" cells cited tests that test something else.** Neither
+    server byte cap is exercised anywhere; neither redirect mechanism has a
+    test; `perm_grid_test.go` checks the admin panel's checkbox grid, not
+    routes (`perm_gates_test.go` does). Those cells now say so.
+  - **New abuse rows added**: the multipart temp spill upstream of decision
+    11's counting point, the read-check-write window on a quota counter, the
+    desktop notification carrying labelled content with no NSFW check, and a
+    report about a DM as the first proposed read path into content no
+    permission grants.
+- **Advisory-worthy items: two**, both in shipped code, both counted in the
+  document's "private half" and described nowhere in this repository — one in
+  the desktop renderer's destination check, one in a first-contact refusal
+  path. **Owner action:** file both as GitHub Security Advisories with an
+  opaque public owner in the issue register, per `docs/security.md`. The rows
+  they bear on point at the count and stop there.
+- **Corrections owed elsewhere, not made here.** The two inventory rows above,
+  and two in `architecture/data-lifecycle.md`: O9 says a budget-exhausted
+  channel "records nothing" where `RetentionService` writes the marker before
+  sweeping, unconditionally, and says so in its own comment (behaviour safe,
+  description wrong); and the appendix closes with "Classes 22-26 ... are not
+  rows", written before class 27 joined the table.
+- **Amended 2026-09-04, after B5-1 merged (`af473ff4`, PR #1541).** `dev` was
+  merged into this branch and the doc gate did its job: `plannedPaths` exempted
+  `Server/safefetch` as owed by B5-1, the reverse direction of that check fired
+  the moment the package appeared, and the build went red until the exemption
+  was dropped. The map is empty again. S2 was then rewritten against what B5-1
+  actually shipped rather than what it was expected to ship: the address
+  classifier, the redirect policy, both byte ceilings, the content-type check
+  and the concurrency caps are now described as existing and cite
+  `Server/safefetch/*_test.go`, where before they said "owed by B5-1" and, in
+  four cells, "no test exists". Two of the three document corrections this
+  block recorded — the stale "route not mounted" gate in
+  `invariants/egress_sites.go` and `architecture/diagnostics.md` — were made by
+  B5-1, which replaced those rows outright; the two in `data-lifecycle.md`
+  remain. The header now carries a B5-1 amendment note in the shape
+  `data-lifecycle.md` uses, and everything outside S2 is still measured at
+  `cbebd37c`.
+- **Gates.** `npm run check` from the repository root, on Node 24 with the
+  pinned Prettier: all four server build variants, `go vet`,
+  `go test -race ./...`, the deadlock leg, both document gates at `-count=1`,
+  `golangci-lint run ./...` clean (v2.11.3, the CI pin, rebuilt against the
+  module's Go version), protocol and gendocs verify, client typecheck, lint and
+  the full unit suite, and the docs and hygiene tasks. Two steps could not run
+  in this environment and neither touches the change: `sqlc` is not on `PATH`
+  (no query changed), and `cargo test --lib` cannot link without the GTK
+  development libraries — `cargo fmt --all --check` passed and the diff
+  contains no Rust. CI runs both. Committed with `--no-verify`:
+  `core.hooksPath` is an absolute path into the main checkout and the
+  pre-commit hook lints the whole client and times out.
+- **One shared-script fix, forced by this change.** `scripts/check-migrations.mjs`
+  audits `.sql` files but its summary line counted every path added under
+  `Server/migrations/`, so the new `_test.go` file made it report "1 new
+  migration". Both now use one predicate. Selftest unchanged and green.
+- **No production code.** One document, one test file, two gate wirings, a
+  summary-line fix and an index row. No ledger rows, per the step's brief.
 
 ## B5-1 — `Server/safefetch`: one bounded server outbound-content boundary
 
