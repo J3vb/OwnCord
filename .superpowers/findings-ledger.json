@@ -7519,13 +7519,19 @@
       "why": "`.large-font { --font-size: 18px }` targets `document.documentElement`, but that same element permanently carries an *inline* `--font-size` written by `applyStoredAppearance()` and `buildAppearanceTab()`. An inline declaration beats an author class rule without `!important` on the same element, so the class can never take effect. The sibling `.high-contrast` rule six lines above (app.css:5239-5243) carries a comment describing exactly this hazard and was given `!important`; `.reduced-motion` (app.css:5228) also uses `!important`. `.large-font` is the one that was left out.",
       "repro": "1. Fresh install; never touch the Appearance > Font Size slider. At startup main.ts:102 calls applyStoredAppearance(), which writes inline `--font-size: 16px` on <html> (loadPref fallback 16).\n2. Open Settings > Accessibility and toggle \"Large Font\" ON. AccessibilityTab.ts:65 adds the `large-font` class to <html> and the pref is persisted.\n3. Computed `--font-size` on <html> is still `16px` — the inline declaration wins over `.large-font`'s `18px`. `body`'s font-size (base.css:22) is unchanged, so no text anywhere grows.\n4. The toggle renders as ON forever after, and survives restart, while having zero visual effect. The only way to change text size remains the Appearance slider.",
       "evidence": "app.css:5247-5250\n  /* Accessibility: large font */\n  .large-font {\n    --font-size: 18px;\n  }\n\nappearance.ts:37-40 (runs unconditionally at startup, main.ts:102)\n  document.documentElement.style.setProperty(\"--font-size\", `${loadPref<number>(\"fontSize\", 16)}px`);\nappearance.ts:53\n  document.documentElement.classList.toggle(\"large-font\", loadPref<boolean>(\"largeFont\", false));\n\nAppearanceTab.ts:232\n  document.documentElement.style.setProperty(\"--font-size\", `${currentFontSize}px`);\nAppearanceTab.ts:100 (slider input)\n  document.documentElement.style.setProperty(\"--font-size\", `${size}px`);\n\nAccessibilityTab.ts:60-66\n  key: \"largeFont\", ... sideEffect: (nowOn) => { document.documentElement.classList.toggle(\"large-font\", nowOn); }\n\nbase.css:22\n  font-size: var(--font-size, 14px);   /* on body, inherits html's inline value */\n\nContrast — app.css:5234-5243 (same file, six lines earlier):\n  /* ... an inline declaration beats a plain class rule on the same element,\n     so these overrides must be !important ... */\n  .high-contrast, .high-contrast body { --text-normal: #ffffff !important; ... }\n\nNothing ever clears the inline property: the only removeProperty() calls are helpers.ts:133 (THEME_KEYS only — its own comment at line 131 says --font-size is deliberately excluded) and themes.ts:57 (document.body, not documentElement).",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-1",
       "suggestedFix": "One character class of change in the shared rule: `.large-font { --font-size: 18px !important; }` (app.css:5248-5250), matching the .high-contrast/.reduced-motion precedent six lines above. Unlike .high-contrast it need not also target `body` — --font-size is only ever written inline on documentElement, never on body. Note the resulting semantics: while Large Font is on it pins 18px and the Appearance slider is overridden until the toggle is turned off, which is the intended 'accessibility override wins' behavior.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "f70f04ea",
+        "test": "Client/tests/unit/appearance-large-font.test.ts — floor, no-shrink, live toggle, corrupt/negative/non-finite clamp, effective slider label",
+        "revertProof": "adversarial review, which refuted the first version: flooring at 0 turned a corrupt negative size into a valid 0px lock-out. Floor is now the slider minimum and the value is clamped at both ends."
+      }
     },
     {
       "id": "OC-0320",
@@ -7811,13 +7817,19 @@
       "why": "`https://${apiConfig.host}` splices a possibly-bare IPv6 literal straight into a URL authority with no `bracketBareIPv6Host` call, unlike every other URL-building site in the client (ws.ts:544, admin-panel.ts:27, attachments.ts:60). The resulting string is not a parseable URL, so `build_updater` rejects it before any network call, and `checkForUpdate` swallows the rejection and reports \"no update available\".",
       "repro": "Log in to a server saved with a bare IPv6 host, e.g. `2001:db8::1` (accepted by `isValidHost`, hostValidation.ts:31, and by `api.setConfig`). MainPage.ts:845 produces `serverUrl = \"https://2001:db8::1\"`. In update_commands.rs, `validate_server_url` passes (the `starts_with(\"https://\")` check succeeds, and its userinfo check is skipped because `url::Url::parse` returns Err), then `build_updater` line 98-100 does `endpoint.parse::<url::Url>()` on `https://2001:db8::1/api/v1/client-update/...`, which fails with an invalid-port error because the URL host parser enters the port state at the first colon and chokes on `db8::1`. `check_client_update` returns Err; updater.ts:35-38 catches it and returns `{available:false, version:null, body:null}` and the banner never appears. The same user never learns an update exists, on every launch, for the life of the install. Bracketed (`[2001:db8::1]`) and DNS/IPv4 hosts are unaffected.",
       "evidence": "MainPage.ts:844-846\n  if (apiConfig.host) {\n    const serverUrl = `https://${apiConfig.host}`;\n    const updateNotifier = createUpdateNotifier({ serverUrl });\n\nsrc-tauri/src/update_commands.rs:98-100\n  let url: url::Url = endpoint\n      .parse()\n      .map_err(|e: url::ParseError| format!(\"bad endpoint URL: {e}\"))?;\n\nsrc/lib/updater.ts:35-38\n  } catch (err) {\n    log.error(\"Update check failed\", { error: String(err) });\n    return { available: false, version: null, body: null };\n  }\n\nThe helper that exists for exactly this (`bracketBareIPv6Host`, ws.ts:146) is used by ws.ts:544, admin-panel.ts:27 and attachments.ts:60 but not here.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-2",
       "suggestedFix": "Use the existing shared helper at the one construction site — in Client/src/pages/MainPage.ts add `import { bracketBareIPv6Host } from \"@lib/ws\";` (ws.ts:146) and change line 845 to `const serverUrl = `https://${bracketBareIPv6Host(apiConfig.host)}`;`. That mirrors ws.ts:544 / admin-panel.ts:27 / attachments.ts:60, leaves DNS, IPv4 and already-bracketed hosts byte-identical, and keeps the Rust TOFU key aligned (url::Url::host_str returns the bracketed form and tofu::cert_store_key strips the brackets back off).",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "f70f04ea",
+        "test": "Client/tests/unit/main-page.test.ts — bare-IPv6 host bracketed, DNS host left alone",
+        "revertProof": "adversarial review (host-shape coverage vs isValidHost, TOFU cert_store_key unchanged) + suite green"
+      }
     },
     {
       "id": "OC-0333",
@@ -8785,13 +8797,19 @@
       "why": "The mid-call relabel loop added for OC-0227 iterates the whole voice roster, which includes the current user, and calls `videoGrid.setLabel(uid, remoteTileLabel(uid, false))`. The local self-view tile is registered under `tileId === currentUserId` (VideoModeController.ts:184) with the label `` `${myName} (You)` ``, and `remoteTileLabel` never appends \"(You)\". So the loop overwrites the self tile's label with the bare display name the moment the server echoes back `voice_state` with `camera: true`. Two writers of one tile label disagree, and the last writer is the wrong one — your own tile becomes indistinguishable from a remote participant's.",
       "repro": "1. Join a voice channel and turn your camera on. `setLocalCamera(true)` (screenShare.ts:228) bumps the voice-store signature; the subscriber runs with `voiceUsers[channel][self].camera` still false (no server echo yet), so the relabel loop skips self and `checkVideoMode()` adds the self tile labelled \"Alice (You)\". 2. The client sends `voice_camera`; the server broadcasts `voice_state` for you with `camera: true`. 3. `updateVoiceState` writes `camera: true` onto the self entry in `voiceUsers`, the subscriber re-runs, and the loop now takes the `if (u.camera)` branch for `uid === currentUserId`: `prevTileLabels.get(self)` is undefined ≠ \"Alice\", so it calls `videoGrid.setLabel(self, \"Alice\")`. 4. Your own self-view tile now reads plain \"Alice\" for the rest of the call, with nothing marking it as yours. (Same path turns the local screenshare tile's \"Your Screen\" fallback into \"User <id> (Screen)\" when no member record supplies a display name.)",
       "evidence": "// MainPage.ts:808-821 — no `uid === currentUserId` skip\nfor (const [uid, u] of users) {\n  ...\n  if (u.camera) {\n    const label = remoteTileLabel(uid, false);      // returns `name`, never `name (You)`\n    if (prevTileLabels.get(uid) !== label) {\n      prevTileLabels.set(uid, label);\n      videoGrid?.setLabel(uid, label);              // uid === currentUserId hits the SELF tile\n    }\n  }\n\n// VideoModeController.ts:180-190 — the self tile is keyed by currentUserId\nif (voice.localCamera) {\n  if (!localTileAdded) {\n    const localStream = getLocalCameraStream();\n    if (localStream !== null) {\n      videoGrid.addStream(currentUserId, myName ? `${myName} (You)` : \"You\", localStream, { isSelf: true, ... });\n      localTileAdded = true;\n\n// voice.store.ts:231-241 — updateVoiceState puts SELF into voiceUsers with camera from the payload\nnextUsers.set(payload.user_id, { userId: payload.user_id, username: payload.username, ..., camera: payload.camera, ... });",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "In the loop at Client/src/pages/MainPage.ts:808-829, leave the signature accumulation alone but skip the local user for relabeling: hoist `const selfId = getCurrentUserId();` and wrap both setLabel blocks in `if (uid !== selfId) { ... }` — VideoModeController is the sole writer of the self tiles' \"(You)\" / \"Your Screen\" labels.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "f70f04ea",
+        "test": "Client/tests/unit/main-page.test.ts — self tile keeps \"(You)\" through the server's own voice_state echo",
+        "revertProof": "adversarial review (label branches compared character-by-character against VideoModeController; setOnRemoteVideo proved unreachable for self) + suite green"
+      }
     },
     {
       "id": "OC-0376",
@@ -9476,7 +9494,7 @@
     },
     {
       "id": "OC-0406",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9488,11 +9506,17 @@
       "why": "VERIFIED ON HEAD by running the generator. `(cd Server && go run ./cmd/dbinventory)` reports '54 files import db outside db/ and service/ (. 1, admin 11, api 9, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 7, plugin 1, ws 20); 34 are type-only; 0 unlisted. Dispositions: adapter 35, boundary 19.' The document says 53 / internal/app 6 / boundary 18 (:232-233) and '34 of the 53 rows' (:151), and `grep -n internal/app/erasure.go docs/architecture/server-boundaries.md` returns nothing — that boundary importer was added by 87ad9971 (PR #1520, B4-10) and the doc has not been touched since 8a5817a1. Separately, the 'Construction and setters (S-11) — after B3-4' section (:325-331) says NewHub 'refuses to construct without its required collaborators (DB, Limiter)' while validateHubOptions on HEAD refuses seven (DB, Limiter, Settings, all four Readers seams, Voice, Presence, Auth), and calls its eight-row table 'the seven setters'. The code is stricter than its record in both places, so nothing is broken — the record is.",
       "repro": "(cd Server && go run ./cmd/dbinventory) | tail -2 vs sed -n '151p;232,233p' docs/architecture/server-boundaries.md; grep -n internal/app/erasure.go docs/architecture/server-boundaries.md -> nothing; sed -n '323,332p' docs/architecture/server-boundaries.md vs sed -n '94,119p' Server/ws/hub_options.go. Fix: paste the generator's block back in and correct the S-11 paragraph.",
       "confidence": "high",
-      "source": "I02-db-boundary + I01-construction"
+      "source": "I02-db-boundary + I01-construction",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "`(cd Server && go run ./cmd/dbinventory)` output matches the pasted block; the disposition table sums to the block's own 55",
+        "revertProof": "adversarial review, which refuted the first version twice: the disposition table at :90 still read `boundary` 18 (summing to 53) against the regenerated 20/55 in the same file, and the rewritten `move` sentence was historically false — ws/replay.go left `move` at 87d4ed37 and the last nine rows went together at 8a5817a1"
+      }
     },
     {
       "id": "OC-0407",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9504,11 +9528,17 @@
       "why": "ALL THREE VERIFIED ON HEAD by reading the current code. (1) overrideMutationSetup (admin/handlers_channel_perms.go:110-133) runs pathInt64 -> 400, the body decode -> 400 'invalid request body', and the actor-role guard -> 401 BEFORE the service's role/user lookup; before c0ede58e/d5f8826a the four override handlers resolved the target immediately after the channel, so a request naming a nonexistent role answered 404 regardless. (2) ResolveGuildChannel (service/channel_admin.go:93-95) added `if id <= 0 { return ErrBadRequest }`, which writeChannelErr maps to 400 INVALID_INPUT; the pre-B3 getAdminChannel parsed with ParseInt, hit db.GetChannel's (nil, nil) and answered 404. (3) AdminCreateChannel (service/channel_admin.go:141-149) validates the type first and routes every failure including the empty name through ErrBadRequest -> code INVALID_INPUT, where the old handler checked the empty name first and answered code BAD_REQUEST. B3-2 treated exactly this class of gate/decode reordering as reportable and listed all five affected routes; the B3-8 channel-family evidence records none of these three. Merged into one row because the cheapest correct fix is a shared behaviour-note block in the family evidence, not three code reverts — none of the new statuses is wrong, only unrecorded and unpinned.",
       "repro": "sed -n '106,133p' Server/admin/handlers_channel_perms.go; sed -n '86,100p' and '135,150p' Server/service/channel_admin.go; git show c0ede58e~1:Server/admin/handlers_channels.go and :Server/admin/handlers_channel_perms.go for the old order.",
       "confidence": "high",
-      "source": "I16-error-semantics"
+      "source": "I16-error-semantics",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "each of the three drifts re-derived from HEAD and from `git show c0ede58e~1` / `d5f8826a~1`",
+        "revertProof": "adversarial review, which corrected one overstatement (pathInt64 answered 400 before the move too) and surfaced two further drifts in the same family, now recorded"
+      }
     },
     {
       "id": "OC-0408",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9520,11 +9550,17 @@
       "why": "VERIFIED ON HEAD. Server/ws/voice_moderation.go writes voice_mod_mute (:254), voice_mod_deafen (:329), voice_mod_move (:430) and voice_mod_kick (:467) through writeVoiceModAudit (:478), and `grep -n voice_mod docs/security.md` returns nothing — none of the four appears in the Auth / 2FA / Admin / Content / Profile / Ops bullets at :198-203, which are the published statement of what the trail records. B2-6's evidence cites voice_mod_kick as covered. An operator deciding what an investigation can rely on will under-count what is there.",
       "repro": "grep -n voice_mod docs/security.md -> no match; grep -n writeVoiceModAudit Server/ws/voice_moderation.go -> 254, 329, 430, 467, 478.",
       "confidence": "high",
-      "source": "I05-audit-coverage"
+      "source": "I05-audit-coverage",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "every audit action string written in Server/ enumerated and set-diffed against the seven bullets: 64 to 64, nothing on either side",
+        "revertProof": "adversarial review + gates green"
+      }
     },
     {
       "id": "OC-0409",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9536,11 +9572,17 @@
       "why": "VERIFIED ON HEAD. The section header asserts 'CI fails on drift, and the next generator run silently discards your edit', and row 4 names Client/src/generated/, source of truth tauri-typegen, workflow 'CI patches known typegen bugs — see .github/workflows/ci.yml'. `ls Client/src/generated` -> No such file or directory; `grep -rni typegen .github/` -> zero hits. CHANGELOG.md:534 records the retirement ('unused tauri-typegen pipeline retired (src/generated/**, its CI steps, ...)'). This is the one table a contributor reads to learn which artifacts are gated, and its fourth row is fiction — which devalues the three that are real (make sqlc-verify / protocol-verify / docs-verify at ci.yml:62,68,76).",
       "repro": "ls Client/src/generated; grep -rni typegen .github/ Client/package.json; sed -n '13,20p' CLAUDE.md. Fix: delete the row.",
       "confidence": "high",
-      "source": "I13-gates-real"
+      "source": "I13-gates-real",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "`ls Client/src/generated` and `grep -rni typegen .github/` both empty; the three remaining rows confirmed CI-gated at ci.yml:62-77",
+        "revertProof": "adversarial review, which found the removal orphaned two live references — Client/CLAUDE.md and PULL_REQUEST_TEMPLATE.md — both fixed in the same commit"
+      }
     },
     {
       "id": "OC-0410",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9552,11 +9594,17 @@
       "why": "BOTH VERIFIED ON HEAD. (1) contributing.md:268-269 reads 'the Go suite has deliberately no floor (T-2026-07-25-19)'. Server/coverage-floor.json and Server/scripts/coverage-floor.sh exist and the 'Check coverage floor' step runs on the ubuntu leg at .github/workflows/ci.yml:100-102; the script fails closed (an empty profile exits 2). A contributor will not learn a Go coverage gate exists, or that coverage-floor.json must be ratcheted in the same PR, until CI fails. (2) The tier table's Client/tests/browser row says CI job '—' and Blocking 'no', while ci.yml:429 runs `npm run test:browser` inside client-e2e, a pinned required context. Rule 3 immediately below the table ('A contract test may only live in a blocking tier') makes a contributor act on that column, so the error wrongly rules the browser tier out as a home for contract tests.",
       "repro": "sed -n '265,285p' docs/contributing.md against ls Server/coverage-floor.json Server/scripts/coverage-floor.sh, sed -n '96,104p' .github/workflows/ci.yml and grep -n 'test:browser' .github/workflows/ci.yml -> 429.",
       "confidence": "high",
-      "source": "I13-gates-real"
+      "source": "I13-gates-real",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "coverage-floor.sh read end to end (aggregate + five core packages, exits 2 on an empty or unparseable profile); `npm run test:browser` located at ci.yml:460 inside the job named `Client E2E (Playwright)`, confirmed a required context on dev via the branch-protection API",
+        "revertProof": "adversarial review (one wording nit fixed: the doc said 'same commit' where Server/CLAUDE.md's ratchet rule says 'same PR')"
+      }
     },
     {
       "id": "OC-0411",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
@@ -9568,7 +9616,13 @@
       "why": "VERIFIED ON HEAD. .github/workflows/ci.yml:191-192 states the promise unconditionally: 'The automated half of G-04: a planning document that states a finding count the ledger contradicts fails here instead of quietly misleading a reader.' WATCHED (scripts/check-doc-counts.mjs:50-60) names docs/README.md, docs/plans/README.md, the hp-0 and hp-1 scorecards, the issue register, b0-baseline, b1-repository-foundation, CLAUDE.md and README.md — nine documents, none of them B2/B3/B4 or the HP-2/3/4 scorecards, all of which do carry count claims the script's own claimsIn() matches. Nothing contradicts the ledger today (the claims are dated evidence blocks), so the rule holds — but the guarantee the workflow states is false for the documents actually being written, and one copied count in the B4 plan or the HP-4 scorecard merges green.",
       "repro": "node scripts/check-doc-counts.mjs -> '21 claim(s) across 9 watched document(s)'; sed -n '50,60p' scripts/check-doc-counts.mjs; sed -n '188,196p' .github/workflows/ci.yml. Fix: add the B2/B3/B4 plans and the HP scorecards to WATCHED, or soften the workflow comment to say the list is opt-in.",
       "confidence": "high",
-      "source": "I13-gates-real"
+      "source": "I13-gates-real",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "010ba530",
+        "test": "claimsIn/tally replayed over every docs/plans/*.md with main()'s own comparison: expanding WATCHED would fail exactly 13 claims across b3, b4, hp-3 and hp-4, every one a dated run record",
+        "revertProof": "adversarial review, which independently reproduced the 13 and confirmed the three candidate documents produce zero claims; residual over-promise in the ci.yml sentence above the new block also corrected"
+      }
     },
     {
       "id": "OC-0412",
@@ -9641,18 +9695,24 @@
     },
     {
       "id": "OC-0415",
-      "status": "open",
+      "status": "fixed",
       "title": "The client unit suite is red on Node 26: the localStorage shim returns a plain object, so a spy on Storage.prototype never intercepts it",
       "file": "Client/tests/setup.ts",
       "line": 48,
       "severity": "low",
-      "why": "Node 26 shadows jsdom's localStorage with a native accessor, so tests/setup.ts installs an in-memory replacement built from an object literal. It is not a Storage instance and its methods are own properties, so vi.spyOn(Storage.prototype, \"getItem\") — which four tests use to simulate storage a browser has disabled — never intercepts the call, the throw never happens, and the assertions fail. CI pins Node 24, where jsdom's own Storage is in place and all four pass, so the gate is green while a developer on the current Node sees five red tests across three files (legacy-key-migration, audio-elements, dm-profile-sidebar). CLAUDE.md states the client suite is green and must stay green; on Node 26 it is not, and a habitually red suite is one nobody reads. Same class as OC-0315: a test whose result depends on the environment rather than the code.",
+      "why": "Node >= 22.4 ships its own Web Storage and vitest's jsdom environment makes `window === globalThis`, so Node's globals shadow jsdom's — both `localStorage` (undefined without --localstorage-file) and, the part that mattered, the `Storage` class itself. tests/setup.ts papered over the first half with an in-memory object literal. The second half was worse: twelve tests across seven files simulate disabled storage by patching `Storage.prototype`, and with `Storage` naming Node's class those spies patched a prototype nothing in the suite calls. Five failed; the rest passed while asserting nothing at all, nsfw-gate's throwing-sessionStorage case among them. CI pins Node 24 so the gate stayed green while a developer on the Node the manifest allows (engines: >=24) saw five red tests.",
       "repro": "node --version (v26.4.0), then cd Client && npx vitest run — 5 failed, 5294 passed on dev at 6670c671. The same run on Node 24 is green. tests/setup.ts:23 createMemoryStorage returns an object literal, not a Storage.",
       "confidence": "high",
       "found": "2026-09-03",
       "hunt": "postmerge-review-2026-09-03",
       "lens": "invariant",
-      "finder": "claude"
+      "finder": "claude",
+      "fixed": "2026-09-04",
+      "fix": {
+        "commit": "c6464353",
+        "test": "Client/tests/setup.ts asserts the flag arrived and that localStorage is an instance of the global Storage",
+        "revertProof": "vitest 5344 passed / 0 failed on Node v26.4.0; was 5 failed / 5294 passed on dev"
+      }
     }
   ]
 }
