@@ -7,8 +7,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
   `src/pages/`, `src/components/` UI
-- `src/lib/protocolTypes.ts` and `src/generated/` are generated — see the root
-  CLAUDE.md
+- `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
   `tests/browser` (vitest browser mode)

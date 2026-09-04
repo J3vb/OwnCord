@@ -1879,6 +1879,45 @@ fixture half the `ws` suite builds) or deferring to the B3 exit:
   are satisfied by the same handle); `TestNewHub_RequiredCollaborators`
   gains the Readers refusal case.
 
+**Behaviour notes — channel family, error semantics (recorded 2026-09-04,
+OC-0407)**. Parts 1 and 2 (`c0ede58e`, `d5f8826a`) moved gates and decodes
+across the handler/service line, and three admin responses changed with them.
+None is wrong; all three were unrecorded, which is what B3-2 treats as
+reportable for exactly this class of reordering. Pinned here rather than
+reverted:
+
+1. **Override routes: 404 → 400/401.** `overrideMutationSetup`
+   (`admin/handlers_channel_perms.go`) now runs the body decode (400
+   `BAD_REQUEST` "invalid request body") and the actor-role guard (401
+   `UNAUTHORIZED`) **before** the service resolves the target role or user.
+   Before the move, the four override handlers resolved the target straight
+   after the channel, so a request that was _also_ malformed or
+   unauthenticated answered 404 first. The new order stops leaking whether a
+   role id exists to a caller who has not proved anything yet. (`pathInt64`'s
+   own 400 is not part of the drift — it answered 400 before the move too —
+   and the channel is still resolved first, so a bad channel id still 404s.)
+2. **Non-positive channel id: 404 → 400.** `ResolveGuildChannel`
+   (`service/channel_admin.go`) rejects `id <= 0` with `ErrBadRequest`, which
+   `writeChannelErr` maps to 400 `INVALID_INPUT`. The old `getAdminChannel`
+   parsed `-1` successfully, asked the database, got `(nil, nil)` and
+   answered 404. Only ids no row can ever have are affected; a positive id
+   that does not exist still answers 404, and a DM id still answers 404
+   indistinguishably (S-04).
+3. **Empty channel name: code `BAD_REQUEST` → `INVALID_INPUT`.**
+   `AdminCreateChannel` validates the type first and routes every validation
+   failure, the empty name included, through `ErrBadRequest`. The old handler
+   checked the empty name first and wrote code `BAD_REQUEST`. The status is
+   400 either way; the code string and — for a request that is _both_
+   untyped-invalid and unnamed — the message changed.
+
+Two smaller changes in the same family, recorded for completeness. The four
+500 bodies `writeChannelErr` replaced ("failed to create/update/delete/fetch
+channel") are now one generic "channel action failed", which is a narrowing
+worth having: the specific strings told a caller which statement failed. And
+create now _stores_ the sanitised, trimmed name `cleanChannelMeta` returns,
+where the old handler stored `req.Name` raw — part 1's S-03 bullet records the
+length half of that contract, not the normalisation-on-store half.
+
 **Evidence — invite family, 2026-08-31: vacuous, and why** — the plan's
 family order names `invite` after the channel family, but there is no
 invite work to do and never was. Checked against B3-0's own inventory at

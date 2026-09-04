@@ -41,7 +41,10 @@ describe("applyStoredAppearance", () => {
 
     expect(mockApplyThemeByName).toHaveBeenCalledWith("neon-glow");
     expect(mockRestoreTheme).not.toHaveBeenCalled();
-    expect(document.documentElement.style.getPropertyValue("--font-size")).toBe("16px");
+    // largeFont is "true" above, so 16px is raised to the 18px Large Font floor.
+    // This assertion used to read "16px" — it was pinning OC-0319, the bug where
+    // the toggle changed nothing, not a behaviour worth keeping.
+    expect(document.documentElement.style.getPropertyValue("--font-size")).toBe("18px");
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#1a1b1e");
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
     expect(document.body.style.getPropertyValue("--accent")).toBe("#123456");

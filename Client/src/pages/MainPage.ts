@@ -5,6 +5,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
+import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
@@ -763,24 +764,34 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Wire voice error callback to toast
     setVoiceOnError((msg) => showToast(msg, "error"));
 
-    // The label shown on a remote video tile: memberDisplayName when known —
+    // The label shown on a video tile: memberDisplayName when known —
     // the same identity a rename shows everywhere else (ChannelSidebar's
     // voice roster, message rows, the member list) — falling back to the
     // voice roster's (possibly frozen) username, then a placeholder. Single
     // writer so tile creation (setOnRemoteVideo below) and tile relabeling
     // on a mid-call rename (the voiceStore subscriber below) cannot disagree
     // (OC-0227).
-    function remoteTileLabel(userId: number, isScreenshare: boolean): string {
+    //
+    // Self-aware, because the relabel loop walks the whole voice roster and the
+    // roster includes you: VideoModeController registers the local tiles as
+    // "<name> (You)" / "Your Screen", and a bare remote label written over them
+    // leaves your own tile indistinguishable from a participant's (OC-0375).
+    // These two branches must keep matching VideoModeController's addStream
+    // labels — that is what the OC-0375 test pins.
+    function tileLabel(userId: number, isScreenshare: boolean): string {
       const voice = voiceStore.getState();
       const channelId = voice.currentChannelId;
       const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
       const voiceUser = channelUsers?.get(userId);
       const member = membersStore.getState().members.get(userId);
       const name = (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+      const isSelf = userId === getCurrentUserId();
       if (name === undefined || name === "") {
+        if (isSelf) return isScreenshare ? "Your Screen" : "You";
         return isScreenshare ? `User ${userId} (Screen)` : `User ${userId}`;
       }
-      return isScreenshare ? `${name} (Screen)` : name;
+      if (isScreenshare) return `${name} (Screen)`;
+      return isSelf ? `${name} (You)` : name;
     }
 
     // Wire remote video callbacks to video grid
@@ -790,7 +801,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       const channelId = voice.currentChannelId;
       if (channelId === null) return;
       const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
-      const username = remoteTileLabel(userId, isScreenshare);
+      const username = tileLabel(userId, isScreenshare);
       videoGrid.addStream(tileId, username, stream, {
         isSelf: false,
         audioUserId: userId,
@@ -836,7 +847,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 // tile, so nothing else keeps its label in sync (OC-0227).
                 // setLabel() no-ops for a tile that isn't open yet.
                 if (u.camera) {
-                  const label = remoteTileLabel(uid, false);
+                  const label = tileLabel(uid, false);
                   if (prevTileLabels.get(uid) !== label) {
                     prevTileLabels.set(uid, label);
                     videoGrid?.setLabel(uid, label);
@@ -844,7 +855,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 }
                 if (u.screenshare) {
                   const tileId = uid + SCREENSHARE_TILE_ID_OFFSET;
-                  const label = remoteTileLabel(uid, true);
+                  const label = tileLabel(uid, true);
                   if (prevTileLabels.get(tileId) !== label) {
                     prevTileLabels.set(tileId, label);
                     videoGrid?.setLabel(tileId, label);
@@ -865,7 +876,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {
-      const serverUrl = `https://${apiConfig.host}`;
+      // A bare IPv6 literal must be bracketed or the URL is unparseable and
+      // the updater silently reports "no update available" forever (OC-0332).
+      // Same helper as ws.ts, admin-panel.ts and attachments.ts.
+      const serverUrl = `https://${bracketBareIPv6Host(apiConfig.host)}`;
       const updateNotifier = createUpdateNotifier({ serverUrl });
       updateNotifier.mount(root);
       children.push(updateNotifier);

@@ -7,6 +7,12 @@ import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers"
 import type { ThemeName } from "./helpers";
 import { setTheme } from "@stores/ui.store";
 import { getActiveThemeName, loadCustomTheme, restoreTheme } from "@lib/themes";
+import {
+  applyFontSize,
+  effectiveFontSize,
+  MIN_FONT_SIZE_PX,
+  MAX_FONT_SIZE_PX,
+} from "@lib/appearance";
 
 const FALLBACK_ACCENT = "#5865f2";
 
@@ -87,18 +93,22 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const fontSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
-    min: "12",
-    max: "20",
+    min: String(MIN_FONT_SIZE_PX),
+    max: String(MAX_FONT_SIZE_PX),
     value: String(currentFontSize),
   });
-  const fontLabel = createElement("span", { class: "slider-val" }, `${currentFontSize}px`);
+  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
+  // above where the slider sits, and a label that disagrees with the rendered
+  // text is the same "control that lies" bug in a different place (OC-0319).
+  const fontLabel = createElement("span", { class: "slider-val" }, `${effectiveFontSize()}px`);
   fontSlider.addEventListener(
     "input",
     () => {
       const size = Number(fontSlider.value);
-      setText(fontLabel, `${size}px`);
-      document.documentElement.style.setProperty("--font-size", `${size}px`);
       savePref("fontSize", size);
+      // Both read the pref back, so save first (OC-0319).
+      applyFontSize();
+      setText(fontLabel, `${effectiveFontSize()}px`);
     },
     { signal },
   );
@@ -229,7 +239,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   } else {
     applyTheme(currentTheme);
   }
-  document.documentElement.style.setProperty("--font-size", `${currentFontSize}px`);
+  applyFontSize();
   document.documentElement.classList.toggle("compact-mode", currentCompact);
   if (hasStoredAccent) {
     applyAccent(currentAccent);

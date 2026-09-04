@@ -61,6 +61,13 @@ const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
 // Real audioElements.ts pulls in livekit-client (unmocked elsewhere in this
 // file's graph) purely to hold the AudioElements class this page never
 // touches directly — mock out the one export MainPage actually calls.
+const { mockCreateUpdateNotifier } = vi.hoisted(() => ({
+  mockCreateUpdateNotifier: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
+}));
+vi.mock("@components/UpdateNotifier", () => ({
+  createUpdateNotifier: mockCreateUpdateNotifier,
+}));
+
 vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
@@ -255,9 +262,9 @@ function fakeWs(): FakeWsClient {
   };
 }
 
-function fakeApi(): ApiClient {
+function fakeApi(host = ""): ApiClient {
   return {
-    getConfig: () => ({ host: "" }),
+    getConfig: () => ({ host }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
   } as unknown as ApiClient;
 }
@@ -573,6 +580,88 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // The already-open tile must pick up the new name without the tile
     // being torn down and re-created (no new addStream call for tile 200).
     expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
+  });
+
+  it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    // resetStores authenticates user 1 ("alice"). This is the server's own
+    // voice_state echo landing in voiceUsers for the local user — updateVoiceState
+    // writes self into the roster exactly like any other member.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              1,
+              {
+                userId: 1,
+                username: "alice",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    const videoGrid = capturedChatAreaRef.current!.videoGrid;
+    // VideoModeController registers the self tile under the local user id with
+    // "alice (You)". The relabel loop walks the whole roster, self included, so
+    // it must produce the same self label — not the bare remote form, which
+    // would leave your own tile indistinguishable from a participant's.
+    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)");
+  });
+
+  it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi("2001:db8::1") });
+    page.mount(container);
+
+    // A bare IPv6 literal spliced into a URL authority is not parseable — the
+    // host parser enters the port state at the first colon — so build_updater
+    // rejects it and checkForUpdate reports "no update available" forever.
+    // Every other URL-building site brackets it (ws.ts, admin-panel.ts,
+    // attachments.ts); this one did not.
+    expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
+      serverUrl: "https://[2001:db8::1]",
+    });
+  });
+
+  it("leaves a DNS host unbracketed in the auto-updater URL (OC-0332)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi("chat.example.com:8443") });
+    page.mount(container);
+
+    expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
+      serverUrl: "https://chat.example.com:8443",
+    });
   });
 
   it("does not open the 1:1 profile panel for a group DM header click", () => {
