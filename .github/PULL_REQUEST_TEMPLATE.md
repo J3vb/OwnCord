@@ -25,7 +25,7 @@
 - [ ] Manual testing done (describe below)
 - [ ] Generated files were regenerated, not hand-edited — `Server/db/dbgen/`,
       `Server/ws/message_types.go`, `Client/src/lib/protocolTypes.ts`,
-      `Client/src/generated/`, `.superpowers/FINDINGS.md`. CI fails on drift
+      `.superpowers/FINDINGS.md`. CI fails on drift
 - [ ] Docs updated — anything under `docs/architecture/` (incl. `ux/`) whose
       "Source of truth" files this PR touches is updated in the same PR
       (their maintenance rule), and reference docs (`api.md`, `protocol.md`,

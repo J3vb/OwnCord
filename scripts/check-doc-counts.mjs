@@ -45,8 +45,16 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Active documents that assert a count. Adding a count to a document means
-// adding it here — an unlisted document is not checked.
+// Active documents whose counts are meant to track the LIVE ledger. Adding
+// such a count to a document means adding the document here — an unlisted
+// document is not checked, and the CI job says so.
+//
+// Deliberately excluded: plan and scorecard evidence blocks. Their counts are
+// dated records of a run ("check:docs (336 fixed / 43 open)", "totals 315
+// fixed / 59 open -> 320 fixed / 54 open"), correct as written and wrong to
+// rewrite when the ledger moves. Watching them today would fail thirteen
+// claims across b3, b4, hp-3 and hp-4 and the only way to green would be to
+// falsify signed evidence.
 const WATCHED = [
   "docs/README.md",
   "docs/plans/README.md",

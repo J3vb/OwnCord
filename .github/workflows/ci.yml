@@ -197,8 +197,15 @@ jobs:
   # and must stay green — never "fix" a failing test by editing its assertions.
   # ubuntu-latest for the same reason as client-check above: jsdom-only vitest
   # with no platform-conditional code under test.
-  # The automated half of G-04: a planning document that states a finding count
+  # The automated half of G-04: a WATCHED document that states a finding count
   # the ledger contradicts fails here instead of quietly misleading a reader.
+  # Coverage is OPT-IN, not automatic — only the documents in
+  # check-doc-counts.mjs's WATCHED list are read, and a new count-carrying
+  # document is unchecked until it is added there. That is deliberate: most plan
+  # and scorecard documents state counts as DATED evidence ("totals 315 fixed /
+  # 59 open -> 320 fixed / 54 open" for a run on a given day), correct as
+  # written and wrong to rewrite when the ledger moves on. Watch a document only
+  # when its counts are meant to track the live ledger.
   # Deliberately tiny — no npm ci, because the script imports nothing outside
   # node:. It also runs its own selftest, since the whole check rests on
   # patterns narrow enough not to cry wolf.

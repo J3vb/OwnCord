@@ -265,10 +265,15 @@ no file paths.
 
 ## Testing
 
-The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;
-the Go suite has deliberately no floor (T-2026-07-25-19) — use `make cover-all`
-to see the honest cross-package number. Follow a test-driven workflow and never
-lower a threshold to make a change fit.
+The client suite enforces **70% coverage thresholds** in `vitest.config.ts`.
+The Go suite has floors too, since B3-6: `Server/coverage-floor.json` names an
+aggregate and a per-package floor for the five core packages (`ws`, `service`,
+`permissions`, `auth`, `db`), and `Server/scripts/coverage-floor.sh` enforces
+them on the ubuntu leg of Server Build & Test. It fails closed — an empty or
+unparseable profile exits 2 rather than passing. A PR that raises coverage
+ratchets the file in the same PR; the ratchet rule is in `Server/CLAUDE.md`.
+Use `make cover-all` to see the honest cross-package number. Follow a
+test-driven workflow and never lower a threshold to make a change fit.
 
 ### Tiers
 
@@ -277,7 +282,7 @@ lower a threshold to make a change fit.
 | `Client/tests/unit`        | `npm run test:unit`        | Client Unit Tests                           | yes      |
 | `Client/tests/integration` | `npm run test:integration` | Client Unit Tests                           | yes      |
 | `Client/tests/contract`    | `npm run test:contract`    | Client Unit Tests                           | yes      |
-| `Client/tests/browser`     | `npm run test:browser`     | —                                           | no       |
+| `Client/tests/browser`     | `npm run test:browser`     | Client E2E (Playwright)                     | yes      |
 | `Client/tests/e2e`         | `npm run test:e2e`         | Client E2E (Playwright)                     | yes      |
 | `Client/tests/e2e` @parity | —                          | Client E2E (parity subset, blocking)        | yes      |
 | `Client/tests/e2e/native`  | `npm run test:e2e:native`  | —                                           | no       |
