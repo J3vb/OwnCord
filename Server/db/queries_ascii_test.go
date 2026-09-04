@@ -21,8 +21,11 @@ import (
 // the cheapest way to make that class of corruption impossible.
 func TestQueryFilesAreASCIIOnly(t *testing.T) {
 	root := "queries"
+	// Not a Skipf: this test IS the guard, and a guard that excuses itself when
+	// its subject moves is worse than no guard. If the directory is renamed,
+	// the rename fixes this line, not the other way round.
 	if _, err := os.Stat(root); err != nil {
-		t.Skipf("no %s directory: %v", root, err)
+		t.Fatalf("no %s directory: %v", root, err)
 	}
 
 	var checked int

@@ -1,4 +1,7 @@
 mod commands;
+// Test-only: gates over tauri.conf.json and the source text itself.
+#[cfg(test)]
+mod config_gates;
 mod constants;
 mod credentials;
 #[cfg(windows)]
