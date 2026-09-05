@@ -870,14 +870,155 @@ route-posture test in B4-2's style proving that with the default configuration
 every candidate browser-client path answers as an unmounted route, with a
 negative control that the same test would fail if the route were mounted.
 
-**Record for B8, so it is not rediscovered.** A browser-client route has to
+**Record for B8, so it is not rediscovered.** ~~A browser-client route has to
 mount at `/*` and therefore **last** — registered before
 `r.Route("/api/v1", ...)` (`api/router.go:97`) or before
-`r.Mount("/admin", ...)` (`:196`) it swallows both. Enabled mode also needs its
-own CSP (the global `SecurityHeadersWithTLS` is separate from the admin
-panel's inline one) and a Vite-build-before-`go build` ordering that touches
-`Server/Makefile`, `Server/Dockerfile` and CI. None of that is B5's work; all
-of it is B8's inheritance and belongs in this step's PR description.
+`r.Mount("/admin", ...)` (`:196`) it swallows both.~~ **Struck as false, and
+corrected here, by B5-3 — measured, not read.** chi matches on a radix trie and
+orders children `ntStatic` before `ntCatchAll`, so registration order decides
+nothing: with `r.Handle("/*", ...)` registered **first**, ahead of `/health`,
+`r.Route("/api/v1", ...)` and `r.Mount("/admin", ...)`, every one of those
+still answers (`/health` 200, `/api/v1/info` 200, `/admin/users` 200), `Mount`
+does not panic, and `/api/v1/nope` and `/admin/nope` still 404 rather than
+falling through to the catch-all. The real hazard is **scope, not order**: a
+root `/*` claims exactly the space that 404s today — `/`, `/index.html`,
+`/api`, `/apix`, `/health/x`, and **every future unclaimed top-level prefix**,
+plus 405-instead-of-404 for a method it does not declare. A route added later
+under a prefix the bundle already swallows will look mounted and answer HTML.
+Mount the bundle under its own prefix, or accept that the root namespace is
+spent. The rest of the paragraph stands: enabled mode needs its own CSP (the
+global `SecurityHeadersWithTLS`, `api/middleware.go:439`, sets
+`default-src 'self'` and `Cache-Control: no-store` — both wrong for a
+hashed-asset SPA — and `r.Use` cannot amend it after routes are registered,
+chi panics; the only in-tree escape hatch is a per-route `w.Header().Set` like
+`admin/admin.go:56`, which is invisible to every middleware unit test), and a
+Vite-build-before-`go build` ordering that touches `Server/Makefile`,
+`Server/Dockerfile` and CI. None of that is B5's work; all of it is B8's
+inheritance.
+
+**Evidence, 2026-09-05** — branch `feature/b5-3-browser-hosting-posture` from
+`dev` `a60c6ca9`. Both premises were re-verified at that base before any code
+was written and both held: the admin panel's `embed.FS` is the tree's only
+`http.FileServer`, and `(*plugin.Registry).AssetHandler` had no production
+caller.
+
+- **The key.** `server.browser_client_enabled`, a `bool` on `ServerConfig`
+  beside `waf_enabled` (`Server/config/config.go`), zero-value false so it
+  needs no `defaults()` entry, one commented line in `defaultYAML`, and a row
+  in each of the three tables in `docs/server-configuration.md` — the
+  generated key index, the hand-written Server reference, and the hand-written
+  environment-variable list. `OWNCORD_SERVER_BROWSER_CLIENT_ENABLED` binds with
+  no `envKeyToKoanf` edit; verified by running it, not by reading it. No new
+  config section: `waf_enabled` / `waf_paranoia_level` / `waf_crs_mode` is the
+  in-repo precedent for growing related keys inside `server.` without one, and
+  B8's further keys have not been designed. If B8 does want a `browser.`
+  section, note that a rename only reaches `slog.Warn` (`unknownFileKeys`
+  inside `config.Load`, "a
+  warning must not brick a working install"), so an operator who had opted in
+  silently reverts to **off** — the safe direction, but it needs a release
+  note.
+- **What enabled does today: nothing, loudly.** No route is mounted in either
+  state. `NewRouter` logs a warning when the key is set, because this build
+  ships no browser assets and an operator who turned it on would otherwise
+  conclude the server is broken. A 503 placeholder at `/*` was considered and
+  rejected: it is enabled-mode behaviour, which decision 10 assigns to B8, and
+  it would claim the root namespace and drag the CSP and `Cache-Control`
+  questions forward a phase for no proof gained.
+- **The test is the deliverable, and it is two checkers, not one.**
+  `Server/api/browser_hosting_posture_test.go`. `walkBrowserHostingRoutes`
+  walks the production tree (`chi.Walk`, the B4-2 idiom) and reports any route
+  matching a candidate browser path, a candidate path via `concretePath`, or
+  one of nine subtree patterns (`/*`, `/assets/*`, `/static/*`, `/dist/*`,
+  ...). The pattern clause is not redundant: `concretePath` rewrites `*` to
+  `x`, so `/assets/*` becomes `/assets/x` and matches no path, and a real Vite
+  bundle is hash-named so a wire request for `/assets/index.js` would 404
+  against a `FileServer` rooted there. It is also not sufficient on its own:
+  **`chi.Walk` descends into a `Mount` and yields the child routes with the
+  prefix applied, never the mount's own `/prefix/*` pattern**, so a subrouter
+  that declares no route and serves everything from its `NotFound` handler
+  walks as zero routes and the whole pattern list would be dead for the shape
+  it most needs to catch. `mountedSubtreePatterns` walks `Routes()` for the
+  mount patterns `Walk` omits. `probeBrowserHostingWire` sends real requests
+  and reports any candidate path that does not answer **404 and not HTML** —
+  the content-type clause is what makes "no asset is served" real, because an
+  SPA fallback serves `index.html` **under** a 404 and a status-only check
+  passes it. That clause reads the **body as well as the header**:
+  `httptest.ResponseRecorder` does no content sniffing, so a fallback that
+  omits `Content-Type` looks unmounted to a header-only check while a real
+  `net/http` server sniffs the first chunk and answers
+  `text/html; charset=utf-8` — measured, and it was a live bypass of the first
+  draft of this file. Sniffing also covers `application/xhtml+xml`. Both
+  checkers carry `absence_contract_test.go`'s vacuity guards (>= 100 routes
+  walked, the mounted `/admin` subrouter seen — the probe borrows the walk's
+  counts, since a probe cannot tell a server that hosts nothing from a stub
+  that answers nothing), and one candidate path (`/zz-unclaimed`) is
+  deliberately not a browser path: it is the baseline the probe assumes.
+- **Five negative controls, checked in, covering every clause.** The walk
+  control mounts a `FileServer` at `/static/*`, an `/index.html`, and a
+  `Mount("/assets", …)` whose subrouter declares **no** route, all beside the
+  real router (the shape `TestAuthPosture_NegativeControl` uses), and asserts
+  **exactly** those three plus the control's own root `Mount` are reported —
+  the `Mount` arm fails unless `mountedSubtreePatterns` runs. The wire control
+  is a four-arm table. Three arms are SPA index fallbacks installed as
+  `r.NotFound`, which registers **no route**, so `chi.Walk` sees zero and a
+  walk-only posture test has a silent hole exactly where a real browser client
+  lands; they differ only in how the content type reaches the client —
+  declared `text/html`, declared `application/xhtml+xml`, or **not declared at
+  all** and left to sniffing — and each asserts the walk sees nothing **and**
+  the probe catches every candidate. The fourth arm is a served asset tree
+  answering 200, which is the only control for the probe's _status_ clause;
+  without it, half of line "404 and not HTML" would be unproven.
+- **The dormant surface, now guarded.** The step's own second premise —
+  `AssetHandler` is never mounted — was prose that nothing enforced.
+  `TestBrowserHostingPosture_PluginAssetHandlerStaysUnmounted` scans every
+  non-test `.go` file in the module for the **selector** form `.AssetHandler`,
+  which catches a call and a method value, and matches neither the declaration
+  (`) AssetHandler(`) nor prose about it in a comment. The declaring file is
+  therefore scanned like any other rather than exempted — a mount helper added
+  beside the declaration is the likeliest place for one to appear, and an
+  exempted file is a blind spot at exactly that address. Vacuity guards: >= 100
+  files scanned, and the declaration line itself must be found in
+  `plugin/host_ui.go`.
+- **Configuration, proved through the shipped template.**
+  `TestLoadBrowserClientHostingDisabledByDefault` calls `config.Load` on a
+  fresh path, so it exercises the file `Load` writes and reads back — an
+  accidentally uncommented `browser_client_enabled: true` in `defaultYAML`
+  fails it, which a test that only built `defaults()` in Go could not see. It
+  also scans the written file for a live key.
+- **Revert-proof, ten mutations across two rounds.** Round one: dropping
+  `/assets/*` from the pattern list, dropping `/index.html` from the candidate
+  paths, reducing the wire probe to a status-only check, adding a production
+  file that references `AssetHandler`, uncommenting the template line, and
+  flipping the compiled default. Round two, after an adversarial pass briefed
+  to assume a bypass exists: reverting the HTML test to header-only (the
+  sniffing arm goes red), removing the `mountedSubtreePatterns` call (the
+  `Mount` arm of the walk control goes red), adding a call to `AssetHandler`
+  **inside** its own declaring file (now caught; it was invisible before), and
+  adding a comment merely naming `AssetHandler` in a production file (stays
+  green — no false positive). Each turned exactly its named test red, and the
+  tree was green again after each revert. The status-only and header-only
+  mutations are the ones that matter: they are the difference between proving
+  no route is registered and proving no asset is served.
+- **What B8 inherits, beyond the corrected paragraph above.** Write
+  `TestBrowserHosting_EnabledDoesNotShadowAPIOrAdmin` on day one — the
+  measured table is in this block, so it is an assertion, not an
+  investigation. When the second `http.FileServer` lands, add
+  `Server/invariants/static_file_roots.go` modelled on `egress_sites.go`,
+  allowlisting `admin/admin.go:60` with its reason and **excluding**
+  `http.ServeContent` (`emoji_handler.go`, `upload_handler.go` and
+  `plugin/host_ui.go` each serve one authenticated record, not a tree); it is
+  not built here because an allowlist with one row and no second candidate
+  gates nothing. `docs/api.md` is deliberately untouched: `cmd/gendocs` builds
+  its own config literal with the key off, so the published route index is the
+  disabled-mode surface by construction. And the candidate-path list is
+  vocabulary, not semantics — a bundle mounted at a prefix nobody listed is
+  caught only if it uses one of the nine subtree patterns.
+- **No validation seam was invented.** The key is a bool with no range to
+  check, so it does not force the decision the plan's trap defers; `config.Load`
+  is warn-only by design and stays that way. The first B5 step to add a
+  _bounded_ key still owes that agreement.
+- **Nothing else moved.** No migration, no protocol change, no findings-ledger
+  row (BG-01's register row is B5-12's), and no `Client/` file.
 
 ## B5-4 — Web Push subscription storage (no dispatch)
 

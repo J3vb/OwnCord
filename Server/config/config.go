@@ -173,8 +173,17 @@ type ServerConfig struct {
 	AllowedOrigins    []string `koanf:"allowed_origins"`
 	TrustedProxies    []string `koanf:"trusted_proxies"`
 	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
-	WAFEnabled        bool     `koanf:"waf_enabled"`        // Enable Coraza WAF (default: false)
-	WAFParanoiaLevel  int      `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
+	WAFEnabled        bool     `koanf:"waf_enabled"` // Enable Coraza WAF (default: false)
+	// BrowserClientEnabled is the owner opt-in for hosting a browser client
+	// from this server. It is false by default and this build ships no
+	// browser assets, so enabling it hosts nothing yet — the bundle, its
+	// route and its own CSP are B8's (BG-01, plan decision 10). The key
+	// exists now because a disabled-by-default hosting surface is a security
+	// property, and proving it before the assets exist is far cheaper than
+	// proving it after; Server/api/browser_hosting_posture_test.go is that
+	// proof.
+	BrowserClientEnabled bool `koanf:"browser_client_enabled"`
+	WAFParanoiaLevel     int  `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
 	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
 	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
@@ -394,6 +403,9 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # browser_client_enabled: false  # host a browser client from this server.
+  #                           # Owner opt-in, off by default. This build ships no
+  #                           # browser assets, so turning it on hosts nothing yet.
   # waf_enabled: false        # Coraza WAF (inline rules + OWASP Core Rule Set)
   # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
   # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs

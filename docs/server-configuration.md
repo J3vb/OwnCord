@@ -39,6 +39,7 @@ the server automatically when a startup-only value changed. Note that
 | `server.allowed_origins`               | string[] | `[]`               | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted.                                                                                                                   |
 | `server.trusted_proxies`               | string[] | `[]`               | CIDRs of trusted reverse proxies (for X-Forwarded-For)                                                                                                                                                                                                                                                                                                                                              |
 | `server.admin_allowed_cidrs`           | string[] | private networks   | CIDRs allowed to access `/admin` routes. Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`                                                                                                                                                                                                                                                             |
+| `server.browser_client_enabled`        | bool     | `false`            | Owner opt-in for hosting a browser client from this server. Off by default, and **this build ships no browser assets**, so turning it on hosts nothing yet — it mounts no route and serves no file, and the server logs a warning saying so. The bundle, its route and its own CSP arrive in a later release (BG-01).                                                                               |
 | `server.waf_enabled`                   | bool     | `false`            | Enable the Coraza WAF middleware (inline rules + OWASP Core Rule Set)                                                                                                                                                                                                                                                                                                                               |
 | `server.waf_paranoia_level`            | int      | `2`                | OWASP CRS paranoia level 1–4; values outside that range fall back to 2                                                                                                                                                                                                                                                                                                                              |
 | `server.waf_crs_mode`                  | string   | `"detect"`         | CRS layer mode: `off` (inline rules only), `detect` (matches logged, never blocks), `block` (anomaly-scoring blocking). Unknown values fall back to `detect`.                                                                                                                                                                                                                                       |
@@ -183,7 +184,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 57 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 58 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -212,6 +213,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `security.expensive_auth_concurrency`       | Security (`security`)                   |
 | `server.admin_allowed_cidrs`                | Server (`server`)                       |
 | `server.allowed_origins`                    | Server (`server`)                       |
+| `server.browser_client_enabled`             | Server (`server`)                       |
 | `server.data_dir`                           | Server (`server`)                       |
 | `server.livekit_webhook_allowed_cidrs`      | Server (`server`)                       |
 | `server.max_ws_connections`                 | Server (`server`)                       |
@@ -283,6 +285,7 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_PLUGINS_ENABLED`                   | `plugins.enabled`                   |
 | `OWNCORD_PLUGINS_DIRECTORY`                 | `plugins.directory`                 |
 | `OWNCORD_GIF_API_KEY`                       | `gif.api_key`                       |
+| `OWNCORD_SERVER_BROWSER_CLIENT_ENABLED`     | `server.browser_client_enabled`     |
 | `OWNCORD_SERVER_WAF_ENABLED`                | `server.waf_enabled`                |
 | `OWNCORD_DATABASE_TYPE`                     | `database.type`                     |
 | `OWNCORD_TELEMETRY_OTLP_INSECURE`           | `telemetry.otlp_insecure`           |
@@ -304,6 +307,7 @@ server:
     - "10.0.0.0/8"
     - "172.16.0.0/12"
     - "192.168.0.0/16"
+  browser_client_enabled: false # owner opt-in; no browser assets ship yet
 
 database:
   path: "data/chatserver.db"

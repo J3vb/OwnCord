@@ -54,6 +54,24 @@ type Runtime struct {
 	VoiceEnabled bool
 }
 
+// warnOnServerConfig logs the settings that are legal but rarely what an
+// operator meant. Warnings only: config.Load is warn-never-fail by design, so
+// a questionable value must not stop a server that was working yesterday.
+func warnOnServerConfig(cfg *config.Config) {
+	// Issue 15: a wildcard origin accepts every browser page on the internet.
+	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
+		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
+	}
+	// BG-01: browser-client hosting is an owner opt-in and this build ships no
+	// browser assets, so the key mounts nothing yet. Say so rather than let an
+	// operator who turned it on conclude the server is broken; the bundle, its
+	// route and its own CSP arrive with B8.
+	if cfg.Server.BrowserClientEnabled {
+		slog.Warn("server.browser_client_enabled is set, but this build hosts no browser client — " +
+			"the key has no effect yet: no route is mounted and no asset is served")
+	}
+}
+
 // NewRouter builds and returns the fully configured HTTP handler and a
 // cleanup function that stops background goroutines (e.g. rate-limiter
 // cleanup).
@@ -219,10 +237,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		u,
 	)
 
-	// Issue 15: Warn if AllowedOrigins contains wildcard.
-	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
-		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
-	}
+	warnOnServerConfig(cfg)
 
 	cleanup := func() {
 		close(limiterStopCh)
