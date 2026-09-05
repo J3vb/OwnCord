@@ -129,7 +129,7 @@ func SetGIFBaseURLForTest(baseURL string) func() {
 // URL). For tests that want a deterministic resolve failure without touching
 // real DNS, which a DNS-impaired runner can retry for several seconds.
 // Nothing outside a _test.go file may set safefetch.Policy.Resolve;
-// TestNoProductionOverrideOfSeams enforces that.
+// TestProductionPolicyShape (safefetch/seams_test.go) enforces that.
 func SetGIFResolveForTest(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) (func(), error) {
 	stub, err := safefetch.New(safefetch.Policy{
 		Schemes:              []string{"https"},
