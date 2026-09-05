@@ -576,3 +576,88 @@ func TestLoadBrowserClientHostingDisabledByDefault(t *testing.T) {
 		}
 	}
 }
+
+// ─── B5-2: the two bounded storage keys and the applyBounds seam ───────────
+
+// TestLoadStorageBoundsDefaults pins the compiled defaults through a fresh
+// Load, the way TestLoadBrowserClientHostingDisabledByDefault does: the
+// per-user quota is unlimited (decision 11 — no install changes on upgrade)
+// and the headroom floor is the 256 MiB the banner and /health always used.
+// The shipped template must keep both keys commented so those defaults win.
+func TestLoadStorageBoundsDefaults(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.UserQuotaMB != 0 || cfg.Upload.UserQuotaBytes() != 0 {
+		t.Errorf("upload.user_quota_mb = %d (bytes %d), want 0 = unlimited", cfg.Upload.UserQuotaMB, cfg.Upload.UserQuotaBytes())
+	}
+	if cfg.Server.MinFreeDiskMB != 256 || cfg.Server.MinFreeDiskBytes() != 256<<20 {
+		t.Errorf("server.min_free_disk_mb = %d (bytes %d), want 256", cfg.Server.MinFreeDiskMB, cfg.Server.MinFreeDiskBytes())
+	}
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "user_quota_mb:") || strings.HasPrefix(trimmed, "min_free_disk_mb:") {
+			t.Errorf("the shipped template sets a storage bound live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// TestLoadStorageBoundsEnvOverride proves the generic env binding reaches both
+// keys — run, not read (B5-3's rule for a new key).
+func TestLoadStorageBoundsEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_UPLOAD_USER_QUOTA_MB", "512")
+	t.Setenv("OWNCORD_SERVER_MIN_FREE_DISK_MB", "1024")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.UserQuotaMB != 512 {
+		t.Errorf("upload.user_quota_mb = %d, want 512 from the environment", cfg.Upload.UserQuotaMB)
+	}
+	if cfg.Server.MinFreeDiskMB != 1024 {
+		t.Errorf("server.min_free_disk_mb = %d, want 1024 from the environment", cfg.Server.MinFreeDiskMB)
+	}
+}
+
+// TestLoadStorageBoundsAreClamped is the validation seam's contract: an
+// out-of-range value is brought into range and Load still succeeds
+// (warn-only — a bad number must not brick a working install). A negative
+// headroom falls back to the DEFAULT floor, not to 0: clamping it to 0 would
+// silently turn the floor off, which is the fail-open the floor exists to
+// prevent (an operator who wants it off writes 0). A value past
+// MaxInt64>>20 lands on that bound so the byte helper cannot overflow.
+func TestLoadStorageBoundsAreClamped(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := "server:\n  min_free_disk_mb: -5\nupload:\n  user_quota_mb: 9223372036854775807\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v — out-of-range values must warn and clamp, never fail", err)
+	}
+	if cfg.Server.MinFreeDiskMB != 256 || cfg.Server.MinFreeDiskBytes() == 0 {
+		t.Errorf("server.min_free_disk_mb = %d after -5, want the default 256 (a negative floor must not fail open)", cfg.Server.MinFreeDiskMB)
+	}
+	explicitOff := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(explicitOff, []byte("server:\n  min_free_disk_mb: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if off, err := config.Load(explicitOff); err != nil || off.Server.MinFreeDiskMB != 0 {
+		t.Errorf("an explicit 0 must stay 0 (the operator's opt-out): got %v, err %v", off, err)
+	}
+	const maxMiB = 9223372036854775807 >> 20
+	if cfg.Upload.UserQuotaMB != maxMiB {
+		t.Errorf("upload.user_quota_mb = %d, want clamped to %d", cfg.Upload.UserQuotaMB, maxMiB)
+	}
+	if cfg.Upload.UserQuotaBytes() <= 0 {
+		t.Errorf("UserQuotaBytes() = %d after the clamp; the byte helper overflowed", cfg.Upload.UserQuotaBytes())
+	}
+}

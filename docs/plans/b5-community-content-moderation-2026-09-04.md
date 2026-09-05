@@ -131,16 +131,17 @@ need not queue behind each other. But the first draft then claimed migrations
 "do not serialize", and that is **false**: they serialize through CI-gated
 generated documentation.
 
-| Generated                                                                                                                                                                      | Regenerated from               | Who rewrites it                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | --------------------------------------------------------------- |
-| `Server/db/dbgen/`                                                                                                                                                             | `db/queries/*.sql`, migrations | every schema step                                               |
-| `gendocs:schema` in `docs/schema.md` — **one alphabetical index carrying a hard-coded table count**                                                                            | migrations                     | every schema step                                               |
-| `gendocs:routes` in `docs/api.md` — **a hard-coded route count**                                                                                                               | `api/router.go`                | every route-adding step                                         |
-| `gendocs:config` in `docs/server-configuration.md` — **a hard-coded key count**, and gendocs exits non-zero if a key is undocumented in the hand-written prose above the block | `config/config.go`             | every config-adding step — **twice**: the block, then the prose |
-| `Server/ws/message_types.go` + `Client/src/lib/protocolTypes.ts`                                                                                                               | `protocol/schema.json`         | every step with a `yes` in the protocol column                  |
+| Generated                                                                                                                                                                                             | Regenerated from                   | Who rewrites it                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Server/db/dbgen/`                                                                                                                                                                                    | `db/queries/*.sql`, migrations     | every schema step                                                                                                                                                                                                                                                                                                                                                       |
+| `gendocs:schema` in `docs/schema.md` — **one alphabetical index carrying a hard-coded table count**                                                                                                   | migrations                         | every schema step                                                                                                                                                                                                                                                                                                                                                       |
+| `gendocs:routes` in `docs/api.md` — **a hard-coded route count**                                                                                                                                      | `api/router.go`                    | every route-adding step                                                                                                                                                                                                                                                                                                                                                 |
+| `gendocs:config` in `docs/server-configuration.md` — **a hard-coded key count**, and gendocs exits non-zero if a key is undocumented in the hand-written prose above the block                        | `config/config.go`                 | every config-adding step — **twice**: the block, then the prose                                                                                                                                                                                                                                                                                                         |
+| `Server/ws/message_types.go` + `Client/src/lib/protocolTypes.ts`                                                                                                                                      | `protocol/schema.json`             | every step with a `yes` in the protocol column                                                                                                                                                                                                                                                                                                                          |
+| `dbinventory:*` block in `docs/architecture/server-boundaries.md` — the `db`-importer table, one row per file with a **per-symbol use count** (`User×3`), gated by `TestServerBoundariesDocIsCurrent` | every non-test file importing `db` | any step that adds **or removes** a `db.` reference in a listed file, even with no new import — B5-2 found this: dropping one `*db.User` re-read in `upload_handler.go` moved the row. Regenerate with `go -C Server run ./cmd/dbinventory`, paste between the markers, `npx prettier --write` (_added by B5-2 — the first draft counted five surfaces; there are six_) |
 
 `make docs-verify` and `make protocol-verify` are hard CI steps
-(`.github/workflows/ci.yml:68-77`). **The rule for all five is identical:**
+(`.github/workflows/ci.yml:68-77`). **The rule for all six is identical:**
 the last action before every push is rebase on `dev`, re-run the generator,
 re-run `ci-check`. Never resolve a generated conflict by hand.
 
@@ -225,7 +226,7 @@ the point of this section** — read them before writing code.
 | **Message Requests' gate point is `CreateDM`**                                   | **Refuted — and this one would have shipped broken**           | `CreateDM` is not where first contact happens on the recipient's side. `MessageService.SendMessage` calls `s.st.OpenDM(...)` per participant and accumulates `result.OpenedDMFor` (`Server/service/message_crud.go:265-285`), which `Server/ws/handlers_chat.go:96` turns into a `DMChannelOpenEvent` and which bumps the hub's global visibility watermark. **A gate confined to `service/dm.go` is bypassed by the sender's first message** — the actual event Message Requests exists to intercept. B5-6's real home is `message_crud.go`.                                                                                                                                  |
 | Blocks exist and are enforced in the transport                                   | **Confirmed in the service, not the transport**                | `auth.IsEffectivelyBanned` at `Server/service/dm.go:126` and `IsEitherBlocked` → `ErrForbidden` at `:130-136`, both inside `CreateDM`. `api/dm_handler.go` is an adapter; its block references are the block/unblock routes. Put new gates beside the existing two, in the service.                                                                                                                                                                                                                                                                                                                                                                                            |
 | Workstream 5 — NSFW must be enforced server-side                                 | **Confirmed — flag only, and the gate is not one place**       | `migrations/025_channel_nsfw.sql` stores the flag. `db/admin_queries.go:163` says "stored and broadcast only; it drives no server-side content behaviour"; `admin/handlers_channels.go:124` says "stored, broadcast **and audited**" — the audit is real (`service/channel_admin.go:243-253`). There is no acknowledgement storage and no read gate. See B5-7 for the four independent leak paths; this is why its size went from 2 days to 6–8.                                                                                                                                                                                                                               |
-| Workstream 4 — durable quotas must be built                                      | **Confirmed in part — half already exists**                    | **Present:** `Server/diskutil/` probes real free space on every platform (`free_unix.go` `syscall.Statfs`, `free_windows.go` `GetDiskFreeSpaceExW`); `api/router.go:483-486` already enforces a reserved-headroom floor (`healthMinFreeDiskBytes = 256 << 20`, `"degraded","disk"` below it); `api/metrics_handler.go` publishes `disk_free_mb`; `internal/app/banner.go:74-92` warns at 1 GiB and errors at 256 MiB. **Absent:** any durable per-user byte counter, and any headroom check **on the upload path** (`api/upload_handler.go:167-183` has only `upload.max_size_mb`, the BUG-131 rate limit and a `MaxBytesReader`).                                             |
+| Workstream 4 — durable quotas must be built                                      | **Confirmed in part — half already exists**                    | **Present:** `Server/diskutil/` probes real free space on every platform (`free_unix.go` `syscall.Statfs`, `free_windows.go` `GetDiskFreeSpaceExW`); `api/router.go:498-501` (`:483-486` at `cbebd37c`; B5-3 moved it) already enforces a reserved-headroom floor (`healthMinFreeDiskBytes = 256 << 20`, `"degraded","disk"` below it); `api/metrics_handler.go` publishes `disk_free_mb`; `internal/app/banner.go:74-92` warns at 1 GiB and errors at 256 MiB. **Absent:** any durable per-user byte counter, and any headroom check **on the upload path** (`api/upload_handler.go:167-183` has only `upload.max_size_mb`, the BUG-131 rate limit and a `MaxBytesReader`).   |
 | An attachment-row byte counter is a sufficient quota                             | **Refuted — evadable, and not transactional today**            | `(*DB).CreateAttachment` (`db/attachment_queries.go:37`) is a bare non-transactional insert, so "maintained transactionally with the attachment rows" means converting a hot write path, not adding to it — and the decrement half lands in `DeleteOrphanedAttachments` (`:208`), `service/erasure.go` and `service/retention.go`. Worse, **emoji uploads write to the same `FileStore` with no attachment row** (`api/emoji_handler.go:150` `store.Save`, `svc.Emoji.Create`), and avatars are exempted by `IsAvatarFileURL`. A counter hung off attachment rows is evadable by uploading emoji. Count at the `FileStore` boundary, or declare the exclusions and bound them. |
 | Workstream 6 — report intake must be built                                       | **Confirmed — greenfield**                                     | Zero hits for `moderation_report` or a reports table in any migration.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **BPR-071 is wholly a client requirement**                                       | **Refuted**                                                    | The traceability matrix assigns BPR-071's **primary phase as B5** (`:35`, `:124`), and its evidence column has a server half: "**Service tests** cover queue, evidence/context, assignment, status, notes, action links, immutable history, retention, and **deletion unlinking**". Only the Moderation Center UI is B9. B5-8 closes the service half, deletion unlinking included.                                                                                                                                                                                                                                                                                            |
@@ -376,7 +377,7 @@ scorecard, which carries the exit-condition acceptance in decision 14.
     install changes behaviour on upgrade — an operator who wants a cap sets
     one. **Headroom mints no third constant:** promote
     `banner.go`'s 256 MiB critical value to a configuration key with that
-    default, shared by the health check (`api/router.go:483-486`), the
+    default, shared by the health check (`api/router.go:498-501`), the
     start-up banner and the upload path, so the three can never disagree about
     what "low disk" means. Pressure is already `disk_free_mb` on the metrics
     surface — extend it, do not add an endpoint.
@@ -812,7 +813,7 @@ none. **Migration:** `044`. **Lane A**, beside B5-1.
 **Present at HEAD:** `Server/diskutil/` probes real free space on every
 platform (`free_unix.go` `syscall.Statfs`, `free_windows.go`
 `GetDiskFreeSpaceExW`, `free_other.go` `ErrUnsupported`);
-`api/router.go:483-486` enforces a reserved-headroom floor
+`api/router.go:498-501` (was `:483-486` at `cbebd37c`; B5-3 moved it, enforcement at `:565`) enforces a reserved-headroom floor
 (`healthMinFreeDiskBytes = 256 << 20`, `"degraded","disk"` below it);
 `api/metrics_handler.go` publishes `disk_free_mb`;
 `internal/app/banner.go:74-92` warns at 1 GiB and errors at 256 MiB.
@@ -852,6 +853,254 @@ integration test for the counter rows themselves.
 (`Server/.golangci.yml`). Adding a sweep probably forces an extraction
 refactor — do it deliberately, in its own commit, so B5-4 and B5-11 inherit a
 clean seam instead of a conflict.
+
+**Evidence, 2026-09-05** — branch `feature/b5-2-upload-quotas` from `dev`
+`5c7a0f4a`; PR to `dev` #1543, commits `f3f7c6f5` (the `maintenanceTick` extraction, on its own) and `63250a15` (the feature). Every premise was re-verified at that base before any code
+was written. The four "present" ones held: `Server/diskutil/` probes real
+free space on every platform; the health floor was `healthMinFreeDiskBytes =
+256 << 20`; `disk_free_mb` was on the metrics surface; the banner warned at
+1 GiB and errored at 256 MiB. Both "absent" ones held: no durable per-user
+byte counter existed anywhere (the only `quota` hits were rate-limit prose),
+and `upload_handler.go:167-183` carried only the per-file cap, the BUG-131
+rate limit and a `MaxBytesReader`. **One citation was stale, not wrong:**
+`api/router.go:483-486` was right at `cbebd37c` and B5-3 moved it to
+`:498-501` (enforcement at `:565`); corrected in the three places this plan
+cites it. The counting-point claims held exactly (`attachment_queries.go:38`
+and `:208`, `emoji_handler.go:150`, `maintenance.go:86`), with one nuance the
+plan's phrasing hides: avatars **are** attachment rows
+(`profile_handler.go:730`), and `IsAvatarFileURL` is an authorisation
+exemption, not an accounting one. **One generated surface the plan missed:**
+the `dbinventory` block in `docs/architecture/server-boundaries.md` counts
+`db.` symbol uses per file and is gated by `TestServerBoundariesDocIsCurrent`;
+dropping one `*db.User` re-read in `upload_handler.go` moved its row. The
+"Generated surfaces" table above now lists six, not five.
+
+- **The counter.** Migration `044_user_storage.sql`: `user_storage(user_id
+PK → users ON DELETE CASCADE, bytes_used CHECK >= 0)`, seeded from
+  `attachments JOIN users` so an operator who sets a quota after upgrading
+  starts from the truth, and so a legacy `uploader_id` with no `users` row
+  (the column predates its foreign key) cannot fail the migration
+  (`TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans`).
+  It is charged **before** the store write (`UploadService.Reserve`,
+  `Server/service/storage_quota.go`), so a crash anywhere after the charge
+  leaves it high, never low; admission is one guarded `UPDATE` (`bytes_used +
+n <= quota`, rows-affected = admitted), so of N uploads racing the last byte
+  exactly those that fit are admitted — SQLite's single writer with
+  `_txlock=immediate` is the arbiter, not Go. The rows are the truth: every
+  maintenance tick recounts each counter to `SUM(attachments.size)` plus what
+  is still in flight for that user, one statement per user, so a sweep
+  cancelled between users leaves every finished user exact. The loop also
+  recounts at start-up, so a restart is a repair point. _Why not hang it on
+  attachment rows:_ emoji have none (plan). _Why not durable reservations:_
+  every crash case is "counter high until the next recount", which the tick
+  repairs; a second table buys nothing. _Why not recount from disk:_ it needs
+  an owner lookup by `stored_as` across two tables in chunked `IN` lists for
+  no gain, since every counted file has a row and stranded files are already
+  removed by `erasure.Reconcile`.
+- **The in-process half, and the rule that keeps it honest.** Bytes reserved
+  but not yet written or rowed live under one `syncutil.Mutex` with the
+  charge. A recount sets a counter to rows **plus** in-flight, so it can
+  never wipe a live reservation (an under-count the moment the row lands).
+  The row insert and the reservation's commit share that lock
+  (`UploadService.Record` takes the reservation), which the race test found:
+  with the commit outside the lock a recount between the two saw the file in
+  the rows **and** in flight (4000 for 3000). A refused charge recounts that
+  one user and retries once, so a user who deleted files is not made to wait
+  for the tick. `Settle` in a `defer` releases on every path that does not
+  reach `Record`, a panic included
+  (`TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite`).
+- **Headroom.** `server.min_free_disk_mb` (default 256) is the one definition
+  of "low disk": the banner's critical tier, `/health`'s floor
+  (`healthDeps.minFreeDiskBytes`; the constant is gone) and the upload path
+  read it. The upload path probes `upload.storage_dir`, which may not be the
+  data volume, and the banner now probes that directory too when it is
+  separate. The check is addition-only in the probe's unsigned type — refuse
+  when `free < floor + in-flight + n` — because the subtraction the first
+  design wrote wraps exactly when the disk is full and admits everything
+  (`TestReserve_FreeBelowFloorWithReservationOutstandingRefuses`). The probe
+  runs **under** the lock: outside it, a reading taken before earlier uploads
+  landed and judged after they committed under-counts the volume
+  (`TestReserve_HeadroomRacersAdmitExactlyWhatFits` measured 6 of 4). The
+  full `-race` run under load then found the last window: between a write
+  landing and its row committing, the same bytes counted twice against the
+  floor (probe plus in-flight) for as long as a row insert takes, refusing a
+  concurrent upload for space not used twice. `StorageReservation.Landed`,
+  called by `saveReserved` the moment the write succeeds, drops the floor's
+  share then; the quota's share stays until the row exists. The exact-count
+  proof now holds its reservations, and
+  `TestReserve_HeadroomRacersNeverOverAdmitWhileBytesLand` proves the landing
+  race never crosses the floor. The upload handler also checks the floor
+  against `Content-Length` before the multipart parser spools the body to
+  disk, which happens before any reservation could
+  (`TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled`). A probe error is
+  unknown, never full, as everywhere else.
+- **Refusals.** `507 STORAGE_QUOTA_EXCEEDED` and `507 STORAGE_LOW_DISK`, both
+  through `writeStorageSaveError`, neither body carrying a path.
+- **Emoji: a bounded exclusion, proved, not counted.** The first design added
+  `emoji.size` and counted them; all three refute lenses found the same hole:
+  erasure reassigns a subject's emoji to an heir (`db/erasure.go:437`,
+  normally the owner), so a per-user count would move up to `MaxEmojiCount ×
+maxEmojiFileBytes` = 100 MiB onto the owner's quota for someone else's
+  action. Emoji are server-wide assets, MANAGE_SERVER-only and capped, so
+  they go through the floor (`ReserveHeadroom`) and charge no counter;
+  `TestReserveHeadroom_EmojiIsBoundedAndFloorOnly` pins the bound and
+  `TestEmojiUpload_IsFloorGatedButNotCharged` the route. Avatars are
+  attachments and are charged; a superseded avatar stays charged until the
+  hourly orphan sweep reclaims it (at most `maxAvatarFileBytes` × 5/min),
+  which is the existing request-path decision left as it is and recorded in
+  `community-services.md`.
+- **The chokepoint.** `api.saveReserved` is the only production call to
+  `FileStore.Save`; its signature demands a reservation.
+  `TestEveryFileStoreSaveIsReserved` walks every non-test file under
+  `Server/` that names `FileStore` or imports `storage` and fails on any other
+  two-argument `.Save(` call, skipping package-qualified calls by
+  construction (`config.Save` is a function, not a store method — the refute
+  panel's day-one red). What it proves is "no second call site"; a write that
+  bypasses the store is outside it, and the sweep found no such writer at
+  the base (`os.WriteFile`/`os.Create` land in backups, plugins, TLS, TOTP,
+  markers, LiveKit and the updater, none under `upload.storage_dir`).
+- **Pressure.** `disk_free_mb` is joined by `disk_min_free_mb`, `disk_low`
+  and `upload_storage_used_mb` on `/api/v1/metrics`; the last is
+  `SUM(attachments.size)` over every row, legacy `NULL` uploaders included,
+  because a sum of per-user counters would under-report exactly the storage
+  an operator watching for pressure needs to see. `docs/deployment.md`'s
+  example is in step.
+- **The validation seam, decided.** `config.applyBounds`, called from `Load`
+  after `Unmarshal`: a table of `{key, *int, min, max, default}` rows where a
+  value below the minimum falls back to the **default** (not the minimum —
+  a negative headroom clamped to 0 would silently turn the floor off, which
+  fails open; an operator who wants it off writes 0) and a value above the
+  maximum clamps (`MaxInt64 >> 20` MiB, so the byte helpers cannot
+  overflow). One `slog.Warn` per row naming the key; `Load` stays warn-only.
+  Rows: `upload.user_quota_mb`, `server.min_free_disk_mb`. B5-4 and B5-11
+  add a row rather than a clamp in the consuming package. The existing
+  scattered checks (auth-rate clamp, the upload-size cap against
+  `api.uploadMaxBodySize`, the admission budget, restart-mode resolution)
+  are **not** moved: each depends on a constant outside `config`.
+- **`maintenanceTick`, extracted first.** Commit `f3f7c6f5`, on its own:
+  a `maintenance` struct, one method per sweep, `steps()` as the ordered
+  list, `tick` walking it, `startMaintenanceLoop` taking `*service.Services`.
+  Order, skips and log messages unchanged and pinned by name
+  (`TestMaintenance_StepOrderIsPinned`); one deliberate change, the backup
+  step skipping a nil settings service instead of dereferencing it inside
+  `admin.MaintainBackups` (the pin test found it). The feature commit adds
+  `recountStorage` **last**, after the orphan, retention and erasure sweeps,
+  so the same tick returns what they freed
+  (`TestMaintenance_TickReturnsBytesTheOrphanSweepFreed`). B5-4 and B5-11
+  add a method and a row.
+- **Erasure and inventory.** `erasureStatements` gets `DELETE FROM
+user_storage`, `db.SubjectInventory` gets class `12a upload byte counter`,
+  `data-lifecycle.md` gets the row and the appendix query, and the erasure
+  fixture holds a counter so the class proves something. Migration `044` has
+  its reversal (`Server/rollback/044_user_storage.down.sql`, first in
+  `rollback.Order`) — the rehearsal test fails a migration without one.
+- **Acceptance, all of it, under `-race`.** Service:
+  `TestReserve_ConcurrentUploadsRacingTheLastByte` (eight racers, room for
+  three, exactly three), `TestReserve_HeadroomRacersAdmitExactlyWhatFits`
+  (exactly four, holding), `…NeverOverAdmitWhileBytesLand`,
+  `TestRecount_RepairsAChargeWithNoFileAfterRestart` (the crash between the
+  charge and the write, repaired by a new service over the same database),
+  `TestRecount_KeepsInFlightBytes`,
+  `TestRecount_ALeakedReservationDoesNotDisableRepair`,
+  `TestRecount_ReturnsBytesAfterErasure` and `…AfterRetention`,
+  `TestReserve_ARefusalRecountsBeforeAnswering`,
+  `TestRecount_RestartMidSweepLeavesFinishedUsersExact` (cancelled after the
+  first user: that user exact, the next untouched and still high, the second
+  sweep finishes it), the emoji bound, the negative size, unknown free
+  space, the boundary. HTTP: the two 507s, eight parallel POSTs through the
+  real route (under the ten-per-minute limiter) with room for three, the
+  charge released on a failed write, a failed row and a panic after the
+  write, the avatar charged and gated, the emoji floor-gated and uncharged,
+  the restore-without-storage-dir consequence the B5-0 table owed
+  (`TestUploadQuota_RestoreWithoutStorageDirRowsOutliveFiles`), the metrics
+  fields, and the chokepoint guard. Database: the migration seed, the guard
+  boundary, and the counter row surviving retention at zero and dying with
+  the account. Config: defaults through a fresh `Load`, both env variables
+  by running them, the clamps. Each was watched red first: the service
+  suite against a `Reserve` that admitted everything (fourteen reds, each
+  naming its guard), the health test against a floor that came from nowhere.
+- **Revert-proof, seventeen mutations, each restored from a byte-exact copy
+  (never `git checkout`), hashes verified.** M1 drop the guard clause from
+  the charge `UPDATE` (sqlc regenerated) →
+  `TestReserve_ConcurrentUploadsRacingTheLastByte`,
+  `TestReserve_ExactlyAtQuotaAdmitsOnePastRefuses`. M2 the recount stops
+  adding in-flight bytes back → `TestRecount_KeepsInFlightBytes`,
+  `TestRecount_ALeakedReservationDoesNotDisableRepair`. M3 the headroom
+  check as the unsigned subtraction the first design wrote →
+  `TestReserve_FreeBelowFloorWithReservationOutstandingRefuses`. M4
+  `reserve` skips the floor → `TestReserve_HeadroomRacersAdmitExactlyWhatFits`,
+  `TestReserveHeadroom_EmojiIsBoundedAndFloorOnly`. M5 `saveReserved` keeps
+  the charge on a failed write → **stayed green at first**: every handler's
+  deferred `Settle` released it anyway, so the guarantee inside
+  `saveReserved` was proved by nothing;
+  `TestSaveReserved_ReleasesTheChargeOnAFailedWrite` (package-internal, no
+  defer) now goes red. M6 no deferred `Settle` in the upload handler →
+  `TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite`, `…WhenTheRowFails`.
+  M7 the pre-spool floor check never runs →
+  `TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled`, strengthened first: a
+  malformed body must get the 507 before the parser's 400, or the mutation
+  stayed green because `Reserve` refused with the same code one step later.
+  M8 the emoji handler calls `store.Save` directly →
+  `TestEveryFileStoreSaveIsReserved`. M9 the erasure statement **and** the
+  `ON DELETE CASCADE` removed together →
+  `TestEraseAccount_EveryInventoryClassIsZero`,
+  `TestUserStorage_RowSurvivesRetentionAtZeroAndDiesWithTheAccount` (either
+  alone stays green: they are deliberately redundant). M10 below-minimum
+  clamps to the minimum → `TestLoadStorageBoundsAreClamped`. M11 `/health`
+  floor hard-coded → `TestRunHealthChecks_FloorIsTheConfiguredOne`. M12 the
+  recount moved ahead of the orphan sweep → `TestMaintenance_StepOrderIsPinned`.
+  M13 the sweep ignores cancellation between users → **stayed green**:
+  `database/sql` refuses a cancelled context, so the driver enforces the
+  contract the explicit check states; the check is kept because the contract
+  belongs in this code rather than in a driver's behaviour, and the test
+  proves the property either way. M14 a refusal no longer recounts →
+  `TestReserve_ARefusalRecountsBeforeAnswering`. M16 the seed without its
+  `JOIN users` → `TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans`.
+  M17 the quota refusal as 413 → `TestUploadQuota_ExceededIs507WithItsOwnCode`.
+- **An independent pass was briefed to refute the design** before any code
+  existed — three lenses (concurrency and crash safety, evasion, repo fit),
+  each told to assume the design wrong. Findings taken: the unsigned
+  subtraction; the recount skipping in-flight users (one leaked reservation
+  would have frozen that user's repair forever — now rows + in-flight, and
+  `Settle` makes a leak a bug, not a state); the emoji heir transfer (three
+  lenses, one hole); no uncharge on delete (the refusal-path recount); the
+  pre-spool floor check; `config.Save` tripping a selector-text guard; a
+  negative headroom clamped to "off"; the missing rollback reversal; the
+  mini-schema upload tests; `handleUploadAvatar`'s six lines of `funlen`
+  headroom (extracted); the banner blind to a separate upload volume; the
+  metric summing counters. Findings declined, with the reason recorded: the
+  recount running before the orphan sweep (it would make every tick one
+  tick stale; the transient it avoids is repaired by `Reconcile` the next
+  tick), and deleting superseded avatars on replacement (an existing
+  request-path decision with its own rationale, out of this step's scope).
+  One thing the panel got wrong and the tests corrected: probing free space
+  outside the lock.
+- **Gates.** `ci-check`, all of it: four build-tag variants, `go vet`, `go
+test -race ./...`, the deadlock leg on `ws`, the untagged `admin` leg, the
+  migrations and `dbinventory` doc gates with `-count=1`, `golangci-lint`
+  clean, `dbgen` in step by hash around a regeneration, protocol in step,
+  `gendocs` idempotent by hash, `check:docs` and `check:hygiene` green.
+
+**What B5-4 and B5-11 inherit.** A bounded key is one row in
+`config.boundedKeys`. A sweep is one method plus one row in
+`maintenance.steps()`, and `TestMaintenance_StepOrderIsPinned` is where its
+place in the order is declared. A new store write goes through
+`api.saveReserved` with a reservation, or `TestEveryFileStoreSaveIsReserved`
+says so. `service.Services` gained no field. Six generated surfaces, not
+five: regenerate `dbinventory` when a `db.` reference moves.
+
+**SEC-04.** Closed here per decision 12: re-tag from `B3/B6` to `B3/B5`. That
+edit is B5-12's; the advisory ID is the owner's, due at the exit.
+
+**Not included, deliberately.** No emoji size column and no per-user
+accounting of emoji (the bounded exclusion above). No change to avatar
+replacement. No pre-044 emoji backfill (nothing to backfill). No move of the
+existing scattered config checks into the seam. No `Client/` file, no
+protocol change, no findings-ledger row. The counter is logical bytes, not
+allocated blocks, so an operator sizing a volume from
+`upload_storage_used_mb` leaves slack; a soft-deleted message's attachment
+stays charged until the orphan sweep reclaims it, which is the existing
+lifecycle (data-lifecycle O3) and the safe side.
 
 ## B5-3 — BG-01 server posture: browser hosting off by default
 

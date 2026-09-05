@@ -146,8 +146,19 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
+		// B5-2: emoji are a bounded exclusion from the per-user quota (a
+		// server-wide asset that changes owner on erasure, MANAGE_SERVER-gated,
+		// capped at service.MaxEmojiCount files of maxEmojiFileBytes) but not
+		// from the headroom floor: a full disk is full for everyone.
+		res, err := svc.Uploads.ReserveHeadroom(r.Context(), int64(len(raw)))
+		if err != nil {
+			writeStorageSaveError(w, err, "emoji upload")
+			return
+		}
+		defer res.Settle(r.Context())
+
 		storedAs := uuid.New().String()
-		if _, saveErr := store.Save(storedAs, bytes.NewReader(raw)); saveErr != nil {
+		if _, saveErr := saveReserved(r.Context(), res, store, storedAs, bytes.NewReader(raw)); saveErr != nil {
 			// writeStorageSaveError also stops echoing raw storage errors
 			// (which embed absolute paths) into the response body.
 			writeStorageSaveError(w, saveErr, "emoji upload")
@@ -163,6 +174,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+		res.Commit()
 
 		broadcastEmojiSet(r.Context(), svc, broadcaster)
 		writeJSON(w, http.StatusCreated, toEmojiResponse(created))

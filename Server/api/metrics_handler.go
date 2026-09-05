@@ -51,6 +51,16 @@ type ServerMetrics struct {
 
 	// DiskFreeMB is free space on the data volume; omitted when unknown.
 	DiskFreeMB *float64 `json:"disk_free_mb,omitempty"`
+	// DiskMinFreeMB is the reserved-headroom floor (server.min_free_disk_mb)
+	// the banner, /health and the upload path share; DiskLow is free < floor,
+	// present when free is known and a floor is set (B5-2 pressure signal).
+	DiskMinFreeMB float64 `json:"disk_min_free_mb"`
+	DiskLow       *bool   `json:"disk_low,omitempty"`
+	// UploadStorageUsedMB is every attachment row's size summed — a storage
+	// total, not the per-user quota counters (which skip legacy rows with no
+	// uploader). Emoji, a bounded exclusion, are not in it. Omitted when the
+	// query fails.
+	UploadStorageUsedMB *float64 `json:"upload_storage_used_mb,omitempty"`
 
 	// SQLite writer-pool saturation: time spent queueing for the single write
 	// connection. The most direct signal for the documented single-writer
@@ -80,6 +90,8 @@ type MetricsSources struct {
 	DBStats        func() sql.DBStats // writer pool
 	PermCache      func() (hits, misses uint64)
 	DiskFree       func() (uint64, error)
+	DiskMinFree    uint64
+	UploadBytes    func(context.Context) (int64, error)
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
@@ -138,10 +150,21 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		if src.ConnRejects != nil {
 			metrics.WSConnRejects = src.ConnRejects()
 		}
+		metrics.DiskMinFreeMB = float64(src.DiskMinFree) / 1024 / 1024
 		if src.DiskFree != nil {
 			if free, err := src.DiskFree(); err == nil {
 				mb := float64(free) / 1024 / 1024
 				metrics.DiskFreeMB = &mb
+				if src.DiskMinFree > 0 {
+					low := free < src.DiskMinFree
+					metrics.DiskLow = &low
+				}
+			}
+		}
+		if src.UploadBytes != nil {
+			if n, err := src.UploadBytes(r.Context()); err == nil {
+				mb := float64(n) / 1024 / 1024
+				metrics.UploadStorageUsedMB = &mb
 			}
 		}
 

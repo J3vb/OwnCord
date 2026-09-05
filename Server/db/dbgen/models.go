@@ -311,6 +311,11 @@ type UserBlock struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+type UserStorage struct {
+	UserID    int64 `json:"userId"`
+	BytesUsed int64 `json:"bytesUsed"`
+}
+
 type VoiceState struct {
 	UserID         int64  `json:"userId"`
 	ChannelID      int64  `json:"channelId"`

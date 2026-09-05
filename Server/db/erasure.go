@@ -249,6 +249,11 @@ var erasureStatements = []struct {
 	query string
 }{
 	{"message_mentions", `DELETE FROM message_mentions WHERE mentioned_user_id = ?`},
+	// The upload byte counter (migration 044, B5-2, class 12a): a counter
+	// keyed by user_id that survived would be a residue naming the subject.
+	// The users delete below would cascade it too; this is the explicit
+	// statement the inventory's zero is proved against.
+	{"user_storage", `DELETE FROM user_storage WHERE user_id = ?`},
 	{"attachments", `DELETE FROM attachments WHERE uploader_id = ?1 OR message_id IN (SELECT id FROM messages WHERE user_id = ?1)`},
 	// The messages_ad trigger (migration 001) drops each row from the FTS
 	// index; message_mentions and reactions on these rows cascade.

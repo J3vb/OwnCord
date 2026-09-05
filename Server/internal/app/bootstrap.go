@@ -82,10 +82,18 @@ func prepareDataDir(log *slog.Logger, cfg *config.Config) error {
 	// Disk-space awareness: the database (WAL growth included), uploads,
 	// certs, and by default backups all live on this volume, and running it
 	// dry breaks several of them at once. Probe errors are ignored — unknown
-	// is not "full". /health repeats this check continuously at 256 MiB.
-	warnLowDisk(log, "data dir", cfg.Server.DataDir)
+	// is not "full". /health repeats this check continuously at the same
+	// floor, server.min_free_disk_mb, and the upload path refuses at it.
+	critical := cfg.Server.MinFreeDiskBytes()
+	warnLowDisk(log, "data dir", cfg.Server.DataDir, critical)
 	if cfg.Backup.Dir != "" && cfg.Backup.Dir != filepath.Join(cfg.Server.DataDir, "backups") {
-		warnLowDisk(log, "backup dir", cfg.Backup.Dir)
+		warnLowDisk(log, "backup dir", cfg.Backup.Dir, critical)
+	}
+	// The upload path refuses at this floor on ITS volume (B5-2), so an
+	// operator who mounted upload.storage_dir elsewhere hears about that
+	// volume at boot rather than from users getting 507s.
+	if cfg.Upload.StorageDir != "" && cfg.Upload.StorageDir != filepath.Join(cfg.Server.DataDir, "uploads") {
+		warnLowDisk(log, "upload dir", cfg.Upload.StorageDir, critical)
 	}
 
 	return nil

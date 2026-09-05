@@ -1,7 +1,7 @@
 # Migration reversals
 
-The hand-run reversal of every migration the B4 phase added, and the order to
-run them in. `rollback.go` is the same list for the rehearsal that tests them.
+The hand-run reversal of every migration the B4 phase added, and every one
+since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
 
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
