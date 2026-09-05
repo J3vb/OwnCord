@@ -39,7 +39,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1541      | B5-1 — `Server/safefetch`, adopted by the GIF proxy and the plugin `http` capability     | `af473ff4` | `1f7b6be0`      |
 | #1542      | B5-3 — browser-client hosting off by default, proved by a route walk and a wire probe    | `5c7a0f4a` | `81cb6402`      |
 | #1543      | B5-2 — per-user upload quotas, one reserved-headroom floor, tick reconciliation (SEC-04) | `123b07d8` | `8a1594a2`      |
-| #1545      | B5-4 — Web Push subscription storage, nothing dispatched                                 | pending    | pending         |
+| #1545      | B5-4 — Web Push subscription storage, nothing dispatched                                 | `a504d61e` | `2de7c3a0`      |
 | #1544      | B5-5 — rich-content inventory, GIF result-URL hygiene, S-03 pinned                       | `1311fee9` | `212ce942`      |
 | #TBD-B5-12 | B5-12 — register and roadmap reconciliation                                              | pending    | pending         |
 | this       | HP-5 — this scorecard and the schema drafts                                              | —          | —               |
