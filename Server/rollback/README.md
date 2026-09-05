@@ -3,6 +3,8 @@
 The hand-run reversal of every migration the B4 phase added, and every one
 since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
 
+`045_push_subscriptions` is B5-4's — see the cost table below.
+
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
 that operator runs, against a database no server is holding open, after taking
@@ -64,6 +66,7 @@ knowing before you start:
 
 | Reversal                     | What it costs                                                                                                                                                                                                                       |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `045_push_subscriptions`     | Every stored Web Push subscription is gone. Nothing was dispatching to them yet (B5-4 is storage-only), so no delivery in flight is lost — every device just has to re-subscribe.                                                   |
 | `043_setup_completed`        | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup"). |
 | `042` + `041` (audit tokens) | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                         |
 | `039_retention`              | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                      |

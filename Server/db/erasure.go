@@ -261,6 +261,11 @@ var erasureStatements = []struct {
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
+	// Web Push subscriptions (migration 045, B5-4, class 2a): the users
+	// delete below would cascade this too, but a surviving endpoint is a
+	// live channel to a person who left, so it gets its own explicit
+	// statement the inventory's zero is proved against.
+	{"push_subscriptions", `DELETE FROM push_subscriptions WHERE user_id = ?`},
 	{"api_tokens", `DELETE FROM api_tokens WHERE user_id = ?`},
 	{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
 	{"pending_totp_enrollments", `DELETE FROM pending_totp_enrollments WHERE user_id = ?`},

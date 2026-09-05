@@ -86,7 +86,7 @@ happens to that use — one of four dispositions from the
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
 | `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |    0 |
-| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   35 |
+| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   36 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   20 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
 
@@ -118,7 +118,7 @@ then the auth family itself, in three sub-families: tokens (9 → 7), sessions
 family's nine rows were **deleted** rather than downgraded — the files stopped
 importing `db` at all — and `token_cli.go` became `boundary`, because a
 bootstrap CLI legitimately opens and migrates its own handle even once it makes
-no query of its own. The table is down from 59 rows to 55, and every row left
+no query of its own. The table is down from 59 rows to 56, and every row left
 is an `adapter` (db types, no persistence call) or a `boundary` that owns a
 handle on purpose. A future `move` row is a deliberate statement that something
 is on its way out, not a parking space: the alternative to writing one is
@@ -148,7 +148,7 @@ which is a row worth reading. Since the channel family's part 3, the hub's
 read seams (`ws/readers.go`) are deliberately that shape: the consumer rows
 name their seam, `DBReaders` wires the handle behind them at the composition
 root, and the seam interfaces are the authoritative list of what those files
-may read. 34 of the 55 rows are type-only, 26 of them `adapter`.
+may read. 35 of the 56 rows are type-only, 27 of them `adapter`.
 
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
@@ -194,6 +194,7 @@ handle-backed read seams.
 | `api/middleware.go`               | `Role` `Session` `User`                                                                                                                      | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard                                                                  |
 | `api/plugins_handler.go`          | `Auditor×2`                                                                                                                                  | `WriteAudit()`                                                               | —                                                                                                                                  | calls     | adapter     | —      | db.Auditor is the seam; WriteAudit only                                                                                                                                                       |
 | `api/profile_handler.go`          | `DB` `Session×3` `User×8`                                                                                                                    | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | User/Session types in the profile and session response shapes; the services own the calls                                                                                                     |
+| `api/push_handler.go`             | `User×3`                                                                                                                                     | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | db.User type on the context key only; PushService owns every call                                                                                                                             |
 | `api/router.go`                   | `DB×3`                                                                                                                                       | —                                                                            | `PingRead` `SQLDb`                                                                                                                 | calls     | boundary    | —      | health probe (PingRead, SQLDb); hub construction left in B3-3                                                                                                                                 |
 | `api/upload_handler.go`           | `Role` `User×2`                                                                                                                              | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions                                                                                             |
 | `auth/helpers.go`                 | `User`                                                                                                                                       | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | db.User type in a helper signature                                                                                                                                                            |
@@ -231,14 +232,14 @@ handle-backed read seams.
 | `ws/voice_join.go`                | `Channel×3` `ChannelOverride` `VoiceState×5`                                                                                                 | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes                                                                            |
 | `ws/voice_moderation.go`          | `Role` `VoiceState×2`                                                                                                                        | —                                                                            | —                                                                                                                                  | type-only | adapter     | —      | Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row                                                                                    |
 
-55 files import `db` outside `db/` and `service/` (. 1, admin 12, api 9, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 7, plugin 1, ws 20); 34 are type-only; 0 unlisted.
-Dispositions: adapter 35, boundary 20. Move targets: .
+56 files import `db` outside `db/` and `service/` (. 1, admin 12, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 7, plugin 1, ws 20); 35 are type-only; 0 unlisted.
+Dispositions: adapter 36, boundary 20. Move targets: .
 
 <!-- dbinventory:end -->
 
 Reading the table:
 
-- **Type-only rows (34, of which 26 are `adapter`)** mostly need no service:
+- **Type-only rows (35, of which 27 are `adapter`)** mostly need no service:
   the `db` types they use are the wire and response shapes. Whether those
   types should live outside `db` is a B3-8 question per family, not a
   boundary violation. The count was 14 at B3-0 and rose as families moved

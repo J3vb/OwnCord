@@ -53,6 +53,7 @@ func (a *App) stages() []stage {
 		{"database", a.startDatabase},
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
+		{"push-vapid-key", a.startPushVAPIDKey},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
 		{"hub", a.startHub},
@@ -191,6 +192,22 @@ func (a *App) startErasureMarkers() error {
 	return nil
 }
 
+// startPushVAPIDKey loads (or generates, on a confirmed absence) the Web
+// Push VAPID key beside totp.key and erasure.key, unconditionally — B5-4:
+// regardless of push.enabled, because the file is cheap and the maintenance
+// sweep needs the key id to recognise (and remove) rows a rotation orphaned
+// even while the feature is off. A load failure is fatal at start-up, same
+// as the erasure key's (startErasureMarkers, mirrored here). startHub
+// installs the loaded key on svc.Push once the service layer exists.
+func (a *App) startPushVAPIDKey() error {
+	key, err := auth.LoadOrGeneratePushVAPIDKey(a.cfg.Server.DataDir)
+	if err != nil {
+		return fmt.Errorf("push VAPID key: %w", err)
+	}
+	a.pushVAPIDKey = key
+	return nil
+}
+
 // startTelemetry initialises OpenTelemetry. Its shutdown is bounded by its
 // own 5s budget inside the returned step.
 func (a *App) startTelemetry() error {
@@ -238,6 +255,14 @@ func (a *App) startHub() error {
 	}
 	if rt.Services != nil && rt.Services.Retention != nil {
 		rt.Services.Retention.SetMarkers(a.markers)
+	}
+	// The VAPID key startPushVAPIDKey loaded earlier, installed once the
+	// service layer exists (B5-4). SetSubscriptionTTL(0) falls back to the
+	// PushService default, so a partial wiring with no push-vapid-key stage
+	// (a direct StartRuntime call in a test) still leaves a usable default.
+	if rt.Services != nil && rt.Services.Push != nil {
+		rt.Services.Push.SetVAPIDKey(a.pushVAPIDKey)
+		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)

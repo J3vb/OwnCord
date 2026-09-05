@@ -56,6 +56,7 @@ type Querier interface {
 	CountChannels(ctx context.Context) (int64, error)
 	CountDMParticipants(ctx context.Context, channelID int64) (int64, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
+	CountPushSubscriptions(ctx context.Context) (int64, error)
 	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
 	CountUnfinishedErasureJobs(ctx context.Context) (int64, error)
 	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int64, error)
@@ -116,6 +117,7 @@ type Querier interface {
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
 	DeletePartialAuthChallenge(ctx context.Context, tokenHash string) (sql.Result, error)
 	DeletePendingTOTPEnrollment(ctx context.Context, userID int64) error
+	DeletePushSubscription(ctx context.Context, arg DeletePushSubscriptionParams) (int64, error)
 	DeleteRecoveryAssist(ctx context.Context, userID int64) error
 	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 	DeleteRecoveryKit(ctx context.Context, userID int64) error
@@ -293,6 +295,19 @@ type Querier interface {
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	// Backs the per-user device cap (service.maxPushSubscriptionsPerUser),
+	// inside DB.UpsertPushSubscription's transaction: the caller keeps the
+	// first `keep` ids and deletes the rest. A self-referencing DELETE...WHERE
+	// id NOT IN (SELECT ... FROM the same table) reads as an ambiguous column
+	// reference to sqlc's analyzer, so the ranking and the delete are two
+	// statements rather than one.
+	ListPushSubscriptionIDsNewestFirst(ctx context.Context, userID int64) ([]int64, error)
+	// Scoped to the running VAPID key: a row whose key id does not match is a
+	// subscription the server can no longer sign for, so it is invisible here
+	// (and removed by the sweep) rather than listed as if it still worked.
+	// p256dh and auth are never selected -- they are a push credential, not
+	// something the owning user's own listing needs back.
+	ListPushSubscriptions(ctx context.Context, arg ListPushSubscriptionsParams) ([]ListPushSubscriptionsRow, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes
 	// them, but creating a role inserts just below the actor and may tie with an
 	// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
@@ -363,6 +378,11 @@ type Querier interface {
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
+	// The staleness sweep (decision 5) and the rotation sweep (decision 2) in
+	// one statement: a row older than cutoff goes, and so does a row whose key
+	// id no longer matches the running key. key_id = '' means "no key installed
+	// yet" -- time-only, since there is nothing to compare against.
+	SweepPushSubscriptions(ctx context.Context, arg SweepPushSubscriptionsParams) (int64, error)
 	// The operator's storage figure on the metrics surface: every attachments
 	// row, legacy rows with a NULL uploader_id included, so it is a total and
 	// not a sum of counters.
@@ -398,6 +418,14 @@ type Querier interface {
 	// v1.30.0 miscounts multi-byte characters and truncates the next query.
 	UpsertPartialAuthChallenge(ctx context.Context, arg UpsertPartialAuthChallengeParams) error
 	UpsertPendingTOTPEnrollment(ctx context.Context, arg UpsertPendingTOTPEnrollmentParams) error
+	// push_subscriptions is the Web Push subscription store (migration 045,
+	// B5-4). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
+	// the byte/rune difference of any multi-byte character.
+	// One row per (user, endpoint): re-subscribing the same endpoint refreshes
+	// its credential and its last_seen_at rather than creating a second row,
+	// which is how a client keeps a subscription alive without a dispatch
+	// failure to prompt it (there is none yet -- B5-11).
+	UpsertPushSubscription(ctx context.Context, arg UpsertPushSubscriptionParams) (int64, error)
 	// Owner-issued recovery credentials (B4-6): one per account, replaced on
 	// issuance, deleted by the redemption that consumes it. The verifier is an
 	// argon2id PHC string and no query returns anything else about the secret.

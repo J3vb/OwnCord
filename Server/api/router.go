@@ -138,6 +138,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
 	}
 
+	// Web Push subscription storage (B5-4) — nothing dispatches yet.
+	// Mounted unconditionally; with push.enabled false every route answers
+	// 503 PUSH_DISABLED after authentication.
+	MountPushRoutes(r, svc.Sessions, svc.Push, cfg.Push.Enabled)
+
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
 

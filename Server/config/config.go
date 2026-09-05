@@ -35,6 +35,7 @@ type Config struct {
 	Plugins          PluginsConfig          `koanf:"plugins"`
 	GIF              GIFConfig              `koanf:"gif"`
 	Logging          LoggingConfig          `koanf:"logging"`
+	Push             PushConfig             `koanf:"push"`
 }
 
 // LoggingConfig controls server log verbosity. Level gates both stdout and
@@ -74,6 +75,24 @@ func ParseLevel(s string) (slog.Level, bool) {
 // endpoints answer 503 GIF_DISABLED and the client hides the picker.
 type GIFConfig struct {
 	APIKey string `koanf:"api_key"`
+}
+
+// PushConfig is the owner gate for Web Push subscription storage (B5-4,
+// plan decision 9). Enabled is false by default — with it false, every
+// route under /api/v1/push answers 503 PUSH_DISABLED after authentication,
+// and nothing is written. Turning it off again later keeps existing
+// subscription rows (nothing dispatches to them regardless — dispatch is
+// B5-11, behind HP-5); the staleness sweep still runs.
+type PushConfig struct {
+	// Enabled is the owner opt-in. Routes are always mounted; this only
+	// gates whether they do anything.
+	Enabled bool `koanf:"enabled"`
+	// SubscriptionTTLDays is the staleness window: a subscription whose
+	// last_seen_at is older than this many days is removed by the
+	// maintenance sweep. Clients keep a row alive by re-POSTing the same
+	// endpoint (an upsert that bumps last_seen_at). Default 90, bounded to
+	// [1, 3650] in boundedKeys.
+	SubscriptionTTLDays int `koanf:"subscription_ttl_days"`
 }
 
 // EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
@@ -407,6 +426,10 @@ func defaults() Config {
 		Logging: LoggingConfig{
 			Level: "info",
 		},
+		Push: PushConfig{
+			Enabled:             false,
+			SubscriptionTTLDays: 90,
+		},
 	}
 }
 
@@ -465,6 +488,15 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments, avatars and emoji); 0 = unlimited
+
+# Web Push subscription storage. Disabled by default: with push.enabled
+# false, every /api/v1/push/* route answers 503 PUSH_DISABLED after
+# authentication and nothing is written. Storage only in this release --
+# nothing is dispatched to a stored subscription yet.
+# push:
+#   enabled: false
+#   subscription_ttl_days: 90  # a subscription not refreshed in this many
+#                              # days is removed by the maintenance sweep
 
 voice:
   # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
@@ -745,6 +777,7 @@ func boundedKeys(cfg *Config) []boundedKey {
 	return []boundedKey{
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
+		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days"},
 	}
 }
 
