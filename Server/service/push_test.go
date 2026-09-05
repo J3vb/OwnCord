@@ -60,7 +60,7 @@ func TestPushSweep_UsesTheConfiguredWindow(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	if len(rows) != 1 || rows[0].Endpoint != "https://push.example/new" {
-		t.Fatalf("rows after sweep = %+v, want only the 89-day-old one", rows)
+		t.Fatalf("rows after sweep = %+v, want only the 29-day-old one", rows)
 	}
 }
 
