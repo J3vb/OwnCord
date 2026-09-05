@@ -1317,7 +1317,7 @@ before the shared contract and pass after; BPR-061's client journeys are
 recorded as owed by B9 rather than claimed here.
 
 **Evidence, 2026-09-05** — branch `feature/b5-5-rich-content-inventory` from
-`dev` `123b07d8`; PR to `dev` #TBD. All three premises were re-verified at
+`dev` `123b07d8`; PR to `dev` #1544, commit `0db34ee1`. All three premises were re-verified at
 that base before anything was written. Two held exactly: the rich-content set
 is client code (`embeds.ts`, `media.ts`, `attachments.ts`, through
 `@tauri-apps/plugin-http` or the webview's own `<img src>` loading), and the
