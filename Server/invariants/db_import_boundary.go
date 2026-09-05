@@ -64,6 +64,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/middleware.go":      {"adapter", "", "User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard"},
 	"api/plugins_handler.go": {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
 	"api/profile_handler.go": {"adapter", "", "User/Session types in the profile and session response shapes; the services own the calls"},
+	"api/push_handler.go":    {"adapter", "", "db.User type on the context key only; PushService owns every call"},
 	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction left in B3-3"},
 	"api/upload_handler.go":  {"adapter", "", "AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions"},
 	// ── auth ──────────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 135 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 139 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -139,6 +139,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/push/subscriptions`                                         |
+| POST    | `/api/v1/push/subscriptions`                                         |
+| DELETE  | `/api/v1/push/subscriptions/{id}`                                    |
+| GET     | `/api/v1/push/vapid`                                                 |
 | GET     | `/api/v1/search`                                                     |
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
@@ -207,6 +211,7 @@ endpoints return plain-text errors — see their section):
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
+| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
 
 ---
 
@@ -1326,6 +1331,113 @@ Same auth, rate limit, response shape, and error codes as
 | Param   | Type | Default | Range | Description               |
 | ------- | ---- | ------- | ----- | ------------------------- |
 | `limit` | int  | 20      | 1-50  | Maximum results to return |
+
+---
+
+## Web Push
+
+Server-side **storage** of Web Push subscriptions only. **Nothing is
+dispatched in this release** — no outbound HTTP of any kind. See
+[Server Configuration](server-configuration.md#web-push-push) for
+`push.enabled` and the staleness window, and the rotation procedure below.
+
+**Default-off contract:** with `push.enabled` false, every endpoint below
+answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
+server writes nothing.
+
+**Refresh-by-re-POST:** a subscription is kept alive by POSTing the same
+`endpoint` again — the server upserts the row (same id, `last_seen_at`
+bumped) rather than creating a second one. A subscription not refreshed
+within `push.subscription_ttl_days` is removed by the maintenance sweep.
+
+**Rotation and `key_id`:** the server signs with one VAPID key at a time.
+`GET /vapid` reports its `key_id`; a client that sees a different `key_id`
+than the one it last subscribed under should re-subscribe — rotating the key
+(an operator action: replace the key file or `OWNCORD_PUSH_VAPID_KEY`, then
+restart) invalidates every subscription created under the old key. Such rows
+stop being listed immediately and are removed by the sweep.
+
+### GET /api/v1/push/vapid
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "public_key": "base64url-encoded-65-byte-P-256-point", "key_id": "a1b2c3d4e5f6a7b8" }
+```
+
+### GET /api/v1/push/subscriptions
+
+**Auth:** Required
+
+Lists the caller's own subscriptions under the currently running VAPID key.
+A subscription created under a since-rotated key is not listed.
+
+#### Response 200 OK
+
+```json
+{
+  "subscriptions": [
+    {
+      "id": 1,
+      "device_name": "My Laptop",
+      "endpoint_host": "fcm.googleapis.com",
+      "created_at": "2026-09-05T12:00:00Z",
+      "last_seen_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+`endpoint_host` is the endpoint URL's host only — never the endpoint itself,
+never the `p256dh`/`auth` keys. An endpoint plus its auth secret is a push
+credential.
+
+### POST /api/v1/push/subscriptions
+
+**Auth:** Required
+**Body limit:** 8 KiB
+
+```json
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "keys": { "p256dh": "...", "auth": "..." },
+  "device_name": "My Laptop"
+}
+```
+
+There is no user id in the body — the row's owner is always the
+authenticated session's. `endpoint` must be an `https://` URL with a host, at
+most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
+to a 65-byte uncompressed P-256 point (`0x04` prefix); `auth` must decode to
+16 bytes. `device_name` is at most 64 runes and must not contain control
+characters. A user may hold at most 10 subscriptions; the 11th evicts the
+oldest by `last_seen_at`.
+
+#### Response 201 Created
+
+```json
+{ "id": 1 }
+```
+
+#### Errors
+
+| Status | Code            | When                                                   |
+| ------ | --------------- | ------------------------------------------------------ |
+| 400    | `INVALID_INPUT` | Malformed body, or a credential field fails validation |
+| 503    | `PUSH_DISABLED` | `push.enabled` is false                                |
+
+### DELETE /api/v1/push/subscriptions/{id}
+
+**Auth:** Required
+
+Revokes one of the caller's own subscriptions.
+
+#### Response
+
+`204 No Content` on success. `404 NOT_FOUND` when `id` does not exist or
+belongs to another user — the two cases are indistinguishable by design.
 
 ---
 

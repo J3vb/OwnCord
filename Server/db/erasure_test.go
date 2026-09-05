@@ -60,6 +60,8 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('avatar-subject', 'me.png', 'stored-avatar.png', 'image/png', 1, ?)`, uid)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-other', ?, 'o.png', 'stored-other.png', 'image/png', 1, ?)`, otherMsg.ID, other)
 	exec(`INSERT INTO user_storage (user_id, bytes_used) VALUES (?, 2)`, uid)
+	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/subject', 'p', 'a', 'key1')`, uid)
+	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/other', 'p', 'a', 'key1')`, other)
 	exec(`INSERT INTO invites (code, created_by) VALUES ('subject-invite', ?)`, uid)
 	exec(`INSERT INTO invites (code, created_by, redeemed_by) VALUES ('other-invite', ?, ?)`, other, uid)
 	exec(`INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('wave', 'emoji-wave', ?)`, uid)
@@ -159,6 +161,9 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	// The other user's reaction on the subject's message cascaded with it.
 	if n := count(`SELECT COUNT(*) FROM reactions`); n != 0 {
 		t.Errorf("reactions left = %d, want 0", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, sub.other); n != 1 {
+		t.Errorf("other user's push subscription left = %d, want 1", n)
 	}
 }
 

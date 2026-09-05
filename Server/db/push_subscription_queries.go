@@ -1,0 +1,129 @@
+package db
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
+)
+
+// PushSubscription is one Web Push subscription (migration 045, B5-4), as
+// listed back to its owner: no p256dh or auth, because those are the push
+// credential and the listing is a device inventory, not a credential dump.
+type PushSubscription struct {
+	ID         int64
+	UserID     int64
+	Endpoint   string
+	DeviceName string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+}
+
+// UpsertPushSubscription writes a subscription for userID, or refreshes an
+// existing one for the same endpoint (last_seen_at bumped, credential and
+// device name replaced) rather than creating a second row — this is how a
+// client keeps a subscription alive with no dispatch failure to prompt it
+// (there is none yet; dispatch is B5-11). keyID is the VAPID key it was
+// created under (service.PushService.PublicKey's key_id).
+func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string) (int64, error) {
+	id, err := d.q.UpsertPushSubscription(ctx, dbgen.UpsertPushSubscriptionParams{
+		UserID:     userID,
+		Endpoint:   endpoint,
+		P256dh:     p256dh,
+		Auth:       auth,
+		DeviceName: deviceName,
+		VapidKeyID: keyID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("UpsertPushSubscription: %w", err)
+	}
+	return id, nil
+}
+
+// ListPushSubscriptions lists userID's subscriptions under the currently
+// running VAPID key (keyID). A row under a different key is invisible here
+// (the server can no longer sign a push for it) and is removed by the sweep,
+// not listed as if it still worked.
+func (d *DB) ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]PushSubscription, error) {
+	rows, err := d.q.ListPushSubscriptions(ctx, dbgen.ListPushSubscriptionsParams{
+		UserID:     userID,
+		VapidKeyID: keyID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ListPushSubscriptions: %w", err)
+	}
+	out := make([]PushSubscription, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PushSubscription{
+			ID:         r.ID,
+			UserID:     userID,
+			Endpoint:   r.Endpoint,
+			DeviceName: r.DeviceName,
+			CreatedAt:  parseSQLiteTime(r.CreatedAt),
+			LastSeenAt: parseSQLiteTime(r.LastSeenAt),
+		})
+	}
+	return out, nil
+}
+
+// DeletePushSubscription removes id, scoped to userID so one user can never
+// revoke another's subscription by guessing an id. Reports whether a row was
+// deleted.
+func (d *DB) DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error) {
+	n, err := d.q.DeletePushSubscription(ctx, dbgen.DeletePushSubscriptionParams{ID: id, UserID: userID})
+	if err != nil {
+		return false, fmt.Errorf("DeletePushSubscription: %w", err)
+	}
+	return n > 0, nil
+}
+
+// TrimPushSubscriptions enforces the per-user device cap
+// (service.maxPushSubscriptionsPerUser): keeps the newest keep rows by
+// last_seen_at (ties broken by id), evicting the rest. The ranking and the
+// delete are two statements — see ListPushSubscriptionIDsNewestFirst's
+// comment for why a single self-referencing DELETE does not sqlc-generate.
+func (d *DB) TrimPushSubscriptions(ctx context.Context, userID int64, keep int) error {
+	ids, err := d.q.ListPushSubscriptionIDsNewestFirst(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("TrimPushSubscriptions list: %w", err)
+	}
+	if keep < 0 {
+		keep = 0
+	}
+	if len(ids) <= keep {
+		return nil
+	}
+	for _, id := range ids[keep:] {
+		if _, err := d.q.DeletePushSubscription(ctx, dbgen.DeletePushSubscriptionParams{ID: id, UserID: userID}); err != nil {
+			return fmt.Errorf("TrimPushSubscriptions delete %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// SweepPushSubscriptions deletes every subscription past cutoff and, when
+// keyID is non-empty, every subscription whose vapid_key_id no longer
+// matches the running key — the staleness sweep and the rotation sweep in
+// one pass (decisions 2 and 5). An empty keyID means no key is installed
+// yet, so the rotation half is skipped (time-only).
+func (d *DB) SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error) {
+	n, err := d.q.SweepPushSubscriptions(ctx, dbgen.SweepPushSubscriptionsParams{
+		Cutoff: cutoff.UTC().Format("2006-01-02 15:04:05"),
+		KeyID:  keyID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("SweepPushSubscriptions: %w", err)
+	}
+	return n, nil
+}
+
+// CountPushSubscriptions is the total row count across every user — used by
+// tests to prove a disabled route writes nothing.
+func (d *DB) CountPushSubscriptions(ctx context.Context) (int64, error) {
+	n, err := d.q.CountPushSubscriptions(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("CountPushSubscriptions: %w", err)
+	}
+	return n, nil
+}

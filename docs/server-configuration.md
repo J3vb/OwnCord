@@ -85,6 +85,32 @@ the server automatically when a startup-only value changed. Note that
 | `upload.storage_dir`   | string | `"data/uploads"` | Directory where uploaded files are stored                                                                                                                                                                                                                                                                                                            |
 | `upload.user_quota_mb` | int    | `0`              | Total bytes one user may hold in upload storage — attachments, avatars and emoji alike, counted where the bytes are written. `0` = unlimited (the default, so no existing install changes on upgrade). An upload that would cross the quota is refused with `507 STORAGE_QUOTA_EXCEEDED`. A negative value falls back to the default with a warning. |
 
+### Web Push (`push`)
+
+Storage only in this release — nothing is dispatched to a stored
+subscription yet (see [Web Push](api.md#web-push) in the API reference).
+Disabled by default: with `push.enabled` false, every `/api/v1/push/*` route
+answers `503 PUSH_DISABLED` after authenticating the caller, and nothing is
+written. Turning it off again later keeps existing subscription rows —
+nothing dispatches to them either way — but the staleness sweep keeps
+running.
+
+| Key                          | Type | Default | Description                                                                                                                                                                                                |
+| ---------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push.enabled`               | bool | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
+| `push.subscription_ttl_days` | int  | `90`    | A subscription whose `last_seen_at` is older than this many days is removed by the maintenance sweep. Clients keep a row alive by re-POSTing the same endpoint. Clamped to 1–3650; `0` falls back to `90`. |
+
+**VAPID key and rotation.** The server generates (or loads) a P-256 VAPID key
+at `data/push_vapid.key`, the same fail-closed pattern as `totp.key` and
+`erasure.key` — override with `OWNCORD_PUSH_VAPID_KEY` (hex, 32 bytes).
+Rotation is an operator action, not an endpoint: replace the key file (or
+change the env var) and restart. Every stored subscription records the key
+id it was created under; a row whose key id no longer matches the running
+key stops being listed immediately and is removed by the sweep that runs at
+start-up and on every maintenance tick — so a rotation takes effect on the
+very next boot. `GET /api/v1/push/vapid` reports the running key's id so a
+client can detect a rotation and re-subscribe.
+
 ### Voice / LiveKit (`voice`)
 
 | Key                           | Type   | Default                                             | Description                                                                                                                                                                                                        |
@@ -186,7 +212,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 60 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 62 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -211,6 +237,8 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `plugins.enabled`                           | Plugins (`plugins`)                     |
 | `plugins.http_allowlist`                    | Plugins (`plugins`)                     |
 | `plugins.max_memory_mb`                     | Plugins (`plugins`)                     |
+| `push.enabled`                              | Web Push (`push`)                       |
+| `push.subscription_ttl_days`                | Web Push (`push`)                       |
 | `security.auth_rate_limit_multiplier`       | Security (`security`)                   |
 | `security.expensive_auth_concurrency`       | Security (`security`)                   |
 | `server.admin_allowed_cidrs`                | Server (`server`)                       |
@@ -275,6 +303,8 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_UPLOAD_MAX_SIZE_MB`                | `upload.max_size_mb`                |
 | `OWNCORD_UPLOAD_STORAGE_DIR`                | `upload.storage_dir`                |
 | `OWNCORD_UPLOAD_USER_QUOTA_MB`              | `upload.user_quota_mb`              |
+| `OWNCORD_PUSH_ENABLED`                      | `push.enabled`                      |
+| `OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS`        | `push.subscription_ttl_days`        |
 | `OWNCORD_VOICE_LIVEKIT_API_KEY`             | `voice.livekit_api_key`             |
 | `OWNCORD_VOICE_LIVEKIT_API_SECRET`          | `voice.livekit_api_secret`          |
 | `OWNCORD_VOICE_LIVEKIT_URL`                 | `voice.livekit_url`                 |
@@ -330,6 +360,13 @@ upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
   user_quota_mb: 0 # per-user total in MiB; 0 = unlimited
+
+# Web Push subscription storage. Storage only -- nothing is dispatched yet.
+push:
+  enabled: false
+  subscription_ttl_days:
+    90 # a subscription not refreshed in this many days
+    # is removed by the maintenance sweep
 
 voice:
   livekit_api_key: "your-api-key"
