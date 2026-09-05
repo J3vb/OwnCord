@@ -173,6 +173,23 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 	}
 }
 
+// validGIFResultURL reports whether a URL forwarded to the client from inside
+// the upstream body is safe for the client to load directly: it must parse,
+// be https, carry a non-empty host, and carry no embedded credentials.
+// safefetch already bounded and type-checked the response envelope; this is
+// a second gate on the values *inside* it, since the media URLs are exactly
+// what the client's own renderer fetches next, unproxied and unvalidated.
+func validGIFResultURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	// Hostname(), not Host: "https://:443/a.gif" parses with Host == ":443"
+	// (non-empty) but Hostname() == "" — a port with no host is not a
+	// destination.
+	return u.Scheme == "https" && u.Hostname() != "" && u.User == nil
+}
+
 // fetchGIFs performs the upstream request and returns the allowlisted results.
 // It never returns the upstream error to the caller and never logs the request
 // URL, because that URL carries the API key.
@@ -196,11 +213,15 @@ func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) ([]gifRes
 		return nil, err
 	}
 
-	// Drop entries missing either renderable format and honour our own limit
-	// even if upstream ignored it. Non-nil so the JSON is [] and never null.
+	// Drop entries missing either renderable format, or carrying a result URL
+	// the client should not be handed, and honour our own limit even if
+	// upstream ignored it. Non-nil so the JSON is [] and never null.
 	results := make([]gifResult, 0, len(upstream.Results))
 	for _, g := range upstream.Results {
 		if g.MediaFormats.TinyGif == nil || g.MediaFormats.Gif == nil {
+			continue
+		}
+		if !validGIFResultURL(g.MediaFormats.TinyGif.URL) || !validGIFResultURL(g.MediaFormats.Gif.URL) {
 			continue
 		}
 		if len(results) >= limit {
