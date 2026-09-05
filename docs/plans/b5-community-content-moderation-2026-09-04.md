@@ -1675,7 +1675,7 @@ PR — not silently into a later one.
 - **BG-01.** Before: only the generic exit-evidence cell. Now: prepends B5-3's
   landed posture (#1542, `5c7a0f4a`) and leaves the B8 build/smoke half named.
 - **BG-05.** Before: only the generic exit-evidence cell. Now: prepends the
-  planned B5-4 storage landing; its PR number is written `#TBD-B5-4`, filled
+  planned B5-4 storage landing; its PR number is written `#1545`, filled
   when B5-4's PR number exists.
 - **Roadmap amendments.** Workstream 2 reworded to point at a new item 12
   (inventory plus the server path — `rich-content-inventory.md`, B5-5; the GIF
