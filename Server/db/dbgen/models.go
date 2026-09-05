@@ -198,6 +198,18 @@ type PluginKv struct {
 	Value    []byte `json:"value"`
 }
 
+type PushSubscription struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"userId"`
+	Endpoint   string `json:"endpoint"`
+	P256dh     string `json:"p256dh"`
+	Auth       string `json:"auth"`
+	DeviceName string `json:"deviceName"`
+	VapidKeyID string `json:"vapidKeyId"`
+	CreatedAt  string `json:"createdAt"`
+	LastSeenAt string `json:"lastSeenAt"`
+}
+
 type RateLockout struct {
 	Key       string `json:"key"`
 	ExpiresAt string `json:"expiresAt"`

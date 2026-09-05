@@ -38,6 +38,11 @@ type Services struct {
 	// Auth is set by the composition root once the hub exists; the admin
 	// panel's owner-only recovery issuance (B4-6) shares it.
 	Auth *AuthService
+	// Push stores Web Push subscriptions (B5-4); the composition root
+	// installs the VAPID key and the staleness TTL on it. A pointer field
+	// so Services stays comparable (admin/services_bundle_test.go compares
+	// two *Services with `!=`).
+	Push *PushService
 }
 
 // New creates all domain services wired together.
@@ -66,5 +71,6 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Tokens:      NewTokenService(st),
 		Sessions:    NewSessionService(st),
 		Setup:       NewSetupService(st),
+		Push:        NewPushService(st),
 	}
 }

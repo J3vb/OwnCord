@@ -2,9 +2,12 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -175,6 +178,37 @@ func TestGIFResponseNeverLeaksAPIKey(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "server-side-key") {
 		t.Fatalf("response leaked the API key: %s", rr.Body.String())
+	}
+}
+
+// A result URL forwarded to the client must be well-formed https with a
+// hostname and no embedded credentials — the client loads these directly,
+// unproxied. One good result and four malformed ones: http scheme, a
+// javascript: URL, embedded userinfo, and a port with no host (Host is
+// ":443", non-empty, but Hostname() is ""). Only the good one must survive.
+func TestGIFResultURLsAreHTTPSWithoutCredentials(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	stubKlipy(t, `{"results":[
+		{"id":"good","media_formats":{"tinygif":{"url":"https://media.klipy.com/good_tiny.gif"},"gif":{"url":"https://media.klipy.com/good.gif"}}},
+		{"id":"http","media_formats":{"tinygif":{"url":"http://media.klipy.com/bad_tiny.gif"},"gif":{"url":"https://media.klipy.com/bad.gif"}}},
+		{"id":"js","media_formats":{"tinygif":{"url":"https://media.klipy.com/js_tiny.gif"},"gif":{"url":"javascript:alert(1)"}}},
+		{"id":"cred","media_formats":{"tinygif":{"url":"https://user:pw@media.klipy.com/cred_tiny.gif"},"gif":{"url":"https://media.klipy.com/cred.gif"}}},
+		{"id":"portonly","media_formats":{"tinygif":{"url":"https://:443/portonly_tiny.gif"},"gif":{"url":"https://media.klipy.com/portonly.gif"}}}
+	]}`, http.StatusOK)
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	results := decodeGIFResults(t, rr)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1 (only the well-formed https result): %v", len(results), results)
+	}
+	if results[0]["id"] != "good" {
+		t.Errorf("result id = %v, want good", results[0]["id"])
 	}
 }
 
@@ -470,5 +504,51 @@ func TestGIFProductionPolicyRefusesLoopback(t *testing.T) {
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+}
+
+// An upstream host that does not resolve — the server has no network route to
+// it, or the operator misconfigured the base URL — must answer 502 quickly
+// and generically: no upstream host, no "no such host", and no API key in the
+// body. The Resolve seam is stubbed to fail immediately (SetGIFResolveForTest,
+// the same shape as safefetch's own TestFetch_OfflineResolveFailure) rather
+// than resolving a real .invalid name: a DNS-impaired CI runner can retry a
+// live query for several seconds and flake the elapsed-time assertion. Every
+// other ceiling — scheme, port, deadline, byte limits, content types,
+// concurrency — is identical to production, and no real DNS is ever touched.
+func TestGIFOfflineUpstreamIsBadGatewayWithoutLeak(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	restore, err := api.SetGIFResolveForTest(func(context.Context, string) ([]netip.Addr, error) {
+		return nil, &net.DNSError{Err: "no such host", Name: "api.klipy.com", IsNotFound: true}
+	})
+	if err != nil {
+		t.Fatalf("SetGIFResolveForTest: %v", err)
+	}
+	t.Cleanup(restore)
+	router := buildGIFRouter(database, "server-side-key")
+
+	start := time.Now()
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "api.klipy.com") {
+		t.Errorf("response leaked the upstream host: %s", body)
+	}
+	if strings.Contains(body, "no such host") {
+		t.Errorf("response leaked the resolver error: %s", body)
+	}
+	if strings.Contains(body, "server-side-key") {
+		t.Errorf("response leaked the API key: %s", body)
+	}
+	// 10s matches gifUpstreamTimeout, the production deadline; a stubbed
+	// Resolve returns instantly, so this only catches a regression that makes
+	// the failure block for the whole deadline instead of failing fast.
+	if elapsed >= 10*time.Second {
+		t.Errorf("offline resolve took %v, want well under the 10s deadline", elapsed)
 	}
 }

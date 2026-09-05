@@ -1290,6 +1290,155 @@ standing proof that **nothing dispatches yet**, so
 `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` stay green
 unchanged.
 
+**Evidence, 2026-09-05** — branch `feature/b5-4-push-subscriptions` from
+`dev` `123b07d8`; PR to `dev` #1545, commits `3157e304` (the feature) and
+`3ef5bfc6` (the independent review round). The premise held at the base:
+zero hits for `webpush`, `web_push` or `vapid` under `Server/`, and the one
+thing that resembles it — the desktop's local notification (B5-0, S7) — sends
+nothing off the machine. Everything B5-2 left for this step was there and was
+used as left: one row in `config.boundedKeys`, one method plus one row in
+`maintenance.steps()` with its place declared in
+`TestMaintenance_StepOrderIsPinned`, and the two erasure lists.
+
+- **The table.** Migration `045_push_subscriptions.sql`: one row per
+  `(user_id, endpoint)` (`UNIQUE`), `user_id → users ON DELETE CASCADE`, the
+  credential (`p256dh`, `auth`), a `device_name`, `vapid_key_id`, and
+  `created_at` / `last_seen_at`. Its reversal is the first entry in
+  `rollback.Order`, with its cost row in the README (every device
+  re-subscribes; nothing was in flight). The class joins `erasureStatements`
+  right after `sessions` — the `users` delete would cascade it, but a
+  surviving endpoint is a live channel to a person who left, so the
+  inventory's zero is proved against an explicit statement (class `2a`,
+  `TestEraseAccount_EveryInventoryClassIsZero`, the fixture seeding one row
+  for the subject and one for the survivor). Removing the statement **and**
+  the cascade together turned that test red harder than expected: the foreign
+  key aborted the whole erasure transaction.
+- **The key, and why a file.** A P-256 private scalar in
+  `data/push_vapid.key` (env `OWNCORD_PUSH_VAPID_KEY`, hex, 32 bytes), loaded
+  by `auth.LoadOrGeneratePushVAPIDKey` through the same fail-closed
+  `loadOrGenerateKeyFile` as `totp.key` and `erasure.key` — a read error
+  refuses rather than replaces (OC-0321), because every stored row's
+  `vapid_key_id` is checked against it. The loader gained one optional
+  field, `valid`, consulted only on the generate branch: a uniform 32-byte
+  scalar falls outside the curve order with probability about 2^-32, and the
+  loop discards such bytes rather than writing a file the next boot cannot
+  decode (`TestPushVAPIDKey_IsGeneratedOnceAndStable` — two loads, one public
+  point; a corrupt file is an error, not a new key). It has its own lifecycle
+  stage, `push-vapid-key`, after `erasure-markers` and **unconditional** —
+  the sweep needs the key id even while the feature is off — and `startHub`
+  installs it on `svc.Push` once the service layer exists, the two-phase
+  shape the erasure key already uses. B5-0 offered a file or a database row;
+  the file keeps a push credential out of every database backup an
+  administrator downloads. `key_id` is the hex of the first eight bytes of
+  SHA-256 over the 65-byte public point.
+- **Rotation is an operator action, not an endpoint.** Replace the file (or
+  the env var) and restart. Every row carries the key id it was created
+  under; a row under any other key is invisible to `List` the instant the new
+  key is installed and is deleted by the sweep, which runs once at start-up
+  (`m.loop`, beside the storage recount) and on every tick — so a rotation
+  takes effect on the first boot with the new key, and a device learns of it
+  from `GET /api/v1/push/vapid`, whose `key_id` no longer matches the one it
+  subscribed under (`TestPushSweep_RotationInvalidatesAndRecollects`,
+  `TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation`, which drives the
+  real `loop` with a pre-closed stop channel). An endpoint is additive later;
+  a filesystem write plus a restart is the strongest owner gate the server
+  has.
+- **The routes and the gate.** `GET /api/v1/push/vapid`,
+  `GET|POST /api/v1/push/subscriptions`, `DELETE /api/v1/push/subscriptions/{id}`,
+  always mounted (`MountPushRoutes`), so they appear in the generated route
+  index. `pushDisabledMiddleware` sits **after** `AuthMiddleware` and before
+  the body limit and the handlers: with `push.enabled` false every route
+  answers `503 PUSH_DISABLED` — the `GIF_DISABLED` shape — having
+  authenticated the caller and read nothing
+  (`TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing`: anonymous
+  is 401, authenticated is 503, and the table stays empty). The listing
+  returns `endpoint_host` only — never the endpoint, never the keys
+  (`TestPushSubscriptions_LifecycleCreateListRevoke` asserts the raw endpoint
+  and both key strings are absent from the body). There is no user id in the
+  request; the owner is the session's, and another user lists nothing and
+  deletes nothing (`TestPushSubscriptions_VisibleOnlyToOwner`, the delete
+  scoped by `user_id` in the SQL itself). Validation, all in
+  `service.validatePushSubscription`: `https` with a hostname and no
+  userinfo, at most 2048 bytes; `p256dh` decoding (padded or unpadded
+  base64url) to a 65-byte point starting `0x04`; `auth` to 16 bytes;
+  `device_name` at most 64 runes with no control characters; the body at
+  most 8 KiB (`TestPushSubscriptions_RejectsMalformed`, ten cases).
+- **The cap, in one transaction.** Ten devices per user, a constant
+  (`maxPushSubscriptionsPerUser`, marked as the knob to promote when an
+  operator asks); the eleventh evicts the oldest by `last_seen_at`
+  (`TestPushSubscriptions_DeviceCapEvictsOldest`). The upsert, the ranking and
+  the eviction run inside **one** writer transaction — the review round
+  found that as three statements a concurrent refresh could revive a row an
+  interleaved trim had chosen, and a cancellation after the upsert could
+  leave eleven rows. Re-subscribing the same endpoint is the refresh path:
+  one row, the same id, a strictly later `last_seen_at`
+  (`TestPushSubscriptions_RefreshIsAnUpsert`), and that is how a client keeps
+  a subscription alive with no dispatch failure to prompt it.
+- **The window.** `push.subscription_ttl_days`, default 90, a row in
+  `boundedKeys` (1..3650; below the minimum falls back to the default, so an
+  operator cannot write the sweep off by accident). The sweep is one
+  statement: `last_seen_at < cutoff OR (key_id <> '' AND vapid_key_id <> key_id)`,
+  the cutoff formatted `2006-01-02 15:04:05` UTC so it compares
+  lexicographically with `datetime('now')`, and an empty key id (no key
+  installed) sweeps by time alone (`TestPushSweep_UsesTheConfiguredWindow`
+  with a 30-day window, `TestPushSweep_NoKeyInstalledSweepsByTimeOnly`). Its
+  step sits right after the second-factor sweep, declared in
+  `TestMaintenance_StepOrderIsPinned`.
+- **Configuration.** `push.enabled` (bool, false) and
+  `push.subscription_ttl_days` under a new `push` section: `PushConfig`,
+  `defaults()`, a commented block in `defaultYAML`, a prose table in
+  `docs/server-configuration.md` with the rotation procedure, the generated
+  key index (62 keys), the environment-variable table, and the example
+  file. `TestLoadPushDisabledByDefault` loads the written template and scans
+  it for a live key; `TestLoadPushEnvOverride` proves `OWNCORD_PUSH_ENABLED`
+  and `OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS` bind by running them, not by
+  reading `envKeyToKoanf`.
+- **Revert-proof, nine mutations.** The delete without its `user_id` scope
+  (owner test red); the disabled gate ahead of auth (anonymous answered 503,
+  red); the raw endpoint in the listing (red); the eviction removed from the
+  transaction (eleven rows, red); the key clause dropped from the sweep
+  (rotation test red); the erasure statement and the cascade removed together
+  (the foreign key aborts the erasure, red). After the review round, three
+  more: the body limit removed (the 9 KiB body with valid fields was
+  accepted, red), the start-up sweep call removed from `loop` (red), and the
+  refresh assertion against an unchanged timestamp (red). Each restored,
+  each green.
+- **An independent review** was briefed to find cross-user access, a bypass
+  of the disabled gate, a credential in a response, a private key anywhere
+  but its file, and controls whose tests would pass without them. It found
+  no P1 and six items, all fixed in `3ef5bfc6`: `u.Host` accepting
+  `https://:443/x` and userinfo (`Hostname()`, and `User == nil`); the
+  three-statement eviction race; and four tests that passed without their
+  control — the body-limit case (the oversized device name produced its 400
+  first), the start-up sweep (called directly rather than through `loop`),
+  the refresh timestamp (`<=` accepted no change), and the window test (set
+  to the default it was meant to override).
+- **Gates.** `ci-check`, all of it: four build-tag variants, `go vet`, `go
+test -race ./...`, the deadlock leg on `ws`, the untagged `admin` leg,
+  `golangci-lint` clean, `dbgen` in step by regeneration, protocol in step,
+  `gendocs` idempotent by hash, `dbinventory` regenerated (the handler's
+  `db.User` context read is a new adapter row in `db_import_boundary.go`),
+  `check:docs`, `check:hygiene`, `check-migrations`. Of the six generated
+  surfaces, five moved: `dbgen`, the schema index (43 tables), the route
+  index (139 routes), the config index (62 keys) and the `dbinventory`
+  block; the protocol did not.
+
+**What B5-11 inherits.** The private key lives on `svc.Push`; expose a
+signer for VAPID JWTs there rather than the key. `vapid_key_id` says which
+key a row expects. A `404`/`410` from a push service should delete the row —
+add an unscoped delete by id beside the user-scoped one, do not widen the
+user-scoped one. `CountPushSubscriptions` is the operator's count for the
+metrics surface. The `egress_sites.go` row, the generic-content payload, the
+dispatch-time permission check and **its own configuration key** are HP-5's
+rulings (scorecard, Question 6), not this step's.
+
+**Not included, deliberately.** No dispatch and no outbound HTTP anywhere in
+the change. No rotate endpoint, no admin count surface (one line when B5-11
+needs it), no `Client/` file, no protocol change, no findings-ledger row.
+`GET /vapid` before a key is installed answers `503`, a state production
+cannot reach because the stage is unconditional. Whether dispatch reuses
+`push.enabled` was left to HP-5, which gave it its own key.
+
 ## B5-5 — Rich-content inventory and the S-03 rune contract
 
 **Closes:** BPR-061; BG-19's server half; S-03. **Decisions:** decisions 1 and 3 — settled. **Size:** 1–2 days. **Protocol effects:** none.
@@ -1315,6 +1464,96 @@ count runes, not bytes.
 **Acceptance:** the inventory has no "unknown" cells; the S-03 tests fail
 before the shared contract and pass after; BPR-061's client journeys are
 recorded as owed by B9 rather than claimed here.
+
+**Evidence, 2026-09-05** — branch `feature/b5-5-rich-content-inventory` from
+`dev` `123b07d8`; PR to `dev` #1544, commit `0db34ee1`. All three premises were re-verified at
+that base before anything was written. Two held exactly: the rich-content set
+is client code (`embeds.ts`, `media.ts`, `attachments.ts`, through
+`@tauri-apps/plugin-http` or the webview's own `<img src>` loading), and the
+server owns exactly one attacker-influenced content path, the GIF proxy,
+already behind `Server/safefetch` since B5-1. **The third was stale:** the
+S-03 contract this step was to write already exists — B3-8 shipped
+`service.cleanChannelMeta` / `cleanChannelField` for the admin writers and
+`cleanTextBounded` with `MaxGroupDMNameLen` for the group-DM create and rename
+paths, the two user-side writers of `channels.name` (`CreateGroupDM` →
+`CreateGroupDMChannel`, `db/dm_queries.go:292`; `RenameGroupDM` →
+`SetDMChannelName`; a third query, `UpdateChannel`, has zero production
+callers), with `admin/s03_contract_test.go`, `TestChannelMeta_NameCountsRunesNotBytes`
+and `TestChannelMeta_SharesTheGroupDMNameCap` already pinning it. So (c) became
+verify-and-pin: every writer was re-read, and the one boundary nobody had
+tested — that the group-DM path counts runes — got
+`TestS03_GroupDMNameCountsRunesNotBytes` (100 × `é` accepted, 101 refused with
+`ErrBadRequest`, plus 101 plain ASCII characters refused too — the third case
+is what makes the test prove a rune cap rather than merely stay consistent
+with a 200-byte one). S-03's register row closes in B5-12 on that evidence.
+
+- **The inventory.** `docs/architecture/rich-content-inventory.md`, indexed
+  from `docs/architecture/README.md` and pointed at from the top of
+  `community-services.md` S2. Fourteen rows, fifteen columns (starts-from,
+  fetched-by, destination, address policy, redirects, size, time, type,
+  concurrency, cache, offline/failure, boundary owner, consent gate,
+  evidence), every cell read from code with `file:line`, none `unknown`. What
+  it makes visible that prose had not: an inline external image in a message
+  body reaches a bare `img.src` past only an http(s)-scheme check
+  (`isSafeUrl`, `media.ts:543`) — no destination or address validation, at
+  the call site or inside `renderInlineImage` itself; the Open Graph fetch
+  buffers the whole body before its 50 000-character slice, and its own
+  rendered preview image is gated by the same hostname-string check as the
+  preview fetch; none of `attachments.ts`'s three sub-paths (image,
+  video/audio, download) carries a TypeScript-level request timeout, though
+  the native Rust proxy underneath still bounds TCP connect and the TLS
+  handshake at 10 s each and the data-copy phase at 600 s
+  (`http_proxy.rs:373,376,458,479`); the image sub-path feeds a durable
+  IndexedDB cache the app never evicts (S2-f), and its in-memory Map, the
+  video/audio blob-URL map and the YouTube title cache all evict in insertion
+  order rather than on last use (no cache in this document is actually LRU);
+  the OG cache clears only through a manual Settings action
+  (`AdvancedTab.ts:344`), unlike the attachment caches, which also clear on
+  page teardown (`MainPage.ts:961`); the external-image `tauriFetch`
+  fallback is reachable today only through an absolute avatar URL, and its
+  response Content-Type is still relabelled through `sanitizeContentType`
+  before use, not sniffed or rejected; the GIF picker gates its results on a
+  `klipy.com` host but a GIF already in a sent message renders as any other
+  inline image; and YouTube's thumbnail image and its clicked iframe embed
+  both load a fixed Google/YouTube host with the video ID validated against
+  `YOUTUBE_ID_RE` first. The two operator binary downloaders and the local
+  desktop notification are rows too, marked not-rich-content, so nobody
+  re-asks. The ownership table assigns every gap: B5-1 done, B5-5 this
+  document, B5-7 consent, B7 the broker (C-09 clauses 1, 7, 8 plus decision
+  2's aggregate budgets), B8 the browser build, and **BPR-061's client
+  journeys recorded as owed by B9, not claimed here.**
+- **GIF polish, one behaviour change.** `safefetch` bounds and type-checks
+  the envelope the upstream sends, not the URLs nested in its JSON — and
+  those are exactly what the client fetches next, unproxied. `validGIFResultURL`
+  now drops any result whose `tinygif.url` or `gif.url` does not parse, is
+  not `https`, has no host, or carries userinfo — the result, not the
+  response (`TestGIFResultURLsAreHTTPSWithoutCredentials`: five in, one out,
+  including a port-with-no-host `https://:443/...` case that checking `u.Host`
+  alone would have missed — it must be `u.Hostname()`).
+  Offline behaviour was already right and is now pinned:
+  `TestGIFOfflineUpstreamIsBadGatewayWithoutLeak` stubs the GIF Fetcher's
+  `safefetch.Policy.Resolve` seam (`SetGIFResolveForTest`, every other
+  ceiling identical to production) to fail deterministically rather than
+  resolving a real `.invalid` name — a DNS-impaired runner can retry a live
+  query for several seconds and flake a real-DNS version of this assertion —
+  and asserts a generic `502` with no upstream host, no resolver text and no
+  API key in the body, well inside the 10 s deadline. The `text/plain` entry in the
+  content-type allowlist is there for a recorded reason — `http.DetectContentType`
+  reports `text/plain` for every textual format including JSON, so the
+  sniffed half of the check needs it — and was left alone; the inventory
+  cites the comment.
+- **Revert-proof.** Removing the URL filter turns its test red (`results = 5,
+want 1`); setting `MaxGroupDMNameLen` to 101 turns
+  `TestChannelMeta_SharesTheGroupDMNameCap` red. Both restored, both green.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `gendocs` a no-op (no route, key or migration moved), `check:docs`,
+  `prettier --check` from the repository root.
+
+**Not included, deliberately.** No `Client/` code — every renderer-side row
+was read, not edited; that is B7's. No change to the GIF content-type
+allowlist. No migration, no configuration key, no protocol change, no
+findings-ledger row. The dead `UpdateChannel` query is noted, not removed.
 
 ## HP-5 — Abuse and privacy review
 
