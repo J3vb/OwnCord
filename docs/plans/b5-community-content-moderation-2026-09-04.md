@@ -897,7 +897,7 @@ Vite-build-before-`go build` ordering that touches `Server/Makefile`,
 inheritance.
 
 **Evidence, 2026-09-05** — branch `feature/b5-3-browser-hosting-posture` from
-`dev` `a60c6ca9`. Both premises were re-verified at that base before any code
+`dev` `a60c6ca9`; PR to `dev` #1542, commit `867fe4db`. Both premises were re-verified at that base before any code
 was written and both held: the admin panel's `embed.FS` is the tree's only
 `http.FileServer`, and `(*plugin.Registry).AssetHandler` had no production
 caller.
