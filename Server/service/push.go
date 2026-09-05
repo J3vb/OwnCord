@@ -134,11 +134,8 @@ func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscr
 	if err != nil {
 		return 0, err
 	}
-	id, err := s.st.UpsertPushSubscription(ctx, userID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID())
+	id, err := s.st.UpsertPushSubscription(ctx, userID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID(), maxPushSubscriptionsPerUser)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
-	}
-	if err := s.st.TrimPushSubscriptions(ctx, userID, maxPushSubscriptionsPerUser); err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return id, nil
@@ -189,8 +186,11 @@ func validatePushSubscription(in PushSubscribeInput) (p256dh, auth, deviceName s
 		return "", "", "", fmt.Errorf("%w: endpoint is too long", ErrInvalidSubscription)
 	}
 	u, perr := url.Parse(in.Endpoint)
-	if perr != nil || u.Scheme != "https" || u.Host == "" {
+	if perr != nil || u.Scheme != "https" || u.Hostname() == "" {
 		return "", "", "", fmt.Errorf("%w: endpoint must be an https URL with a host", ErrInvalidSubscription)
+	}
+	if u.User != nil {
+		return "", "", "", fmt.Errorf("%w: endpoint must not carry credentials", ErrInvalidSubscription)
 	}
 
 	p256dhBytes, decErr := decodePushBase64(in.P256dh)

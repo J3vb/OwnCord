@@ -32,11 +32,12 @@ SELECT id, endpoint, device_name, created_at, last_seen_at
 DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?;
 
 -- name: ListPushSubscriptionIDsNewestFirst :many
--- Backs the per-user device cap (service.maxPushSubscriptionsPerUser,
--- DB.TrimPushSubscriptions): the caller keeps the first `keep` ids and
--- deletes the rest. A self-referencing DELETE...WHERE id NOT IN (SELECT
--- ... FROM the same table) reads as an ambiguous column reference to
--- sqlc's analyzer, so the ranking and the delete are two statements.
+-- Backs the per-user device cap (service.maxPushSubscriptionsPerUser),
+-- inside DB.UpsertPushSubscription's transaction: the caller keeps the
+-- first `keep` ids and deletes the rest. A self-referencing DELETE...WHERE
+-- id NOT IN (SELECT ... FROM the same table) reads as an ambiguous column
+-- reference to sqlc's analyzer, so the ranking and the delete are two
+-- statements rather than one.
 SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY last_seen_at DESC, id DESC;
 
 -- name: SweepPushSubscriptions :execrows

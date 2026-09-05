@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -264,6 +265,8 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 	}{
 		{"http scheme", pushSubscribeBody{Endpoint: "http://push.example.com/sub/x", Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
 		{"no host", pushSubscribeBody{Endpoint: "https:///sub/x", Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
+		{"port-only host", pushSubscribeBody{Endpoint: "https://:443/x", Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
+		{"embedded credentials", pushSubscribeBody{Endpoint: "https://user:pw@push.example/x", Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
 		{"endpoint too long", pushSubscribeBody{Endpoint: "https://push.example.com/" + strings.Repeat("x", 2048), Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
 		{"p256dh 64 bytes", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: badP256dh64, Auth: validAuth()}}},
 		{"p256dh wrong prefix", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: badP256dhWrongPrefix, Auth: validAuth()}}},
@@ -280,8 +283,16 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 	}
 
 	t.Run("body over 8 KiB", func(t *testing.T) {
-		oversized := validSubscribeBody("https://push.example.com/sub/x")
-		oversized.DeviceName = strings.Repeat("x", 9<<10)
+		// Every subscription field stays valid; an ignored JSON field pushes
+		// the body past the limit, so this proves MaxBodySize itself refuses
+		// it rather than a field-length check that would fire regardless.
+		oversized := struct {
+			pushSubscribeBody
+			Padding string `json:"padding"`
+		}{
+			pushSubscribeBody: validSubscribeBody("https://push.example.com/sub/x"),
+			Padding:           strings.Repeat("x", 9<<10),
+		}
 		rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, oversized)
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("oversized body: status = %d %s, want 400", rr.Code, rr.Body.String())
@@ -344,12 +355,20 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("rows for the endpoint = %d, want 1", n)
 	}
-	var after string
-	if err := database.QueryRowContext(ctx, `SELECT last_seen_at FROM push_subscriptions WHERE id = ?`, first.ID).Scan(&after); err != nil {
+	var afterRaw string
+	if err := database.QueryRowContext(ctx, `SELECT last_seen_at FROM push_subscriptions WHERE id = ?`, first.ID).Scan(&afterRaw); err != nil {
 		t.Fatal(err)
 	}
-	if after < before {
-		t.Errorf("last_seen_at after refresh = %q, before = %q; want it to advance", after, before)
+	beforeTime, err := time.Parse("2006-01-02 15:04:05", before)
+	if err != nil {
+		t.Fatalf("parsing before %q: %v", before, err)
+	}
+	afterTime, err := time.Parse("2006-01-02 15:04:05", afterRaw)
+	if err != nil {
+		t.Fatalf("parsing after %q: %v", afterRaw, err)
+	}
+	if !afterTime.After(beforeTime) {
+		t.Errorf("last_seen_at after refresh = %q, before (backdated) = %q; want it strictly later", afterRaw, before)
 	}
 }
 

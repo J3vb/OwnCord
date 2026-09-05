@@ -1408,8 +1408,8 @@ credential.
 ```
 
 There is no user id in the body — the row's owner is always the
-authenticated session's. `endpoint` must be an `https://` URL with a host, at
-most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
+authenticated session's. `endpoint` must be an `https://` URL with a host, no
+embedded credentials, at most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
 to a 65-byte uncompressed P-256 point (`0x04` prefix); `auth` must decode to
 16 bytes. `device_name` is at most 64 runes and must not contain control
 characters. A user may hold at most 10 subscriptions; the 11th evicts the

@@ -364,9 +364,7 @@ upload:
 # Web Push subscription storage. Storage only -- nothing is dispatched yet.
 push:
   enabled: false
-  subscription_ttl_days:
-    90 # a subscription not refreshed in this many days
-    # is removed by the maintenance sweep
+  subscription_ttl_days: 90 # unrefreshed rows swept after this many days
 
 voice:
   livekit_api_key: "your-api-key"

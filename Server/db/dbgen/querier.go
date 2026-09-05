@@ -295,11 +295,12 @@ type Querier interface {
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
-	// Backs the per-user device cap (service.maxPushSubscriptionsPerUser,
-	// DB.TrimPushSubscriptions): the caller keeps the first `keep` ids and
-	// deletes the rest. A self-referencing DELETE...WHERE id NOT IN (SELECT
-	// ... FROM the same table) reads as an ambiguous column reference to
-	// sqlc's analyzer, so the ranking and the delete are two statements.
+	// Backs the per-user device cap (service.maxPushSubscriptionsPerUser),
+	// inside DB.UpsertPushSubscription's transaction: the caller keeps the
+	// first `keep` ids and deletes the rest. A self-referencing DELETE...WHERE
+	// id NOT IN (SELECT ... FROM the same table) reads as an ambiguous column
+	// reference to sqlc's analyzer, so the ranking and the delete are two
+	// statements rather than one.
 	ListPushSubscriptionIDsNewestFirst(ctx context.Context, userID int64) ([]int64, error)
 	// Scoped to the running VAPID key: a row whose key id does not match is a
 	// subscription the server can no longer sign for, so it is invisible here

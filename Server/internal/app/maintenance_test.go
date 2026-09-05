@@ -144,11 +144,15 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 // TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation mirrors the
 // restart shape TestMaintenance_TickReturnsBytesTheOrphanSweepFreed proves
 // for storage: a fresh process — a new *maintenance over the same database,
-// with the newly-loaded (rotated) VAPID key installed — running exactly the
-// call loop() makes before the first ticker fires
-// (m.sweepPushSubscriptions) removes rows a rotation orphaned even though
-// they are not stale by time. This is what makes a rotation take effect on
-// the very next boot rather than the next 15-minute tick.
+// with the newly-loaded (rotated) VAPID key installed — running the real
+// loop() start-up sequence (not just calling sweepPushSubscriptions
+// directly, which would stay green even if loop() stopped calling it)
+// removes rows a rotation orphaned even though they are not stale by time.
+// This is what makes a rotation take effect on the very next boot rather
+// than the next 15-minute tick. stopMaintenance is pre-closed so loop()
+// runs its start-up work (resumeErasure, recountStorage,
+// sweepPushSubscriptions) and returns at the select without waiting for a
+// ticker.
 func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
@@ -172,15 +176,17 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	svc.Push.SetVAPIDKey(priv)
 
 	m := newMaintenance(slog.Default(), cfg, database, svc)
-	if err := m.sweepPushSubscriptions(ctx); err != nil {
-		t.Fatalf("sweepPushSubscriptions: %v", err)
-	}
+	stopMaintenance := make(chan struct{})
+	close(stopMaintenance)
+	maintenanceDone := make(chan struct{})
+	m.loop(ctx, stopMaintenance, maintenanceDone)
+	<-maintenanceDone
 
 	var n int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
-		t.Fatalf("push_subscriptions after the start-up sweep = %d, want 0 (the row was under a rotated-away key)", n)
+		t.Fatalf("push_subscriptions after loop()'s start-up sweep = %d, want 0 (the row was under a rotated-away key)", n)
 	}
 }

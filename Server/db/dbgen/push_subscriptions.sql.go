@@ -41,11 +41,12 @@ const listPushSubscriptionIDsNewestFirst = `-- name: ListPushSubscriptionIDsNewe
 SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY last_seen_at DESC, id DESC
 `
 
-// Backs the per-user device cap (service.maxPushSubscriptionsPerUser,
-// DB.TrimPushSubscriptions): the caller keeps the first `keep` ids and
-// deletes the rest. A self-referencing DELETE...WHERE id NOT IN (SELECT
-// ... FROM the same table) reads as an ambiguous column reference to
-// sqlc's analyzer, so the ranking and the delete are two statements.
+// Backs the per-user device cap (service.maxPushSubscriptionsPerUser),
+// inside DB.UpsertPushSubscription's transaction: the caller keeps the
+// first `keep` ids and deletes the rest. A self-referencing DELETE...WHERE
+// id NOT IN (SELECT ... FROM the same table) reads as an ambiguous column
+// reference to sqlc's analyzer, so the ranking and the delete are two
+// statements rather than one.
 func (q *Queries) ListPushSubscriptionIDsNewestFirst(ctx context.Context, userID int64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listPushSubscriptionIDsNewestFirst, userID)
 	if err != nil {

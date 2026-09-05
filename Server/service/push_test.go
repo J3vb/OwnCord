@@ -39,12 +39,14 @@ func TestPushSweep_UsesTheConfiguredWindow(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1})
 	svc := NewPushService(database)
-	svc.SetSubscriptionTTL(90 * 24 * time.Hour)
+	// 30 days, not the 90-day compiled default: a sweep that ignored the
+	// configured TTL and fell back to the default would still pass at 90.
+	svc.SetSubscriptionTTL(30 * 24 * time.Hour)
 	svc.SetVAPIDKey(genTestVAPIDKey(t))
 	_, keyID, _ := svc.PublicKey()
 
-	seedPushRow(t, database, 1, "https://push.example/old", keyID, time.Now().Add(-91*24*time.Hour))
-	seedPushRow(t, database, 1, "https://push.example/new", keyID, time.Now().Add(-89*24*time.Hour))
+	seedPushRow(t, database, 1, "https://push.example/old", keyID, time.Now().Add(-31*24*time.Hour))
+	seedPushRow(t, database, 1, "https://push.example/new", keyID, time.Now().Add(-29*24*time.Hour))
 
 	n, err := svc.Sweep(context.Background())
 	if err != nil {

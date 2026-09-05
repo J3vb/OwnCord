@@ -26,8 +26,28 @@ type PushSubscription struct {
 // client keeps a subscription alive with no dispatch failure to prompt it
 // (there is none yet; dispatch is B5-11). keyID is the VAPID key it was
 // created under (service.PushService.PublicKey's key_id).
-func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string) (int64, error) {
-	id, err := d.q.UpsertPushSubscription(ctx, dbgen.UpsertPushSubscriptionParams{
+//
+// The upsert, the eviction ranking and the eviction delete run inside ONE
+// writer transaction: three separate statements would let a concurrent
+// refresh revive a row an interleaved trim had already chosen to evict, and
+// a cancellation after the upsert but before the trim would leave more than
+// keep rows in place. keep is the per-user device cap
+// (service.maxPushSubscriptionsPerUser); the newest keep rows by
+// last_seen_at (ties broken by id) survive.
+func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("UpsertPushSubscription begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	q := d.q.WithTx(tx)
+
+	id, err := q.UpsertPushSubscription(ctx, dbgen.UpsertPushSubscriptionParams{
 		UserID:     userID,
 		Endpoint:   endpoint,
 		P256dh:     p256dh,
@@ -38,7 +58,35 @@ func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint,
 	if err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription: %w", err)
 	}
+
+	if keep < 0 {
+		keep = 0
+	}
+	ids, err := q.ListPushSubscriptionIDsNewestFirst(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("UpsertPushSubscription trim list: %w", err)
+	}
+	for _, evictID := range idsPastKeep(ids, keep) {
+		if _, err := q.DeletePushSubscription(ctx, dbgen.DeletePushSubscriptionParams{ID: evictID, UserID: userID}); err != nil {
+			return 0, fmt.Errorf("UpsertPushSubscription trim delete %d: %w", evictID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("UpsertPushSubscription commit: %w", err)
+	}
+	committed = true
 	return id, nil
+}
+
+// idsPastKeep returns the ids to evict: everything past the first keep
+// entries of ids, which ListPushSubscriptionIDsNewestFirst already orders
+// newest first.
+func idsPastKeep(ids []int64, keep int) []int64 {
+	if len(ids) <= keep {
+		return nil
+	}
+	return ids[keep:]
 }
 
 // ListPushSubscriptions lists userID's subscriptions under the currently
@@ -76,30 +124,6 @@ func (d *DB) DeletePushSubscription(ctx context.Context, userID, id int64) (bool
 		return false, fmt.Errorf("DeletePushSubscription: %w", err)
 	}
 	return n > 0, nil
-}
-
-// TrimPushSubscriptions enforces the per-user device cap
-// (service.maxPushSubscriptionsPerUser): keeps the newest keep rows by
-// last_seen_at (ties broken by id), evicting the rest. The ranking and the
-// delete are two statements — see ListPushSubscriptionIDsNewestFirst's
-// comment for why a single self-referencing DELETE does not sqlc-generate.
-func (d *DB) TrimPushSubscriptions(ctx context.Context, userID int64, keep int) error {
-	ids, err := d.q.ListPushSubscriptionIDsNewestFirst(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("TrimPushSubscriptions list: %w", err)
-	}
-	if keep < 0 {
-		keep = 0
-	}
-	if len(ids) <= keep {
-		return nil
-	}
-	for _, id := range ids[keep:] {
-		if _, err := d.q.DeletePushSubscription(ctx, dbgen.DeletePushSubscriptionParams{ID: id, UserID: userID}); err != nil {
-			return fmt.Errorf("TrimPushSubscriptions delete %d: %w", id, err)
-		}
-	}
-	return nil
 }
 
 // SweepPushSubscriptions deletes every subscription past cutoff and, when
