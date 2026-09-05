@@ -193,8 +193,10 @@ suppression above a server-side concern and not only a rendering choice.
 
 ## S2 — External content retrieval
 
+The per-path inventory is [rich-content-inventory.md](rich-content-inventory.md).
+
 **Built by:** B5-1 (`Server/safefetch`, **landed** `af473ff4`) and B5-5
-(inventory, not started), both in front of HP-5; the desktop half is B7. **Register rows:** SEC-03 (P1, confirmed),
+(inventory, **landed**), both in front of HP-5; the desktop half is B7. **Register rows:** SEC-03 (P1, confirmed),
 BG-19 (B5/B9). **Decisions:** 1 (phase split), 2 (per-fetch policy only), 3
 (previews stay client-fetched).
 
