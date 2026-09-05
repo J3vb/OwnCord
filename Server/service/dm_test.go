@@ -127,11 +127,19 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 	}
 }
 
-// S-03: RenameGroupDM is the only user-side writer of channels.name, and its
-// bound (MaxGroupDMNameLen, via cleanTextBounded) must count runes like the
-// admin writer's (TestChannelMeta_NameCountsRunesNotBytes) does, not bytes.
-// 100 two-byte runes is 200 bytes: legal by the contract, illegal by a
-// byte-counting one.
+// S-03: the group-DM create (CreateGroupDM -> CreateGroupDMChannel,
+// db/dm_queries.go:292) and rename (RenameGroupDM -> SetDMChannelName) paths
+// are the two user-side writers of channels.name, and their shared bound
+// (MaxGroupDMNameLen, via cleanTextBounded) must count runes like the admin
+// writer's (TestChannelMeta_NameCountsRunesNotBytes) does, not bytes.
+//
+// 100 two-byte runes is 200 bytes: legal by a rune-counting contract, and
+// also legal by a hypothetical 200-byte-counting one, so that case alone
+// cannot tell the two apart — nor can pairing it with 101 runes (202 bytes,
+// illegal either way). The 101-plain-ASCII-character case closes that gap:
+// 101 runes/bytes must be illegal under a 100-rune cap but would be legal
+// under a 200-byte cap, so this test is self-contained proof of a rune cap,
+// not just consistent with one.
 func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
@@ -156,6 +164,14 @@ func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	name101 := strings.Repeat("é", 101)
 	if _, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name101); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("RenameGroupDM with a 101-rune name: err = %v, want ErrBadRequest", err)
+	}
+
+	// 101 plain ASCII characters is 101 bytes AND 101 runes — illegal under a
+	// 100-rune cap, but would be legal under a 200-byte cap, distinguishing
+	// this test's cap from a byte-counting one that happens to agree above.
+	name101ASCII := strings.Repeat("a", 101)
+	if _, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name101ASCII); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with 101 ASCII characters: err = %v, want ErrBadRequest", err)
 	}
 }
 

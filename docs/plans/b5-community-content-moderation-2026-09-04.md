@@ -1325,53 +1325,75 @@ server owns exactly one attacker-influenced content path, the GIF proxy,
 already behind `Server/safefetch` since B5-1. **The third was stale:** the
 S-03 contract this step was to write already exists — B3-8 shipped
 `service.cleanChannelMeta` / `cleanChannelField` for the admin writers and
-`cleanTextBounded` with `MaxGroupDMNameLen` for the group-DM rename, the only
-user-side writer of `channels.name` (`SetDMChannelName`; a third query,
-`UpdateChannel`, has zero production callers), with
-`admin/s03_contract_test.go`, `TestChannelMeta_NameCountsRunesNotBytes` and
-`TestChannelMeta_SharesTheGroupDMNameCap` already pinning it. So (c) became
+`cleanTextBounded` with `MaxGroupDMNameLen` for the group-DM create and rename
+paths, the two user-side writers of `channels.name` (`CreateGroupDM` →
+`CreateGroupDMChannel`, `db/dm_queries.go:292`; `RenameGroupDM` →
+`SetDMChannelName`; a third query, `UpdateChannel`, has zero production
+callers), with `admin/s03_contract_test.go`, `TestChannelMeta_NameCountsRunesNotBytes`
+and `TestChannelMeta_SharesTheGroupDMNameCap` already pinning it. So (c) became
 verify-and-pin: every writer was re-read, and the one boundary nobody had
 tested — that the group-DM path counts runes — got
-`TestS03_GroupDMNameCountsRunesNotBytes` (100 × `é` accepted, 101 refused
-with `ErrBadRequest`). S-03's register row closes in B5-12 on that evidence.
+`TestS03_GroupDMNameCountsRunesNotBytes` (100 × `é` accepted, 101 refused with
+`ErrBadRequest`, plus 101 plain ASCII characters refused too — the third case
+is what makes the test prove a rune cap rather than merely stay consistent
+with a 200-byte one). S-03's register row closes in B5-12 on that evidence.
 
 - **The inventory.** `docs/architecture/rich-content-inventory.md`, indexed
   from `docs/architecture/README.md` and pointed at from the top of
-  `community-services.md` S2. Eleven rows, fifteen columns (starts-from,
+  `community-services.md` S2. Fourteen rows, fifteen columns (starts-from,
   fetched-by, destination, address policy, redirects, size, time, type,
   concurrency, cache, offline/failure, boundary owner, consent gate,
   evidence), every cell read from code with `file:line`, none `unknown`. What
   it makes visible that prose had not: an inline external image in a message
-  body is a bare `img.src` with **no** check of any kind before the webview
-  dials it; the Open Graph fetch buffers the whole body before its 50 000-
-  character slice; none of `attachments.ts`'s three sub-paths (image,
-  video/audio, download) has a byte or time bound, and the image sub-path
-  feeds a durable IndexedDB cache the app never evicts (S2-f); the
-  external-image `tauriFetch` fallback is reachable today only through an
-  absolute avatar URL; the GIF picker gates its results on a `klipy.com` host
-  but a GIF already in a sent message renders as any other inline image. The
-  two operator binary downloaders and the local desktop notification are
-  rows too, marked not-rich-content, so nobody re-asks. The ownership table
-  assigns every gap: B5-1 done, B5-5 this document, B5-7 consent, B7 the
-  broker (C-09 clauses 1, 7, 8 plus decision 2's aggregate budgets), B8 the
-  browser build, and **BPR-061's client journeys recorded as owed by B9, not
-  claimed here.**
+  body reaches a bare `img.src` past only an http(s)-scheme check
+  (`isSafeUrl`, `media.ts:543`) — no destination or address validation, at
+  the call site or inside `renderInlineImage` itself; the Open Graph fetch
+  buffers the whole body before its 50 000-character slice, and its own
+  rendered preview image is gated by the same hostname-string check as the
+  preview fetch; none of `attachments.ts`'s three sub-paths (image,
+  video/audio, download) carries a TypeScript-level request timeout, though
+  the native Rust proxy underneath still bounds TCP connect and the TLS
+  handshake at 10 s each and the data-copy phase at 600 s
+  (`http_proxy.rs:373,376,458,479`); the image sub-path feeds a durable
+  IndexedDB cache the app never evicts (S2-f), and its in-memory Map, the
+  video/audio blob-URL map and the YouTube title cache all evict in insertion
+  order rather than on last use (no cache in this document is actually LRU);
+  the OG cache clears only through a manual Settings action
+  (`AdvancedTab.ts:344`), unlike the attachment caches, which also clear on
+  page teardown (`MainPage.ts:961`); the external-image `tauriFetch`
+  fallback is reachable today only through an absolute avatar URL, and its
+  response Content-Type is still relabelled through `sanitizeContentType`
+  before use, not sniffed or rejected; the GIF picker gates its results on a
+  `klipy.com` host but a GIF already in a sent message renders as any other
+  inline image; and YouTube's thumbnail image and its clicked iframe embed
+  both load a fixed Google/YouTube host with the video ID validated against
+  `YOUTUBE_ID_RE` first. The two operator binary downloaders and the local
+  desktop notification are rows too, marked not-rich-content, so nobody
+  re-asks. The ownership table assigns every gap: B5-1 done, B5-5 this
+  document, B5-7 consent, B7 the broker (C-09 clauses 1, 7, 8 plus decision
+  2's aggregate budgets), B8 the browser build, and **BPR-061's client
+  journeys recorded as owed by B9, not claimed here.**
 - **GIF polish, one behaviour change.** `safefetch` bounds and type-checks
   the envelope the upstream sends, not the URLs nested in its JSON — and
   those are exactly what the client fetches next, unproxied. `validGIFResultURL`
   now drops any result whose `tinygif.url` or `gif.url` does not parse, is
   not `https`, has no host, or carries userinfo — the result, not the
-  response (`TestGIFResultURLsAreHTTPSWithoutCredentials`: four in, one out).
+  response (`TestGIFResultURLsAreHTTPSWithoutCredentials`: five in, one out,
+  including a port-with-no-host `https://:443/...` case that checking `u.Host`
+  alone would have missed — it must be `u.Hostname()`).
   Offline behaviour was already right and is now pinned:
-  `TestGIFOfflineUpstreamIsBadGatewayWithoutLeak` points the **production**
-  Fetcher at `https://gif-upstream.invalid` and asserts a generic `502` with
-  no upstream host, no resolver text and no API key in the body, answered
-  well inside the deadline (measured 20–30 ms). The `text/plain` entry in the
+  `TestGIFOfflineUpstreamIsBadGatewayWithoutLeak` stubs the GIF Fetcher's
+  `safefetch.Policy.Resolve` seam (`SetGIFResolveForTest`, every other
+  ceiling identical to production) to fail deterministically rather than
+  resolving a real `.invalid` name — a DNS-impaired runner can retry a live
+  query for several seconds and flake a real-DNS version of this assertion —
+  and asserts a generic `502` with no upstream host, no resolver text and no
+  API key in the body, well inside the 10 s deadline. The `text/plain` entry in the
   content-type allowlist is there for a recorded reason — `http.DetectContentType`
   reports `text/plain` for every textual format including JSON, so the
   sniffed half of the check needs it — and was left alone; the inventory
   cites the comment.
-- **Revert-proof.** Removing the URL filter turns its test red (`results = 4,
+- **Revert-proof.** Removing the URL filter turns its test red (`results = 5,
 want 1`); setting `MaxGroupDMNameLen` to 101 turns
   `TestChannelMeta_SharesTheGroupDMNameCap` red. Both restored, both green.
 - **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the

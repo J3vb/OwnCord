@@ -184,7 +184,10 @@ func validGIFResultURL(raw string) bool {
 	if err != nil {
 		return false
 	}
-	return u.Scheme == "https" && u.Host != "" && u.User == nil
+	// Hostname(), not Host: "https://:443/a.gif" parses with Host == ":443"
+	// (non-empty) but Hostname() == "" — a port with no host is not a
+	// destination.
+	return u.Scheme == "https" && u.Hostname() != "" && u.User == nil
 }
 
 // fetchGIFs performs the upstream request and returns the allowlisted results.
