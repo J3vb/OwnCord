@@ -42,6 +42,16 @@ requires to survive the subject's erasure. `target_id` on
 and do cascade, because those two classes are the ones B5 has decided to
 delete outright rather than unlink.
 
+## Deviations recorded as the steps are built
+
+- **048 (B5-8)** carries one statement the draft did not: the new permission bit
+  `MODERATE_MEMBERS` (bit 22, `0x400000`) granted to the default Moderator role,
+  because the report queue is the first consumer of the bit and B5-8 lands
+  before B5-9. The bit's four-file edit (permissions, admin panel grid, client
+  enum, schema bit map) lands in B5-8 as well.
+- **049 (B5-9)** adds `CHECK (actor_id > 0)` on `moderation_actions`, so a row
+  with no human actor cannot be written — half of workstream 10's absence proof.
+
 ## When each `down` file moves
 
 `Server/rollback/` is the applied set once a migration lands: one reversal
