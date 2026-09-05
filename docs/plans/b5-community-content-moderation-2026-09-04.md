@@ -1635,7 +1635,7 @@ Each amendment is dated, carries the owner's ruling, and goes in this step's
 PR — not silently into a later one.
 
 **Evidence, 2026-09-05** — branch `docs/b5-12-register-roadmap` from `dev`
-`123b07d8`; PR to `dev` #TBD.
+`123b07d8`; PR to `dev` #1546.
 
 - **The five `OC-*` rows.** Before: each carried only its original acceptance
   criteria, with nothing in the row itself showing rule 2 was already
