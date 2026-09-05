@@ -127,7 +127,7 @@ func TestUploadAuthorize_UnlinkedIsPrivateToItsUploader(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 2})
 	if err := uploads.Record(context.Background(), AttachmentRecord{
 		ID: "priv", UploaderID: 1, Filename: "f.png", MimeType: "image/png", Size: 3,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	aa, err := uploads.Resolve(context.Background(), "priv")
@@ -293,7 +293,7 @@ func TestUploadRecord_WritesAnUnlinkedRowOwnedByItsUploader(t *testing.T) {
 	if err := uploads.Record(context.Background(), AttachmentRecord{
 		ID: "rec", UploaderID: 7, Filename: "shot.png", MimeType: "image/png",
 		Size: 99, Width: &w, Height: &h,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 

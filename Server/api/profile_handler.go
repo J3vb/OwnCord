@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -719,30 +720,9 @@ func handleUploadAvatar(
 			return
 		}
 
-		fileID := uuid.New().String()
-		written, saveErr := store.Save(fileID, bytes.NewReader(raw))
-		if saveErr != nil {
-			writeStorageSaveError(w, saveErr, "avatar upload")
-			return
-		}
-
 		filename := sanitizeUploadFilename(header.Filename)
-		if err := svc.Uploads.Record(r.Context(), service.AttachmentRecord{
-			ID:         fileID,
-			UploaderID: user.ID,
-			Filename:   filename,
-			MimeType:   mimeType,
-			Size:       written,
-			Width:      &width,
-			Height:     &height,
-		}); err != nil {
-			if delErr := store.Delete(fileID); delErr != nil {
-				slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
-			}
-			slog.Error("failed to create avatar attachment record", "error", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error: "INTERNAL_ERROR", Message: "failed to save avatar",
-			})
+		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, filename, raw, mimeType, width, height)
+		if !ok {
 			return
 		}
 
@@ -784,6 +764,48 @@ func handleUploadAvatar(
 			Height:   &height,
 		})
 	}
+}
+
+// avatarStoreAndRecord is the store-and-row stage of handleUploadAvatar:
+// admit the bytes (B5-2 — an avatar is an attachment and counts against its
+// uploader's quota), write them, and record the row that commits the charge.
+// It writes its own error response and reports ok=false. Split out to keep
+// the handler under the funlen limit; the steps and their order are
+// unchanged from before the reservation existed.
+func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *service.Services, store FileStore, userID int64, filename string, raw []byte, mimeType string, width, height int) (string, int64, bool) {
+	res, err := svc.Uploads.Reserve(ctx, userID, int64(len(raw)))
+	if err != nil {
+		writeStorageSaveError(w, err, "avatar upload")
+		return "", 0, false
+	}
+	defer res.Settle(ctx)
+
+	fileID := uuid.New().String()
+	written, saveErr := saveReserved(ctx, res, store, fileID, bytes.NewReader(raw))
+	if saveErr != nil {
+		writeStorageSaveError(w, saveErr, "avatar upload")
+		return "", 0, false
+	}
+
+	if err := svc.Uploads.Record(ctx, service.AttachmentRecord{
+		ID:         fileID,
+		UploaderID: userID,
+		Filename:   filename,
+		MimeType:   mimeType,
+		Size:       written,
+		Width:      &width,
+		Height:     &height,
+	}, res); err != nil {
+		if delErr := store.Delete(fileID); delErr != nil {
+			slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
+		}
+		slog.Error("failed to create avatar attachment record", "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error: "INTERNAL_ERROR", Message: "failed to save avatar",
+		})
+		return "", 0, false
+	}
+	return fileID, written, true
 }
 
 // avatarUploadReadImage is the bytes stage of handleUploadAvatar: read the

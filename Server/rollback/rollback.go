@@ -1,5 +1,5 @@
 // Package rollback holds the hand-run reversal of every migration in
-// Server/migrations that the B4 phase added, and the order to run them in.
+// Server/migrations that the B4 phase added and every one since, and the order to run them in.
 //
 // Migrations here are forward-only: the server applies them and never
 // un-applies them, so a rollback is an operator action rather than a server
@@ -40,6 +40,7 @@ var FS embed.FS
 
 // Order is every migration reversal, newest first — the order to run them in.
 var Order = []string{
+	"044_user_storage.down.sql",
 	"043_setup_completed.down.sql",
 	"042_audit_actor_token_backfill.down.sql",
 	"041_audit_actor_token.down.sql",

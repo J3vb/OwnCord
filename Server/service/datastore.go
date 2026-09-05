@@ -275,6 +275,15 @@ type Store interface {
 	// avatar check backs the "public exactly while in use" half.
 	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
 	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
+	// The per-user upload byte counter (migration 044, B5-2): charged before
+	// a store write, released on a failed one, recounted from the rows on
+	// the maintenance tick. See UploadService.Reserve.
+	ChargeUserStorage(ctx context.Context, userID, bytes, quota int64) (bool, error)
+	ReleaseUserStorage(ctx context.Context, userID, bytes int64) error
+	UserStorageUsed(ctx context.Context, userID int64) (int64, error)
+	ListUserStorageIDs(ctx context.Context) ([]int64, error)
+	RecountUserStorage(ctx context.Context, userID int64) error
+	TotalAttachmentBytes(ctx context.Context) (int64, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

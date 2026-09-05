@@ -33,6 +33,7 @@ the server automatically when a startup-only value changed. Note that
 | `server.port`                          | int      | `8443`             | HTTP(S) listen port                                                                                                                                                                                                                                                                                                                                                                                 |
 | `server.name`                          | string   | `"OwnCord Server"` | Server display name (shown in `/api/v1/info` and admin panel)                                                                                                                                                                                                                                                                                                                                       |
 | `server.data_dir`                      | string   | `"data"`           | Directory for database, certs, uploads, backups                                                                                                                                                                                                                                                                                                                                                     |
+| `server.min_free_disk_mb`              | int      | `256`              | Reserved headroom, in MiB, on the volumes the server writes to — the one definition of "low disk": below it the start-up banner logs an error, `/health` reports `degraded`/`disk`, and uploads (attachments, avatars, emoji) are refused with `507 STORAGE_LOW_DISK`. `0` disables the floor. A negative value falls back to the default with a warning rather than turning the floor off.         |
 | `server.max_ws_connections`            | int      | `0`                | Cap on concurrently connected WebSocket clients; further upgrades get 503 until connections free up. `0` = unlimited. Every connection costs goroutines and buffered send queues — set a ceiling that matches the host's memory before opening the server to a large community.                                                                                                                     |
 | `server.metrics_allowed_cidrs`         | []string | `[]`               | Separate allowlist for `/api/v1/metrics` and the Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                                        |
 | `server.livekit_webhook_allowed_cidrs` | []string | `[]`               | Separate allowlist for the LiveKit webhook/health endpoints (which also authenticate cryptographically) — an externally-hosted LiveKit's IP goes here, not in the admin allowlist. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                     |
@@ -78,10 +79,11 @@ the server automatically when a startup-only value changed. Note that
 
 ### Uploads (`upload`)
 
-| Key                  | Type   | Default          | Description                               |
-| -------------------- | ------ | ---------------- | ----------------------------------------- |
-| `upload.max_size_mb` | int    | `100`            | Maximum file upload size in megabytes     |
-| `upload.storage_dir` | string | `"data/uploads"` | Directory where uploaded files are stored |
+| Key                    | Type   | Default          | Description                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `upload.max_size_mb`   | int    | `100`            | Maximum file upload size in megabytes                                                                                                                                                                                                                                                                                                                |
+| `upload.storage_dir`   | string | `"data/uploads"` | Directory where uploaded files are stored                                                                                                                                                                                                                                                                                                            |
+| `upload.user_quota_mb` | int    | `0`              | Total bytes one user may hold in upload storage — attachments, avatars and emoji alike, counted where the bytes are written. `0` = unlimited (the default, so no existing install changes on upgrade). An upload that would cross the quota is refused with `507 STORAGE_QUOTA_EXCEEDED`. A negative value falls back to the default with a warning. |
 
 ### Voice / LiveKit (`voice`)
 
@@ -184,7 +186,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 58 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 60 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -218,6 +220,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `server.livekit_webhook_allowed_cidrs`      | Server (`server`)                       |
 | `server.max_ws_connections`                 | Server (`server`)                       |
 | `server.metrics_allowed_cidrs`              | Server (`server`)                       |
+| `server.min_free_disk_mb`                   | Server (`server`)                       |
 | `server.name`                               | Server (`server`)                       |
 | `server.port`                               | Server (`server`)                       |
 | `server.restart_mode`                       | Server (`server`)                       |
@@ -237,6 +240,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `tls.mode`                                  | TLS (`tls`)                             |
 | `upload.max_size_mb`                        | Uploads (`upload`)                      |
 | `upload.storage_dir`                        | Uploads (`upload`)                      |
+| `upload.user_quota_mb`                      | Uploads (`upload`)                      |
 | `voice.advertise_internal_ip`               | Voice / LiveKit (`voice`)               |
 | `voice.auto_download_livekit`               | Voice / LiveKit (`voice`)               |
 | `voice.livekit_api_key`                     | Voice / LiveKit (`voice`)               |
@@ -262,6 +266,7 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_SERVER_PORT`                       | `server.port`                       |
 | `OWNCORD_SERVER_NAME`                       | `server.name`                       |
 | `OWNCORD_SERVER_DATA_DIR`                   | `server.data_dir`                   |
+| `OWNCORD_SERVER_MIN_FREE_DISK_MB`           | `server.min_free_disk_mb`           |
 | `OWNCORD_SERVER_RESTART_MODE`               | `server.restart_mode`               |
 | `OWNCORD_DATABASE_PATH`                     | `database.path`                     |
 | `OWNCORD_TLS_MODE`                          | `tls.mode`                          |
@@ -269,6 +274,7 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_TLS_DOMAIN`                        | `tls.domain`                        |
 | `OWNCORD_UPLOAD_MAX_SIZE_MB`                | `upload.max_size_mb`                |
 | `OWNCORD_UPLOAD_STORAGE_DIR`                | `upload.storage_dir`                |
+| `OWNCORD_UPLOAD_USER_QUOTA_MB`              | `upload.user_quota_mb`              |
 | `OWNCORD_VOICE_LIVEKIT_API_KEY`             | `voice.livekit_api_key`             |
 | `OWNCORD_VOICE_LIVEKIT_API_SECRET`          | `voice.livekit_api_secret`          |
 | `OWNCORD_VOICE_LIVEKIT_URL`                 | `voice.livekit_url`                 |
@@ -299,6 +305,7 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
+  min_free_disk_mb: 256 # reserved headroom; banner, /health and uploads share it
   allowed_origins: [] # empty = deny all cross-origin; set to ["*"] to allow any
   trusted_proxies: [] # e.g. ["10.0.0.0/8"] if behind a reverse proxy
   admin_allowed_cidrs:
@@ -322,6 +329,7 @@ tls:
 upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
+  user_quota_mb: 0 # per-user total in MiB; 0 = unlimited
 
 voice:
   livekit_api_key: "your-api-key"

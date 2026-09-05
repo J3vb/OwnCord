@@ -306,6 +306,7 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 		freeDiskBytes: func() (uint64, error) {
 			return diskutil.FreeBytes(cfg.Server.DataDir)
 		},
+		minFreeDiskBytes: cfg.Server.MinFreeDiskBytes(),
 	}
 }
 
@@ -390,9 +391,22 @@ func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter 
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
+		configureStorageLimits(uploads, cfg)
 		MountUploadRoutes(r, sessions, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
 	return store, storeErr
+}
+
+// configureStorageLimits installs B5-2's two bounds on the upload service:
+// the per-user quota (upload.user_quota_mb, 0 = unlimited) and the headroom
+// floor (server.min_free_disk_mb) probed on the upload volume, which may not
+// be the data volume /health watches.
+func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) {
+	uploads.SetStorageLimits(service.StorageLimits{
+		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
+		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
+		Dir:            cfg.Upload.StorageDir,
+	})
 }
 
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
@@ -453,6 +467,8 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			DBStats:        func() sql.DBStats { return database.SQLDb().Stats() },
 			PermCache:      svc.Permissions.CacheStats,
 			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
+			DiskMinFree:    cfg.Server.MinFreeDiskBytes(),
+			UploadBytes:    database.TotalAttachmentBytes,
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
@@ -485,6 +501,12 @@ type healthDeps struct {
 	dbPing        func(context.Context) error
 	dispatchAlive func() bool
 	freeDiskBytes func() (uint64, error)
+	// minFreeDiskBytes is the free-space floor under which health reports
+	// degraded: server.min_free_disk_mb, the same number the start-up banner
+	// and the upload path use (B5-2, decision 11). SQLite WAL growth,
+	// uploads, and backups all share the data volume, so running dry
+	// corrupts more than one thing at once. 0 disables the check.
+	minFreeDiskBytes uint64
 }
 
 const (
@@ -495,10 +517,6 @@ const (
 	// healthDBPingTimeout bounds the SELECT 1 so a wedged writer degrades the
 	// health report instead of hanging it.
 	healthDBPingTimeout = 1 * time.Second
-	// healthMinFreeDiskBytes is the free-space floor under which health
-	// reports degraded. SQLite WAL growth, uploads, and backups all share the
-	// data volume, so running dry corrupts more than one thing at once.
-	healthMinFreeDiskBytes = 256 << 20 // 256 MiB
 )
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
@@ -561,8 +579,8 @@ func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason strin
 			return "degraded", "database"
 		}
 	}
-	if deps.freeDiskBytes != nil {
-		if free, err := deps.freeDiskBytes(); err == nil && free < healthMinFreeDiskBytes {
+	if deps.freeDiskBytes != nil && deps.minFreeDiskBytes > 0 {
+		if free, err := deps.freeDiskBytes(); err == nil && free < deps.minFreeDiskBytes {
 			return "degraded", "disk"
 		}
 	}

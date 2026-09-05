@@ -23,6 +23,9 @@ import (
 type UploadService struct {
 	st    Store
 	perms *PermissionService
+	// quota is the per-user byte counter's in-process half (B5-2); see
+	// storage_quota.go.
+	quota storageQuota
 }
 
 // NewUploadService creates an UploadService.
@@ -53,13 +56,23 @@ type AttachmentRecord struct {
 // (message_id NULL) until a message claims it, which is what makes it private
 // to its uploader in the meantime (see Authorize).
 //
+// res is the reservation the bytes were written under (B5-2). The row insert
+// and the reservation's commit share one critical section, so a recount can
+// never see the file both in the rows and in flight and double-count it;
+// on failure the reservation is left for the caller's Settle to release.
+//
 // A failure here leaves the caller holding orphaned bytes; every caller
 // deletes them from its store before reporting the error, because nothing
 // else will — the orphan sweep only reclaims rows, and there is no row.
-func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord) error {
+func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord, res *StorageReservation) error {
+	s.quota.mu.Lock()
+	defer s.quota.mu.Unlock()
 	if err := s.st.CreateAttachment(ctx, rec.ID, rec.UploaderID, rec.Filename,
 		rec.ID, rec.MimeType, rec.Size, rec.Width, rec.Height); err != nil {
 		return fmt.Errorf("%w: failed to save attachment: %w", ErrInternal, err)
+	}
+	if res != nil {
+		res.commitLocked()
 	}
 	return nil
 }

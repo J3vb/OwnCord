@@ -24,6 +24,14 @@ type Querier interface {
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
+	// The quota guard and the increment are one statement, so exactly one of
+	// N concurrent uploads racing the last byte is admitted: SQLite serialises
+	// writers and the WHERE is evaluated against the row the UPDATE sees.
+	// Rows affected = admitted.
+	ChargeUserStorage(ctx context.Context, arg ChargeUserStorageParams) (int64, error)
+	// The unlimited-quota form: the counter is maintained whether or not a
+	// quota is set, so turning one on later starts from a live number.
+	ChargeUserStorageUnbounded(ctx context.Context, arg ChargeUserStorageUnboundedParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
 	CleanupExpiredPartialAuthChallenges(ctx context.Context, expiresAt string) error
 	CleanupExpiredPendingTOTPEnrollments(ctx context.Context, expiresAt string) error
@@ -143,6 +151,10 @@ type Querier interface {
 	// Mirror of EnableCameraIfUnderLimit: the count excludes the requester's
 	// own screenshare flag so re-enable is idempotent at the cap (OC-0081).
 	EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error)
+	// user_storage is the per-user upload byte counter (migration 044, B5-2).
+	// Keep this file ASCII-only: sqlc v1.30 truncates the next query by the
+	// byte/rune difference of any multi-byte character.
+	EnsureUserStorage(ctx context.Context, userID int64) error
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
 	// The 1:1 DM channel between two users, if one exists. Mirrors the lookup
 	// inside GetOrCreateDMChannel (raw, transactional) without creating anything:
@@ -232,6 +244,7 @@ type Querier interface {
 	// list rather than one per channel, and the Go layer stitches them together.
 	GetUserDMChannels(ctx context.Context, userID int64) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
+	GetUserStorage(ctx context.Context, userID int64) (int64, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
 	// Erasure jobs (migration 037, B4-9): the durable file half of an account
@@ -293,6 +306,7 @@ type Querier interface {
 	ListUnusedRecoveryCodes(ctx context.Context, userID int64) ([]ListUnusedRecoveryCodesRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
+	ListUserStorageIDs(ctx context.Context) ([]int64, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
 	LogAudit(ctx context.Context, arg LogAuditParams) error
 	LogAuditEntry(ctx context.Context, arg LogAuditEntryParams) error
@@ -325,6 +339,14 @@ type Querier interface {
 	PluginKVSet(ctx context.Context, arg PluginKVSetParams) error
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
 	RecordErasureJobAttempt(ctx context.Context, arg RecordErasureJobAttemptParams) error
+	// The truth: every counted byte this user holds in the store has an
+	// attachments row that names it (avatars are attachments). Emoji are a
+	// bounded exclusion, see migration 044.
+	RecountUserStorage(ctx context.Context, userID int64) error
+	// MAX(0, ...) rather than a bare subtraction: a recount may already have
+	// lowered the row below the charge being released, and the CHECK
+	// constraint would otherwise turn the release into an error.
+	ReleaseUserStorage(ctx context.Context, arg ReleaseUserStorageParams) error
 	RemoveDMParticipant(ctx context.Context, arg RemoveDMParticipantParams) error
 	RemoveReaction(ctx context.Context, arg RemoveReactionParams) (sql.Result, error)
 	// Startup reset: nothing is connected yet, so every 'online' is a leftover
@@ -341,6 +363,10 @@ type Querier interface {
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
+	// The operator's storage figure on the metrics surface: every attachments
+	// row, legacy rows with a NULL uploader_id included, so it is a total and
+	// not a sum of counters.
+	TotalAttachmentBytes(ctx context.Context) (int64, error)
 	TouchAPIToken(ctx context.Context, tokenHash string) error
 	TouchSession(ctx context.Context, token string) error
 	UnbanUser(ctx context.Context, id int64) error

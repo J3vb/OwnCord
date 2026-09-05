@@ -25,6 +25,7 @@ type maintenance struct {
 	settings  *service.SettingsService
 	erasure   *service.ErasureService
 	retention *service.RetentionService
+	uploads   *service.UploadService
 }
 
 // maintenanceStep is one sweep: name is the warning logged when run fails.
@@ -39,7 +40,7 @@ type maintenanceStep struct {
 func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
 	m := &maintenance{log: log, database: database}
 	if svc != nil {
-		m.settings, m.erasure, m.retention = svc.Settings, svc.Erasure, svc.Retention
+		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -91,6 +92,12 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	if err := m.resumeErasure(bgCtx); err != nil {
 		m.log.Warn("erasure jobs still pending", "error", err)
 	}
+	// Storage counters charged by a process that died between the charge
+	// and the write are settled now, so a restart is a repair point rather
+	// than fifteen minutes of a user seeing a phantom charge (B5-2).
+	if err := m.recountStorage(bgCtx); err != nil {
+		m.log.Warn("storage recount failed", "error", err)
+	}
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -129,6 +136,10 @@ func (m *maintenance) steps() []maintenanceStep {
 		{"retention sweep failed", m.sweepRetention},
 		{"erasure jobs still pending", m.resumeErasure},
 		{"storage reconciliation failed", m.reconcileFiles},
+		// Last on purpose: every sweep above that deletes attachment rows
+		// (orphans, retention, erasure) has run, so this tick's recount
+		// already returns the bytes they freed.
+		{"storage recount failed", m.recountStorage},
 	}
 }
 
@@ -239,6 +250,19 @@ func (m *maintenance) reconcileFiles(ctx context.Context) error {
 		m.log.Info("storage reconciliation removed stranded files", "count", removed)
 	}
 	return nil
+}
+
+// recountStorage sets every per-user upload byte counter to the rows that
+// name the user's files plus what is still in flight (B5-2). It is the
+// reconciliation decision 11 puts on the maintenance sweep: the counter is a
+// cache of the rows, and this is where erasure, retention and the orphan
+// sweep return bytes.
+func (m *maintenance) recountStorage(ctx context.Context) error {
+	if m.uploads == nil {
+		return nil
+	}
+	_, err := m.uploads.RecountStorage(ctx)
+	return err
 }
 
 // reconcileFilesPerTick bounds how many stranded files one maintenance tick

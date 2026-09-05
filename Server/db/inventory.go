@@ -41,6 +41,7 @@ var SubjectInventory = []InventoryClass{
 	{"10 reactions", `SELECT COUNT(*) FROM reactions WHERE user_id = ?`, inventoryByUID},
 	{"11 read states", `SELECT COUNT(*) FROM read_states WHERE user_id = ?`, inventoryByUID},
 	{"12 attachment rows uploaded", `SELECT COUNT(*) FROM attachments WHERE uploader_id = ?`, inventoryByUID},
+	{"12a upload byte counter", `SELECT COUNT(*) FROM user_storage WHERE user_id = ?`, inventoryByUID},
 	{"14a dm participation", `SELECT COUNT(*) FROM dm_participants WHERE user_id = ?`, inventoryByUID},
 	{"14b dm open state", `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ?`, inventoryByUID},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},

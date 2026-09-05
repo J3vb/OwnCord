@@ -68,24 +68,25 @@ func wsURL(httpScheme, ip string, port int) string {
 	return ws + "://" + net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
-// Free-space thresholds for the boot-time disk warning. /health uses its own
-// (lower) continuous threshold; these only shape startup log noise.
-const (
-	diskWarnBytes     = 1 << 30   // 1 GiB — warn
-	diskCriticalBytes = 256 << 20 // 256 MiB — error
-)
+// diskWarnBytes is the boot-time "getting low" tier; it only shapes startup
+// log noise. The critical tier is server.min_free_disk_mb — the same floor
+// /health degrades at and the upload path refuses at (B5-2, decision 11), so
+// the three can never disagree about what "low disk" means.
+const diskWarnBytes = 1 << 30 // 1 GiB — warn
 
-// warnLowDisk logs when the volume holding path is low on space. Probe
-// failures (unsupported platform, missing dir) are silent — unknown ≠ full.
-func warnLowDisk(log *slog.Logger, label, path string) {
+// warnLowDisk logs when the volume holding path is low on space: an error
+// below critical (the configured floor; 0 disables that tier), a warning
+// below diskWarnBytes. Probe failures (unsupported platform, missing dir)
+// are silent — unknown ≠ full.
+func warnLowDisk(log *slog.Logger, label, path string, critical uint64) {
 	free, err := diskutil.FreeBytes(path)
 	if err != nil {
 		return
 	}
 	switch {
-	case free < diskCriticalBytes:
+	case critical > 0 && free < critical:
 		log.Error("disk space critically low — writes will start failing soon",
-			"volume", label, "path", path, "free_mb", free>>20)
+			"volume", label, "path", path, "free_mb", free>>20, "min_free_mb", critical>>20)
 	case free < diskWarnBytes:
 		log.Warn("disk space low", "volume", label, "path", path, "free_mb", free>>20)
 	}

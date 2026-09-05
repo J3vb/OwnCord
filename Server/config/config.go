@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -183,7 +184,13 @@ type ServerConfig struct {
 	// proving it after; Server/api/browser_hosting_posture_test.go is that
 	// proof.
 	BrowserClientEnabled bool `koanf:"browser_client_enabled"`
-	WAFParanoiaLevel     int  `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
+	// MinFreeDiskMB is the one definition of "low disk" (B5-2, plan decision
+	// 11): the reserved headroom, in MiB, below which the start-up banner
+	// logs an error, /health reports degraded and the upload path refuses
+	// with 507. Default 256. 0 disables the floor. Three call sites, one
+	// number, so they can never disagree about what "low" means.
+	MinFreeDiskMB    int `koanf:"min_free_disk_mb"`
+	WAFParanoiaLevel int `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
 	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
 	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
@@ -280,6 +287,23 @@ type TLSConfig struct {
 type UploadConfig struct {
 	MaxSizeMB  int    `koanf:"max_size_mb"`
 	StorageDir string `koanf:"storage_dir"`
+	// UserQuotaMB caps the total bytes one user may hold in upload storage —
+	// attachments, avatars and emoji alike, counted where the bytes are
+	// written (B5-2, plan decision 11). 0, the default, is unlimited, so no
+	// existing install changes behaviour on upgrade.
+	UserQuotaMB int `koanf:"user_quota_mb"`
+}
+
+// UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
+func (u UploadConfig) UserQuotaBytes() int64 { return int64(u.UserQuotaMB) << 20 }
+
+// MinFreeDiskBytes is the reserved-headroom floor in bytes; 0 means no floor.
+// applyBounds keeps the MiB value in [0, MaxInt64>>20], so the shift fits.
+func (s ServerConfig) MinFreeDiskBytes() uint64 {
+	if s.MinFreeDiskMB <= 0 {
+		return 0
+	}
+	return uint64(s.MinFreeDiskMB) << 20
 }
 
 // BackupConfig controls where database backups are written. Pointing Dir at
@@ -325,8 +349,9 @@ func defaults() Config {
 				"192.168.0.0/16", // private class C
 				"fc00::/7",       // IPv6 unique local
 			},
-			WAFCRSMode:  "detect",
-			RestartMode: "auto",
+			WAFCRSMode:    "detect",
+			RestartMode:   "auto",
+			MinFreeDiskMB: 256,
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -391,6 +416,9 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
+  # min_free_disk_mb: 256     # reserved headroom on the volumes the server writes to:
+  #                           # below it the banner errors, /health reports degraded
+  #                           # and uploads are refused with 507. 0 disables the floor.
   # allowed_origins: []       # browser origins allowed to connect; empty = deny cross-origin.
   #                           # The OwnCord desktop client is always accepted and needs no entry.
   # trusted_proxies: []       # CIDRs of the reverse-proxy HOPS only (e.g. ["10.0.0.2/32"]).
@@ -435,6 +463,8 @@ tls:
 upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
+  # user_quota_mb: 0          # total bytes one user may hold in upload storage
+  #                           # (attachments, avatars and emoji); 0 = unlimited
 
 voice:
   # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
@@ -570,6 +600,7 @@ func Load(cfgPath string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
+	applyBounds(&cfg)
 
 	// Apply voice defaults for zero-value fields (koanf loses defaults when
 	// the YAML section is present but fields are commented out / omitted).
@@ -682,6 +713,59 @@ func generateRandomKey(byteLen int) (string, error) {
 		return "", fmt.Errorf("crypto/rand: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// boundedKey is one integer key with a legal range. Out-of-range values are
+// clamped to the nearest bound and warned about, never rejected: Load is
+// warn-only by design (a warning must not brick a working install), and a
+// clamped value is the nearest thing to what the operator wrote.
+type boundedKey struct {
+	key      string
+	ptr      *int
+	min, max int
+	// def is what a value BELOW min becomes: the compiled default, not the
+	// minimum. A negative headroom clamped to 0 would silently turn the
+	// floor off, which fails open; falling back to the default fails safe,
+	// and an operator who wants the floor off writes 0 explicitly.
+	def int
+	// meaning names what the fallback stands for, so the warning says what
+	// happened to the operator's intent ("0 means unlimited").
+	meaning string
+}
+
+// boundedKeys is the one place a bounded configuration key states its range
+// (B5-2). A new integer key with a range adds a row here — not a clamp in the
+// package that consumes it — so the checks stay together and every warning
+// reads the same. Bounds are on the MiB values as written; the byte helpers
+// (UserQuotaBytes, MinFreeDiskBytes) shift by 20, and maxMiB keeps that shift
+// inside int64.
+func boundedKeys(cfg *Config) []boundedKey {
+	const maxMiB = math.MaxInt64 >> 20
+	def := defaults()
+	return []boundedKey{
+		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
+		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
+	}
+}
+
+// applyBounds brings every bounded key into its range, warning by key name:
+// below the minimum falls back to the default, above the maximum clamps.
+func applyBounds(cfg *Config) {
+	for _, b := range boundedKeys(cfg) {
+		v := *b.ptr
+		fixed := v
+		switch {
+		case v < b.min:
+			fixed = b.def
+		case v > b.max:
+			fixed = b.max
+		}
+		if fixed == v {
+			continue
+		}
+		slog.Warn("config: value out of range", "key", b.key, "value", v, "using", fixed, "note", b.meaning)
+		*b.ptr = fixed
+	}
 }
 
 // applyVoiceDefaults fills in zero-value voice fields with sensible defaults.

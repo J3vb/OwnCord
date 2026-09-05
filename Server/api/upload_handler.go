@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -129,6 +130,25 @@ func safeStorageErrorMessage(err error) string {
 // 400. Detail never crosses the HTTP boundary either way (path leakage —
 // see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
+	// B5-2: the two bounds refuse with 507 and their own codes, so a client
+	// can tell "your quota is full" from "the server is out of disk" from a
+	// filesystem failure; none of the three bodies carries a path.
+	if errors.Is(saveErr, service.ErrQuotaExceeded) {
+		slog.Info(what+" refused: user storage quota", "error", saveErr)
+		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
+			Error:   "STORAGE_QUOTA_EXCEEDED",
+			Message: "upload rejected: your storage quota is full",
+		})
+		return
+	}
+	if errors.Is(saveErr, service.ErrLowDisk) {
+		slog.Warn(what+" refused: server storage below its reserved headroom", "error", saveErr)
+		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
+			Error:   "STORAGE_LOW_DISK",
+			Message: "upload rejected: the server is low on disk space",
+		})
+		return
+	}
 	if errors.Is(saveErr, storage.ErrIO) {
 		slog.Error(what+" failed: server storage error", "error", saveErr)
 		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
@@ -166,15 +186,29 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		user, ok := r.Context().Value(UserKey).(*db.User)
-		if ok && user != nil {
-			uploadKey := auth.Key("upload", user.ID)
-			if !limiter.Allow(uploadKey, uploadRateLimitPerMinute, time.Minute) {
-				writeJSON(w, http.StatusTooManyRequests, errorResponse{
-					Error:   "RATE_LIMITED",
-					Message: "upload rate limit exceeded, try again later",
-				})
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "not authenticated",
+			})
+			return
+		}
+		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
+		if !limiter.Allow(auth.Key("upload", user.ID), uploadRateLimitPerMinute, time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "upload rate limit exceeded, try again later",
+			})
+			return
+		}
+
+		// B5-2: the multipart parser below spools a large body to disk
+		// before any reservation could run, so the headroom floor is checked
+		// against the declared length first. A chunked body (-1) is unknown
+		// here; the per-file reservation still gates the store write itself.
+		if r.ContentLength > 0 {
+			if err := uploads.CheckHeadroom(r.ContentLength); err != nil {
+				writeStorageSaveError(w, err, "file upload")
 				return
 			}
 		}
@@ -201,13 +235,24 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer file.Close() //nolint:errcheck
 
-		stored, ok := uploadStoreFile(w, file, store)
+		// B5-2: admit the bytes before writing them. header.Size is the part
+		// length the parser measured, never a client-declared number. The
+		// deferred Settle returns the charge on every path that does not
+		// reach Record, a panic included.
+		res, err := uploads.Reserve(r.Context(), user.ID, header.Size)
+		if err != nil {
+			writeStorageSaveError(w, err, "file upload")
+			return
+		}
+		defer res.Settle(r.Context())
+
+		stored, ok := uploadStoreFile(r.Context(), w, file, res, store)
 		if !ok {
 			return
 		}
 
-		// Record the attachment (unlinked — message_id is NULL).
-		user, _ = r.Context().Value(UserKey).(*db.User)
+		// Record the attachment (unlinked — message_id is NULL) and commit
+		// the reservation under the same lock.
 		safeFilename := sanitizeUploadFilename(header.Filename)
 		if err := uploads.Record(r.Context(), service.AttachmentRecord{
 			ID:         stored.id,
@@ -217,9 +262,11 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			Size:       stored.size,
 			Width:      stored.width,
 			Height:     stored.height,
-		}); err != nil {
-			// Clean up stored file on DB failure.
-			_ = store.Delete(stored.id)
+		}, res); err != nil {
+			// Clean up stored file on DB failure; Settle returns the charge.
+			if delErr := store.Delete(stored.id); delErr != nil {
+				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
+			}
 			slog.Error("failed to create attachment record", "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -320,11 +367,11 @@ type storedUpload struct {
 }
 
 // uploadStoreFile is the bytes stage of handleUpload: sniff the type, write the
-// file through the store, and measure it if it is an image. It writes its own
-// error response and reports ok=false, so the caller only has to return.
-// Split out of handleUpload to keep that handler under the funlen limit; the
-// steps and their order are unchanged.
-func uploadStoreFile(w http.ResponseWriter, file multipart.File, store FileStore) (storedUpload, bool) {
+// file through the store under its reservation, and measure it if it is an
+// image. It writes its own error response and reports ok=false, so the caller
+// only has to return. Split out of handleUpload to keep that handler under
+// the funlen limit; the steps and their order are unchanged.
+func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file multipart.File, res *service.StorageReservation, store FileStore) (storedUpload, bool) {
 	// Generate UUID for storage.
 	fileID := uuid.New().String()
 
@@ -349,7 +396,7 @@ func uploadStoreFile(w http.ResponseWriter, file multipart.File, store FileStore
 	}
 
 	// Store file on disk (validates file type via magic bytes).
-	writtenBytes, saveErr := store.Save(fileID, file)
+	writtenBytes, saveErr := saveReserved(ctx, res, store, fileID, file)
 	if saveErr != nil {
 		writeStorageSaveError(w, saveErr, "file upload")
 		return storedUpload{}, false
