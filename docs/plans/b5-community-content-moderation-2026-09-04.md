@@ -1634,6 +1634,61 @@ meet:
 Each amendment is dated, carries the owner's ruling, and goes in this step's
 PR — not silently into a later one.
 
+**Evidence, 2026-09-05** — branch `docs/b5-12-register-roadmap` from `dev`
+`123b07d8`; PR to `dev` #TBD.
+
+- **The five `OC-*` rows.** Before: each carried only its original acceptance
+  criteria, with nothing in the row itself showing rule 2 was already
+  satisfied. Now: each cell opens `**Fixed** — ledger `fixed`, closed by
+<step> (#pr, `sha`), test <fix.test>.`, ledger fields verbatim. OC-0323 and
+  OC-0357 share `fix.commit` `074aea0`, confirmed inside PR #1483's commit
+  list, squashed to `dev` as B3-8's `4585d52c`. OC-0327, OC-0349 and OC-0351
+  all share `fix.commit` `0c610f61`; `git log --grep` alone found it only for
+  OC-0351 (`#1530`), but `gh pr view 1530 --json commits` lists `0c610f61` in
+  its commit set, so all three close there, squashed as `1edd777f` — resolving
+  the plan's "check #1436/#1471" note: neither PR's commit list actually
+  contains it. The ledger's `fix.test` for those three is the placeholder
+  string "per-group tests added alongside each fix; see the commit", so their
+  rows cite the PR instead: "tests: the per-finding tests in #1530 (the ledger
+  records no path)".
+- **SEC-02.** Before: closure text cited "B5 item 11" (SEC-03's item, not
+  SEC-02's). Now: text names B2-5 (#1440) for the landed server half and
+  re-tags the UI remainder to B9 (Moderation Center, BPR-071's client half,
+  "no B5 step touches client UI"); Phase `B5` → `B9`, State unchanged.
+- **SEC-03.** Before: Phase `B5`, one closure line. Now: Phase `B5/B7`; the
+  closure line splits per decisions 1 and 2 — server boundary closed by B5-1
+  (#1541, `Server/safefetch`), aggregate cross-caller budgets, cache eviction
+  and the desktop broker (C-09 clauses 1, 7, 8) deferred to B7.
+  `docs/trust-model.md`'s C-09 `Status:` line gets the matching
+  cross-reference appended so it names the same split back.
+- **SEC-04.** Before: Phase `B3/B6`. Now: Phase `B3/B5` per decision 12;
+  closure text records B5-2 (#1543, `123b07d8`) as closing the server half and
+  flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`.
+- **BG-18 / BG-19.** Before: Phase `B5/B9`, plain exit evidence. Now: each row
+  prepends its own decision-14 split sentence — BG-18 names B5-7 as its server
+  half and exit condition 3; BG-19 names B5-1 + B5-5 (#1541, #1544) and exit
+  condition 2 — both keeping B9 as the client half and the owner's HP-5
+  acceptance.
+- **S-03.** Before: State `confirmed`. Now: State `resolved`; closure text
+  names B3-8's shared rune contract and the group-DM writer B5-5 pins
+  (`#1544`, open, `TestS03_GroupDMNameCountsRunesNotBytes`).
+- **BG-01.** Before: only the generic exit-evidence cell. Now: prepends B5-3's
+  landed posture (#1542, `5c7a0f4a`) and leaves the B8 build/smoke half named.
+- **BG-05.** Before: only the generic exit-evidence cell. Now: prepends the
+  planned B5-4 storage landing; its PR number is written `#TBD-B5-4`, filled
+  when B5-4's PR number exists.
+- **Roadmap amendments.** Workstream 2 reworded to point at a new item 12
+  (inventory plus the server path — `rich-content-inventory.md`, B5-5; the GIF
+  proxy, B5-1); item 11 gets an amendment pointing at the one place the
+  server/B7 split now lives; exit conditions 2 and 3 are both narrowed to
+  server-side paths with the identical HP-5-acceptance caveat, matching
+  decision 14's "one standard" requirement.
+
+**Not included:** no `.superpowers/findings-ledger.json` row was touched — the
+ledger stays the sole authority for `OC-*` status, and this step only records
+what it and `git`/`gh` already say. No production code changed. SEC-04's
+advisory ID remains the owner's to fill at the B5 exit.
+
 ## Exit gate
 
 The roadmap's seven conditions, plus the phase execution pattern's rule 2.
