@@ -26,6 +26,7 @@ type maintenance struct {
 	erasure   *service.ErasureService
 	retention *service.RetentionService
 	uploads   *service.UploadService
+	push      *service.PushService
 }
 
 // maintenanceStep is one sweep: name is the warning logged when run fails.
@@ -41,6 +42,7 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	m := &maintenance{log: log, database: database}
 	if svc != nil {
 		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
+		m.push = svc.Push
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -98,6 +100,13 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	if err := m.recountStorage(bgCtx); err != nil {
 		m.log.Warn("storage recount failed", "error", err)
 	}
+	// A VAPID key rotation takes effect on the first boot with the new key,
+	// not fifteen minutes later (B5-4): rows the rotation orphaned stop
+	// being listed the instant the new key is installed, but the sweep is
+	// what actually removes them.
+	if err := m.sweepPushSubscriptions(bgCtx); err != nil {
+		m.log.Warn("push subscription sweep failed", "error", err)
+	}
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -131,6 +140,7 @@ func (m *maintenance) steps() []maintenanceStep {
 	return []maintenanceStep{
 		{"failed to delete expired sessions", m.sweepSessions},
 		{"failed to clean up expired second-factor state", m.sweepSecondFactor},
+		{"push subscription sweep failed", m.sweepPushSubscriptions},
 		{"backup maintenance failed", m.maintainBackups},
 		{"failed to delete orphaned attachments", m.sweepOrphans},
 		{"retention sweep failed", m.sweepRetention},
@@ -163,6 +173,18 @@ func (m *maintenance) sweepSessions(ctx context.Context) error {
 // spent TOTP codes (migration 032) — the persisted second-factor state's sweep.
 func (m *maintenance) sweepSecondFactor(ctx context.Context) error {
 	return m.database.CleanupExpiredSecondFactorState(ctx)
+}
+
+// sweepPushSubscriptions removes stale Web Push subscriptions and every
+// subscription a VAPID key rotation orphaned (B5-4, decisions 2 and 5). Nil
+// push means no service layer at all (a partial wiring in tests); a no-op
+// tick is the point, not a failure.
+func (m *maintenance) sweepPushSubscriptions(ctx context.Context) error {
+	if m.push == nil {
+		return nil
+	}
+	_, err := m.push.Sweep(ctx)
+	return err
 }
 
 // maintainBackups runs scheduled backups and retention pruning, driven by the

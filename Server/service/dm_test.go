@@ -127,6 +127,54 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 	}
 }
 
+// S-03: the group-DM create (CreateGroupDM -> CreateGroupDMChannel,
+// db/dm_queries.go:292) and rename (RenameGroupDM -> SetDMChannelName) paths
+// are the two user-side writers of channels.name, and their shared bound
+// (MaxGroupDMNameLen, via cleanTextBounded) must count runes like the admin
+// writer's (TestChannelMeta_NameCountsRunesNotBytes) does, not bytes.
+//
+// 100 two-byte runes is 200 bytes: legal by a rune-counting contract, and
+// also legal by a hypothetical 200-byte-counting one, so that case alone
+// cannot tell the two apart — nor can pairing it with 101 runes (202 bytes,
+// illegal either way). The 101-plain-ASCII-character case closes that gap:
+// 101 runes/bytes must be illegal under a 100-rune cap but would be legal
+// under a 200-byte cap, so this test is self-contained proof of a rune cap,
+// not just consistent with one.
+func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	svc := NewDMService(database)
+
+	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
+	if err != nil {
+		t.Fatalf("setup CreateGroupDM: %v", err)
+	}
+
+	name100 := strings.Repeat("é", 100)
+	ch, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name100)
+	if err != nil {
+		t.Fatalf("RenameGroupDM with a 100-rune multibyte name: %v", err)
+	}
+	if ch.Name != name100 {
+		t.Fatalf("name mangled: %q", ch.Name)
+	}
+
+	name101 := strings.Repeat("é", 101)
+	if _, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name101); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with a 101-rune name: err = %v, want ErrBadRequest", err)
+	}
+
+	// 101 plain ASCII characters is 101 bytes AND 101 runes — illegal under a
+	// 100-rune cap, but would be legal under a 200-byte cap, distinguishing
+	// this test's cap from a byte-counting one that happens to agree above.
+	name101ASCII := strings.Repeat("a", 101)
+	if _, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name101ASCII); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with 101 ASCII characters: err = %v, want ErrBadRequest", err)
+	}
+}
+
 // cancelAfterCreateGroupDMStore wraps a real *db.DB and cancels a context the
 // instant CreateGroupDMChannel returns successfully — simulating a client
 // disconnect that lands exactly in the gap between the channel's commit and

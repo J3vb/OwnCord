@@ -122,6 +122,34 @@ func SetGIFBaseURLForTest(baseURL string) func() {
 	return func() { gifAPIBase = prev }
 }
 
+// SetGIFResolveForTest swaps only the GIF Fetcher's Resolve seam, keeping
+// every ceiling — scheme, port, deadline, byte limits, content types,
+// concurrency — identical to production, and gifAPIBase untouched (a request
+// whose Resolve fails never dials, so there is no need of a stub upstream
+// URL). For tests that want a deterministic resolve failure without touching
+// real DNS, which a DNS-impaired runner can retry for several seconds.
+// Nothing outside a _test.go file may set safefetch.Policy.Resolve;
+// TestProductionPolicyShape (safefetch/seams_test.go) enforces that.
+func SetGIFResolveForTest(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) (func(), error) {
+	stub, err := safefetch.New(safefetch.Policy{
+		Schemes:              []string{"https"},
+		Ports:                []int{443},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         0,
+		Deadline:             gifUpstreamTimeout,
+		MaxBytes:             gifMaxResponseBytes,
+		MaxDecompressedBytes: gifMaxResponseBytes,
+		MaxConcurrent:        gifMaxConcurrentUpstream,
+		Resolve:              resolve,
+	})
+	if err != nil {
+		return nil, err
+	}
+	prev := gifFetcher
+	gifFetcher = stub
+	return func() { gifFetcher = prev }, nil
+}
+
 // SecurityHeaders is SecurityHeadersWithTLS with TLS disabled (no HSTS).
 // Test-only convenience — production always goes through SecurityHeadersWithTLS.
 func SecurityHeaders(next http.Handler) http.Handler {

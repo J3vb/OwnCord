@@ -577,6 +577,34 @@ func TestLoadBrowserClientHostingDisabledByDefault(t *testing.T) {
 	}
 }
 
+// TestLoadPushDisabledByDefault pins B5-4's owner gate: a fresh install
+// stores no Web Push subscriptions until the owner opts in, modelled on
+// TestLoadBrowserClientHostingDisabledByDefault.
+func TestLoadPushDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Push.Enabled {
+		t.Error("push.enabled is true on a fresh install; Web Push must be owner opt-in")
+	}
+	if cfg.Push.SubscriptionTTLDays != 90 {
+		t.Errorf("push.subscription_ttl_days = %d, want 90", cfg.Push.SubscriptionTTLDays)
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if strings.TrimSpace(line) == "push:" {
+			t.Error("the shipped template sets the push: section live — keep it commented so the compiled default wins")
+		}
+	}
+}
+
 // ─── B5-2: the two bounded storage keys and the applyBounds seam ───────────
 
 // TestLoadStorageBoundsDefaults pins the compiled defaults through a fresh
@@ -626,6 +654,25 @@ func TestLoadStorageBoundsEnvOverride(t *testing.T) {
 	}
 }
 
+// TestLoadPushEnvOverride proves OWNCORD_PUSH_ENABLED and
+// OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS reach config.Push — run, not read
+// (server-configuration.md documents both; this is what verifies the claim).
+func TestLoadPushEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_PUSH_ENABLED", "true")
+	t.Setenv("OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS", "30")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Push.Enabled {
+		t.Error("push.enabled = false, want true from OWNCORD_PUSH_ENABLED")
+	}
+	if cfg.Push.SubscriptionTTLDays != 30 {
+		t.Errorf("push.subscription_ttl_days = %d, want 30 from the environment", cfg.Push.SubscriptionTTLDays)
+	}
+}
+
 // TestLoadStorageBoundsAreClamped is the validation seam's contract: an
 // out-of-range value is brought into range and Load still succeeds
 // (warn-only — a bad number must not brick a working install). A negative
@@ -635,7 +682,7 @@ func TestLoadStorageBoundsEnvOverride(t *testing.T) {
 // MaxInt64>>20 lands on that bound so the byte helper cannot overflow.
 func TestLoadStorageBoundsAreClamped(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	yaml := "server:\n  min_free_disk_mb: -5\nupload:\n  user_quota_mb: 9223372036854775807\n"
+	yaml := "server:\n  min_free_disk_mb: -5\nupload:\n  user_quota_mb: 9223372036854775807\npush:\n  subscription_ttl_days: 0\n"
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -645,6 +692,16 @@ func TestLoadStorageBoundsAreClamped(t *testing.T) {
 	}
 	if cfg.Server.MinFreeDiskMB != 256 || cfg.Server.MinFreeDiskBytes() == 0 {
 		t.Errorf("server.min_free_disk_mb = %d after -5, want the default 256 (a negative floor must not fail open)", cfg.Server.MinFreeDiskMB)
+	}
+	if cfg.Push.SubscriptionTTLDays != 90 {
+		t.Errorf("push.subscription_ttl_days = %d after 0 (below the minimum of 1), want the default 90", cfg.Push.SubscriptionTTLDays)
+	}
+	pushHigh := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(pushHigh, []byte("push:\n  subscription_ttl_days: 5000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if high, err := config.Load(pushHigh); err != nil || high.Push.SubscriptionTTLDays != 3650 {
+		t.Errorf("push.subscription_ttl_days after 5000 = %v, %v; want clamped to 3650", high, err)
 	}
 	explicitOff := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(explicitOff, []byte("server:\n  min_free_disk_mb: 0\n"), 0o600); err != nil {

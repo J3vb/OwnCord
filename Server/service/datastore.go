@@ -285,6 +285,15 @@ type Store interface {
 	RecountUserStorage(ctx context.Context, userID int64) error
 	TotalAttachmentBytes(ctx context.Context) (int64, error)
 
+	// ── Push (migration 045, B5-4) ──
+	// UpsertPushSubscription's keep is the per-user device cap; the upsert,
+	// the eviction ranking and the eviction delete run in one transaction.
+	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
+	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
+	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
+	CountPushSubscriptions(ctx context.Context) (int64, error)
+
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)

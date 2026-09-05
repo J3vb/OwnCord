@@ -24,6 +24,7 @@ func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
 	{"2 sessions", `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, inventoryByUID},
+	{"2a push subscriptions", `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, inventoryByUID},
 	{"3 api tokens", `SELECT COUNT(*) FROM api_tokens WHERE user_id = ?`, inventoryByUID},
 	{"4a totp secret", `SELECT COUNT(*) FROM users WHERE id = ? AND totp_secret IS NOT NULL`, inventoryByUID},
 	{"4b second-factor rows", `SELECT (SELECT COUNT(*) FROM partial_auth_challenges WHERE user_id = ?1)
