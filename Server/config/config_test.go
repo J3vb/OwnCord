@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -546,4 +547,32 @@ func TestLoadRestartMode(t *testing.T) {
 			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "spawn")
 		}
 	})
+}
+
+// TestLoadBrowserClientHostingDisabledByDefault pins BG-01's first closure
+// clause at the configuration boundary: a fresh install hosts no browser
+// client unless the owner opts in. Load writes defaultYAML and then loads it
+// back, so this covers the shipped template too — an accidentally
+// uncommented `browser_client_enabled: true` line fails here, which a test
+// that only built defaults() in Go could not see.
+func TestLoadBrowserClientHostingDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Server.BrowserClientEnabled {
+		t.Error("server.browser_client_enabled is true on a fresh install; browser hosting must be owner opt-in (BG-01)")
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "browser_client_enabled:") {
+			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
 }
