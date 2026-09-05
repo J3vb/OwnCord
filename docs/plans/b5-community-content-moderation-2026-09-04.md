@@ -855,9 +855,7 @@ refactor — do it deliberately, in its own commit, so B5-4 and B5-11 inherit a
 clean seam instead of a conflict.
 
 **Evidence, 2026-09-05** — branch `feature/b5-2-upload-quotas` from `dev`
-`5c7a0f4a`; PR to `dev` (number recorded by the follow-up commit), commits
-`f3f7c6f5` (the `maintenanceTick` extraction, on its own) and the feature
-commit after it. Every premise was re-verified at that base before any code
+`5c7a0f4a`; PR to `dev` #1543, commits `f3f7c6f5` (the `maintenanceTick` extraction, on its own) and `63250a15` (the feature). Every premise was re-verified at that base before any code
 was written. The four "present" ones held: `Server/diskutil/` probes real
 free space on every platform; the health floor was `healthMinFreeDiskBytes =
 256 << 20`; `disk_free_mb` was on the metrics surface; the banner warned at
