@@ -127,6 +127,38 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 	}
 }
 
+// S-03: RenameGroupDM is the only user-side writer of channels.name, and its
+// bound (MaxGroupDMNameLen, via cleanTextBounded) must count runes like the
+// admin writer's (TestChannelMeta_NameCountsRunesNotBytes) does, not bytes.
+// 100 two-byte runes is 200 bytes: legal by the contract, illegal by a
+// byte-counting one.
+func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	svc := NewDMService(database)
+
+	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
+	if err != nil {
+		t.Fatalf("setup CreateGroupDM: %v", err)
+	}
+
+	name100 := strings.Repeat("é", 100)
+	ch, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name100)
+	if err != nil {
+		t.Fatalf("RenameGroupDM with a 100-rune multibyte name: %v", err)
+	}
+	if ch.Name != name100 {
+		t.Fatalf("name mangled: %q", ch.Name)
+	}
+
+	name101 := strings.Repeat("é", 101)
+	if _, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name101); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with a 101-rune name: err = %v, want ErrBadRequest", err)
+	}
+}
+
 // cancelAfterCreateGroupDMStore wraps a real *db.DB and cancels a context the
 // instant CreateGroupDMChannel returns successfully — simulating a client
 // disconnect that lands exactly in the gap between the channel's commit and

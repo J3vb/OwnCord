@@ -1316,6 +1316,74 @@ count runes, not bytes.
 before the shared contract and pass after; BPR-061's client journeys are
 recorded as owed by B9 rather than claimed here.
 
+**Evidence, 2026-09-05** — branch `feature/b5-5-rich-content-inventory` from
+`dev` `123b07d8`; PR to `dev` #TBD. All three premises were re-verified at
+that base before anything was written. Two held exactly: the rich-content set
+is client code (`embeds.ts`, `media.ts`, `attachments.ts`, through
+`@tauri-apps/plugin-http` or the webview's own `<img src>` loading), and the
+server owns exactly one attacker-influenced content path, the GIF proxy,
+already behind `Server/safefetch` since B5-1. **The third was stale:** the
+S-03 contract this step was to write already exists — B3-8 shipped
+`service.cleanChannelMeta` / `cleanChannelField` for the admin writers and
+`cleanTextBounded` with `MaxGroupDMNameLen` for the group-DM rename, the only
+user-side writer of `channels.name` (`SetDMChannelName`; a third query,
+`UpdateChannel`, has zero production callers), with
+`admin/s03_contract_test.go`, `TestChannelMeta_NameCountsRunesNotBytes` and
+`TestChannelMeta_SharesTheGroupDMNameCap` already pinning it. So (c) became
+verify-and-pin: every writer was re-read, and the one boundary nobody had
+tested — that the group-DM path counts runes — got
+`TestS03_GroupDMNameCountsRunesNotBytes` (100 × `é` accepted, 101 refused
+with `ErrBadRequest`). S-03's register row closes in B5-12 on that evidence.
+
+- **The inventory.** `docs/architecture/rich-content-inventory.md`, indexed
+  from `docs/architecture/README.md` and pointed at from the top of
+  `community-services.md` S2. Eleven rows, fifteen columns (starts-from,
+  fetched-by, destination, address policy, redirects, size, time, type,
+  concurrency, cache, offline/failure, boundary owner, consent gate,
+  evidence), every cell read from code with `file:line`, none `unknown`. What
+  it makes visible that prose had not: an inline external image in a message
+  body is a bare `img.src` with **no** check of any kind before the webview
+  dials it; the Open Graph fetch buffers the whole body before its 50 000-
+  character slice; none of `attachments.ts`'s three sub-paths (image,
+  video/audio, download) has a byte or time bound, and the image sub-path
+  feeds a durable IndexedDB cache the app never evicts (S2-f); the
+  external-image `tauriFetch` fallback is reachable today only through an
+  absolute avatar URL; the GIF picker gates its results on a `klipy.com` host
+  but a GIF already in a sent message renders as any other inline image. The
+  two operator binary downloaders and the local desktop notification are
+  rows too, marked not-rich-content, so nobody re-asks. The ownership table
+  assigns every gap: B5-1 done, B5-5 this document, B5-7 consent, B7 the
+  broker (C-09 clauses 1, 7, 8 plus decision 2's aggregate budgets), B8 the
+  browser build, and **BPR-061's client journeys recorded as owed by B9, not
+  claimed here.**
+- **GIF polish, one behaviour change.** `safefetch` bounds and type-checks
+  the envelope the upstream sends, not the URLs nested in its JSON — and
+  those are exactly what the client fetches next, unproxied. `validGIFResultURL`
+  now drops any result whose `tinygif.url` or `gif.url` does not parse, is
+  not `https`, has no host, or carries userinfo — the result, not the
+  response (`TestGIFResultURLsAreHTTPSWithoutCredentials`: four in, one out).
+  Offline behaviour was already right and is now pinned:
+  `TestGIFOfflineUpstreamIsBadGatewayWithoutLeak` points the **production**
+  Fetcher at `https://gif-upstream.invalid` and asserts a generic `502` with
+  no upstream host, no resolver text and no API key in the body, answered
+  well inside the deadline (measured 20–30 ms). The `text/plain` entry in the
+  content-type allowlist is there for a recorded reason — `http.DetectContentType`
+  reports `text/plain` for every textual format including JSON, so the
+  sniffed half of the check needs it — and was left alone; the inventory
+  cites the comment.
+- **Revert-proof.** Removing the URL filter turns its test red (`results = 4,
+want 1`); setting `MaxGroupDMNameLen` to 101 turns
+  `TestChannelMeta_SharesTheGroupDMNameCap` red. Both restored, both green.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `gendocs` a no-op (no route, key or migration moved), `check:docs`,
+  `prettier --check` from the repository root.
+
+**Not included, deliberately.** No `Client/` code — every renderer-side row
+was read, not edited; that is B7's. No change to the GIF content-type
+allowlist. No migration, no configuration key, no protocol change, no
+findings-ledger row. The dead `UpdateChannel` query is noted, not removed.
+
 ## HP-5 — Abuse and privacy review
 
 **The owner signs.** Deliverable:
