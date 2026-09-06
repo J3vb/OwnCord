@@ -667,8 +667,8 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 		t.Fatalf("GetModerationAction: %v", err)
 	}
 	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-	if result, _, err := database.DecideAppealTx(ctx, upheldID, "open", 0, "upheld", ownerID, "no",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal); err != nil || result != db.AppealWriteOK {
+	if result, _, _, err := database.DecideAppealTx(ctx, upheldID, "open", 0, "upheld", ownerID, "no",
+		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil); err != nil || result != db.AppealWriteOK {
 		t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 	}
 

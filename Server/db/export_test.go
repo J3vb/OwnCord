@@ -18,3 +18,34 @@ func SetModerationActionPreInsertHookForTest(fn func()) {
 func SetAppealReversalHookForTest(fn func() error) {
 	appealReversalHookForTest = fn
 }
+
+// SetAppealDecidePreBeginTxHookForTest installs (or, with nil, clears) the
+// barrier DecideAppealTx runs immediately before its own BeginTx — round 3's
+// seam for proving the decider's authority is re-read fresh INSIDE the
+// transaction, not trusted from before it began. Exported for db_test;
+// production code never calls this.
+func SetAppealDecidePreBeginTxHookForTest(fn func()) {
+	appealDecidePreBeginTxHook = fn
+}
+
+// SetAppealAssignPreBeginTxHookForTest is AssignAppealTx's twin of
+// SetAppealDecidePreBeginTxHookForTest, for the plain (non-forced) assign
+// path.
+func SetAppealAssignPreBeginTxHookForTest(fn func()) {
+	appealAssignPreBeginTxHook = fn
+}
+
+// SetForceReassignPreBeginTxHookForTest is forceReassignGuarded's twin,
+// shared by reports' and appeals' force-reassign paths.
+func SetForceReassignPreBeginTxHookForTest(fn func()) {
+	forceReassignPreBeginTxHook = fn
+}
+
+// SetAppealInsertPreHookForTest installs (or, with nil, clears) the barrier
+// InsertAppeal runs immediately before its own INSERT — the seam a
+// concurrent-submit contention test uses to force two goroutines to
+// genuinely both reach the write together. Exported for db_test only;
+// production code never calls this.
+func SetAppealInsertPreHookForTest(fn func()) {
+	appealInsertPreHookForTest = fn
+}

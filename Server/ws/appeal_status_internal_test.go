@@ -7,12 +7,14 @@ import (
 	"time"
 )
 
-// TestAppeal_StatusFrameReachesAppellantAndOtherDevices: NotifyAppealStatus
-// is targeted by user id (SendToUserLow, mirroring NotifyModAction) —
-// whichever device is currently registered under that user id receives it,
-// exactly as a reconnect on another device would, and no other connected
-// user does.
-func TestAppeal_StatusFrameReachesAppellantAndOtherDevices(t *testing.T) {
+// TestAppeal_StatusFrameReachesAppellantAndDeviceReplacement: NotifyAppealStatus
+// is targeted by user id (SendToUserLow, mirroring NotifyModAction). The hub
+// registers at most ONE client per user id (h.clients is keyed by user id),
+// so "another device" is not a second simultaneous socket — it is the SAME
+// user id's registration being REPLACED (a reconnect). Whichever socket is
+// CURRENTLY registered receives the frame; the one it replaced gets
+// nothing further, and no other connected user does either.
+func TestAppeal_StatusFrameReachesAppellantAndDeviceReplacement(t *testing.T) {
 	h := newEmitTestHub()
 	appellant := registerEmitTestClient(h, 42, 0)
 	bystander := registerEmitTestClient(h, 99, 0)
@@ -41,9 +43,9 @@ func TestAppeal_StatusFrameReachesAppellantAndOtherDevices(t *testing.T) {
 		t.Fatalf("a different connected user received %d messages, want 0: %v", len(msgs), msgs)
 	}
 
-	// "Other devices": h.clients is keyed by user id, so a second socket for
-	// the SAME appellant (a reconnect on another device) replaces the first
-	// registration, exactly as a real device switch does — the frame must
+	// Device replacement: h.clients is keyed by user id, so registering a
+	// second socket for the SAME appellant REPLACES the first (a reconnect),
+	// rather than adding a second simultaneous recipient — the frame must
 	// reach whichever socket is CURRENTLY registered, and the replaced one
 	// must get nothing further.
 	secondDevice := registerEmitTestClient(h, 42, 0)

@@ -343,13 +343,39 @@ func (d *DB) AssignReport(ctx context.Context, id, assigneeID, observedAssigneeI
 // the actor's fresh position does not outrank the assignee's fresh
 // position — the caller maps that to a 403, distinctly from the 409 the
 // plain conflict gets.
-func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observedAssigneeID int64, doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
+// forceReassignPreBeginTxHook, when non-nil, runs immediately before
+// forceReassignGuarded's BeginTx — the barrier a test uses to promote or
+// demote a principal in the exact gap between the caller's earlier
+// authorization and this transaction's own fresh reads, proving the
+// transaction boundary (not merely "eventually consistent") is what the
+// guard actually depends on. Test-only (nil in production).
+var forceReassignPreBeginTxHook func()
+
+// checkAuthority, when non-nil, is a fresh in-transaction re-check of
+// actorID's own moderation authority (CanModerate bit, effective ban) —
+// P2 review: previously only the target's rank was re-read fresh here, so a
+// bit revoked or a ban landed on the ACTOR between the caller's earlier
+// authorization and this write went uncaught. nil preserves the pre-P2
+// behavior exactly (reports' force-reassign never asked for this).
+func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observedAssigneeID int64,
+	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error,
+	doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
+	if forceReassignPreBeginTxHook != nil {
+		forceReassignPreBeginTxHook()
+	}
 	tx, err := writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("forceReassignGuarded begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
+
+	if checkAuthority != nil {
+		rolePerms, banned, banExpires, ok := deciderAuthority(ctx, tx, actorID)
+		if !ok || checkAuthority(rolePerms, banned, banExpires) != nil {
+			return false, fmt.Errorf("forceReassignGuarded: %w", ErrForbidden)
+		}
+	}
 
 	actorPos, ok := rolePosition(ctx, tx, actorID)
 	if !ok {
@@ -382,7 +408,7 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observed
 // AssignReportForced is the report queue's force-reassign path. See
 // forceReassignGuarded for the shared mechanics.
 func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error) {
-	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, func(q *dbgen.Queries) (int64, error) {
+	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, nil, func(q *dbgen.Queries) (int64, error) {
 		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
 	})
 }

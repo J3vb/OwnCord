@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/db/audittest"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // appealFixture wraps moderationActionsFixture (moderation_actions_test.go)
@@ -104,6 +106,59 @@ func TestAppeal_OnlyTheTargetMaySubmit(t *testing.T) {
 	}
 }
 
+// vanishingActionStore wraps a real Store and deletes actionID's row for
+// real (simulating the target's account erasure cascading it away) the
+// FIRST time GetModerationAction resolves it — placing the vanish exactly
+// between Submit's ownership lookup and its InsertAppeal write.
+type vanishingActionStore struct {
+	Store
+	actionID int64
+	deleted  bool
+}
+
+func (s *vanishingActionStore) GetModerationAction(ctx context.Context, id int64) (*db.ModerationAction, error) {
+	action, err := s.Store.GetModerationAction(ctx, id)
+	if err == nil && id == s.actionID && !s.deleted {
+		s.deleted = true
+		if _, derr := s.Store.(*db.DB).ExecContext(ctx, `DELETE FROM moderation_actions WHERE id = ?`, id); derr != nil {
+			panic(derr) // test setup failure, not a case under test
+		}
+	}
+	return action, err
+}
+
+// TestAppeal_VanishedActionMapsToTheSameNotFoundShapeAsUnknown is N4: an
+// action erased between Submit's ownership lookup and its InsertAppeal
+// write must produce the EXACT SAME refusal (error value, hence the same
+// wire shape) as an action id that never existed — no existence oracle
+// either way, matching TestAppeal_OnlyTheTargetMaySubmit's identical
+// refusal for "not mine".
+func TestAppeal_VanishedActionMapsToTheSameNotFoundShapeAsUnknown(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "be nice", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+
+	vs := &vanishingActionStore{Store: f.database, actionID: actionID}
+	appeals := NewAppealService(vs, f.mod.perms, f.mod, auth.NewRateLimiter())
+
+	_, vanishedErr := appeals.Submit(ctx, fixtureMember, actionID, "please")
+	_, unknownErr := f.appeals.Submit(ctx, fixtureMember, 999999, "please")
+
+	if !errors.Is(vanishedErr, ErrNotFound) {
+		t.Fatalf("Submit against a vanished action: want ErrNotFound, got %v", vanishedErr)
+	}
+	if !errors.Is(unknownErr, ErrNotFound) {
+		t.Fatalf("Submit against an unknown action: want ErrNotFound, got %v", unknownErr)
+	}
+	if vanishedErr.Error() != unknownErr.Error() {
+		t.Fatalf("vanished-action refusal (%q) and unknown-action refusal (%q) differ — an existence oracle", vanishedErr, unknownErr)
+	}
+}
+
 func TestAppeal_OnePerActionEver(t *testing.T) {
 	ctx := context.Background()
 
@@ -144,7 +199,11 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 	// statements, so two real goroutines can both pass the pre-check before
 	// either commits its insert — decision 8's actual race-proof is the
 	// UNIQUE(action_id) constraint InsertAppeal hits, not the pre-check
-	// alone, and this must still leave exactly one 201.
+	// alone, and this must still leave exactly one 201. This is a
+	// scheduler-luck smoke test at the service layer; the barrier-forced
+	// version that guarantees both goroutines are genuinely in flight
+	// together at the INSERT itself (not merely hoping the scheduler
+	// interleaves them) is db.TestAppealQueries_InsertAppealConcurrentBothInFlight.
 	t.Run("concurrent submit", func(t *testing.T) {
 		f := newAppealFixture(t)
 		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
@@ -521,6 +580,52 @@ func TestAppeal_SoleModeratorMayDecideAndAuditSaysSo(t *testing.T) {
 	}
 }
 
+// TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors
+// is item 4: overturning writes TWO audit rows — appeal_decide, actor the
+// human decider (the accountable decision), and the kind-specific reversal
+// (user_untimeout here), actor 0 (a mechanical consequence of the decision,
+// not a second moderation action by that human — the same convention
+// LiftTimeoutByActionID's lifted_by=0 already uses). The reversal row's
+// detail names the appeal's public id; neither row ever carries the appeal
+// body or the decision note.
+func TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	const body = "appeal body sentinel 4-item"
+	const note = "decision note sentinel 4-item"
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, body)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	rec := audittest.Install(t, f.database)
+	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", note); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	decideEntry := rec.Wait(t, "appeal_decide")
+	if decideEntry.ActorID != fixturePeerMod {
+		t.Fatalf("appeal_decide actor = %d, want the human decider %d", decideEntry.ActorID, fixturePeerMod)
+	}
+	reversalEntry := rec.Wait(t, "user_untimeout")
+	if reversalEntry.ActorID != 0 {
+		t.Fatalf("user_untimeout actor = %d, want 0 (a mechanical consequence of the decision)", reversalEntry.ActorID)
+	}
+	if !strings.Contains(reversalEntry.Detail, publicID) {
+		t.Fatalf("user_untimeout detail = %q, want it to name the appeal %q", reversalEntry.Detail, publicID)
+	}
+	for _, e := range rec.Entries() {
+		if strings.Contains(e.Detail, body) || strings.Contains(e.Detail, note) {
+			t.Fatalf("audit %q detail carries the appeal body or note: %q", e.Action, e.Detail)
+		}
+	}
+}
+
 // ── Effects ──────────────────────────────────────────────────────────────
 
 func TestAppeal_OverturnLiftsTimeoutUnbansAcknowledgesWarning(t *testing.T) {
@@ -857,6 +962,110 @@ func TestAppeal_DecideDoesNotNotifyOnFailure(t *testing.T) {
 	}
 	if len(notifier.calls) != 0 {
 		t.Fatalf("appeal_status notify calls = %d, want 0 for a failed Decide", len(notifier.calls))
+	}
+}
+
+// appealOrderRecorder records every notify call's order across BOTH
+// channels (appeal_status and mod_queue) in one shared, lock-protected
+// slice — F4's own test needs the two interleaved to prove one transition's
+// pair never lands between another's.
+type appealOrderRecorder struct {
+	mu     syncutil.Mutex
+	events []string
+}
+
+func (r *appealOrderRecorder) add(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, s)
+}
+
+func (r *appealOrderRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.events...)
+}
+
+type orderedStatusNotifier struct{ rec *appealOrderRecorder }
+
+func (n *orderedStatusNotifier) NotifyAppealStatus(userID int64, publicID, state string, note *string) {
+	n.rec.add("status:" + state)
+}
+
+type orderedQueueBroadcaster struct{ rec *appealOrderRecorder }
+
+func (b *orderedQueueBroadcaster) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
+	b.rec.add("queue:" + state)
+}
+
+// TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder is F4: Assign's
+// write commits, then — before Assign has notified anyone — a concurrent
+// Decide runs to completion (write, audit, both notifies). F4's per-appeal
+// lock must force Decide to wait for Assign's own notify pair before it can
+// even begin its write, so every notify (appeal_status AND mod_queue) lands
+// in commit order: assigned, assigned, overturned, overturned — never a
+// stale "assigned" trailing behind "overturned".
+func TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	rec := &appealOrderRecorder{}
+	f.appeals.SetNotifier(&orderedStatusNotifier{rec: rec})
+	f.appeals.SetQueueBroadcaster(&orderedQueueBroadcaster{rec: rec})
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	appealPostWriteHookForTest = func(pid string) {
+		if pid != publicID {
+			return
+		}
+		once.Do(func() { close(reached) })
+		<-release
+	}
+	defer func() { appealPostWriteHookForTest = nil }()
+
+	assignDone := make(chan error, 1)
+	go func() {
+		assignDone <- f.appeals.Assign(ctx, fixturePeerMod, publicID, false)
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Assign never reached the post-write hook — the barrier never armed")
+	}
+
+	decideDone := make(chan error, 1)
+	go func() {
+		decideDone <- f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine")
+	}()
+	// Best-effort: give Decide's goroutine a moment to actually queue behind
+	// the appeal's own lock before releasing Assign's hook — the correctness
+	// claim holds regardless (the lock, not timing, is what orders them),
+	// this only makes the race more likely to be genuinely in flight.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	if err := <-assignDone; err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if err := <-decideDone; err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	want := []string{"status:assigned", "queue:assigned", "status:overturned", "queue:overturned"}
+	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notify order = %v, want %v", got, want)
 	}
 }
 

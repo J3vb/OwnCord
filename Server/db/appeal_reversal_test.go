@@ -42,8 +42,8 @@ func TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction(t *testing.T) {
 	db.SetAppealReversalHookForTest(func() error { return errors.New("forced reversal failure for test") })
 	defer db.SetAppealReversalHookForTest(nil)
 
-	result, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal)
+	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
+		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
 	if err == nil {
 		t.Fatal("DecideAppealTx with a forced reversal failure: want a non-nil error")
 	}

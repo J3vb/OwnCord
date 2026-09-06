@@ -9,6 +9,32 @@ import (
 	"context"
 )
 
+const appealObservedRowExists = `-- name: AppealObservedRowExists :one
+SELECT EXISTS (
+  SELECT 1 FROM appeals
+   WHERE id = ?1 AND state IN ('open', 'assigned')
+     AND state = ?2 AND assignee_id = ?3
+)
+`
+
+type AppealObservedRowExistsParams struct {
+	ID                 int64  `json:"id"`
+	ObservedState      string `json:"observedState"`
+	ObservedAssigneeID int64  `json:"observedAssigneeId"`
+}
+
+// P3 review: reject a stale/terminal appeal BEFORE running the (possibly
+// expensive) self-review eligibility test below -- the exact row+state+
+// assignee the caller observed, mirroring DecideAppeal's own guard so a
+// decide that is going to fail its guarded UPDATE anyway never pays for the
+// eligibility check first.
+func (q *Queries) AppealObservedRowExists(ctx context.Context, arg AppealObservedRowExistsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, appealObservedRowExists, arg.ID, arg.ObservedState, arg.ObservedAssigneeID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const assignAppeal = `-- name: AssignAppeal :execrows
 UPDATE appeals
    SET assignee_id = ?1, state = 'assigned'
@@ -43,7 +69,7 @@ SELECT COUNT(*) FROM users u
  WHERE u.id != 0
    AND u.id != ?1
    AND u.id != ?2
-   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND u.ban_expires <= datetime('now')))
+   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
    AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0)
 `
 
@@ -54,17 +80,21 @@ type CountUsersWithPermissionParams struct {
 	AdminBit           int64 `json:"adminBit"`
 }
 
-// The eligible-moderator count for decision 8's self-review escape: every
-// OTHER user whose role holds perm_bit or the Administrator bit, excluding
-// the acting moderator, the appellant (F2/F3 review: an appellant who
-// happens to also hold the bit must never count as their own alternative
-// reviewer), id 0 (the system actor is never a reviewer), and anyone
-// effectively banned (banned = 1 with no expiry, or an expiry still in the
-// future -- the same rule auth.IsEffectivelyBanned applies, mirrored here in
-// SQL so the count can run inside the caller's own write transaction rather
-// than round-tripping every candidate through Go). The bit test is done in
-// SQL rather than fetched row-by-row and checked in Go, since the count
-// alone is all the caller needs.
+// The eligible-moderator COUNT for decision 8's self-review escape (the
+// exported db.CountEligibleModerators contract -- Assign's non-transactional
+// checkSelfReview and its own direct tests want the actual count, not just
+// ">0"): every OTHER user, excluding the acting moderator, the appellant
+// (F2/F3 review: an appellant who happens to also hold the bit must never
+// count as their own alternative reviewer), id 0 (the system actor is never
+// a reviewer), and anyone effectively banned, who holds perm_bit or the
+// Administrator bit. The ban comparison is normalised the same way
+// mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
+// writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
+// "ban_expires <= datetime('now')" compares that against SQLite's space-form
+// "2006-01-02 15:04:05" -- a bare ' ' sorts BELOW 'T', so a same-day expiry
+// would compare as still-active until midnight and wrongly exclude an
+// eligible moderator (the exact bug notBannedClause's own comment
+// documents). replace() normalises the separator before comparing.
 func (q *Queries) CountUsersWithPermission(ctx context.Context, arg CountUsersWithPermissionParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUsersWithPermission,
 		arg.ExcludeActorID,
@@ -117,6 +147,43 @@ func (q *Queries) DecideAppeal(ctx context.Context, arg DecideAppealParams) (int
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const eligibleModeratorExists = `-- name: EligibleModeratorExists :one
+SELECT EXISTS (
+  SELECT 1 FROM users u
+    JOIN roles r ON r.id = u.role_id
+   WHERE u.id != 0
+     AND u.id != ?1
+     AND u.id != ?2
+     AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
+     AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0)
+)
+`
+
+type EligibleModeratorExistsParams struct {
+	ExcludeActorID     int64 `json:"excludeActorId"`
+	ExcludeAppellantID int64 `json:"excludeAppellantId"`
+	PermBit            int64 `json:"permBit"`
+	AdminBit           int64 `json:"adminBit"`
+}
+
+// DecideAppealTx's own self-review escape test (P3 review): the identical
+// WHERE clause as CountUsersWithPermission above, but SELECT EXISTS rather
+// than SELECT COUNT(*) -- DecideAppealTx only ever tests ">0", so scanning
+// until the first match is strictly less work than counting every match,
+// and it now runs only after AppealObservedRowExists has already confirmed
+// the appeal is not stale/terminal, inside the same transaction.
+func (q *Queries) EligibleModeratorExists(ctx context.Context, arg EligibleModeratorExistsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, eligibleModeratorExists,
+		arg.ExcludeActorID,
+		arg.ExcludeAppellantID,
+		arg.PermBit,
+		arg.AdminBit,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const findAppealForAction = `-- name: FindAppealForAction :one

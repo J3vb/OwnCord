@@ -158,7 +158,10 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 				t.Fatalf("Submit: %v", err)
 			}
 			rec := audittest.Install(t, f.database)
-			if err := appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", note); err != nil {
+			// "overturned" (not "upheld"): item 4's reversal audit row
+			// (user_warning_acknowledged, for a warning) is written alongside
+			// appeal_decide, and both must clear the sentinel denylist.
+			if err := appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", note); err != nil {
 				t.Fatalf("Decide: %v", err)
 			}
 			return rec, []string{body, note}

@@ -18,6 +18,12 @@ type Querier interface {
 	AcknowledgeWarning(ctx context.Context, arg AcknowledgeWarningParams) (int64, error)
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
+	// P3 review: reject a stale/terminal appeal BEFORE running the (possibly
+	// expensive) self-review eligibility test below -- the exact row+state+
+	// assignee the caller observed, mirroring DecideAppeal's own guard so a
+	// decide that is going to fail its guarded UPDATE anyway never pays for the
+	// eligibility check first.
+	AppealObservedRowExists(ctx context.Context, arg AppealObservedRowExistsParams) (int64, error)
 	ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error)
 	// Scoped to channel_id as well as user_id: the moderator's authorization is
 	// checked against a channel snapshot several round trips before this write
@@ -85,17 +91,21 @@ type Querier interface {
 	// everyone exactly while some user's avatar points at it. Covered by the
 	// partial index on users(avatar) added in migration 027.
 	CountUsersWithAvatar(ctx context.Context, avatar *string) (int64, error)
-	// The eligible-moderator count for decision 8's self-review escape: every
-	// OTHER user whose role holds perm_bit or the Administrator bit, excluding
-	// the acting moderator, the appellant (F2/F3 review: an appellant who
-	// happens to also hold the bit must never count as their own alternative
-	// reviewer), id 0 (the system actor is never a reviewer), and anyone
-	// effectively banned (banned = 1 with no expiry, or an expiry still in the
-	// future -- the same rule auth.IsEffectivelyBanned applies, mirrored here in
-	// SQL so the count can run inside the caller's own write transaction rather
-	// than round-tripping every candidate through Go). The bit test is done in
-	// SQL rather than fetched row-by-row and checked in Go, since the count
-	// alone is all the caller needs.
+	// The eligible-moderator COUNT for decision 8's self-review escape (the
+	// exported db.CountEligibleModerators contract -- Assign's non-transactional
+	// checkSelfReview and its own direct tests want the actual count, not just
+	// ">0"): every OTHER user, excluding the acting moderator, the appellant
+	// (F2/F3 review: an appellant who happens to also hold the bit must never
+	// count as their own alternative reviewer), id 0 (the system actor is never
+	// a reviewer), and anyone effectively banned, who holds perm_bit or the
+	// Administrator bit. The ban comparison is normalised the same way
+	// mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
+	// writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
+	// "ban_expires <= datetime('now')" compares that against SQLite's space-form
+	// "2006-01-02 15:04:05" -- a bare ' ' sorts BELOW 'T', so a same-day expiry
+	// would compare as still-active until midnight and wrongly exclude an
+	// eligible moderator (the exact bug notBannedClause's own comment
+	// documents). replace() normalises the separator before comparing.
 	CountUsersWithPermission(ctx context.Context, arg CountUsersWithPermissionParams) (int64, error)
 	// A lapsed temporary ban must not hide a TOTP-less user from this count: the
 	// ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause /
@@ -172,6 +182,13 @@ type Querier interface {
 	// tombstone. No row comes back when it loses, which the wrapper reports as
 	// ErrNotFound rather than a silent success (OC-0358).
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
+	// DecideAppealTx's own self-review escape test (P3 review): the identical
+	// WHERE clause as CountUsersWithPermission above, but SELECT EXISTS rather
+	// than SELECT COUNT(*) -- DecideAppealTx only ever tests ">0", so scanning
+	// until the first match is strictly less work than counting every match,
+	// and it now runs only after AppealObservedRowExists has already confirmed
+	// the appeal is not stale/terminal, inside the same transaction.
+	EligibleModeratorExists(ctx context.Context, arg EligibleModeratorExistsParams) (int64, error)
 	// Camera and screenshare share one voice_max_video budget, counted in
 	// STREAMS, not rows: a channel capped at N simultaneous video streams must
 	// not let a camera publish ignore screenshare occupants (or vice versa,

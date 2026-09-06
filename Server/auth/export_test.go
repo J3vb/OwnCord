@@ -4,10 +4,12 @@ import "time"
 
 // SeedTimestampForTest inserts ts directly into key's window, bypassing
 // Allow's own time.Now() — the seam a test uses to simulate an old
-// submission without a real clock (N2, B5-10 review: rateLimiterCleanupMaxWindow
-// vs a 24h-window caller). Exported for auth_test only; production code
-// never calls this.
-func (r *RateLimiter) SeedTimestampForTest(key string, ts time.Time) {
+// submission without a real clock (N2, B5-10 review). window records the
+// key's own budget the same way a real Allow call would (item 6, round 3
+// review: Cleanup is now per-key-window-aware, so a seeded entry needs one
+// to behave like a real caller's key rather than reading as already stale).
+// Exported for auth_test only; production code never calls this.
+func (r *RateLimiter) SeedTimestampForTest(key string, ts time.Time, window time.Duration) {
 	s := r.shardFor(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -16,5 +18,6 @@ func (r *RateLimiter) SeedTimestampForTest(key string, ts time.Time) {
 		e = &entry{}
 		s.windows[key] = e
 	}
+	e.window = window
 	e.timestamps = append(e.timestamps, ts)
 }

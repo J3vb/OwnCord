@@ -10,6 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // AppealService is the B5-10 rate-limited appeal against a moderation
@@ -31,6 +32,45 @@ type AppealService struct {
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
 	notifier   AppealStatusNotifier
+	queue      AppealQueueBroadcaster
+	locks      *appealLocker
+}
+
+// appealLocker is F4's per-appeal serialization: a transition's guarded
+// write and its live notifies (appeal_status, mod_queue) must behave as one
+// atomic unit from that appeal's own point of view, or a delayed transition
+// can notify AFTER a later one already has — a stale Assign's "assigned"
+// frame trailing behind a Decide's "overturned" one that the appellant
+// already received. Assign, Decide and Withdraw all hold the appeal's own
+// lock from just before touching the database through their own notify
+// call, so no two transitions on the SAME appeal can ever have their
+// notifies race each other out of commit order. Keyed by public id — every
+// entry point already has it before touching the database.
+//
+// ponytail: an unbounded map guarded by one mutex, entries never removed —
+// about 40 bytes per appeal ever touched, for the process lifetime.
+// Acceptable at decision 8's rate-limited scale (3 submissions/day/user);
+// switch to an LRU if appeal volume ever makes that a real cost.
+type appealLocker struct {
+	mu    syncutil.Mutex
+	locks map[string]*syncutil.Mutex
+}
+
+func newAppealLocker() *appealLocker {
+	return &appealLocker{locks: make(map[string]*syncutil.Mutex)}
+}
+
+// lock acquires publicID's own mutex and returns the func that releases it.
+func (l *appealLocker) lock(publicID string) func() {
+	l.mu.Lock()
+	m, ok := l.locks[publicID]
+	if !ok {
+		m = &syncutil.Mutex{}
+		l.locks[publicID] = m
+	}
+	l.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 // AppealStatusNotifier delivers a live appeal_status frame to the
@@ -39,19 +79,46 @@ type AppealStatusNotifier interface {
 	NotifyAppealStatus(userID int64, publicID, state string, decisionNote *string)
 }
 
+// AppealQueueBroadcaster delivers a live mod_queue frame for an appeal
+// state change. *ws.Hub implements it (the same method the API handler used
+// to call after Assign/Decide/Withdraw returned). F4 review: moved to run
+// from INSIDE the service, under the SAME per-appeal lock the appeal_status
+// notify holds, so the two can never race each other out of commit order —
+// the handler calling it separately, after the lock had already been
+// released, is exactly what let a delayed transition's frame arrive after a
+// later one's.
+type AppealQueueBroadcaster interface {
+	BroadcastAppealQueue(ctx context.Context, appealID int64, state string)
+}
+
 // NewAppealService creates an AppealService.
 func NewAppealService(st Store, perms *PermissionService, moderation *ModerationService, limiter *auth.RateLimiter) *AppealService {
-	return &AppealService{st: st, perms: perms, moderation: moderation, limiter: limiter}
+	return &AppealService{st: st, perms: perms, moderation: moderation, limiter: limiter, locks: newAppealLocker()}
 }
 
 // SetNotifier installs the live appeal_status notifier.
 func (s *AppealService) SetNotifier(n AppealStatusNotifier) { s.notifier = n }
+
+// SetQueueBroadcaster installs the live mod_queue broadcaster.
+func (s *AppealService) SetQueueBroadcaster(b AppealQueueBroadcaster) { s.queue = b }
 
 func (s *AppealService) notify(userID int64, publicID, state string, decisionNote *string) {
 	if s.notifier != nil {
 		s.notifier.NotifyAppealStatus(userID, publicID, state, decisionNote)
 	}
 }
+
+func (s *AppealService) notifyQueue(ctx context.Context, appealID int64, state string) {
+	if s.queue != nil {
+		s.queue.BroadcastAppealQueue(ctx, appealID, state)
+	}
+}
+
+// appealPostWriteHookForTest, when non-nil, runs after a transition's
+// guarded write has committed but BEFORE its notifies — while this appeal's
+// lock is still held (F4's revert-proof seam, export_test.go). Test-only,
+// nil in production.
+var appealPostWriteHookForTest func(publicID string)
 
 // appealBodyMaxRunes and appealNoteMaxRunes bound the two free-text fields
 // (S6 storage exhaustion, the same shape reports' maxDetailRunes/
@@ -62,14 +129,16 @@ const (
 	appealNoteMaxRunes = 2000
 )
 
-// appealRateLimit and appealRateWindow are decision 8's per-user rolling
+// appealRateLimit and AppealRateWindow are decision 8's per-user rolling
 // cap: 3 submissions per 24 hours. The key is "appeal:<user id>" — a
 // dedicated prefix, never shared with "report" (Server/auth/ratelimit.go's
 // Key), so a reporter's quota is never consumed by an appellant or vice
-// versa.
+// versa. AppealRateWindow is exported (item 6, round 3 review) so
+// auth's own rate-limiter tests assert against the real production value
+// instead of a local literal that could silently drift from it.
 const (
 	appealRateLimit  = 3
-	appealRateWindow = 24 * time.Hour
+	AppealRateWindow = 24 * time.Hour
 )
 
 // appealableKinds are the moderation-action kinds decision 8 allows an
@@ -120,7 +189,7 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 		return "", fmt.Errorf("%w: this action cannot be appealed", ErrBadRequest)
 	}
 
-	if s.limiter != nil && !s.limiter.Allow(auth.Key("appeal", appellantID), appealRateLimit, appealRateWindow) {
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("appeal", appellantID), appealRateLimit, AppealRateWindow) {
 		return "", ErrRateLimited
 	}
 
@@ -214,8 +283,14 @@ func (s *AppealService) resolveOwn(ctx context.Context, appellantID int64, publi
 
 // Withdraw withdraws the caller's own appeal — the appellant only, open or
 // assigned states only. Nothing leaves a decided or already-withdrawn
-// state.
+// state. F4 review: the write and both live notifies (appeal_status,
+// mod_queue) run under this appeal's own lock, so a withdrawal racing an
+// in-flight Assign or Decide can never have its notify land out of order
+// relative to theirs.
 func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicID string) error {
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+
 	a, err := s.resolveOwn(ctx, appellantID, publicID)
 	if err != nil {
 		return err
@@ -227,8 +302,12 @@ func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicI
 	if !ok {
 		return fmt.Errorf("%w: appeal is already decided", ErrConflict)
 	}
+	if appealPostWriteHookForTest != nil {
+		appealPostWriteHookForTest(publicID)
+	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, appellantID, "appeal_withdraw", "appeal", a.ID, "")
 	s.notify(a.AppellantID, a.PublicID, "withdrawn", nil)
+	s.notifyQueue(ctx, a.ID, "withdrawn")
 	return nil
 }
 
@@ -372,6 +451,9 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
 		return fmt.Errorf("%w: appeal not found", ErrNotFound)
@@ -397,8 +479,12 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	} else if err := s.assignAppealPlain(ctx, appeal.ID, actorID, observed); err != nil {
 		return err
 	}
+	if appealPostWriteHookForTest != nil {
+		appealPostWriteHookForTest(publicID)
+	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "appeal_assign", "appeal", appeal.ID, "")
 	s.notify(appeal.AppellantID, appeal.PublicID, "assigned", nil)
+	s.notifyQueue(ctx, appeal.ID, "assigned")
 	return nil
 }
 
@@ -406,10 +492,10 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 // outrank the observed assignee's fresh position, read inside the write's
 // own transaction (see forceReassignGuarded).
 func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorID, observed int64) error {
-	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, actorID)
+	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, actorID, s.checkModeratorAuthority)
 	if err != nil {
 		if errors.Is(err, db.ErrForbidden) {
-			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+			return fmt.Errorf("%w: cannot moderate this appeal", ErrForbidden)
 		}
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
@@ -420,10 +506,15 @@ func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorI
 }
 
 // assignAppealPlain is Assign's ordinary branch: no current assignee, or the
-// caller re-assigning to themselves.
+// caller re-assigning to themselves. P2 review: wrapped in its own
+// transaction (AssignAppealTx) with a fresh authority re-check, the same
+// property Decide's own transaction already has.
 func (s *AppealService) assignAppealPlain(ctx context.Context, appealID, actorID, observed int64) error {
-	ok, err := s.st.AssignAppeal(ctx, appealID, actorID, observed)
+	ok, err := s.st.AssignAppealTx(ctx, appealID, actorID, observed, actorID, s.checkModeratorAuthority)
 	if err != nil {
+		if errors.Is(err, db.ErrForbidden) {
+			return fmt.Errorf("%w: cannot moderate this appeal", ErrForbidden)
+		}
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if !ok {
@@ -487,6 +578,9 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		return fmt.Errorf("%w: decision note contains control characters", ErrBadRequest)
 	}
 
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
 		return fmt.Errorf("%w: appeal not found", ErrNotFound)
@@ -500,9 +594,9 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	}
 
 	needsSelfReviewCheck := action.ActorID != 0 && action.ActorID == actorID
-	result, soleModerator, err := s.st.DecideAppealTx(ctx, appeal.ID, appeal.State, appeal.AssigneeID, outcome, actorID, note,
+	result, soleModerator, reversalApplied, err := s.st.DecideAppealTx(ctx, appeal.ID, appeal.State, appeal.AssigneeID, outcome, actorID, note,
 		needsSelfReviewCheck, appeal.AppellantID, permissions.ModerateMembers, permissions.Administrator,
-		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID})
+		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}, s.checkModeratorAuthority)
 	if err != nil {
 		slog.Error("appeal decide: transaction error", "appeal_id", appeal.ID, "action_id", action.ID, "err", err)
 	}
@@ -513,8 +607,15 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		return ErrSelfReview
 	case db.AppealWriteReversalFailed:
 		return ErrReversalFailed
+	case db.AppealWriteForbidden:
+		// P2 review: the decider's own bit was revoked, or a ban landed,
+		// between requireModerate above and this write's own fresh read.
+		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	default: // db.AppealWriteConflict, including the plain Go error case above.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
+	}
+	if appealPostWriteHookForTest != nil {
+		appealPostWriteHookForTest(publicID)
 	}
 
 	detail := outcome
@@ -523,8 +624,42 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	}
 	// Audit rows must survive a request canceled after the decision committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "appeal_decide", "appeal", appeal.ID, detail)
+	// item 4: the reversal's own audit row, actor 0 (a mechanical consequence
+	// of the decision, not a second moderation action by a human — the same
+	// convention LiftTimeoutByActionID's lifted_by=0 already uses), detail
+	// naming the appeal that caused it. Best-effort, like appeal_decide's own
+	// row above (D8 policy) — written only when reversalApplied (N1: a
+	// superseded/already-lifted action reverses to a no-op, which is not
+	// itself an event worth auditing).
+	if reversalApplied {
+		if auditAction, ok := db.ReversalAuditActionFor(action.Kind); ok {
+			db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, auditAction, "user", action.TargetID, "overturned appeal "+appeal.PublicID)
+		}
+	}
+	// B5-10 round 3: voice reconcile after commit — wired when B5-9's round 4
+	// is merged. Once voice_states.server_muted_by and ModerationService's
+	// post-commit reconcile method land, an "overturned" timeout/ban here
+	// calls it (ctx, action.TargetID, []int64{action.ID}, actorID) so a
+	// live target's voice mute lifts alongside the ledger reversal above.
 	s.notify(appeal.AppellantID, appeal.PublicID, outcome, &note)
+	s.notifyQueue(ctx, appeal.ID, outcome)
 
 	slog.Info("appeal decided", "actor_id", actorID, "appeal_id", appeal.ID, "outcome", outcome, "sole_moderator", soleModerator)
 	return nil
+}
+
+// checkModeratorAuthority is DecideAppealTx's and AssignAppealTx's fresh
+// (P2 review): rolePerms/banned/banExpires are read live, inside the SAME
+// transaction as the guarded write, and passed here rather than trusted
+// from requireModerate's earlier (now possibly stale) check. permissions.
+// CanModerate is the canonical predicate; auth.IsEffectivelyBanned is reused
+// via a throwaway *db.User so the ban-lapse parsing stays in exactly one
+// place. A revoked bit or a ban that landed before this transaction began
+// refuses (db.AppealWriteForbidden), never a decision the data no longer
+// supports.
+func (s *AppealService) checkModeratorAuthority(rolePerms int64, banned bool, banExpires *string) error {
+	if auth.IsEffectivelyBanned(&db.User{Banned: banned, BanExpires: banExpires}) {
+		return ErrForbidden
+	}
+	return permissions.CanModerate(permissions.Subject{RolePerms: rolePerms})
 }

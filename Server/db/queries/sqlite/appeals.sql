@@ -83,6 +83,18 @@ UPDATE appeals
    AND appeals.assignee_id = sqlc.arg(observed_assignee_id)
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(assignee_id));
 
+-- name: AppealObservedRowExists :one
+-- P3 review: reject a stale/terminal appeal BEFORE running the (possibly
+-- expensive) self-review eligibility test below -- the exact row+state+
+-- assignee the caller observed, mirroring DecideAppeal's own guard so a
+-- decide that is going to fail its guarded UPDATE anyway never pays for the
+-- eligibility check first.
+SELECT EXISTS (
+  SELECT 1 FROM appeals
+   WHERE id = sqlc.arg(id) AND state IN ('open', 'assigned')
+     AND state = sqlc.arg(observed_state) AND assignee_id = sqlc.arg(observed_assignee_id)
+);
+
 -- name: DecideAppeal :execrows
 -- new_state is 'upheld' or 'overturned', validated in Go. Guarded on the
 -- OBSERVED state and assignee (optimistic concurrency, Claim 5 review: a
@@ -107,24 +119,45 @@ UPDATE appeals
  WHERE id = ? AND appellant_id = ? AND state IN ('open', 'assigned');
 
 -- name: CountUsersWithPermission :one
--- The eligible-moderator count for decision 8's self-review escape: every
--- OTHER user whose role holds perm_bit or the Administrator bit, excluding
--- the acting moderator, the appellant (F2/F3 review: an appellant who
--- happens to also hold the bit must never count as their own alternative
--- reviewer), id 0 (the system actor is never a reviewer), and anyone
--- effectively banned (banned = 1 with no expiry, or an expiry still in the
--- future -- the same rule auth.IsEffectivelyBanned applies, mirrored here in
--- SQL so the count can run inside the caller's own write transaction rather
--- than round-tripping every candidate through Go). The bit test is done in
--- SQL rather than fetched row-by-row and checked in Go, since the count
--- alone is all the caller needs.
+-- The eligible-moderator COUNT for decision 8's self-review escape (the
+-- exported db.CountEligibleModerators contract -- Assign's non-transactional
+-- checkSelfReview and its own direct tests want the actual count, not just
+-- ">0"): every OTHER user, excluding the acting moderator, the appellant
+-- (F2/F3 review: an appellant who happens to also hold the bit must never
+-- count as their own alternative reviewer), id 0 (the system actor is never
+-- a reviewer), and anyone effectively banned, who holds perm_bit or the
+-- Administrator bit. The ban comparison is normalised the same way
+-- mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
+-- writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
+-- "ban_expires <= datetime('now')" compares that against SQLite's space-form
+-- "2006-01-02 15:04:05" -- a bare ' ' sorts BELOW 'T', so a same-day expiry
+-- would compare as still-active until midnight and wrongly exclude an
+-- eligible moderator (the exact bug notBannedClause's own comment
+-- documents). replace() normalises the separator before comparing.
 SELECT COUNT(*) FROM users u
   JOIN roles r ON r.id = u.role_id
  WHERE u.id != 0
    AND u.id != sqlc.arg(exclude_actor_id)
    AND u.id != sqlc.arg(exclude_appellant_id)
-   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND u.ban_expires <= datetime('now')))
+   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
    AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0);
+
+-- name: EligibleModeratorExists :one
+-- DecideAppealTx's own self-review escape test (P3 review): the identical
+-- WHERE clause as CountUsersWithPermission above, but SELECT EXISTS rather
+-- than SELECT COUNT(*) -- DecideAppealTx only ever tests ">0", so scanning
+-- until the first match is strictly less work than counting every match,
+-- and it now runs only after AppealObservedRowExists has already confirmed
+-- the appeal is not stale/terminal, inside the same transaction.
+SELECT EXISTS (
+  SELECT 1 FROM users u
+    JOIN roles r ON r.id = u.role_id
+   WHERE u.id != 0
+     AND u.id != sqlc.arg(exclude_actor_id)
+     AND u.id != sqlc.arg(exclude_appellant_id)
+     AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
+     AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0)
+);
 
 -- name: LiftTimeoutByActionID :execrows
 -- F1/N1 review: overturning an appeal reverses the SPECIFIC appealed action,

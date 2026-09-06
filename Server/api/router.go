@@ -109,7 +109,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.
 	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(rateLimiterCleanupInterval, rateLimiterCleanupMaxWindow, limiterStopCh)
+	go limiter.StartCleanup(rateLimiterCleanupInterval, limiterStopCh)
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -383,8 +383,13 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 		}
 		if svc.Appeals != nil {
 			// B5-10: a live appellant gets the appeal_status frame on
-			// assignment, decision and withdrawal.
+			// assignment, decision and withdrawal. F4 review: the mod_queue
+			// broadcaster is wired here too, so Assign/Decide/Withdraw issue
+			// BOTH live frames themselves, under the same per-appeal lock —
+			// the handler no longer calls BroadcastAppealQueue for these
+			// three after the fact, once the lock has already been released.
 			svc.Appeals.SetNotifier(hub)
+			svc.Appeals.SetQueueBroadcaster(hub)
 		}
 	}
 	if svc.Erasure != nil {
@@ -402,7 +407,7 @@ func mountModerationRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 	MountModerationQueueRoutes(r, svc, hub)
 	MountModerationRoutes(r, svc)
 	MountAppealRoutes(r, svc, hub)
-	MountModerationAppealRoutes(r, svc, hub)
+	MountModerationAppealRoutes(r, svc)
 }
 
 // routerUploadRoutes mounts the file upload and serving routes and returns the

@@ -376,11 +376,20 @@ type Store interface {
 	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
 	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
 	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
-	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
-	// DecideAppealTx runs the self-review eligibility count, the guarded
+	// AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
+	// transaction with a fresh authority re-check (P2) — see db.AssignAppealTx.
+	AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	// DecideAppealTx runs a fresh authority re-check (P2), the stale/terminal
+	// row rejection (P3), the self-review eligibility test, the guarded
 	// decide UPDATE (on the OBSERVED state/assignee) and, for an overturn,
 	// the reversal, all in one transaction — see db.DecideAppealTx.
-	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction) (db.AppealWriteOutcome, bool, error)
+	// reversalApplied tells the caller whether to write the reversal's own
+	// audit row (item 4), best-effort, AFTER this commits.
+	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (result db.AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error)
 	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
 	// CountEligibleModerators is decision 8's self-review escape: the count
 	// of OTHER users (excluding excludeActorID, excludeAppellantID, id 0,

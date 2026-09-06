@@ -225,7 +225,8 @@ endpoints return plain-text errors — see their section):
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
 | `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                         |
-| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, or deciding the appeal of an action they themselves took, where another eligible moderator exists (B5-8/B5-10)                                                                                     |
+| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                         |
+| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                |
 | `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
@@ -2280,7 +2281,11 @@ A state change (assignment, decision, or withdrawal) sends the appellant an
 ### POST /api/v1/appeals/{id}/withdraw
 
 Withdraw the caller's own appeal — the appellant only, `open` or `assigned`
-states only. `{id}` is the opaque public id. **Auth:** Required.
+states only. `{id}` is the opaque public id. **Auth:** Required. Sends the
+appellant an `appeal_status` frame and a connected moderator queue a
+`mod_queue` `"withdrawn"` frame, both under decision 8's per-appeal write
+ordering (a delayed assignment or decision can never notify out of order
+with this one) — see [protocol.md](protocol.md).
 
 #### Response 204 No Content
 
@@ -2301,6 +2306,14 @@ The moderator appeal queue. **Auth:** Required. **Permission:**
 **Query:** `state` — `open`, `assigned` or `decided` (both `upheld` and
 `overturned` together); omitted defaults to open+assigned together.
 
+**The appellant's own appeal rule:** a moderator viewing this queue never
+sees their OWN filed appeal in the list, even when it matches the requested
+state — the same confidentiality rule reports apply between the reporter
+and the subject. Their own appeal's state is still visible through `GET
+/api/v1/appeals/mine` and the live `appeal_status` frame; only the
+moderation-facing surfaces built for reviewing OTHER people's appeals hide
+it.
+
 ---
 
 ### GET /api/v1/moderation/appeals/{id}
@@ -2308,6 +2321,19 @@ The moderator appeal queue. **Auth:** Required. **Permission:**
 One appeal, the appealed action, and the action's linked report's public id
 when the action was report-linked. `{id}` is the opaque public id. **Auth:**
 Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+The appellant's own appeal rule applies here too: a moderator requesting
+their OWN appeal's detail gets `403 SELF_REVIEW`, not the row — it would
+otherwise show them who is assigned, who decided, and the acting
+moderator's identity, none of which they can otherwise see.
+
+#### Errors
+
+| Status | Code          | Cause                                     |
+| ------ | ------------- | ----------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`           |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant |
+| 404    | `NOT_FOUND`   | no such appeal                            |
 
 ---
 
@@ -2320,15 +2346,25 @@ Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 and only succeeds when the caller outranks the current assignee (the same
 hierarchy rule ban/kick/timeout and the report queue use).
 
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not assign it to themself **where another
+eligible moderator exists** (decision 8's deciding-moderator rule, applied
+symmetrically to assignment) — on a one-moderator install, where no one
+else is eligible, they may. Separately, and with **no such escape**, the
+appellant themself may never assign their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS` — a governance gap on a
+one-moderator install, not a bug this route papers over.
+
 #### Response 204 No Content
 
 #### Errors
 
-| Status | Code        | Cause                                                                                              |
-| ------ | ----------- | -------------------------------------------------------------------------------------------------- |
-| 403    | `FORBIDDEN` | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                   |
-| 404    | `NOT_FOUND` | no such appeal                                                                                     |
-| 409    | `CONFLICT`  | already assigned to someone else and `force` was not set, or the appeal is no longer open/assigned |
+| Status | Code          | Cause                                                                                                |
+| ------ | ------------- | ---------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                     |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists |
+| 404    | `NOT_FOUND`   | no such appeal                                                                                       |
+| 409    | `CONFLICT`    | already assigned to someone else and `force` was not set, or the appeal is no longer open/assigned   |
 
 ---
 
@@ -2337,12 +2373,15 @@ hierarchy rule ban/kick/timeout and the report queue use).
 Decide the appeal. `{id}` is the opaque public id. **Auth:** Required.
 **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
-**The deciding-moderator rule (decision 8):** the moderator who took the
-appealed action may not decide its appeal **where another eligible
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not decide its appeal **where another eligible
 moderator exists** — eligible meaning a different user holding
-`MODERATE_MEMBERS` or `ADMINISTRATOR`. On a one-moderator install, where no
-one else is eligible, the acting moderator may decide their own appeal, and
-the audit row records that it was the sole-moderator exception.
+`MODERATE_MEMBERS` or `ADMINISTRATOR`, and not currently banned. On a
+one-moderator install, where no one else is eligible, the acting moderator
+may decide their own appeal, and the audit row records that it was the
+sole-moderator exception. Separately, and with **no such escape**, the
+appellant themself may never decide their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS`.
 
 #### Request
 
@@ -2354,23 +2393,43 @@ the audit row records that it was the sole-moderator exception.
 
 #### Response 204 No Content
 
-**Effect of overturning:** a `timeout` is lifted (through the same
-mechanism `POST .../untimeout` uses, including its voice half and the live
-`mod_action` frame); a `ban` is undone (`UnbanUser`); a `warning` is marked
-acknowledged, so the notice disappears from the target's next connect. A
-`removal` has nothing to restore — the reported content is already gone;
-overturning a removal appeal is a record of the decision only. Upholding
-changes nothing further.
+**Effect of overturning:** the self-review check, the decision, and the
+kind-specific ledger reversal below all commit in ONE transaction — a
+decider who fails a fresh in-transaction check (their own `MODERATE_MEMBERS`
+bit revoked, or a ban landed, since the request was authorized), or a
+reversal that genuinely fails, leaves NOTHING committed: the appellant is
+never told "overturned" while the sanction it named is still in effect.
+The reversal targets the SPECIFIC appealed action by its ledger id, never
+"whatever is currently active for this target" — appealing an older,
+already-superseded timeout or ban cannot disturb a newer one. A `timeout`
+is lifted; a `ban` is undone, but only if no strictly newer ban exists for
+the same target (ban → unban → re-ban → overturn the first ban leaves the
+target still banned); a `warning` is marked acknowledged, so the notice
+disappears from the target's next connect. A `removal` has nothing to
+restore — the reported content is already gone; overturning a removal
+appeal is a record of the decision only. Upholding changes nothing further.
+Each reversal that actually changes something writes its own audit row
+(`user_untimeout`, `user_unban`, or a warning-acknowledged equivalent),
+actor `0` (a mechanical consequence of the decision, not a second
+moderation action by the human decider), alongside the decision's own
+`appeal_decide` row.
+
+**Voice**, for a live target already muted by an overturned timeout or ban:
+wired in this PR's final commit, once B5-9's own voice reconcile method
+lands — until then a live target's voice mute does not lift automatically
+alongside the ledger reversal above, and clears on their next voice
+rejoin/session refresh instead.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                   |
-| ------ | ------------- | --------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | invalid `outcome`, or `note` too long/unsafe                                            |
-| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`                                                         |
-| 403    | `SELF_REVIEW` | the acting moderator deciding their own appeal, where another eligible moderator exists |
-| 404    | `NOT_FOUND`   | no such appeal                                                                          |
-| 409    | `CONFLICT`    | the appeal is already decided or withdrawn                                              |
+| Status | Code              | Cause                                                                                                            |
+| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
+| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, or the decider's own authority no longer holds when re-checked at decision time |
+| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
+| 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
+| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
+| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself  |
 
 ---
 

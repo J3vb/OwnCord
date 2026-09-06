@@ -12,14 +12,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// setupLimiterReapInterval and setupLimiterReapMaxWindow control how often
-// the setup endpoint's dedicated rate limiter reaps stale window entries.
-// Vars, not consts, so tests can shrink them instead of waiting on the real
-// interval (see export_test.go).
-var (
-	setupLimiterReapInterval  = 5 * time.Minute
-	setupLimiterReapMaxWindow = 15 * time.Minute
-)
+// setupLimiterReapInterval controls how often the setup endpoint's
+// dedicated rate limiter reaps stale window entries. A var, not a const, so
+// tests can shrink it instead of waiting on the real interval (see
+// export_test.go). Cleanup is per-key-window-aware since item 6 (round 3
+// review; auth/ratelimit.go's entry.window), so there is no separate
+// max-window to tune here anymore — each entry retires on its own window.
+var setupLimiterReapInterval = 5 * time.Minute
 
 // setupLimiterHook, when non-nil, receives the *auth.RateLimiter NewAdminAPI
 // creates for the /setup endpoint. Test-only seam: NewAdminAPI returns only
@@ -111,10 +110,10 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 	// indefinitely (nothing stops the chain), so a later test's
 	// SetSetupLimiterReapTiming restoring the vars on its own goroutine
 	// would otherwise race an in-flight reap here.
-	interval, maxWindow := setupLimiterReapInterval, setupLimiterReapMaxWindow
+	interval := setupLimiterReapInterval
 	var reap func()
 	reap = func() {
-		rl.Cleanup(maxWindow)
+		rl.Cleanup()
 		time.AfterFunc(interval, reap)
 	}
 	time.AfterFunc(interval, reap)

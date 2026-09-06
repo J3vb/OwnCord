@@ -80,7 +80,7 @@ func MountAppealRoutes(r chi.Router, svc *service.Services, hub AppealQueueBroad
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleFileAppeal(svc, hub))
 		r.Get("/mine", handleMyAppeals(svc))
-		r.Post("/{id}/withdraw", handleWithdrawAppeal(svc, hub))
+		r.Post("/{id}/withdraw", handleWithdrawAppeal(svc))
 	})
 }
 
@@ -88,13 +88,13 @@ func MountAppealRoutes(r chi.Router, svc *service.Services, hub AppealQueueBroad
 // assign, decide. Authorization is enforced inside AppealService
 // (CanModerate, the canonical predicate) so these handlers carry no
 // permission check of their own.
-func MountModerationAppealRoutes(r chi.Router, svc *service.Services, hub AppealQueueBroadcaster) {
+func MountModerationAppealRoutes(r chi.Router, svc *service.Services) {
 	r.Route("/api/v1/moderation/appeals", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleAppealQueueList(svc))
 		r.Get("/{id}", handleAppealQueueGet(svc))
-		r.Post("/{id}/assign", handleAppealQueueAssign(svc, hub))
-		r.Post("/{id}/decide", handleAppealQueueDecide(svc, hub))
+		r.Post("/{id}/assign", handleAppealQueueAssign(svc))
+		r.Post("/{id}/decide", handleAppealQueueDecide(svc))
 	})
 }
 
@@ -150,12 +150,13 @@ func handleMyAppeals(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleWithdrawAppeal is N3 review: withdrawal now broadcasts a
-// mod_queue "withdrawn" event too (previously only the appellant's own
-// appeal_status frame fired), the same shape submit/assign/decide already
-// use — a connected moderator should see a withdrawn appeal leave the
-// queue without needing to re-poll GET /api/v1/moderation/appeals.
-func handleWithdrawAppeal(svc *service.Services, hub AppealQueueBroadcaster) http.HandlerFunc {
+// handleWithdrawAppeal: N3's mod_queue "withdrawn" broadcast (a connected
+// moderator should see a withdrawn appeal leave the queue without needing
+// to re-poll GET /api/v1/moderation/appeals) is issued by AppealService.
+// Withdraw itself now (F4 review) — under the same per-appeal lock as the
+// appellant's own appeal_status frame, so the two can never race each
+// other out of order. This handler carries no broadcast of its own.
+func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -166,11 +167,6 @@ func handleWithdrawAppeal(svc *service.Services, hub AppealQueueBroadcaster) htt
 		if err := svc.Appeals.Withdraw(r.Context(), user.ID, publicID); err != nil {
 			writeAppealServiceError(r.Context(), w, err)
 			return
-		}
-		if hub != nil {
-			if id, rerr := svc.Appeals.ResolveAppealID(context.WithoutCancel(r.Context()), publicID); rerr == nil {
-				hub.BroadcastAppealQueue(context.WithoutCancel(r.Context()), id, "withdrawn")
-			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -230,7 +226,10 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-func handleAppealQueueAssign(svc *service.Services, hub AppealQueueBroadcaster) http.HandlerFunc {
+// handleAppealQueueAssign: the mod_queue "assigned" broadcast is issued by
+// AppealService.Assign itself (F4 review), under the same per-appeal lock
+// as the appellant's own appeal_status frame.
+func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
@@ -243,16 +242,14 @@ func handleAppealQueueAssign(svc *service.Services, hub AppealQueueBroadcaster) 
 			writeAppealServiceError(r.Context(), w, err)
 			return
 		}
-		if hub != nil {
-			if id, rerr := svc.Appeals.ResolveAppealID(context.WithoutCancel(r.Context()), publicID); rerr == nil {
-				hub.BroadcastAppealQueue(context.WithoutCancel(r.Context()), id, "assigned")
-			}
-		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func handleAppealQueueDecide(svc *service.Services, hub AppealQueueBroadcaster) http.HandlerFunc {
+// handleAppealQueueDecide: the mod_queue outcome broadcast is issued by
+// AppealService.Decide itself (F4 review), under the same per-appeal lock
+// as the appellant's own appeal_status frame.
+func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
@@ -269,11 +266,6 @@ func handleAppealQueueDecide(svc *service.Services, hub AppealQueueBroadcaster) 
 		if err := svc.Appeals.Decide(r.Context(), actorID, publicID, req.Outcome, req.Note); err != nil {
 			writeAppealServiceError(r.Context(), w, err)
 			return
-		}
-		if hub != nil {
-			if id, rerr := svc.Appeals.ResolveAppealID(context.WithoutCancel(r.Context()), publicID); rerr == nil {
-				hub.BroadcastAppealQueue(context.WithoutCancel(r.Context()), id, req.Outcome)
-			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
