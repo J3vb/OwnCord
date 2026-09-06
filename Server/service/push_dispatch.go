@@ -262,7 +262,7 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 func (d *PushDispatcher) runRound(ctx context.Context, channelID int64, items []pushRoundItem, attempt int) []pushRoundItem {
 	sem := make(chan struct{}, pushMaxConcurrentSends)
 	var wg sync.WaitGroup
-	var mu sync.Mutex
+	var mu syncutil.Mutex
 	retry := make([]pushRoundItem, 0, len(items))
 	for i := range items {
 		item := &items[i]
