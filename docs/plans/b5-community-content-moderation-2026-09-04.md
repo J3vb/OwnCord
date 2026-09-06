@@ -4,14 +4,16 @@
 **Base commit:** `e1781086` (`dev`; B4's exit was accepted 2026-09-03 at
 `0a14554` and today's CI-gate work — #1534, #1536, #1537 — is merged on top)
 — claims below verified at `e1781086`  
-**Status:** IN PROGRESS. **B5-0 and B5-1 are complete** (both 2026-09-04 — see
-their evidence blocks). B5-0 closed entry-gate item 3; B5-1 landed
-`Server/safefetch` and closed SEC-03's server half. No other step has started. **All fourteen decisions were settled 2026-09-04**
-(the owner delegated them; thirteen as drafted, decision 7 strengthened), so no
-step is blocked on an unanswered question. Two owner _actions_ remain and
-neither is due before the exit — plus one B5-0 raised: two advisory-worthy
-items in shipped code, counted in the new document and owed a GitHub Security
-Advisory each.
+**Status:** IN PROGRESS. **Audit snapshot, 2026-09-06, at `dev`
+`61ac2b959cc4592ee5291637ac36f22acab89631`: B5-0 through B5-9 and B5-11 are
+merged; B5-12's initial reconciliation is merged.** B5-10 is being finished
+and is not assessed as complete by this audit. HP-5 was accepted 2026-09-06
+at #1547, with the signature record completed by #1550; it is not awaiting a
+new signature. The existing exit gate remains open for B5-10, the acceptance
+follow-ups below, final reconciliation and the required exit evidence.
+**All fourteen decisions were settled 2026-09-04** (the owner delegated them;
+thirteen as drafted, decision 7 strengthened). Private advisory disposition
+is still an exit obligation; this source audit does not certify its closure.
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
@@ -2590,6 +2592,12 @@ findings-ledger row.
 
 ## B5-11 — Web Push dispatch
 
+**Audit status, 2026-09-06:** merged as #1548 (`897e21b`), with the B5-6 trust
+and B5-7 acknowledgement integrations present at `61ac2b9`, including their
+revocation tests. The draft-branch wording in the dated evidence below is
+historical. The remaining delivery-lifecycle acceptance follow-up belongs to
+the existing B5 exit gate below.
+
 **Closes:** BG-05's dispatch half. **Blocked by:** HP-5 (the roadmap's
 parallelism rule blocks dispatch on the privacy defaults). **Decisions:** 9 — settled. **Size:** 2 days. **Protocol effects:** none. **Migration:** none.
 **Beside** the B5-8..B5-10 chain. **Owns:**
@@ -2727,6 +2735,17 @@ same tree, each marked where it goes.
 after B5-0. **Adds no ledger rows** — this is register, roadmap and plan
 bookkeeping, not hunt findings.
 
+**Audit carryover, 2026-09-06:** initial reconciliation merged as #1546
+(`2b187b6`); a final pass is still owed at the B5 exit SHA. Reconcile the
+index, phase header, roadmap, register and traceability against actual merges
+and acceptance results, including B5-6..B5-11. Update the non-generated
+NSFW API/channel-admin prose in `docs/api.md` to describe B5-7's server
+enforcement consistently, and reconcile the shared safe-fetch inventory's
+gate descriptions with push dispatch. Preserve historical evidence blocks
+and signed decisions; do not count a merged implementation as an accepted
+phase exit or overwrite B5-10's ongoing evidence. BPR-053 reconciliation is
+assigned explicitly to B6 workstream 18.
+
 **Register corrections**, each with the evidence already in "Verify before you
 implement":
 
@@ -2840,6 +2859,37 @@ shape, and the `gate-evidence` job blocks tagging an ungated SHA.
 | 6          | Push subscriptions are per server/device, opt-in, revocable, and contain no sensitive default payload                        | B5-4 and B5-11, plus `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green                                                                                                                                                                                                       |
 | 7          | No unresolved B5 security advisory remains                                                                                   | Closed at the exit, as B4 did, not per step — advisories go through GitHub Security Advisories and never into a commit, issue or PR description. **SEC-04's unfilled `GHSA-____-____-____` is the known open item.**                                                                            |
 | **rule 2** | No `OC-*` finding tagged B5 is open, unless re-tagged with a written reason in the scorecard                                 | **Already satisfied at the base commit** — all five are `fixed` in the ledger; B5-12 records it. The open `SEC-03`, `SEC-04`, `S-03` and six `BG-*` rows are not `OC-*`, but the same discipline applies: each closes in its step or is re-tagged in writing.                                   |
+
+**Audit carryovers, 2026-09-06, measured by source and test inspection at
+`61ac2b9`.** These complete existing acceptance conditions within the active
+B5 phase; they add no phase, step number or hold point. They remain open
+until implementation and the named integration evidence are reviewed. This
+audit implements none of them, and it does not judge B5-10's unfinished work.
+
+- **Condition 5 — B5-2 follow-up:** qualify reservation/admission and cleanup
+  over the complete upload path, including multipart temporary storage.
+  Exercise concurrent bodies above the in-memory threshold, known and
+  unknown lengths, a separately mounted temporary volume, cancellation and
+  restart. Prove the configured headroom boundary throughout staging and
+  final storage, not only at the final file write. This remains B5 work
+  because safe storage admission is already an exit promise.
+- **Conditions 3 and 4 — B5-7/B5-8 follow-up:** complete and verify consent
+  handling across moderation evidence reads, including acknowledgement
+  revocation and source-channel relabelling/deletion. Cover evidence text
+  and attachment retrieval through the real service/HTTP paths, with
+  authorized and refused cases. This is the existing server-side consent
+  contract and must close before the B9 interface is built.
+- **Condition 6 — B5-11 follow-up:** prove that current device-subscription
+  consent and current block state govern every queued/retried delivery.
+  Revoke a subscription and apply a block between attempts; assert that
+  no subsequent delivery uses the withdrawn authority. Preserve the
+  existing trust, NSFW, membership and online-state checks. This belongs to
+  B5's revocable push service, alongside B8's already-planned client UX.
+
+Keep security validation and advisory disposition in the private review
+trail. Close these items and B5-12's final reconciliation on the measured
+exit SHA before claiming B5 acceptance; do not defer these conditions to a
+later client phase merely because their implementations have merged.
 
 **The roadmap's required evidence for B5**, each owed by a named step:
 state-machine and property tests for requests, reports, actions and appeals
