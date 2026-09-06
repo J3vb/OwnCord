@@ -1363,10 +1363,12 @@ channel, or every other participant of a one-to-one DM who trusts the
 author (the same `trusted_senders` row Message Requests gates on — see
 "Message Requests" below; a first-contact message from someone not yet
 trusted rings no one's phone). Within that set, only offline subscribers
-are pushed to (a connected client already has the message), permission is
-re-checked at dispatch time (`CanViewChannel`, not whatever it was when the
-subscription was created), and a channel labelled `nsfw` gets no push at
-all. At most one push per user per channel per 60
+are pushed to (a connected client already has the message), and permission
+is re-checked at dispatch time (`CanReadContent`, not whatever it was when
+the subscription was created) — the same predicate every content read path
+resolves, so a channel labelled `nsfw` pushes only to a recipient who has
+acknowledged it (see "NSFW Acknowledgement" below); a revoke between the
+first attempt and a retry drops the retry. At most one push per user per channel per 60
 seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
 (or a network error) gets two retries — three attempts total — before being
 dropped, and any other failure status drops immediately. Nothing is written
