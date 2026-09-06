@@ -133,6 +133,9 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	if actorID == targetID {
 		return 0, fmt.Errorf("recordModerationAction: actor equals target: %w", ErrOutranked)
 	}
+	if moderationActionPreRankCheckHook != nil {
+		moderationActionPreRankCheckHook()
+	}
 	actorPos, ok := rolePosition(ctx, tx, actorID)
 	if !ok {
 		return 0, fmt.Errorf("recordModerationAction: actor role: %w", ErrOutranked)
@@ -153,6 +156,18 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	}
 	return insertModerationActionRow(ctx, tx, kind, targetID, actorID, reportID, reason, expiresAt)
 }
+
+// moderationActionPreRankCheckHook, when non-nil, runs inside
+// recordModerationAction's transaction, BEFORE either rolePosition call —
+// the window between BeginTx (already open by the time this function runs;
+// BanUserWithAction's own effect write, BanUser, has already landed too)
+// and the rank snapshot itself. Test-only (nil in production): the
+// contention test's second interleaving (Codex review follow-up) uses this
+// to force a concurrent role change to contend for the writer connection
+// one step earlier than moderationActionPreInsertHook does, so the "cannot
+// preempt an in-flight decision" property is proved at both ends of the
+// rank check, not just after it.
+var moderationActionPreRankCheckHook func()
 
 // moderationActionPreInsertHook, when non-nil, runs after the rank check has
 // read both positions and before the insert — while tx, and so the writer's
@@ -251,39 +266,37 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 //
 // Ownership of an outstanding SFU mute lives on the voice session, not this
 // ledger (voice_states.server_muted_by, round 4, Codex review — see
-// migration 049's comment for the full rationale). Superseding transfers it
-// in this same transaction: whichever voice_states row currently names one
-// of the just-superseded ids as owner is repointed at the NEW row, so a mute
-// an earlier timeout applied is not stranded when its row stops being the
-// one LiftTimeout will act on, even when THIS timeout's own voice half turns
-// out to be skipped.
-func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error) {
+// migration 049's comment for the full rationale). Superseding a row that
+// owns a mute must transfer it to the NEW row, or that mute is stranded
+// once LiftTimeout stops acting on the superseded one — but the transfer
+// itself does NOT happen here (round 5, Codex review P2): it runs inside
+// MuteForTimeoutSession's own transaction, under the ws-layer per-target
+// lock the voice half already holds, so it can never land between that
+// lock's DB write and its paired SFU call (the exact gap a transfer here,
+// outside the lock, would race). TimeoutUser only returns the superseded
+// ids for the caller (service.applyTimeoutVoiceHalf) to pass through.
+func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("TimeoutUser begin tx: %w", err)
+		return 0, nil, fmt.Errorf("TimeoutUser begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	expires := expiresAt.UTC().Format(sqliteDatetimeFormat)
-	id, err := recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
+	id, err = recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	q := dbgen.New(tx)
-	supersededIDs, err := q.SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
+	supersededIDs, err = q.SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
 		LiftedBy: actorID, TargetID: targetID, ID: id,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("TimeoutUser supersede: %w", err)
-	}
-	if len(supersededIDs) > 0 {
-		if err := transferVoiceMuteOwnership(ctx, tx, supersededIDs, id); err != nil {
-			return 0, fmt.Errorf("TimeoutUser transfer voice mute ownership: %w", err)
-		}
+		return 0, nil, fmt.Errorf("TimeoutUser supersede: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("TimeoutUser commit: %w", err)
+		return 0, nil, fmt.Errorf("TimeoutUser commit: %w", err)
 	}
-	return id, nil
+	return id, supersededIDs, nil
 }
 
 // transferVoiceMuteOwnership repoints voice_states.server_muted_by from any

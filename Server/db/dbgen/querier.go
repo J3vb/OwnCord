@@ -25,6 +25,11 @@ type Querier interface {
 	// whatever channel their row points at by then -- including a DM call the
 	// moderator was never authorized against (OC-0005). :execresult so the
 	// caller can tell a real no-op (target moved) from a normal apply.
+	// server_muted_by = NULL unconditionally (round 5, Codex review P1): a
+	// manual mute or re-mute must never leave a stale timeout id as owner --
+	// otherwise that timeout's later lift would clear THIS independent manual
+	// mute, which it does not own. A manual mute owns nothing (NULL), same as
+	// ClearVoiceServerMute's own unmute.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
 	// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
@@ -285,6 +290,12 @@ type Querier interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserStorage(ctx context.Context, userID int64) (int64, error)
+	// server_muted_by rides along here ONLY -- the single-user read RestoreModFlags
+	// uses to carry a timeout's ownership across a channel switch (round 5,
+	// Codex review P2) -- never on GetChannelVoiceStates/GetAllVoiceStates
+	// below, which feed the client-facing voice_state/ready payloads: the
+	// column is server-side-only (migration 049's comment) and must not leak
+	// into the wire protocol.
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
 	// The one indexed lookup permissions.Checker / service.PermissionService.Subject
@@ -475,6 +486,15 @@ type Querier interface {
 	// on THIS row can later clear it. NOT NULL excludes a manual moderator
 	// mute (voice_mod_mute never sets server_muted_by): that ownership is never
 	// reassigned to a timeout just because no timeout currently owns it.
+	//
+	// The trailing EXISTS (round 5, Codex review P2) requires the INCOMING
+	// action_id itself to still be an active timeout on THIS target: a mute
+	// attempt that is only reaching the SFU/DB now because its own goroutine
+	// was delayed, after its row was already lifted (and possibly a lift's
+	// own finalize already ran), must not claim -- or re-claim -- a mute a
+	// lift already correctly decided to clear. Without this a delayed A could
+	// mute (or reclaim from B) under an owner the ledger no longer recognizes,
+	// stranding the SFU muted until the reconcile sweep next runs.
 	MuteForSession(ctx context.Context, arg MuteForSessionParams) (sql.Result, error)
 	OpenDM(ctx context.Context, arg OpenDMParams) (int64, error)
 	// seq is supplied by the hub so the row seq matches the wrapped-payload seq.
@@ -531,6 +551,12 @@ type Querier interface {
 	// earlier timeout owns is not stranded when its row stops being the active
 	// one LiftTimeout will act on.
 	SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) ([]int64, error)
+	// Disambiguates MuteForSession's own no-match result (round 5, Codex review
+	// P2): whether the INCOMING action_id is still a live timeout on this
+	// target, so a delayed mute call (its own row already lifted, or expired,
+	// by the time it finally reaches the SFU/DB) is told matched=false rather
+	// than mistaken for "already muted by someone else".
+	TimeoutActionIsActiveForTarget(ctx context.Context, arg TimeoutActionIsActiveForTargetParams) (int64, error)
 	// The operator's storage figure on the metrics surface: every attachments
 	// row, legacy rows with a NULL uploader_id included, so it is a total and
 	// not a sum of counters.

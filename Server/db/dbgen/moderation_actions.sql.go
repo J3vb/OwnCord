@@ -330,6 +330,30 @@ func (q *Queries) SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActi
 	return items, nil
 }
 
+const timeoutActionIsActiveForTarget = `-- name: TimeoutActionIsActiveForTarget :one
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE id = ? AND target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active
+`
+
+type TimeoutActionIsActiveForTargetParams struct {
+	ID       int64 `json:"id"`
+	TargetID int64 `json:"targetId"`
+}
+
+// Disambiguates MuteForSession's own no-match result (round 5, Codex review
+// P2): whether the INCOMING action_id is still a live timeout on this
+// target, so a delayed mute call (its own row already lifted, or expired,
+// by the time it finally reaches the SFU/DB) is told matched=false rather
+// than mistaken for "already muted by someone else".
+func (q *Queries) TimeoutActionIsActiveForTarget(ctx context.Context, arg TimeoutActionIsActiveForTargetParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, timeoutActionIsActiveForTarget, arg.ID, arg.TargetID)
+	var active int64
+	err := row.Scan(&active)
+	return active, err
+}
+
 const unlinkModerationActionsByActor = `-- name: UnlinkModerationActionsByActor :exec
 UPDATE moderation_actions SET actor_id = 0, actor_token = ? WHERE actor_id = ?
 `

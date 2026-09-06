@@ -939,7 +939,7 @@ func TestVoice_MuteForTimeoutSession_ChannelMismatch(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel B: %v", err)
 	}
 
-	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt)
+	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt, nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession: %v", err)
 	}
@@ -988,7 +988,7 @@ func TestVoice_MuteForTimeoutSession_JoinedAtMismatch(t *testing.T) {
 		t.Fatal("test setup broken: rejoin produced the same joined_at token")
 	}
 
-	matched, _, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt)
+	matched, _, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt, nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession: %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt)
+	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt, nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession (first mute): %v", err)
 	}
@@ -1026,7 +1026,7 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 
 	// Muting an already-muted target owned by the SAME still-active action:
 	// matched, but nothing new transitioned.
-	matched, transitioned, err = database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt)
+	matched, transitioned, err = database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt, nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession (already muted): %v", err)
 	}
@@ -1064,7 +1064,7 @@ func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-reclaim-user")
 	chanA := seedVoiceChannel(t, database, "vc-cas-reclaim-a")
-	staleAction := seedTimeoutAction(t, database, userID, false) // already inactive
+	staleAction := seedTimeoutAction(t, database, userID, true) // active for now
 	newAction := seedTimeoutAction(t, database, userID, true)
 
 	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
@@ -1074,13 +1074,18 @@ func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	// staleAction claims the mute first (as if it landed before its own row
-	// was superseded).
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, staleAction, state.JoinedAt); err != nil || !matched || !transitioned {
+	// staleAction claims the mute first, while still active (round 5, Codex
+	// review P2: the incoming action itself must be active for the mute to
+	// land at all) — then goes inactive afterward, as if it landed before
+	// its own row was superseded.
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, staleAction, state.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("seed mute: matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
+	if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET expires_at = '2000-01-01 00:00:00' WHERE id = ?`, staleAction); err != nil {
+		t.Fatalf("backdate staleAction: %v", err)
+	}
 
-	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, newAction, state.JoinedAt)
+	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, newAction, state.JoinedAt, nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession (reclaim): %v", err)
 	}
@@ -1106,7 +1111,7 @@ func TestVoice_MuteForTimeoutSession_NoSession(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-cas-nosession-a")
 	actionID := seedTimeoutAction(t, database, userID, true)
 
-	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, "no-such-join-token")
+	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, "no-such-join-token", nil)
 	if err != nil {
 		t.Fatalf("MuteForTimeoutSession: %v", err)
 	}
@@ -1125,7 +1130,7 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 	chanA := seedVoiceChannel(t, database, "vc-orphan-a")
 
 	liftedUser := seedVoiceUser(t, database, "orphan-lifted-user")
-	liftedAction := seedLiftedTimeoutAction(t, database, liftedUser) // expires_at still in the future, but lifted_at is set
+	liftedAction := seedTimeoutAction(t, database, liftedUser, true) // active for now
 	if err := database.JoinVoiceChannel(ctx, liftedUser, chanA); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
@@ -1133,12 +1138,17 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 	if err != nil || liftedState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, liftedUser, chanA, liftedAction, liftedState.JoinedAt); err != nil || !matched || !transitioned {
+	// Mute while still active (round 5, Codex review P2 requires it), THEN
+	// mark it lifted — expires_at stays in the future, only lifted_at is set.
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, liftedUser, chanA, liftedAction, liftedState.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession(lifted): matched=%v transitioned=%v err=%v", matched, transitioned, err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, liftedAction); err != nil {
+		t.Fatalf("mark liftedAction lifted: %v", err)
 	}
 
 	expiredUser := seedVoiceUser(t, database, "orphan-expired-user")
-	expiredAction := seedNeverLiftedExpiredAction(t, database, expiredUser)
+	expiredAction := seedTimeoutAction(t, database, expiredUser, true) // active for now
 	if err := database.JoinVoiceChannel(ctx, expiredUser, chanA); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
@@ -1146,8 +1156,11 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 	if err != nil || expiredState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, expiredUser, chanA, expiredAction, expiredState.JoinedAt); err != nil || !matched || !transitioned {
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, expiredUser, chanA, expiredAction, expiredState.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession(expired): matched=%v transitioned=%v err=%v", matched, transitioned, err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET expires_at = '2000-01-01 00:00:00' WHERE id = ?`, expiredAction); err != nil {
+		t.Fatalf("backdate expiredAction: %v", err)
 	}
 
 	got, err := database.FindOrphanedVoiceMutes(ctx)
@@ -1163,29 +1176,6 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 			t.Errorf("FindOrphanedVoiceMutes entry %+v does not match want %+v", o, want)
 		}
 	}
-}
-
-// seedNeverLiftedExpiredAction is seedTimeoutAction's active=false shape
-// named for what this test needs: expires_at already past, lifted_at still
-// NULL — an expiry nobody ever explicitly lifted.
-func seedNeverLiftedExpiredAction(t *testing.T, database *db.DB, targetID int64) int64 {
-	t.Helper()
-	return seedTimeoutAction(t, database, targetID, false)
-}
-
-// seedLiftedTimeoutAction inserts a moderation_actions row with expires_at
-// still in the future but lifted_at already set — a timeout that was
-// explicitly lifted before it would have expired on its own.
-func seedLiftedTimeoutAction(t *testing.T, database *db.DB, targetID int64) int64 {
-	t.Helper()
-	var id int64
-	row := database.QueryRowContext(context.Background(),
-		`INSERT INTO moderation_actions (kind, target_id, expires_at, lifted_at) VALUES ('timeout', ?, '2999-01-01 00:00:00', datetime('now')) RETURNING id`,
-		targetID)
-	if err := row.Scan(&id); err != nil {
-		t.Fatalf("seedLiftedTimeoutAction: %v", err)
-	}
-	return id
 }
 
 // TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes: a
@@ -1205,7 +1195,7 @@ func TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes(t *test
 	if err != nil || activeState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, activeUser, chanA, activeAction, activeState.JoinedAt); err != nil || !matched || !transitioned {
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, activeUser, chanA, activeAction, activeState.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
 
@@ -1288,7 +1278,7 @@ func TestVoice_ClearServerMuteOwnedBy_MatchesAnyOfTheChain(t *testing.T) {
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, owner, state.JoinedAt); err != nil || !matched || !transitioned {
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, owner, state.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("seed mute: matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
 

@@ -79,6 +79,22 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
 	}
 	if state == nil {
+		// Authorization before existence (follow-up to round 4, Codex review):
+		// with no session to build a channel Subject from, still run the SAME
+		// canonical authorizer (no second one) on a Subject built from just the
+		// actor's base role and a zero channel — CanModerateVoice's DM branch
+		// and channel-override layer are both no-ops against a zero Channel, so
+		// this reduces to exactly the base-bit-plus-ReadMessages/MuteMembers
+		// check the full, in-voice path would fail on for the SAME actor
+		// regardless of channel. An actor without the base bit gets the SAME
+		// 403 here as the in-voice failure below, so a target in voice and one
+		// not in voice are byte-identical refusals — probing voice presence
+		// this way learns nothing. Only a holder (who would pass the full
+		// channel check too, absent an unlucky channel-level deny) ever
+		// reaches the VoiceError below.
+		if permissions.AuthorizeVoiceModerator(permissions.Subject{RolePerms: actorRole.Permissions}) != nil {
+			return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing MUTE_MEMBERS permission"}}
+		}
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	}
 
@@ -188,20 +204,22 @@ func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, ch
 // Widening VoiceModerator itself lives in deps.go; until then *Hub also
 // satisfies this optional extension, mirroring voiceChannelDisconnector.
 type voicePendingModFlagsSetter interface {
-	SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool) bool
+	SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool
 }
 
 // stashPendingModFlags is a best-effort no-op when mod does not support the
 // optional extension or the target has no connection on this node — the
 // eviction that follows still proceeds either way, exactly as it did before
 // this stash existed, so a missing implementation only loses the
-// preservation, never blocks the move.
-func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serverDeafened bool) {
+// preservation, never blocks the move. serverMutedBy (round 5, Codex review
+// P2) carries a timeout's ownership through the stash the same way
+// voiceJoinLeaveCurrent's own snapshot does for a self-initiated switch.
+func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	if !serverMuted && !serverDeafened {
 		return
 	}
 	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
-		setter.SetPendingVoiceModFlags(targetID, serverMuted, serverDeafened)
+		setter.SetPendingVoiceModFlags(targetID, serverMuted, serverDeafened, serverMutedBy)
 	}
 }
 
@@ -215,7 +233,7 @@ func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serve
 // re-apply as a server mute/deafen nobody currently ordered.
 func clearPendingModFlags(mod VoiceModerator, targetID int64) {
 	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
-		setter.SetPendingVoiceModFlags(targetID, false, false)
+		setter.SetPendingVoiceModFlags(targetID, false, false, nil)
 	}
 }
 
@@ -319,7 +337,18 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	// single bool with no way to tell "explicit" from "deafen-implied" apart,
 	// so an explicit-mute-then-deafen sequence has both lifted together by an
 	// undeafen — accepted as the simplest correct behavior given the schema.
-	muteMatched, err := d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	// The implied mute's DB write and its paired SFU call run under the same
+	// per-user lock SetServerMuteLocked uses for the manual mute endpoint
+	// (round 5, Codex review: this pair used to bypass the lock entirely),
+	// so it cannot interleave with a timeout's mute/unmute for the same
+	// target either. Falls back to the unlocked write only for a Mod-less
+	// test deps, exactly like handleVoiceModMuteV2.
+	var muteMatched bool
+	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
+		muteMatched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	} else {
+		muteMatched, err = d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	}
 	if err != nil || !muteMatched {
 		if err != nil {
 			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID())
@@ -329,12 +358,6 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 		}
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
-	}
-	if d.Mod != nil {
-		if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, c.Deafened()); err != nil {
-			slog.Warn("ws handleVoiceModDeafenV2 MuteParticipant failed",
-				"err", err, "target_id", c.TargetID(), "channel_id", state.ChannelID)
-		}
 	}
 
 	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID(),
@@ -423,7 +446,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// voicePendingModFlagsSetter. The target's own re-join (handleVoiceJoin,
 	// via voiceJoinLeaveCurrent in voice_join.go) has no row left to read
 	// (currentChID == 0 by then) and takes this stash back out instead.
-	stashPendingModFlags(d.Mod, c.TargetID(), state.ServerMuted, state.ServerDeafened)
+	stashPendingModFlags(d.Mod, c.TargetID(), state.ServerMuted, state.ServerDeafened, state.ServerMutedBy)
 	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
@@ -593,11 +616,11 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 // do here" case DisconnectFromVoiceInChannel reports, since without a live
 // *Client there is nowhere to stash the flags and no re-join on this node to
 // consume them.
-func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool) bool {
+func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	c := h.GetClient(userID)
 	if c == nil {
 		return false
 	}
-	c.setPendingModFlags(serverMuted, serverDeafened)
+	c.setPendingModFlags(serverMuted, serverDeafened, serverMutedBy)
 	return true
 }

@@ -25,7 +25,7 @@ func (q *Queries) ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServ
 
 const applyVoiceServerMute = `-- name: ApplyVoiceServerMute :execresult
 
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?
+UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = NULL WHERE user_id = ? AND channel_id = ?
 `
 
 type ApplyVoiceServerMuteParams struct {
@@ -39,6 +39,11 @@ type ApplyVoiceServerMuteParams struct {
 // whatever channel their row points at by then -- including a DM call the
 // moderator was never authorized against (OC-0005). :execresult so the
 // caller can tell a real no-op (target moved) from a normal apply.
+// server_muted_by = NULL unconditionally (round 5, Codex review P1): a
+// manual mute or re-mute must never leave a stale timeout id as owner --
+// otherwise that timeout's later lift would clear THIS independent manual
+// mute, which it does not own. A manual mute owns nothing (NULL), same as
+// ClearVoiceServerMute's own unmute.
 func (q *Queries) ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, applyVoiceServerMute, arg.UserID, arg.ChannelID)
 }
@@ -333,7 +338,7 @@ const getUserVoiceState = `-- name: GetUserVoiceState :one
 SELECT vs.user_id, vs.channel_id, u.username,
        vs.muted, vs.deafened, vs.speaking,
        vs.camera, vs.screenshare,
-       vs.server_muted, vs.server_deafened, vs.joined_at
+       vs.server_muted, vs.server_deafened, vs.joined_at, vs.server_muted_by
 FROM voice_states vs
 JOIN users u ON u.id = vs.user_id
 WHERE vs.user_id = ?
@@ -351,8 +356,15 @@ type GetUserVoiceStateRow struct {
 	ServerMuted    int64  `json:"serverMuted"`
 	ServerDeafened int64  `json:"serverDeafened"`
 	JoinedAt       string `json:"joinedAt"`
+	ServerMutedBy  *int64 `json:"serverMutedBy"`
 }
 
+// server_muted_by rides along here ONLY -- the single-user read RestoreModFlags
+// uses to carry a timeout's ownership across a channel switch (round 5,
+// Codex review P2) -- never on GetChannelVoiceStates/GetAllVoiceStates
+// below, which feed the client-facing voice_state/ready payloads: the
+// column is server-side-only (migration 049's comment) and must not leak
+// into the wire protocol.
 func (q *Queries) GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserVoiceState, userID)
 	var i GetUserVoiceStateRow
@@ -368,6 +380,7 @@ func (q *Queries) GetUserVoiceState(ctx context.Context, userID int64) (GetUserV
 		&i.ServerMuted,
 		&i.ServerDeafened,
 		&i.JoinedAt,
+		&i.ServerMutedBy,
 	)
 	return i, err
 }
@@ -476,6 +489,11 @@ UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = ?1
         WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
      ))
    )
+   AND EXISTS (
+     SELECT 1 FROM moderation_actions
+      WHERE id = ?1 AND target_id = ?2
+        AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+   )
 `
 
 type MuteForSessionParams struct {
@@ -514,6 +532,15 @@ type MuteForSessionParams struct {
 // on THIS row can later clear it. NOT NULL excludes a manual moderator
 // mute (voice_mod_mute never sets server_muted_by): that ownership is never
 // reassigned to a timeout just because no timeout currently owns it.
+//
+// The trailing EXISTS (round 5, Codex review P2) requires the INCOMING
+// action_id itself to still be an active timeout on THIS target: a mute
+// attempt that is only reaching the SFU/DB now because its own goroutine
+// was delayed, after its row was already lifted (and possibly a lift's
+// own finalize already ran), must not claim -- or re-claim -- a mute a
+// lift already correctly decided to clear. Without this a delayed A could
+// mute (or reclaim from B) under an owner the ledger no longer recognizes,
+// stranding the SFU muted until the reconcile sweep next runs.
 func (q *Queries) MuteForSession(ctx context.Context, arg MuteForSessionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, muteForSession,
 		arg.ActionID,

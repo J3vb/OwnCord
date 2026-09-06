@@ -298,6 +298,19 @@ func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 			}
 		})
 	}
+
+	// Positive control (Codex review): every case above asserts 403 for
+	// modToken, which a blanket "reject everything" perimeter bug would
+	// satisfy just as well as a correct ownerOnlyMiddleware — proving
+	// nothing about whether it is the OWNER check specifically doing the
+	// refusing. NarrowMod's mask (KickMembers, BanMembers, MuteMembers) is
+	// all AdminPerimeter membership, and GET /me sits behind the perimeter
+	// alone with no further requirePerm — so the SAME narrow-role token
+	// that gets 403 on every owner-only route above must be admitted here.
+	if w := doRequest(t, handler, http.MethodGet, "/me", modToken, nil); w.Code == http.StatusForbidden {
+		t.Fatalf("GET /me (narrow AdminPerimeter role) = 403, want admitted — "+
+			"the owner-only routes' 403s must come from ownerOnlyMiddleware, not a perimeter that rejects everything; body: %s", w.Body.String())
+	}
 }
 
 // ─── KICK_MEMBERS (force logout) ─────────────────────────────────────────────

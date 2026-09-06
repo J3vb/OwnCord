@@ -30,16 +30,35 @@ import (
 // lost — it simply applies once the connection is free, after this
 // transaction ends.
 func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t *testing.T) {
+	t.Run("promotion queued after the rank check, before the insert", func(t *testing.T) {
+		runBanUserWithActionConcurrentRoleChangeCannotPreempt(t, db.SetModerationActionPreInsertHookForTest)
+	})
+	// Codex review follow-up: the same property, one step earlier — a
+	// promotion attempted between BeginTx (and BanUser's own effect write,
+	// already landed by the time recordModerationAction runs) and the rank
+	// snapshot itself, not only after it. Structurally the SAME writer
+	// connection guarantee applies either way, but a future refactor that
+	// moved the rank read onto a path not covered by ONE specific barrier
+	// position must not go unnoticed just because the OTHER position still
+	// passes.
+	t.Run("promotion queued between BeginTx and the rank check", func(t *testing.T) {
+		runBanUserWithActionConcurrentRoleChangeCannotPreempt(t, db.SetModerationActionPreRankCheckHookForTest)
+	})
+}
+
+// runBanUserWithActionConcurrentRoleChangeCannotPreempt drives the shared
+// scenario through whichever barrier setter the caller supplies.
+func runBanUserWithActionConcurrentRoleChangeCannotPreempt(t *testing.T, setHook func(func())) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
 	reached := make(chan struct{})
 	release := make(chan struct{})
-	db.SetModerationActionPreInsertHookForTest(func() {
+	setHook(func() {
 		close(reached)
 		<-release
 	})
-	defer db.SetModerationActionPreInsertHookForTest(nil)
+	defer setHook(nil)
 
 	type banOutcome struct {
 		id  int64
@@ -54,7 +73,7 @@ func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t
 	select {
 	case <-reached:
 	case <-time.After(5 * time.Second):
-		t.Fatal("BanUserWithAction never reached the pre-insert hook — the contention barrier never armed")
+		t.Fatal("BanUserWithAction never reached the contention barrier — it never armed")
 	}
 
 	// A genuinely concurrent writer, contending for the exact one writer
@@ -98,8 +117,8 @@ func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t
 		t.Fatalf("ListModerationActionsForTarget: %v", err)
 	}
 	found := false
-	for _, r := range rows {
-		if r.ID == outcome.id && r.Kind == "ban" {
+	for i := range rows {
+		if rows[i].ID == outcome.id && rows[i].Kind == "ban" {
 			found = true
 		}
 	}

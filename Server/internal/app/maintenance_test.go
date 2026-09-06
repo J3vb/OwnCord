@@ -37,8 +37,8 @@ func newMaintenanceTestDB(t *testing.T) *db.DB {
 // which only need the DB half of the contract.
 type dbVoiceMuterForTest struct{ database *db.DB }
 
-func (m *dbVoiceMuterForTest) MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (bool, bool) {
-	matched, transitioned, err := m.database.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt)
+func (m *dbVoiceMuterForTest) MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (bool, bool) {
+	matched, transitioned, err := m.database.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
 	if err != nil || !matched {
 		return false, false
 	}
@@ -89,14 +89,21 @@ func TestReconcileOrphanedVoiceMutes_ExpiredTimeoutUnmuted(t *testing.T) {
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	// Already expired at issue time — simulating a timeout whose expiry has
-	// since passed with nobody having lifted it.
-	actionID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(-time.Hour))
+	// Issued (and muted) while still active, exactly like a real timeout —
+	// round 5's Codex review P2 refuses a mute attempt whose OWN action is
+	// already inactive, so the setup must mute FIRST and expire it
+	// afterward, simulating a timeout whose expiry has since passed with
+	// nobody having lifted it.
+	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt); err != nil || !matched || !transitioned {
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05"), actionID); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
 	}
 
 	if err := m.reconcileOrphanedVoiceMutes(ctx); err != nil {
@@ -142,11 +149,11 @@ func TestReconcileOrphanedVoiceMutes_CrashBetweenLiftAndFinalize(t *testing.T) {
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
-	actionID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt); err != nil || !matched || !transitioned {
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
 

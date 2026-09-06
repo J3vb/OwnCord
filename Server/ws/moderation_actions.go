@@ -61,14 +61,24 @@ func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expir
 // unmuted->muted transition — false means the target was already
 // server-muted by someone/something else, so the caller must not treat
 // this action as responsible for later clearing it, P1-4 PARTIAL).
-func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (applied, owned bool) {
+//
+// supersededIDs transfers ownership from those just-superseded ledger ids
+// onto actionID (round 4, Codex review) — but now, unlike round 4, INSIDE
+// this call's own lock hold and the same DB transaction as the mute itself
+// (round 5, Codex review P2): TimeoutUser no longer transfers ownership on
+// its own, because a transfer landing between another action's DB write
+// and its SFU call (both under ITS OWN lock hold, but the transfer was
+// previously a bare DB write outside any lock) could move ownership out
+// from under that action's rollback-on-SFU-failure, which scopes its
+// clear to just its own actionID and would then find nothing to undo.
+func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (applied, owned bool) {
 	if h.voice == nil {
 		return false, false
 	}
 	unlock := h.voiceMod.lock(userID)
 	defer unlock()
 
-	matched, transitioned, err := h.voice.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt)
+	matched, transitioned, err := h.voice.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
 	if err != nil {
 		slog.Error("ws MuteForTimeout MuteForTimeoutSession", "err", err, "user_id", userID)
 		return false, false

@@ -12,30 +12,48 @@ import "github.com/J3vb/OwnCord/Server/syncutil"
 // rollback on an SFU failure (Codex 14) is guaranteed to run against the
 // same, unchanged DB state its own mute just produced.
 //
-// Entries are never removed (ponytail: unbounded but one *syncutil.Mutex
-// per distinct user ever voice-moderated is a small, bounded-in-practice
-// leak — add eviction if a long-lived server with a very large, ever-
-// churning moderated population measures it as a real cost).
+// Entries are reference-counted and evicted once nobody holds or is waiting
+// on them (round 5, Codex review P3): a long-lived server moderating a
+// large, ever-churning population must not grow this map forever.
 type voiceModLocks struct {
 	mu    syncutil.Mutex
-	locks map[int64]*syncutil.Mutex
+	locks map[int64]*voiceModLockEntry
+}
+
+// voiceModLockEntry is one userID's lock plus how many callers currently
+// hold it or are waiting to. refs is guarded by voiceModLocks.mu, not the
+// entry's own lock — it must be adjusted at the same time as the map lookup
+// so a concurrent lock() and the unlocking eviction check can never race
+// each other into deleting an entry someone is about to wait on.
+type voiceModLockEntry struct {
+	mu   syncutil.Mutex
+	refs int
 }
 
 func newVoiceModLocks() *voiceModLocks {
-	return &voiceModLocks{locks: make(map[int64]*syncutil.Mutex)}
+	return &voiceModLocks{locks: make(map[int64]*voiceModLockEntry)}
 }
 
 // lock acquires the per-userID lock, blocking until held, and returns a
 // func that releases it — `defer voiceMod.lock(userID)()`.
 func (v *voiceModLocks) lock(userID int64) func() {
 	v.mu.Lock()
-	l, ok := v.locks[userID]
+	e, ok := v.locks[userID]
 	if !ok {
-		l = &syncutil.Mutex{}
-		v.locks[userID] = l
+		e = &voiceModLockEntry{}
+		v.locks[userID] = e
 	}
+	e.refs++
 	v.mu.Unlock()
 
-	l.Lock()
-	return l.Unlock
+	e.mu.Lock()
+	return func() {
+		e.mu.Unlock()
+		v.mu.Lock()
+		e.refs--
+		if e.refs == 0 {
+			delete(v.locks, userID)
+		}
+		v.mu.Unlock()
+	}
 }

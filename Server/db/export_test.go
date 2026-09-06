@@ -9,6 +9,16 @@ func SetModerationActionPreInsertHookForTest(fn func()) {
 	moderationActionPreInsertHook = fn
 }
 
+// SetModerationActionPreRankCheckHookForTest installs (or, with nil, clears)
+// the barrier moderationActionPreRankCheckHook runs inside
+// recordModerationAction's transaction, before either rolePosition call —
+// one step earlier than SetModerationActionPreInsertHookForTest's own
+// barrier. Exported for db_test's black-box contention test — production
+// code never calls this.
+func SetModerationActionPreRankCheckHookForTest(fn func()) {
+	moderationActionPreRankCheckHook = fn
+}
+
 // SetModerationActionPreBeginTxHookForTest installs (or, with nil, clears)
 // the barrier moderationActionPreBeginTxHook runs at the top of
 // BanUserWithAction, before BeginTx is called. Exported for db_test's

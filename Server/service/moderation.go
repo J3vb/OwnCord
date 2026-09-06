@@ -71,7 +71,15 @@ type TimeoutVoiceMuter interface {
 	// for it (ownership bookkeeping is now entirely internal to the DB/lock
 	// layer), kept only because "did I just take ownership" is meaningful
 	// information for a caller that wants it.
-	MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (applied, owned bool)
+	//
+	// supersededIDs (round 5, Codex review P2) transfers ownership from
+	// those just-superseded ledger ids onto actionID INSIDE the same
+	// per-user lock this call already takes for its own DB write and SFU
+	// pair — TimeoutUser no longer transfers ownership itself, because
+	// doing so outside this lock could land between another action's DB
+	// write and its own SFU call, making that action's rollback (on an SFU
+	// failure) miss the row a concurrent supersede had already moved.
+	MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (applied, owned bool)
 	// UnmuteForTimeout clears the mute currently owned by any of actionIDs
 	// (a lift's own id, or its whole supersede chain) — session-bound for
 	// free (round 4, fixing Codex 13): an ended or restarted session cannot
@@ -362,7 +370,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	}
 
 	expires := time.Now().Add(duration)
-	id, err := s.st.TimeoutUser(ctx, targetID, actorID, reportID, reason, expires)
+	id, supersededIDs, err := s.st.TimeoutUser(ctx, targetID, actorID, reportID, reason, expires)
 	if err != nil {
 		if errors.Is(err, db.ErrOutranked) {
 			return nil, fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
@@ -374,7 +382,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_timeout", "user", targetID,
 		fmt.Sprintf("timeout issued, expires %s", expires.UTC().Format(time.RFC3339)))
 
-	voiceSkipped := !s.applyTimeoutVoiceHalf(ctx, actorID, targetID, id)
+	voiceSkipped := !s.applyTimeoutVoiceHalf(ctx, actorID, targetID, id, supersededIDs)
 
 	s.notifyModAction(targetID, id, "timeout", reason, &expires)
 
@@ -390,7 +398,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 // voice muter to report success (P3-14): a target not currently in voice, a
 // channel-switch race, or an SFU failure must not be reported as applied
 // just because the actor was eligible.
-func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64) bool {
+func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64, supersededIDs []int64) bool {
 	auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID)
 	if !ok || s.voiceMuter == nil {
 		return false
@@ -398,7 +406,7 @@ func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, 
 	if timeoutPreMuteHook != nil {
 		timeoutPreMuteHook()
 	}
-	applied, _ := s.voiceMuter.MuteForTimeout(context.WithoutCancel(ctx), targetID, auth.channelID, actionID, auth.joinedAt)
+	applied, _ := s.voiceMuter.MuteForTimeout(context.WithoutCancel(ctx), targetID, auth.channelID, actionID, auth.joinedAt, supersededIDs)
 	return applied
 }
 
@@ -519,9 +527,31 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 // or 0 for a system-initiated finalize (the maintenance-tick reconcile
 // sweep, cleaning up a mute whose owning timeout already lifted or expired
 // with nobody having run this method yet).
+//
+// The idempotent repair (the voice clear above) and the notification below
+// are deliberately separate (round 5, Codex review P2): a STALE finalize —
+// this call's liftedActionIDs lost the race to a NEWER timeout that has
+// since superseded them and is still active — must still run its repair
+// (clearing what it owns is always safe: session-bound ownership means it
+// can only ever match ITS OWN ids, never the newer timeout's), but must NOT
+// send a "lifted"/expires_at:null frame or write an audit row after the
+// newer timeout's own issue already announced the target's CURRENT sanction
+// state — a stale announcement racing behind the current one would tell a
+// live client it is free when a newer timeout still holds.
 func (s *ModerationService) FinalizeTimeoutLift(ctx context.Context, targetID int64, liftedActionIDs []int64, actorID int64) {
 	if s.voiceMuter != nil {
 		s.voiceMuter.UnmuteForTimeout(context.WithoutCancel(ctx), targetID, liftedActionIDs)
+	}
+	active, err := s.st.HasActiveTimeout(context.WithoutCancel(ctx), targetID)
+	if err != nil {
+		slog.Error("FinalizeTimeoutLift: HasActiveTimeout", "err", err, "target_id", targetID)
+		return
+	}
+	if active {
+		// A newer timeout superseded liftedActionIDs and is still active —
+		// its own issue already published the current state; this stale
+		// finalize's repair (above) is done, and that is all it owns to do.
+		return
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_untimeout", "user", targetID, "timeout lifted")
 	s.notifyModAction(targetID, 0, "timeout", "", nil)

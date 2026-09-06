@@ -103,7 +103,7 @@ func seedTimeoutActionForTest(t *testing.T, database *db.DB, targetID int64) int
 // "voice": "applied"/"skipped" must reflect what actually happened).
 func TestMuteForTimeout_NoVoiceStore(t *testing.T) {
 	h := &Hub{}
-	if applied, owned := h.MuteForTimeout(context.Background(), 1, 100, 1, "tok"); applied || owned {
+	if applied, owned := h.MuteForTimeout(context.Background(), 1, 100, 1, "tok", nil); applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: no voice store wired", applied, owned)
 	}
 }
@@ -120,7 +120,7 @@ func TestMuteForTimeout_NoSession(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	actionID := seedTimeoutActionForTest(t, database, uid)
-	if applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, "no-such-token"); applied || owned {
+	if applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, "no-such-token", nil); applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: no voice_states row for %d", applied, owned, uid)
 	}
 }
@@ -141,7 +141,7 @@ func TestMuteForTimeout_SessionMismatch(t *testing.T) {
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	if applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, "stale-join-token"); applied || owned {
+	if applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, "stale-join-token", nil); applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: the join token does not match the live session", applied, owned)
 	}
 	state, err := h.voice.State(context.Background(), uid)
@@ -175,7 +175,7 @@ func TestMuteForTimeout_SFUFailureRollsBackDB(t *testing.T) {
 		t.Fatalf("State: %v", err)
 	}
 
-	applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, state.JoinedAt)
+	applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, state.JoinedAt, nil)
 	if applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: h.livekit is nil, so MuteParticipant always fails", applied, owned)
 	}
@@ -216,7 +216,7 @@ func (e *errorVoiceStore) State(ctx context.Context, userID int64) (*db.VoiceSta
 	return e.VoiceStore.State(ctx, userID)
 }
 
-func (e *errorVoiceStore) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (bool, bool, error) {
+func (e *errorVoiceStore) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (bool, bool, error) {
 	if e.muteErr != nil {
 		return false, false, e.muteErr
 	}
@@ -236,7 +236,7 @@ func TestMuteForTimeout_MuteForTimeoutSessionFailed(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteErr: errors.New("boom")}
-	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok"); applied || owned { // must not panic
+	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok", nil); applied || owned { // must not panic
 		t.Fatalf("applied=%v owned=%v, want both false: MuteForTimeoutSession failed", applied, owned)
 	}
 }
@@ -248,7 +248,7 @@ func TestMuteForTimeout_MuteForTimeoutSessionNoMatch(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteMatch: false}
-	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok"); applied || owned { // must not panic, no broadcast
+	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok", nil); applied || owned { // must not panic, no broadcast
 		t.Fatalf("applied=%v owned=%v, want both false: MuteForTimeoutSession reported no match", applied, owned)
 	}
 }
@@ -264,7 +264,7 @@ func TestMuteForTimeout_BroadcastSkippedOnStateReadFailure(t *testing.T) {
 	muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error { return nil }
 	t.Cleanup(func() { muteParticipantHookForTest = prevHook })
 
-	applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok")
+	applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok", nil)
 	if !applied || !owned { // must not panic despite the broadcast's State() failing
 		t.Fatalf("applied=%v owned=%v, want both true: the mute itself succeeded", applied, owned)
 	}
@@ -288,7 +288,7 @@ func TestMuteForTimeout_AlreadyMuted(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteMatch: true, muteOwned: false}
-	applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok")
+	applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok", nil)
 	if !applied || owned {
 		t.Fatalf("applied=%v owned=%v, want applied=true owned=false: already muted by someone/something else", applied, owned)
 	}
@@ -301,7 +301,7 @@ func TestMuteForTimeout_RollbackFailureIsLoggedNotPanicked(t *testing.T) {
 	h := newTestHub(t, database, nil, nil)
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteMatch: true, muteOwned: true, clearErr: errors.New("rollback boom")}
 	// h.livekit is nil, so MuteParticipant fails, triggering the rollback.
-	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok"); applied || owned {
+	if applied, owned := h.MuteForTimeout(context.Background(), 1, chID, 1, "tok", nil); applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: SFU failure, even with a failing rollback", applied, owned)
 	}
 }
@@ -349,7 +349,7 @@ func TestUnmuteForTimeout_SFUFailureStillClearsDB(t *testing.T) {
 	}
 	prevHook := muteParticipantHookForTest
 	muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error { return nil }
-	applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, state.JoinedAt)
+	applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, state.JoinedAt, nil)
 	muteParticipantHookForTest = prevHook
 	if !applied || !owned {
 		t.Fatalf("seed mute: applied=%v owned=%v", applied, owned)
@@ -425,6 +425,49 @@ func TestHandleVoiceModMuteV2_ModLessDepsFallsBackToUnlockedWrite(t *testing.T) 
 	}
 }
 
+// TestMuteForTimeout_ContendsOnTheHubLock is round 5's Codex review test
+// partial: TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim only ever
+// runs its two paths sequentially, which proves the ownership model's
+// correctness but nothing about whether MuteForTimeout genuinely takes
+// h.voiceMod at all. This parks the target's lock directly, starts
+// MuteForTimeout in a goroutine, and asserts it is still blocked a moment
+// later — real contention on the Hub's own lock, not a doc comment's claim.
+func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
+	database, chID := applyTimeoutMuteTestDB(t)
+	uid, err := database.CreateUser(context.Background(), "lock-contend-user", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	h := newTestHub(t, database, nil, nil)
+	ctx := context.Background()
+	if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	actionID := seedTimeoutActionForTest(t, database, uid)
+
+	unlock := h.voiceMod.lock(uid)
+
+	done := make(chan struct{})
+	go func() {
+		h.MuteForTimeout(ctx, uid, chID, actionID, "tok", nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("MuteForTimeout completed while the per-user lock was held by the test goroutine")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: still blocked.
+	}
+
+	unlock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MuteForTimeout never completed after the lock was released")
+	}
+}
+
 // TestVoiceModLocks_SerializesSameUser proves voiceModLocks' core contract
 // (round 4, Codex 12): two callers for the SAME userID cannot both be inside
 // their critical section at once — the second's lock() call genuinely
@@ -492,6 +535,49 @@ func TestVoiceModLocks_DoesNotSerializeDifferentUsers(t *testing.T) {
 	}
 }
 
+// TestVoiceModLocks_EvictsEntryOnceUnheldAndUnwaited is round 5's Codex
+// review P3: the per-target map must not grow forever — an entry with no
+// current holder and no queued waiter is removed as soon as the last
+// release happens, not kept around indefinitely.
+func TestVoiceModLocks_EvictsEntryOnceUnheldAndUnwaited(t *testing.T) {
+	v := newVoiceModLocks()
+
+	unlock := v.lock(1)
+	if len(v.locks) != 1 {
+		t.Fatalf("locks = %d entries while held, want 1", len(v.locks))
+	}
+	unlock()
+	if len(v.locks) != 0 {
+		t.Fatalf("locks = %d entries after the only holder released, want 0 (evicted)", len(v.locks))
+	}
+
+	// A waiter queued behind an in-flight holder must NOT be evicted out
+	// from under it: refs stays at 2 (holder + waiter) until both release.
+	unlockA := v.lock(2)
+	waiterStarted := make(chan struct{})
+	waiterDone := make(chan struct{})
+	go func() {
+		close(waiterStarted)
+		v.lock(2)() // blocks until unlockA runs, then immediately releases
+		close(waiterDone)
+	}()
+	<-waiterStarted
+	// Give the waiter a moment to register itself (increment refs) before
+	// the holder releases — best-effort, like the existing contention test
+	// above; the correctness claim (refs never hits 0 while a waiter is
+	// registered) holds regardless of exactly when it gets there.
+	time.Sleep(20 * time.Millisecond)
+	unlockA()
+	select {
+	case <-waiterDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the queued waiter for user 2 never completed")
+	}
+	if len(v.locks) != 0 {
+		t.Fatalf("locks = %d entries after both the holder and the waiter released, want 0 (evicted)", len(v.locks))
+	}
+}
+
 // TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim exercises the "X
 // lifts while Y's timeout mutes" scenario (round 4's reshape of
 // TestTimeout_VoiceHalf_StrandedMuteCompensated, Codex 12) through the
@@ -534,7 +620,7 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim(t *testing.T) {
 			t.Cleanup(func() { muteParticipantHookForTest = prevHook })
 
 			actionX := seedTimeoutActionForTest(t, database, uid)
-			if applied, owned := h.MuteForTimeout(ctx, uid, chID, actionX, state.JoinedAt); !applied || !owned {
+			if applied, owned := h.MuteForTimeout(ctx, uid, chID, actionX, state.JoinedAt, nil); !applied || !owned {
 				t.Fatalf("seed mute by X: applied=%v owned=%v", applied, owned)
 			}
 			// X is lifted (db.LiftTimeout already ran, ledger-side) before
@@ -549,10 +635,10 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim(t *testing.T) {
 			run := map[string]func(){
 				"unmute-then-mute": func() {
 					h.UnmuteForTimeout(ctx, uid, []int64{actionX})
-					h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt)
+					h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt, nil)
 				},
 				"mute-then-unmute": func() {
-					h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt)
+					h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt, nil)
 					h.UnmuteForTimeout(ctx, uid, []int64{actionX})
 				},
 			}[order]

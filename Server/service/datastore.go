@@ -246,7 +246,12 @@ type Store interface {
 	// (voice_states.server_muted_by) atomically with the mute, only on a
 	// genuine unmuted->muted transition (round 4, replacing round 3's
 	// CompareAndSetServerMute — see migration 049's comment).
-	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (matched, transitioned bool, err error)
+	// supersededIDs transfers ownership from those just-superseded ledger
+	// ids onto actionID, inside the same transaction as the mute (round 5,
+	// Codex review P2) — the caller (ws.Hub, under its per-user lock) is
+	// the only place this transfer may happen; see moderation.go's
+	// TimeoutVoiceMuter.MuteForTimeout doc comment.
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
 	// ClearServerMuteOwnedBy clears server_muted for whichever voice_states
 	// row currently names one of actionIDs as owner and reports its
 	// channel/join token for the paired SFU call (round 4).
@@ -335,7 +340,10 @@ type Store interface {
 	// a target promoted between the caller's check and this write is
 	// refused (db.ErrOutranked), not sanctioned.
 	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
-	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error)
+	// TimeoutUser also returns the ids it just superseded (round 5, Codex
+	// review P2): the caller passes them to the voice half's mute call so
+	// the ownership transfer runs under ITS per-user lock, not here.
+	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error)
 	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none
 	// lifted). The caller passes them to ClearServerMuteOwnedBy, which
 	// clears whichever voice_states row (if any) is currently owned by one

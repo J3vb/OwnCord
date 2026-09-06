@@ -211,6 +211,99 @@ func TestModerationQueueAct_NoBroadcastWhenActionFails(t *testing.T) {
 	}
 }
 
+// TestModerationQueueAct_NoBroadcastWhenBanWriteFails is the sibling Codex
+// review asked for: the existing no-broadcast test above only ever exercises
+// a PERMISSION refusal (403, before any write is attempted) — it proves
+// nothing about whether a genuine DB write failure, after authorization
+// already passed, is also handled without a stray broadcast. Dropping the
+// ledger table the ban's own transaction writes to (BanUserWithAction is
+// one transaction covering both the ban and its ledger row) forces the
+// write itself to fail with an actor who otherwise holds BAN_MEMBERS.
+func TestModerationQueueAct_NoBroadcastWhenBanWriteFails(t *testing.T) {
+	h, database, broadcaster := buildModQueueActRouter(t)
+	modID := mintModerator(t, database, "act-banwritefail-mod", 90, permissions.ModerateMembers|permissions.BanMembers)
+	modToken, _ := mintSession(t, database, modID)
+	reporterID := mintUser(t, database, "act-banwritefail-reporter")
+	reporterToken, _ := mintSession(t, database, reporterID)
+	targetID := mintUser(t, database, "act-banwritefail-target")
+
+	publicID := fileUserReport(t, h, reporterToken, targetID)
+
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE moderation_actions`); err != nil {
+		t.Fatalf("DROP TABLE moderation_actions: %v", err)
+	}
+
+	status, body := actJSON(t, h, http.MethodPost, "/api/v1/moderation/queue/"+publicID+"/act", modToken,
+		`{"kind":"ban","reason":"repeated spam"}`)
+	if status == http.StatusOK || status == http.StatusNoContent {
+		t.Fatalf("act(ban) with the ledger table gone: status = %d, body = %s, want a failure status", status, body)
+	}
+	if len(broadcaster.bans) != 0 {
+		t.Fatalf("BroadcastMemberBan calls = %v, want none — the write failed, nothing should have landed", broadcaster.bans)
+	}
+	target, err := database.GetUserByID(context.Background(), targetID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if target.Banned {
+		t.Fatal("target is banned despite the ledger write failing — BanUserWithAction's transaction did not roll back")
+	}
+}
+
+// TestModerationQueueAct_NoBroadcastWhenRemovalWriteFails is
+// TestModerationQueueAct_NoBroadcastWhenBanWriteFails's removal twin: same
+// dropped ledger table (recordLedgerRow's own write target), an actor who
+// otherwise holds MANAGE_MESSAGES.
+func TestModerationQueueAct_NoBroadcastWhenRemovalWriteFails(t *testing.T) {
+	h, database, broadcaster := buildModQueueActRouter(t)
+	modID := mintModerator(t, database, "act-removalwritefail-mod", 90, permissions.ModerateMembers|permissions.ManageMessages)
+	modToken, _ := mintSession(t, database, modID)
+	reporterID := mintUser(t, database, "act-removalwritefail-reporter")
+	reporterToken, _ := mintSession(t, database, reporterID)
+	authorID := mintUser(t, database, "act-removalwritefail-author")
+
+	chID, err := database.CreateChannel(context.Background(), "act-removalwritefail-channel", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	msgID, err := database.CreateMessage(context.Background(), chID, authorID, "reported content", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	body := `{"target_type":"message","target_id":"` + itoa(msgID) + `","reason":"spam"}`
+	status, respBody := actJSON(t, h, http.MethodPost, "/api/v1/reports", reporterToken, body)
+	if status != http.StatusCreated {
+		t.Fatalf("file report: status = %d, body = %s", status, respBody)
+	}
+	var fileResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(respBody, &fileResp); err != nil {
+		t.Fatalf("unmarshal file-report response: %v", err)
+	}
+
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE moderation_actions`); err != nil {
+		t.Fatalf("DROP TABLE moderation_actions: %v", err)
+	}
+
+	status, actBody := actJSON(t, h, http.MethodPost, "/api/v1/moderation/queue/"+fileResp.ID+"/act", modToken,
+		`{"kind":"removal","reason":"rule violation"}`)
+	if status == http.StatusOK || status == http.StatusNoContent {
+		t.Fatalf("act(removal) with the ledger table gone: status = %d, body = %s, want a failure status", status, actBody)
+	}
+	if len(broadcaster.bulkDeletes) != 0 {
+		t.Fatalf("BroadcastChatBulkDeleted calls = %+v, want none — the write failed, nothing should have landed", broadcaster.bulkDeletes)
+	}
+	msg, err := database.GetMessage(context.Background(), msgID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Deleted {
+		t.Fatal("the reported message was deleted despite the ledger write failing")
+	}
+}
+
 // TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted is P2-7's removal
 // half: acting through the queue must send a chat_bulk_deleted broadcast for
 // the removed message — the direct purge route's own broadcast, reused

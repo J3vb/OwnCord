@@ -104,13 +104,16 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	if err := m.resumeErasure(bgCtx); err != nil {
 		m.log.Warn("erasure jobs still pending", "error", err)
 	}
-	// A crash between a lift's ledger commit and its own post-commit voice
-	// finalize (or a timeout that simply expired with nobody ever lifting
-	// it) is repaired now, not fifteen minutes from now (round 4, B5-10
-	// addendum).
-	if err := m.reconcileOrphanedVoiceMutes(bgCtx); err != nil {
-		m.log.Warn("orphaned voice mute reconciliation failed", "error", err)
-	}
+	// Deliberately NOT run here at start-up (round 5, Codex review): this
+	// runs AFTER initDatabase's ClearAllVoiceStates (database.go), which
+	// wipes every voice_states row on every restart regardless — a real
+	// voice session cannot survive the process dying anyway (the LiveKit
+	// participant is gone with it). There is nothing left here to repair by
+	// the time this loop starts, so reconcileOrphanedVoiceMutes runs only
+	// on the periodic tick (steps() below) — catching a crash between a
+	// lift's ledger commit and its own post-commit voice finalize, or a
+	// timeout that simply expired with nobody ever lifting it, within one
+	// 15-minute tick of it happening, same as every other tick-only sweep.
 	// Storage counters charged by a process that died between the charge
 	// and the write are settled now, so a restart is a repair point rather
 	// than fifteen minutes of a user seeing a phantom charge (B5-2).
@@ -275,8 +278,12 @@ func (m *maintenance) retireModerationActions(ctx context.Context) error {
 // audit rows) — repairing a crash between a lift's ledger commit and its
 // own finalize call, and closing the gap that otherwise left a naturally
 // EXPIRED timeout's voice mute in effect forever (nothing else ever calls
-// UnmuteForTimeout for an expiry). Runs at loop start (a crash-shaped gap
-// is repaired on restart, not fifteen minutes later) and again every tick.
+// UnmuteForTimeout for an expiry). Tick-only, NOT at loop start (round 5,
+// Codex review): by the time this loop starts, initDatabase's
+// ClearAllVoiceStates has already wiped every voice_states row this restart
+// — there is nothing left here for a start-up call to repair, and a
+// voice_states row is only ever real again once a live client re-joins
+// after the restart, which the next ordinary tick already covers.
 func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
 	if m.moderation == nil {
 		return nil

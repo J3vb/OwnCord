@@ -42,10 +42,16 @@ DELETE FROM voice_states WHERE user_id = ?;
 DELETE FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
 
 -- name: GetUserVoiceState :one
+-- server_muted_by rides along here ONLY -- the single-user read RestoreModFlags
+-- uses to carry a timeout's ownership across a channel switch (round 5,
+-- Codex review P2) -- never on GetChannelVoiceStates/GetAllVoiceStates
+-- below, which feed the client-facing voice_state/ready payloads: the
+-- column is server-side-only (migration 049's comment) and must not leak
+-- into the wire protocol.
 SELECT vs.user_id, vs.channel_id, u.username,
        vs.muted, vs.deafened, vs.speaking,
        vs.camera, vs.screenshare,
-       vs.server_muted, vs.server_deafened, vs.joined_at
+       vs.server_muted, vs.server_deafened, vs.joined_at, vs.server_muted_by
 FROM voice_states vs
 JOIN users u ON u.id = vs.user_id
 WHERE vs.user_id = ?;
@@ -89,7 +95,12 @@ UPDATE voice_states SET screenshare = ? WHERE user_id = ?;
 -- caller can tell a real no-op (target moved) from a normal apply.
 
 -- name: ApplyVoiceServerMute :execresult
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?;
+-- server_muted_by = NULL unconditionally (round 5, Codex review P1): a
+-- manual mute or re-mute must never leave a stale timeout id as owner --
+-- otherwise that timeout's later lift would clear THIS independent manual
+-- mute, which it does not own. A manual mute owns nothing (NULL), same as
+-- ClearVoiceServerMute's own unmute.
+UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = NULL WHERE user_id = ? AND channel_id = ?;
 
 -- name: ClearVoiceServerMute :execresult
 -- server_muted_by is cleared unconditionally here too: this is the manual
@@ -131,6 +142,15 @@ UPDATE voice_states SET server_muted = 0, server_muted_by = NULL WHERE user_id =
 -- on THIS row can later clear it. NOT NULL excludes a manual moderator
 -- mute (voice_mod_mute never sets server_muted_by): that ownership is never
 -- reassigned to a timeout just because no timeout currently owns it.
+--
+-- The trailing EXISTS (round 5, Codex review P2) requires the INCOMING
+-- action_id itself to still be an active timeout on THIS target: a mute
+-- attempt that is only reaching the SFU/DB now because its own goroutine
+-- was delayed, after its row was already lifted (and possibly a lift's
+-- own finalize already ran), must not claim -- or re-claim -- a mute a
+-- lift already correctly decided to clear. Without this a delayed A could
+-- mute (or reclaim from B) under an owner the ledger no longer recognizes,
+-- stranding the SFU muted until the reconcile sweep next runs.
 UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = sqlc.arg(action_id)
  WHERE user_id = sqlc.arg(user_id) AND channel_id = sqlc.arg(channel_id) AND joined_at = sqlc.arg(joined_at)
    AND (
@@ -139,6 +159,11 @@ UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = sqlc.arg(
        SELECT id FROM moderation_actions
         WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
      ))
+   )
+   AND EXISTS (
+     SELECT 1 FROM moderation_actions
+      WHERE id = sqlc.arg(action_id) AND target_id = sqlc.arg(user_id)
+        AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
    );
 
 -- name: VoiceSessionExists :one

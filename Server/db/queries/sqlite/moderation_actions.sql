@@ -20,6 +20,17 @@ SELECT EXISTS (
      WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
 ) AS active;
 
+-- name: TimeoutActionIsActiveForTarget :one
+-- Disambiguates MuteForSession's own no-match result (round 5, Codex review
+-- P2): whether the INCOMING action_id is still a live timeout on this
+-- target, so a delayed mute call (its own row already lifted, or expired,
+-- by the time it finally reaches the SFU/DB) is told matched=false rather
+-- than mistaken for "already muted by someone else".
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE id = ? AND target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active;
+
 -- name: SupersedeActiveTimeouts :many
 -- On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
 -- still-active timeout row for the same target, in the same transaction as

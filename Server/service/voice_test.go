@@ -107,11 +107,11 @@ func TestVoiceService_RestoreModFlags(t *testing.T) {
 	}
 
 	// Nothing to restore: no round trips, and the caller keeps the row it has.
-	if got := svc.RestoreModFlags(ctx, 1, 10, false, false); got != nil {
+	if got := svc.RestoreModFlags(ctx, 1, 10, false, false, nil); got != nil {
 		t.Errorf("RestoreModFlags with no flags set returned %+v, want nil", got)
 	}
 
-	got := svc.RestoreModFlags(ctx, 1, 10, true, true)
+	got := svc.RestoreModFlags(ctx, 1, 10, true, true, nil)
 	if got == nil {
 		t.Fatal("RestoreModFlags returned nil after restoring both flags")
 	}
@@ -126,8 +126,58 @@ func TestVoiceService_RestoreModFlags(t *testing.T) {
 	if err := svc.Join(ctx, 2, 11, 0); err != nil {
 		t.Fatalf("join other: %v", err)
 	}
-	if got := svc.RestoreModFlags(ctx, 2, 10, true, false); got != nil && got.ServerMuted {
+	if got := svc.RestoreModFlags(ctx, 2, 10, true, false, nil); got != nil && got.ServerMuted {
 		t.Error("a restore scoped to channel 10 muted a member who is in channel 11")
+	}
+}
+
+// TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership is round 5's
+// Codex review P2: restoring a mute owned by a still-active timeout must
+// stamp the SAME owner onto the fresh session, not the old, ownerless
+// (manual-mute-shaped) restore — otherwise nothing can ever clear it again.
+func TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership(t *testing.T) {
+	svc, database, ctx := voiceFixture(t)
+	if err := svc.Join(ctx, 1, 10, 0); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	var actionID int64
+	row := database.QueryRowContext(ctx,
+		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', 1, '2999-01-01 00:00:00') RETURNING id`)
+	if err := row.Scan(&actionID); err != nil {
+		t.Fatalf("seed active timeout action: %v", err)
+	}
+
+	got := svc.RestoreModFlags(ctx, 1, 10, true, false, &actionID)
+	if got == nil || !got.ServerMuted {
+		t.Fatalf("RestoreModFlags did not restore the mute: %+v", got)
+	}
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, 1, []int64{actionID}); err != nil || !cleared {
+		t.Fatalf("ClearServerMuteOwnedBy cleared=%v err=%v, want true: the restored mute must carry the SAME owner forward", cleared, err)
+	}
+}
+
+// TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute is
+// round 5's Codex review P2, the other half: a timeout that lifted or
+// expired in the gap between the channel switch and this restore must not
+// have its mute resurrected with no owner left to ever clear it.
+func TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute(t *testing.T) {
+	svc, database, ctx := voiceFixture(t)
+	if err := svc.Join(ctx, 1, 10, 0); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	var actionID int64
+	row := database.QueryRowContext(ctx,
+		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', 1, '2000-01-01 00:00:00') RETURNING id`)
+	if err := row.Scan(&actionID); err != nil {
+		t.Fatalf("seed expired timeout action: %v", err)
+	}
+
+	if got := svc.RestoreModFlags(ctx, 1, 10, true, false, &actionID); got != nil && got.ServerMuted {
+		t.Fatal("RestoreModFlags restored a mute whose owner is no longer active")
+	}
+	state, err := database.GetVoiceState(ctx, 1)
+	if err != nil || state == nil || state.ServerMuted {
+		t.Fatal("ServerMuted must be false: an expired owner's mute must not be resurrected")
 	}
 }
 

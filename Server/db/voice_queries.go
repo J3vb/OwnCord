@@ -110,6 +110,7 @@ func (d *DB) GetVoiceState(ctx context.Context, userID int64) (*VoiceState, erro
 		ServerMuted:    r.ServerMuted != 0,
 		ServerDeafened: r.ServerDeafened != 0,
 		JoinedAt:       r.JoinedAt,
+		ServerMutedBy:  r.ServerMutedBy,
 	}
 	return &vs, nil
 }
@@ -227,17 +228,36 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 // impossible, not merely guarded against).
 //
 // matched=false covers "no such session" (the target left/switched between
-// authorization and this call, P1-3 PARTIAL) — disambiguated from
-// "already muted by someone/something else" (matched=true,
-// transitioned=false, not this call's ownership to claim) only when the
-// conditional UPDATE itself affects zero rows.
-func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (matched, transitioned bool, err error) {
+// authorization and this call, P1-3 PARTIAL) and "the incoming actionID is
+// no longer an active timeout on this target" (round 5, Codex review P2: a
+// delayed call, reaching the SFU/DB after its own row was already lifted or
+// expired, must be refused, not treated as a fresh or reclaimed mute) —
+// disambiguated from "already muted by someone/something else" (matched=
+// true, transitioned=false, not this call's ownership to claim) only when
+// the conditional UPDATE itself affects zero rows.
+//
+// supersededIDs, when non-empty, transfers ownership from those (just-
+// superseded, round 4 Codex review) ledger ids onto actionID FIRST, inside
+// this SAME transaction (round 5, Codex review P2): TimeoutUser no longer
+// does this transfer itself, because it must happen under the ws-layer
+// per-target lock the caller (ws.Hub.MuteForTimeout) already holds for the
+// paired SFU call, not as a bare DB write racing that lock from outside it
+// — a transfer landing between the lock's DB write and its SFU call is
+// exactly the gap that let a failed caller's rollback miss the row a
+// concurrent supersede had already re-pointed elsewhere.
+func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
+
+	if len(supersededIDs) > 0 {
+		if err := transferVoiceMuteOwnership(ctx, tx, supersededIDs, actionID); err != nil {
+			return false, false, fmt.Errorf("MuteForTimeoutSession transfer: %w", err)
+		}
+	}
 
 	res, err := q.MuteForSession(ctx, dbgen.MuteForSessionParams{
 		ActionID: &actionID, UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
@@ -257,12 +277,27 @@ func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actio
 	if err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession exists check: %w", err)
 	}
+	if found == 0 {
+		if err := tx.Commit(); err != nil {
+			return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
+		}
+		return false, false, nil
+	}
+	active, err := q.TimeoutActionIsActiveForTarget(ctx, dbgen.TimeoutActionIsActiveForTargetParams{ID: actionID, TargetID: userID})
+	if err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession active check: %w", err)
+	}
 	// Nothing was written either way — no ownership to commit, but a plain
 	// read inside this tx costs nothing to finish cleanly.
 	if err := tx.Commit(); err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
 	}
-	return found != 0, false, nil
+	if active == 0 {
+		// The incoming action is no longer live (lifted or expired) — not
+		// this call's mute to claim, regardless of the session's own state.
+		return false, false, nil
+	}
+	return true, false, nil
 }
 
 // ClearServerMuteOwnedBy clears server_muted for whichever voice_states row
