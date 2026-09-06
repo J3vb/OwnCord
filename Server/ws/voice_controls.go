@@ -301,6 +301,7 @@ func voiceStateBroadcast(ctx context.Context, d VoiceDeps, userID int64) Result 
 	}
 	return Result{Events: []Event{VoiceStateEvent{
 		voiceChannelID: state.ChannelID,
+		userID:         userID,
 		payload:        buildVoiceState(*state),
 	}}}
 }

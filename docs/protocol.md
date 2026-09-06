@@ -98,7 +98,7 @@ The sequence number system enables reconnection with state recovery.
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`                                                                                                                                         |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                                          |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
 | Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                        |
 
@@ -323,7 +323,9 @@ DM chat events (`chat_message`, `chat_edited`, `chat_deleted`,
 `events` table as channel broadcasts, so they replay at tiers 1 and 2 —
 filtered to the DM's participants. The unsequenced DM lifecycle events
 (`dm_channel_open`/`dm_channel_close`) are not replayed; that state is always
-recoverable via the full `ready` payload.
+recoverable via the full `ready` payload. `dm_request` (B5-6) is unsequenced
+too, but its state is not in `ready` — a missed one is recovered from
+`GET /api/v1/dm-requests` instead (see the dm_request section below).
 
 ---
 
@@ -348,13 +350,16 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
-`nsfw`, `voice_max_users` and `voice_max_video` are always present, with their
-column defaults on an unconfigured channel — `false`, `0`, and **`25`** for
-`voice_max_video`, which is `DEFAULT 25` rather than zero (migration 004) —
-never omitted, so "absent" never has to mean two different things. `nsfw` is a
-label the server never acts on (see below); the two voice limits are the values
+`nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
+present, with their column defaults on an unconfigured channel — `false`,
+`false`, `0`, and **`25`** for `voice_max_video`, which is `DEFAULT 25` rather
+than zero (migration 004) — never omitted, so "absent" never has to mean two
+different things. `nsfw` is a label the server enforces (see below);
+`nsfw_acknowledged` is whether the CALLER has their own consent row for it
+(migration `047`, B5-7) — always `false` for an unlabelled channel, where it
+means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
 
@@ -765,11 +770,24 @@ client is told about. Sent on every admin `PATCH`, so a client applies channel
 edits (rename, topic, category move, slow mode, `nsfw`, voice limits) without
 reconnecting.
 
-`nsfw` is shipped so clients can gate or label a channel; **the server applies
-no content behaviour of its own to a flagged channel** — no filtering, no age
-check, no restriction on who may read or post. The desktop client shows a
-one-time-per-session warning before rendering the channel and marks it in the
-sidebar; a client that ignores the field behaves exactly as before it existed.
+`nsfw` is shipped so clients can gate or label a channel, and **the server now
+enforces it** (migration `047`, B5-7): a member with no acknowledgement row
+for a labelled channel gets no content from it — no message history, around
+window, pins, reaction users, search hits, or live/replayed `chat_message` /
+`chat_edited` / `reaction_update` — and no attachment bytes from it either,
+regardless of client. `channel_create`/`channel_update` themselves still reach
+every viewer including the one that just turned the label on, since those
+frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
+only in `ready` (above), not in this broadcast, the same reason `can_send` is
+omitted from it. See `PUT`/`DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
+records or revokes consent, and the `nsfw_ack` frame below for the second-
+device signal. The desktop client's own gating UI (blur, consent prompt) is
+B9's; an account with no standing acknowledgement simply never satisfies the
+server-side gate and receives no content to render, on any device or client
+that ignores this UI — the row is per-user, not per-session or per-device, so
+a second device or a client that skips the gating UI inherits whatever the
+account has already acknowledged rather than bypassing consent.
 
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
@@ -792,6 +810,30 @@ into an archive that nobody can see or moderate.
   "payload": { "id": 8 }
 }
 ```
+
+### nsfw_ack (Server -> Client, direct)
+
+B5-7. Sent to the caller's OWN other live sockets after `PUT` or `DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`), so a second
+device converges without a reconnect.
+
+```json
+{
+  "type": "nsfw_ack",
+  "payload": { "channel_id": 8, "acknowledged": true }
+}
+```
+
+| Field          | Type    | Description                                         |
+| -------------- | ------- | --------------------------------------------------- |
+| `channel_id`   | integer | The channel the caller just acknowledged or revoked |
+| `acknowledged` | boolean | `true` after `PUT`, `false` after `DELETE`          |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_request`: a
+client that misses one (a dropped connection during the request) recovers on
+its next `ready`, whose per-channel `nsfw_acknowledged` field is the
+persisted source of truth — there is nothing here a resync needs to recover
+that `ready` does not already carry.
 
 ---
 
@@ -1418,6 +1460,78 @@ Sent to the caller of `DELETE /api/v1/dms/{id}`. For a group that is a _leave_,
 and the remaining participants receive a fresh `dm_channel_open` carrying the
 new membership.
 
+### dm_request (Server -> Client)
+
+B5-6, one-to-one DMs only. Sent to the **recipient** in two situations:
+
+- **On creation**, once: the first message from a sender the recipient does
+  not yet trust (`docs/schema.md` migration `046`) stages a `message_requests`
+  row instead of opening the conversation, and the recipient gets this frame
+  with `preview` set. A resend while the request is still pending, or after
+  it was ignored or deleted, creates no second row and sends nothing
+  (decision 5) — the sender's own frames (`chat_send_ok`, `chat_message`) are
+  unaffected either way, and the sender never learns which of the two cases
+  they hit. `blocked` is not part of this silence (Codex P2-9): a resend from
+  a blocked sender never reaches this gate at all — it is refused up front
+  with `ErrBlocked` by the existing, pre-B5-6 block check, which the sender
+  does see.
+- **On every transition**, with the new `state` and `preview: null` (the held
+  message never changes): `accept` (`dm_channel_open` is sent first, then
+  this), `ignore`, `delete`, `block` — see `docs/api.md`'s "Message Requests"
+  section for the REST routes that decide a request. Sent to the recipient's
+  other live connections, not to the sender.
+
+```json
+{
+  "type": "dm_request",
+  "payload": {
+    "id": 1,
+    "state": "pending",
+    "channel_id": 100,
+    "sender": {
+      "id": 7,
+      "username": "stranger",
+      "display_name": "",
+      "avatar": ""
+    },
+    "preview": {
+      "message_id": 55,
+      "content": "hi, stranger",
+      "timestamp": "2026-09-05T12:00:00Z"
+    },
+    "created_at": "2026-09-05T12:00:00Z",
+    "decided_at": null
+  }
+}
+```
+
+| Field        | Type           | Description                                                                                   |
+| ------------ | -------------- | --------------------------------------------------------------------------------------------- |
+| `state`      | string         | `pending`, `accepted`, `ignored`, `deleted` or `blocked`                                      |
+| `sender`     | object         | The message's author — a stranger's profile, safely previewed with no automatic fetch (below) |
+| `preview`    | object \| null | The held message's id/content/timestamp; present only on creation, `null` on every transition |
+| `decided_at` | string \| null | Set once a recipient transition lands; `null` while pending                                   |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_channel_close`
+above: a client that misses one recovers from `GET /api/v1/dm-requests`, the
+persisted source of truth, rather than the replay ring buffer. Unlike
+`dm_channel_open` it does not bump the visibility watermark — a missed
+`dm_request` does not strand a channel a full resync is needed to see, the
+REST inbox already has it.
+
+**The recipient's client must render this with every automatic media, embed,
+link-preview and avatar fetch suppressed** — decision 4's "safely previewed":
+`sender.avatar` can be an external URL (Codex P3-10), so fetching it is
+exactly the kind of network request to a stranger-controlled endpoint this
+frame exists to withhold, same as any link or embed in the message body.
+Nothing the client would otherwise auto-fetch runs until the recipient
+accepts (B9 implements the client half; this frame carries the flag by
+construction — the suppression list above is exhaustive over what the
+payload contains to fetch from).
+
+**The sender receives nothing from this path, ever** — not a hint that a
+request exists, not its state, not whether it was ever decided.
+
 ### DM Authorization
 
 All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
@@ -1656,6 +1770,7 @@ tables below add per-type behavioral notes.
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
+| `dm_request`          | No       | Direct to recipient (B5-6)                                              |
 | `call_incoming`       | No       | Direct to each other DM participant                                     |
 | `call_declined`       | No       | Direct to each other DM participant                                     |
 | `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
@@ -1666,6 +1781,7 @@ tables below add per-type behavioral notes.
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
 | `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
+| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                 |
 
 ### Plugin command types
 

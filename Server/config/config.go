@@ -36,6 +36,7 @@ type Config struct {
 	GIF              GIFConfig              `koanf:"gif"`
 	Logging          LoggingConfig          `koanf:"logging"`
 	Moderation       ModerationConfig       `koanf:"moderation"`
+	Push             PushConfig             `koanf:"push"`
 }
 
 // ModerationConfig holds the report queue's retention window (B5-8, plan
@@ -86,6 +87,39 @@ func ParseLevel(s string) (slog.Level, bool) {
 // endpoints answer 503 GIF_DISABLED and the client hides the picker.
 type GIFConfig struct {
 	APIKey string `koanf:"api_key"`
+}
+
+// PushConfig is the owner gate for Web Push subscription storage (B5-4,
+// plan decision 9) and dispatch (B5-11, HP-5 scorecard Question 6). Enabled
+// is false by default — with it false, every route under /api/v1/push
+// answers 503 PUSH_DISABLED after authentication, and nothing is written.
+// Turning it off again later keeps existing subscription rows (nothing
+// dispatches to them regardless of DispatchEnabled while Enabled is false);
+// the staleness sweep still runs.
+type PushConfig struct {
+	// Enabled is the owner opt-in for subscription storage. Routes are
+	// always mounted; this only gates whether they do anything.
+	Enabled bool `koanf:"enabled"`
+	// SubscriptionTTLDays is the staleness window: a subscription whose
+	// last_seen_at is older than this many days is removed by the
+	// maintenance sweep. Clients keep a row alive by re-POSTing the same
+	// endpoint (an upsert that bumps last_seen_at). Default 90, bounded to
+	// [1, 3650] in boundedKeys.
+	SubscriptionTTLDays int `koanf:"subscription_ttl_days"`
+	// DispatchEnabled is the SECOND, separate owner opt-in dispatch needs on
+	// top of Enabled (plan decision 9): storage on with dispatch off is the
+	// B5-4 state, and an operator who enabled storage before dispatch
+	// existed does not acquire it on upgrade. Turning this on makes the
+	// server open outbound HTTPS connections to the push service named in
+	// each stored subscription's endpoint — see
+	// docs/architecture/diagnostics.md's egress table. False by default;
+	// dispatch runs only when Enabled and DispatchEnabled are both true.
+	DispatchEnabled bool `koanf:"dispatch_enabled"`
+	// Contact is the operator contact a VAPID JWT's "sub" claim names
+	// (RFC 8292), sent as "mailto:"+Contact. Empty (the default) omits the
+	// claim entirely — some push services require a contact and will refuse
+	// a request without one, which is the operator's decision to make.
+	Contact string `koanf:"contact"`
 }
 
 // EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
@@ -422,6 +456,12 @@ func defaults() Config {
 		Moderation: ModerationConfig{
 			ReportRetentionDays: 180,
 		},
+		Push: PushConfig{
+			Enabled:             false,
+			SubscriptionTTLDays: 90,
+			DispatchEnabled:     false,
+			Contact:             "",
+		},
 	}
 }
 
@@ -480,6 +520,22 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments, avatars and emoji); 0 = unlimited
+
+# Web Push subscriptions. Disabled by default: with push.enabled false,
+# every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
+# and nothing is written. push.dispatch_enabled is a SECOND, separate
+# opt-in: with it false (the default) nothing is ever dispatched to a
+# stored subscription, even with push.enabled true. Turning dispatch on
+# makes the server open outbound HTTPS connections to the push service
+# named in each stored subscription's endpoint.
+# push:
+#   enabled: false
+#   subscription_ttl_days: 90  # a subscription not refreshed in this many
+#                              # days is removed by the maintenance sweep
+#   dispatch_enabled: false    # opens outbound connections to push services
+#                              # when enabled together with push.enabled
+#   contact: ""                # operator contact for VAPID JWTs, sent as
+#                              # "mailto:<contact>"; empty omits the claim
 
 voice:
   # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
@@ -768,6 +824,7 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
+		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days"},
 	}
 }
 

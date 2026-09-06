@@ -668,7 +668,7 @@ operation before building their full cross-client experience.
    a server-local trusted-sender relationship.
 2. Retain and polish the existing link-preview, GIF-search, YouTube/media
    embed, and rich-content set behind privacy-preserving bounded retrieval.
-   Provider expansion is optional and otherwise post-beta.
+   Provider expansion is optional and otherwise post-beta — see item 12.
 3. Enforce redirect, resolved-address, type, size, duration, streaming,
    concurrency, cache, and offline policies for every external fetch. Avoid
    residual full-body buffering.
@@ -694,6 +694,16 @@ operation before building their full cross-client experience.
     (time, streaming byte ceiling, content-type list, concurrency cap) plus
     aggregate budgets and byte-weighted cache eviction; implement the byte
     accounting once, at the boundary B7's native broker will own.
+    _(amended 2026-09-05 by B5-12)_ The split — server boundary B5, aggregate
+    budgets and the desktop broker B7 — is recorded once, in
+    `docs/trust-model.md`'s C-09 `Status:` line and the register's SEC-03 row;
+    this item defers to them.
+12. _(amended 2026-09-05 by B5-12, under the owner's 2026-09-04 delegation,
+    decisions 1 and 3)_ Workstream 2 is an **inventory plus the server path**:
+    B5 delivers `docs/architecture/rich-content-inventory.md` (B5-5) and the
+    GIF proxy behind `Server/safefetch` (B5-1); the link-preview, YouTube and
+    media set stays client-fetched and unchanged, its bounded retrieval is
+    B7's broker (C-09) and its journeys are B9's (BPR-061).
 
 ### Hold point HP-5 — Abuse and privacy review
 
@@ -706,9 +716,14 @@ before exposing the endpoints.
 
 - Message Requests cannot bypass block, permission, retention, or deletion
   rules.
-- External retrieval passes address, redirect, streaming-size, timeout,
-  concurrency, media-type, and offline adversarial tests.
-- NSFW content and third-party fetches remain unavailable before consent.
+- External retrieval **on server-side fetch paths** passes address, redirect,
+  streaming-size, timeout, concurrency, media-type, and offline adversarial
+  tests _(amended 2026-09-05 by B5-12, decision 14: the desktop preview path
+  is C-09/B7; the owner's written acceptance is carried by the HP-5
+  scorecard)_.
+- NSFW content and third-party fetches remain unavailable before consent **on
+  every server path** _(amended 2026-09-05 by B5-12, decision 14: the client
+  render gate is B9; owner acceptance at HP-5)_.
 - Report, moderation, and appeal state machines enforce least privilege and
   immutable safe audit.
 - Storage quotas and disk headroom fail safely under concurrency and restart.

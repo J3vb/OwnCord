@@ -126,7 +126,7 @@ func (q *Queries) GetAttachmentByID(ctx context.Context, id string) (GetAttachme
 
 const getAttachmentWithChannel = `-- name: GetAttachmentWithChannel :one
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
-       a.uploaded_at, a.uploader_id, m.channel_id, c.type
+       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id
@@ -144,8 +144,12 @@ type GetAttachmentWithChannelRow struct {
 	UploaderID *int64  `json:"uploaderId"`
 	ChannelID  *int64  `json:"channelId"`
 	Type       *string `json:"type"`
+	Nsfw       *int64  `json:"nsfw"`
 }
 
+// c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
+// NULL when the attachment is unlinked or its message/channel is gone, same
+// as c.type, so both are read through the caller's nil-safe mapping.
 func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetAttachmentWithChannelRow, error) {
 	row := q.db.QueryRowContext(ctx, getAttachmentWithChannel, id)
 	var i GetAttachmentWithChannelRow
@@ -160,6 +164,7 @@ func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetA
 		&i.UploaderID,
 		&i.ChannelID,
 		&i.Type,
+		&i.Nsfw,
 	)
 	return i, err
 }

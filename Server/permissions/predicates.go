@@ -25,6 +25,14 @@ var ErrBlocked = errors.New("user is blocked")
 // no voice room (text, announcement).
 var ErrNotVoiceChannel = errors.New("not a voice channel")
 
+// ErrNSFWUnacknowledged is returned by CanReadContent for a labelled channel
+// the subject has not acknowledged (decision 13, BG-18's server half, B5-7).
+// Every content path — REST reads, search, live/replayed socket delivery,
+// attachment bytes — reports this identically; the caller maps it to its own
+// status code (403 NSFW_ACKNOWLEDGEMENT_REQUIRED on the REST/attachment
+// surfaces; the socket and search simply withhold the content).
+var ErrNSFWUnacknowledged = errors.New("nsfw content not acknowledged")
+
 // Subject is everything a channel predicate consults: the actor's role bits,
 // both override layers for the one channel in question, the channel's flags,
 // and — for a DM — the membership and block state the caller looked up. The
@@ -39,6 +47,11 @@ type Subject struct {
 	// creation, not per message (service.requireDMNotBlocked).
 	DMParticipant bool
 	DMBlocked     bool
+	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether
+	// THIS subject has a row acknowledging the channel's label (B5-7). The
+	// caller resolves it live, never from a cache — CanReadContent's whole
+	// point is that a revocation takes effect on the very next read.
+	NSFWAcknowledged bool
 }
 
 // Has reports whether the subject's effective permission in the channel holds
@@ -175,6 +188,28 @@ func CanModerateVoice(s Subject) error {
 	}
 	if !s.Has(ReadMessages | MuteMembers) {
 		return missing(MuteMembers)
+	}
+	return nil
+}
+
+// CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled
+// channel returns no content — message bodies and metadata that carries them
+// (history, around, pins, reaction users, search hits, live and replayed
+// chat_message/chat_edited/reaction_update frames) and attachment bytes —
+// until the subject's own row exists. It is CanViewChannel's caller that
+// decides whether a channel is visible at all; this only adds the narrower
+// consent question on top, so a channel that is not visible is still
+// ErrNotDMParticipant/missing(ReadMessages)/ErrArchived, never this sentinel.
+//
+// Decision 13: no bit and no admin bypass skips this — a moderator or
+// administrator acknowledges like anyone else, so the caller resolves
+// NSFWAcknowledged from the row the same way for every subject.
+func CanReadContent(s Subject) error {
+	if err := CanViewChannel(s); err != nil {
+		return err
+	}
+	if s.Channel.NSFW && !s.NSFWAcknowledged {
+		return ErrNSFWUnacknowledged
 	}
 	return nil
 }

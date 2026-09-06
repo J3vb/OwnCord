@@ -114,6 +114,20 @@ func (rb *EventRingBuffer) newestSeqLocked() uint64 {
 // in allowedChannelIDs or whose channelID is 0 (global broadcasts).
 // Returns nil if afterSeq is too old (same semantics as EventsSince).
 func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelIDs map[int64]bool) [][]byte {
+	return rb.EventsSinceFilteredContent(afterSeq, allowedChannelIDs, allowedChannelIDs)
+}
+
+// EventsSinceFilteredContent is EventsSinceFiltered plus B5-7's content gate:
+// a buffered event whose channelID is allowed is included as before UNLESS
+// it is a content-bearing kind (contentBearingKinds) for a channel that is
+// NOT in readableChannelIDs, in which case it is silently dropped — a
+// labelled channel a caller has not acknowledged replays no content, even
+// though the channel itself (metadata frames) still replays normally.
+// EventsSinceFiltered is this with readableChannelIDs == allowedChannelIDs,
+// i.e. no extra narrowing, for every caller that predates the content/
+// metadata distinction (voice-only replay, most reconnect paths before an
+// NSFW channel is involved).
+func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedChannelIDs, readableChannelIDs map[int64]bool) [][]byte {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
 
@@ -145,8 +159,10 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 				return nil
 			}
 			// channelID 0 = global broadcast, always include.
-			// channelID > 0 = channel-scoped, include only if allowed.
-			if e.channelID == 0 || allowedChannelIDs[e.channelID] {
+			// channelID > 0 = channel-scoped, include only if allowed AND
+			// (not content-bearing, or the channel is also readable).
+			if e.channelID == 0 || (allowedChannelIDs[e.channelID] &&
+				(!contentBearingKinds[extractEventType(e.data)] || readableChannelIDs[e.channelID])) {
 				result = append(result, e.data)
 			}
 		}

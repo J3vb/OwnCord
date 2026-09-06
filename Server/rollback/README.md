@@ -3,6 +3,9 @@
 The hand-run reversal of every migration the B4 phase added, and every one
 since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
 
+`045_push_subscriptions` is B5-4's, `046_message_requests` is B5-6's and
+`047_nsfw_acknowledgements` is B5-7's — see the cost table below.
+
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
 that operator runs, against a database no server is holding open, after taking
@@ -65,6 +68,9 @@ knowing before you start:
 | Reversal                     | What it costs                                                                                                                                                                                                                                                                                                                            |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `048_reports`                | The report queue and every outcome row are gone — including the unlinkable ones decision 7 keeps after a subject erases. A report about an account that has since erased carries the last durable trace that the report ever happened; dropping the table drops that trace too. Also revokes `MODERATE_MEMBERS` from the Moderator role. |
+| `047_nsfw_acknowledgements`  | Every stored acknowledgement is gone. Nobody's consent history is reconstructable, so every member re-acknowledges every labelled channel on their next read — a one-time annoyance, not data loss of anything the product treats as durable content.                                    |
+| `046_message_requests`       | Every pending request and every ignored/deleted/blocked decision the recipient made is lost, and a later re-apply's grandfathering backfill collapses the `sent_first`/`accepted`/`grandfathered` distinction on standing trust to just "trust exists" — see the reversal's own comment. |
+| `045_push_subscriptions`     | Every stored Web Push subscription is gone. Nothing was dispatching to them yet (B5-4 is storage-only), so no delivery in flight is lost — every device just has to re-subscribe.                                                                                                        |
 | `043_setup_completed`        | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup").                                                                                                      |
 | `042` + `041` (audit tokens) | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                                                                                                                              |
 | `039_retention`              | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                                                                                                                           |

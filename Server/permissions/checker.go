@@ -35,6 +35,9 @@ type ChannelRef struct {
 	ID       int64
 	Type     string
 	Archived bool
+	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
+	// ignores it. Always false for a DM — DMs cannot be labelled.
+	NSFW bool
 }
 
 // DB is the minimal database interface the Checker needs.

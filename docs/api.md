@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 142 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 153 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -114,11 +114,18 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
 | POST    | `/api/v1/channels/{id}/messages/purge`                               |
 | GET     | `/api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users` |
+| DELETE  | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
+| PUT     | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
 | GET     | `/api/v1/channels/{id}/pins`                                         |
 | DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | GET     | `/api/v1/client-update/{target}/{current_version}`                   |
 | GET     | `/api/v1/diagnostics/connectivity`                                   |
+| GET     | `/api/v1/dm-requests/`                                               |
+| POST    | `/api/v1/dm-requests/{id}/accept`                                    |
+| POST    | `/api/v1/dm-requests/{id}/block`                                     |
+| POST    | `/api/v1/dm-requests/{id}/delete`                                    |
+| POST    | `/api/v1/dm-requests/{id}/ignore`                                    |
 | GET     | `/api/v1/dms/`                                                       |
 | POST    | `/api/v1/dms/`                                                       |
 | POST    | `/api/v1/dms/group`                                                  |
@@ -144,6 +151,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/moderation/queue/{id}/assign`                               |
 | POST    | `/api/v1/moderation/queue/{id}/close`                                |
 | POST    | `/api/v1/moderation/queue/{id}/notes`                                |
+| GET     | `/api/v1/push/subscriptions`                                         |
+| POST    | `/api/v1/push/subscriptions`                                         |
+| DELETE  | `/api/v1/push/subscriptions/{id}`                                    |
+| GET     | `/api/v1/push/vapid`                                                 |
 | POST    | `/api/v1/reports/`                                                   |
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
@@ -215,6 +226,9 @@ endpoints return plain-text errors — see their section):
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
+| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
+| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 
 ---
 
@@ -1337,6 +1351,137 @@ Same auth, rate limit, response shape, and error codes as
 
 ---
 
+## Web Push
+
+Server-side storage of Web Push subscriptions, plus dispatch behind its own,
+second opt-in: `push.dispatch_enabled` (default **off**, independent of
+`push.enabled`). See [Server Configuration](server-configuration.md#web-push-push)
+for both keys, the staleness window, and the rotation procedure below.
+
+**Default-off contract:** with `push.enabled` false, every endpoint below
+answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
+server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
+false — the state an install upgraded from an earlier release starts in —
+subscriptions are stored but nothing is ever sent to one.
+
+**What dispatch sends, and to whom.** With both keys true, a new message
+sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
+name, sender or count — to: the message's direct `@mentions` in a guild
+channel, or every other participant of a one-to-one DM who trusts the
+author (the same `trusted_senders` row Message Requests gates on — see
+"Message Requests" below; a first-contact message from someone not yet
+trusted rings no one's phone). Within that set, only offline subscribers
+are pushed to (a connected client already has the message), and permission
+is re-checked at dispatch time (`CanReadContent`, not whatever it was when
+the subscription was created) — the same predicate every content read path
+resolves, so a channel labelled `nsfw` pushes only to a recipient who has
+acknowledged it (see "NSFW Acknowledgement" below); a revoke between the
+first attempt and a retry drops the retry. At most one push per user per channel per 60
+seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
+(or a network error) gets two retries — three attempts total — before being
+dropped, and any other failure status drops immediately. Nothing is written
+per attempt, and a restart drops anything in flight. Turning dispatch on
+makes the server
+open outbound HTTPS connections to the push service named in each stored
+subscription's endpoint — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table.
+
+**Refresh-by-re-POST:** a subscription is kept alive by POSTing the same
+`endpoint` again — the server upserts the row (same id, `last_seen_at`
+bumped) rather than creating a second one. A subscription not refreshed
+within `push.subscription_ttl_days` is removed by the maintenance sweep.
+
+**Rotation and `key_id`:** the server signs with one VAPID key at a time.
+`GET /vapid` reports its `key_id`; a client that sees a different `key_id`
+than the one it last subscribed under should re-subscribe — rotating the key
+(an operator action: replace the key file or `OWNCORD_PUSH_VAPID_KEY`, then
+restart) invalidates every subscription created under the old key. Such rows
+stop being listed immediately and are removed by the sweep.
+
+### GET /api/v1/push/vapid
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "public_key": "base64url-encoded-65-byte-P-256-point", "key_id": "a1b2c3d4e5f6a7b8" }
+```
+
+### GET /api/v1/push/subscriptions
+
+**Auth:** Required
+
+Lists the caller's own subscriptions under the currently running VAPID key.
+A subscription created under a since-rotated key is not listed.
+
+#### Response 200 OK
+
+```json
+{
+  "subscriptions": [
+    {
+      "id": 1,
+      "device_name": "My Laptop",
+      "endpoint_host": "fcm.googleapis.com",
+      "created_at": "2026-09-05T12:00:00Z",
+      "last_seen_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+`endpoint_host` is the endpoint URL's host only — never the endpoint itself,
+never the `p256dh`/`auth` keys. An endpoint plus its auth secret is a push
+credential.
+
+### POST /api/v1/push/subscriptions
+
+**Auth:** Required
+**Body limit:** 8 KiB
+
+```json
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "keys": { "p256dh": "...", "auth": "..." },
+  "device_name": "My Laptop"
+}
+```
+
+There is no user id in the body — the row's owner is always the
+authenticated session's. `endpoint` must be an `https://` URL with a host, no
+embedded credentials, at most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
+to a 65-byte uncompressed P-256 point (`0x04` prefix); `auth` must decode to
+16 bytes. `device_name` is at most 64 runes and must not contain control
+characters. A user may hold at most 10 subscriptions; the 11th evicts the
+oldest by `last_seen_at`.
+
+#### Response 201 Created
+
+```json
+{ "id": 1 }
+```
+
+#### Errors
+
+| Status | Code            | When                                                   |
+| ------ | --------------- | ------------------------------------------------------ |
+| 400    | `INVALID_INPUT` | Malformed body, or a credential field fails validation |
+| 503    | `PUSH_DISABLED` | `push.enabled` is false                                |
+
+### DELETE /api/v1/push/subscriptions/{id}
+
+**Auth:** Required
+
+Revokes one of the caller's own subscriptions.
+
+#### Response
+
+`204 No Content` on success. `404 NOT_FOUND` when `id` does not exist or
+belongs to another user — the two cases are indistinguishable by design.
+
+---
+
 ## Direct Messages
 
 DM channels use participant-based authorization rather than role-based permissions.
@@ -1537,6 +1682,154 @@ participants receive a fresh `dm_channel_open` with the new membership.
 | Status | Code        | Reason                       |
 | ------ | ----------- | ---------------------------- |
 | 404    | `NOT_FOUND` | Not a participant of this DM |
+
+---
+
+## Message Requests
+
+B5-6: the first message from a sender the recipient does not yet trust, in a
+**one-to-one** DM, stages a request instead of opening the conversation
+(`message_requests`, `trusted_senders` — `docs/schema.md`, migration `046`).
+Group DMs are untouched. Existing one-to-one DM pairs were grandfathered as
+trusted when `046` applied, so no live conversation broke on upgrade.
+
+**The sender's side is byte-identical across `pending`, `ignored` and
+`deleted`** (decision 5, `docs/architecture/community-services.md` section
+S1): `chat_send_ok`, `chat_message`, `GET /api/v1/dms` and
+`GET /channels/{id}/messages` are the same whether the request ends up
+pending, ignored or deleted. A sender can never distinguish those three
+states from one another, or from a request nobody has looked at yet —
+silence, not a rejection. `block` is not part of this claim: a blocked
+sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
+the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
+and it is visible to the sender by design.
+
+Transitions are **recipient-only** and legal **only from `pending`**:
+
+- `accept` — trusts the sender, opens the conversation for the recipient
+  (`dm_channel_open`), and marks the request accepted, all in one
+  transaction.
+- `ignore` — the request drops out of the inbox; nothing else changes.
+- `delete` — identical to `ignore` server-side; the held message rows stay in
+  the channel (the recipient never opened it).
+- `block` — blocks the sender (`PUT /api/v1/blocks/{userId}`'s existing
+  effects) and only then marks the request blocked.
+
+A transition attempted on a row that is not pending returns **409
+CONFLICT** if the row exists for the caller (a race, including the loser of
+two simultaneous decisions) or **404 NOT_FOUND** if it does not — including
+when the caller is the sender or an unrelated user, so a foreign request's
+existence is never confirmed.
+
+### GET /api/v1/dm-requests
+
+List the caller's pending inbox, newest first.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "requests": [
+    {
+      "id": 1,
+      "channel_id": 42,
+      "sender": {
+        "id": 7,
+        "username": "stranger",
+        "display_name": "",
+        "avatar": ""
+      },
+      "preview": {
+        "message_id": 100,
+        "content": "hi, stranger",
+        "timestamp": "2026-09-05T12:00:00Z"
+      },
+      "created_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/v1/dm-requests/{id}/accept
+
+### POST /api/v1/dm-requests/{id}/ignore
+
+### POST /api/v1/dm-requests/{id}/delete
+
+### POST /api/v1/dm-requests/{id}/block
+
+Decide a pending request. `block` additionally blocks the sender.
+
+**Auth:** Required (recipient only)
+
+#### Response 200 OK
+
+```json
+{
+  "id": 1,
+  "state": "accepted",
+  "decided_at": "2026-09-05T12:05:00Z"
+}
+```
+
+#### Errors
+
+| Status | Code        | Reason                                             |
+| ------ | ----------- | -------------------------------------------------- |
+| 404    | `NOT_FOUND` | Not this recipient's request, or it does not exist |
+| 409    | `CONFLICT`  | The request is no longer pending                   |
+
+---
+
+## NSFW Acknowledgement
+
+B5-7: a channel's `nsfw` label (`docs/schema.md`, migration `025`) is
+enforced server-side (migration `047`, decision 13). A member with no
+acknowledgement row for a labelled channel gets no content from it on any
+path — history, around, pins, reaction users, search, live/replayed socket
+delivery, or attachment bytes — regardless of role; an administrator
+acknowledges like anyone else. Revoking takes effect on the caller's very
+next read, with no client-side cache to invalidate.
+
+### PUT /api/v1/channels/{id}/nsfw-acknowledgement
+
+Record the caller's own consent to the channel's labelled content.
+Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
+(`docs/protocol.md`) with `"acknowledged": true`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+
+---
+
+### DELETE /api/v1/channels/{id}/nsfw-acknowledgement
+
+Revoke the caller's own acknowledgement, if any. Idempotent — revoking a row
+that does not exist (never acknowledged, or the channel was since unlabelled)
+still answers 204. Sends the caller's other live sockets an `nsfw_ack` frame
+with `"acknowledged": false`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
 
 ---
 

@@ -48,12 +48,14 @@ export const ServerMessageType = {
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  DM_REQUEST: "dm_request",
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
   PLUGIN_BROADCAST: "plugin_broadcast", // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+  NSFW_ACK: "nsfw_ack", // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 } as const;
 
 export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];

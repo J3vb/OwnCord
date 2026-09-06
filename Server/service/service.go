@@ -40,6 +40,26 @@ type Services struct {
 	Auth *AuthService
 	// Reports is the local report intake and moderator queue (B5-8).
 	Reports *ReportService
+	// Push stores Web Push subscriptions (B5-4); the composition root
+	// installs the VAPID key and the staleness TTL on it. A pointer field
+	// so Services stays comparable (admin/services_bundle_test.go compares
+	// two *Services with `!=`).
+	Push *PushService
+	// MessageRequests is B5-6's first-contact gate and trusted-sender
+	// bookkeeping; Messages holds a pointer to it too
+	// (MessageService.SetMessageRequests), which is where the gate actually
+	// runs (service/message_crud.go's OpenDM accumulation).
+	MessageRequests *MessageRequestService
+	// NSFW owns the per-user, per-channel acknowledgement row (B5-7); the
+	// four content read paths (REST, search, socket, attachments) resolve it
+	// through permissions.CanReadContent.
+	NSFW *NSFWService
+	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
+	// the composition root constructed it — which it does only when both
+	// push.enabled and push.dispatch_enabled are true. Exists on Services
+	// so the metrics route can read its counters; MessageService gets it
+	// separately, through SetPushNotifier.
+	PushDispatch *PushDispatcher
 }
 
 // New creates all domain services wired together.
@@ -49,27 +69,33 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	erasure := NewErasureService(st)
 	moderation := NewModerationService(st, permSvc)
 	moderation.erasure = erasure
+	blocks := NewBlockService(st)
 	messages := NewMessageService(st, permSvc, limiter)
+	messageRequests := NewMessageRequestService(st, blocks)
+	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
 	return &Services{
-		Erasure:     erasure,
-		Retention:   NewRetentionService(st),
-		Messages:    messages,
-		Channels:    NewChannelService(st, permSvc),
-		Permissions: permSvc,
-		Users:       NewUserService(st),
-		DMs:         NewDMService(st),
-		Invites:     NewInviteService(st),
-		Blocks:      NewBlockService(st),
-		Moderation:  moderation,
-		Roles:       NewRoleService(st, permSvc),
-		Emoji:       NewEmojiService(st, permSvc),
-		Settings:    NewSettingsService(st),
-		Uploads:     uploads,
-		Voice:       NewVoiceService(st),
-		Tokens:      NewTokenService(st),
-		Sessions:    NewSessionService(st),
-		Setup:       NewSetupService(st),
-		Reports:     NewReportService(st, permSvc, messages, uploads, moderation, limiter),
+		Erasure:         erasure,
+		Retention:       NewRetentionService(st),
+		Messages:        messages,
+		Channels:        NewChannelService(st, permSvc),
+		Permissions:     permSvc,
+		Users:           NewUserService(st),
+		DMs:             NewDMService(st),
+		Invites:         NewInviteService(st),
+		Blocks:          blocks,
+		Moderation:      moderation,
+		Roles:           NewRoleService(st, permSvc),
+		Emoji:           NewEmojiService(st, permSvc),
+		Settings:        NewSettingsService(st),
+		Uploads:         uploads,
+		Voice:           NewVoiceService(st),
+		Tokens:          NewTokenService(st),
+		Sessions:        NewSessionService(st),
+		Setup:           NewSetupService(st),
+		Reports:         NewReportService(st, permSvc, messages, uploads, moderation, limiter),
+		Push:            NewPushService(st),
+		MessageRequests: messageRequests,
+		NSFW:            NewNSFWService(st, permSvc),
 	}
 }

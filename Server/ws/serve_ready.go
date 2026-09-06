@@ -150,7 +150,7 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
-	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
 }
 
 // permOverride maps one db override (both layers) to the checker's type.
@@ -192,8 +192,12 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 }
 
 // readyChannelPayloads builds the ready payload's channel objects — one entry
-// per visible channel, with the per-user unread fields folded in.
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role) []map[string]any {
+// per visible channel, with the per-user unread fields folded in. ackMap
+// carries the caller's own acknowledgement per NSFW-labelled channel id
+// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
+// gets one) reads as false, which is correct either way — nothing needs
+// acknowledging there.
+func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -213,10 +217,16 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
-			// Age-gate flag. Shipped so a client can label or gate the
-			// channel; the server applies no content behaviour of its own to
-			// a flagged channel (migration 025).
+			// Age-gate flag. The server enforces content behaviour on a
+			// flagged channel now (B5-7, permissions.CanReadContent); see
+			// nsfw_acknowledged below for the caller's own consent state.
 			"nsfw": visibleChannels[i].NSFW,
+			// Whether THIS caller has acknowledged the label (B5-7). Always
+			// present, like nsfw itself — false for an unlabelled channel,
+			// where it means nothing but must not be omitted (two different
+			// meanings for "absent" is exactly what B5-7's other always-shipped
+			// fields avoid).
+			"nsfw_acknowledged": ackMap[visibleChannels[i].ID],
 			// Voice capacity limits (0 = unlimited) — the same values the
 			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
 			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
@@ -308,6 +318,31 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 	return voiceStates
 }
 
+// readyNSFWAcknowledgements resolves userID's acknowledgement for every
+// LABELLED channel in visibleChannels — the ready payload's per-channel
+// nsfw_acknowledged field (B5-7). Bounded by how many labelled channels the
+// caller can see (typically zero), not by the full channel list, and skipped
+// entirely when none are labelled: an unflagged deployment pays nothing.
+func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, userID int64, visibleChannels []db.Channel) map[int64]bool {
+	var ackMap map[int64]bool
+	for i := range visibleChannels {
+		if !visibleChannels[i].NSFW {
+			continue
+		}
+		ok, err := database.HasNSFWAcknowledgement(ctx, userID, visibleChannels[i].ID)
+		if err != nil {
+			slog.Warn("ws: buildReady HasNSFWAcknowledgement failed, reporting unacknowledged",
+				"user_id", userID, "channel_id", visibleChannels[i].ID, "err", err)
+			continue
+		}
+		if ackMap == nil {
+			ackMap = make(map[int64]bool)
+		}
+		ackMap[visibleChannels[i].ID] = ok
+	}
+	return ackMap
+}
+
 // buildReady constructs the ready server→client message.
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
@@ -340,7 +375,8 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	}
 
 	// Build protocol-compliant channel objects (strip extra fields).
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role)
+	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
+	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
@@ -541,7 +577,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 		}
 	}
 	h.updateKeyHolder(vs.ChannelID)
-	h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
+	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
 	if h.livekit == nil {
 		return
 	}

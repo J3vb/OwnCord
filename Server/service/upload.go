@@ -146,17 +146,54 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 		}
 	}
 
-	if role != nil && permissions.HasAdmin(role.Permissions) {
+	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
+
+	// P2-6: ordinary channel visibility runs BEFORE the NSFW consent check
+	// (previously reversed). A non-viewer without READ_MESSAGES must get the
+	// exact same refusal (FORBIDDEN, via errFileForbidden) whether or not the
+	// channel happens to be labelled — checking consent first would answer a
+	// non-viewer with a DIFFERENT code (NSFW_ACKNOWLEDGEMENT_REQUIRED) only
+	// for a labelled channel, disclosing the label's existence to someone who
+	// cannot see the channel at all. Same admin exemption this gate always
+	// had; decision 13's admin-refusing consent check still runs next.
+	if aa.ChannelID != nil && aa.ChannelType != "dm" && !isAdmin {
+		if actor == nil || !s.perms.HasChannelPerm(ctx, actor.ID, *aa.ChannelID, permissions.ReadMessages) {
+			return errFileForbidden()
+		}
+	}
+
+	if err := s.checkNSFWConsent(ctx, aa, actor); err != nil {
+		return err
+	}
+
+	if isAdmin {
 		return nil
 	}
 
 	if aa.ChannelID == nil {
 		return s.authorizeUnlinked(ctx, aa, actor)
 	}
-	if aa.ChannelType != "dm" {
-		if actor == nil || !s.perms.HasChannelPerm(ctx, actor.ID, *aa.ChannelID, permissions.ReadMessages) {
-			return errFileForbidden()
-		}
+	return nil
+}
+
+// checkNSFWConsent is Authorize's B5-7 decision 13 gate: the NSFW check runs
+// BEFORE the admin bypass, so an administrator without a row is refused
+// exactly like anyone else — no bit and no admin bypass skips this. DMs
+// cannot be labelled, so this only ever applies to a non-DM linked channel.
+func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
+	if aa.ChannelID == nil || aa.ChannelType == "dm" || !aa.ChannelNSFW {
+		return nil
+	}
+	if actor == nil {
+		return errFileForbidden()
+	}
+	ok, ackErr := s.st.HasNSFWAcknowledgement(ctx, actor.ID, *aa.ChannelID)
+	if ackErr != nil {
+		slog.Error("failed to check NSFW acknowledgement", "attachment_id", aa.ID, "error", ackErr)
+		return errFileForbidden()
+	}
+	if !ok {
+		return fmt.Errorf("%w", permissions.ErrNSFWUnacknowledged)
 	}
 	return nil
 }

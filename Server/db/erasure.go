@@ -264,6 +264,11 @@ var erasureStatements = []struct {
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
+	// Web Push subscriptions (migration 045, B5-4, class 2a): the users
+	// delete below would cascade this too, but a surviving endpoint is a
+	// live channel to a person who left, so it gets its own explicit
+	// statement the inventory's zero is proved against.
+	{"push_subscriptions", `DELETE FROM push_subscriptions WHERE user_id = ?`},
 	{"api_tokens", `DELETE FROM api_tokens WHERE user_id = ?`},
 	{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
 	{"pending_totp_enrollments", `DELETE FROM pending_totp_enrollments WHERE user_id = ?`},
@@ -281,6 +286,20 @@ var erasureStatements = []struct {
 	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
+	// Message requests and trusted senders (migration 046, B5-6, classes 14c
+	// and 14d): both tables name a sender and a recipient, so an erasure of
+	// either party needs both columns — the users delete below would cascade
+	// these too, but a surviving row across the cascade boundary is exactly
+	// the silent-pass shape TestEraseAccount_EveryInventoryClassIsZero exists
+	// to catch, so they get their own explicit statements before it runs.
+	{"message_requests", `DELETE FROM message_requests WHERE sender_id = ?1 OR recipient_id = ?1`},
+	{"trusted_senders", `DELETE FROM trusted_senders WHERE recipient_id = ?1 OR sender_id = ?1`},
+	// NSFW acknowledgements (migration 047, B5-7, class 18a): a consent
+	// record naming the subject. The users delete below would cascade this
+	// too, but decision 13 binds it to decision 7's erasure rule, so it gets
+	// its own explicit statement the inventory's zero is proved against —
+	// the channel half needs none (ON DELETE CASCADE on channel_id).
+	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},

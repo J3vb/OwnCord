@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"os"
@@ -45,6 +47,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 	want := []string{
 		"failed to delete expired sessions",
 		"failed to clean up expired second-factor state",
+		"push subscription sweep failed",
 		"backup maintenance failed",
 		"failed to delete orphaned attachments",
 		"retention sweep failed",
@@ -259,4 +262,54 @@ func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 	}
 	assertReportContent(oldID, "", 0, 0)
 	assertReportContent(recentID, "the reporter's written detail", 1, 1)
+}
+
+// TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation mirrors the
+// restart shape TestMaintenance_TickReturnsBytesTheOrphanSweepFreed proves
+// for storage: a fresh process — a new *maintenance over the same database,
+// with the newly-loaded (rotated) VAPID key installed — running the real
+// loop() start-up sequence (not just calling sweepPushSubscriptions
+// directly, which would stay green even if loop() stopped calling it)
+// removes rows a rotation orphaned even though they are not stale by time.
+// This is what makes a rotation take effect on the very next boot rather
+// than the next 15-minute tick. stopMaintenance is pre-closed so loop()
+// runs its start-up work (resumeErasure, recountStorage,
+// sweepPushSubscriptions) and returns at the select without waiting for a
+// ticker.
+func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
+		t.Fatal(err)
+	}
+	// Written under a key that is not the one about to be installed below —
+	// standing in for "a key rotated since this row was created".
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (10, 'https://push.example/a', 'p', 'a', 'old-key-id')`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
+	svc := service.New(database, auth.NewRateLimiter())
+	svc.Push.SetVAPIDKey(priv)
+
+	m := newMaintenance(slog.Default(), cfg, database, svc)
+	stopMaintenance := make(chan struct{})
+	close(stopMaintenance)
+	maintenanceDone := make(chan struct{})
+	m.loop(ctx, stopMaintenance, maintenanceDone)
+	<-maintenanceDone
+
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("push_subscriptions after loop()'s start-up sweep = %d, want 0 (the row was under a rotated-away key)", n)
+	}
 }

@@ -1591,4 +1591,39 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     PRIMARY KEY (blocker_id, blocked_id),
     CHECK (blocker_id != blocked_id)
 );
+
+-- Message requests and trusted senders (migration 046, B5-6). No
+-- grandfathering backfill here — this synthetic schema is applied to an
+-- empty database before any test seeds a DM, so there is nothing yet to
+-- backfill.
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
+    ON message_requests(recipient_id, state);
+
+-- Per-user NSFW acknowledgement (migration 047, B5-7).
+CREATE TABLE IF NOT EXISTS nsfw_acknowledgements (
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    acknowledged_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
 `)

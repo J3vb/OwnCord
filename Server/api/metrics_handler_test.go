@@ -153,3 +153,44 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 		t.Errorf("event_persister should be omitted when persistence is disabled, got %v", resp["event_persister"])
 	}
 }
+
+// TestHandleMetrics_PushCounters proves the three push_* fields (B5-11,
+// behind HP-5) surface real values when a PushCounters source is wired, and
+// stay at zero — never absent, they are plain uint64s — when it is nil, the
+// state of a server with dispatch off (the compiled default).
+func TestHandleMetrics_PushCounters(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
+		PushCounters: func() (uint64, uint64, uint64) { return 7, 2, 1 },
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["push_dispatched"] != float64(7) || resp["push_failed"] != float64(2) || resp["push_pruned"] != float64(1) {
+		t.Errorf("push counters = %v/%v/%v, want 7/2/1", resp["push_dispatched"], resp["push_failed"], resp["push_pruned"])
+	}
+
+	// Dispatch off: PushCounters nil, the three fields stay at zero.
+	r2 := chi.NewRouter()
+	r2.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{}))
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	req2.RemoteAddr = "127.0.0.1:9999"
+	rr2 := httptest.NewRecorder()
+	r2.ServeHTTP(rr2, req2)
+	var resp2 map[string]any
+	if err := json.NewDecoder(rr2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp2["push_dispatched"] != float64(0) || resp2["push_failed"] != float64(0) || resp2["push_pruned"] != float64(0) {
+		t.Errorf("push counters with no source = %v/%v/%v, want 0/0/0", resp2["push_dispatched"], resp2["push_failed"], resp2["push_pruned"])
+	}
+}
