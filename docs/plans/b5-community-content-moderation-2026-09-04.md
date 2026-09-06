@@ -1833,7 +1833,7 @@ plus `TestNoAutomaticTelemetry_Capture` still green on compiled defaults and
 the tests must make that unfalsifiable.
 
 **Evidence, 2026-09-06** — branch `feature/b5-11-push-dispatch` from `dev`
-`a504d61e`, **behind HP-5**: draft PR to `dev` #TBD-B5-11, never merged before
+`a504d61e`, **behind HP-5**: draft PR to `dev` #1548, never merged before
 the owner signs the scorecard; commits `5bdba8df` (the feature), `fa741ff7`
 (the independent review round) and `b7f638c5` (its verification round). Premise held at the base: B5-4's storage was
 on `dev`, with the private scalar on `svc.Push` and no dispatch anywhere; B5-6's
