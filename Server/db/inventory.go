@@ -61,6 +61,9 @@ var SubjectInventory = []InventoryClass{
 	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
 	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
 	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
+	// 22f (second Codex review): report_events is metadata, not content —
+	// unlinking the actor is the whole job, the audit_log shape.
+	{"22f report events by the subject", `SELECT COUNT(*) FROM report_events WHERE actor_id = ?`, inventoryByUID},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.

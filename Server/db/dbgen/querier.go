@@ -282,11 +282,31 @@ type Querier interface {
 	// (migration 048) is the constraint expected to fire here on a race: two
 	// simultaneous filings of the same (reporter, target) both reach this
 	// INSERT, and the loser's violates that partial unique index.
+	// Re-validated inside the transaction (Codex review, P1-4 widened): the
+	// evidence snapshot is built and the reporter/subject resolved before the
+	// transaction opens, so an erasure landing between that resolution and this
+	// INSERT must not restore a since-erased reporter or subject id -- the
+	// INSERT ... SELECT ... WHERE EXISTS guard turns that race into zero rows
+	// (mapped to db.ErrNotFound) rather than a row naming an erased account.
+	// subject_id = 0 is a valid, principal-less target (an attachment with no
+	// resolvable uploader) and skips the EXISTS check for it.
 	InsertReport(ctx context.Context, arg InsertReportParams) (int64, error)
+	// report_events is this feature's own immutable history, never the shared
+	// audit_log (second Codex review): detail is the state or outcome word
+	// only, never free text.
+	InsertReportEvent(ctx context.Context, arg InsertReportEventParams) error
+	// Guarded (Codex review, P1-4 widened): an evidence row's author erased
+	// between the snapshot's capture and this transaction's commit must not
+	// land -- the row is silently dropped (0 = a valid author-less context row,
+	// e.g. a system message, and skips the check).
 	InsertReportEvidence(ctx context.Context, arg InsertReportEvidenceParams) error
 	// INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
-	// between requirePerm and this write must not land as a note's author.
-	// Zero rows affected means the caller answers 409.
+	// between requirePerm and this write must not land as a note's author, and
+	// (Codex review) the report must still be open/assigned -- a note added
+	// between GetReport's read and this write, on a report a concurrent Close
+	// just closed, must not land either. Both guards are in the one INSERT's
+	// WHERE clause, so there is no read-then-write gap between them. Zero rows
+	// affected means the caller answers 409, for either cause.
 	InsertReportNote(ctx context.Context, arg InsertReportNoteParams) (int64, error)
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
@@ -327,6 +347,7 @@ type Querier interface {
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	ListReportEvents(ctx context.Context, reportID int64) ([]ReportEvent, error)
 	ListReportEvidence(ctx context.Context, reportID int64) ([]ReportEvidence, error)
 	ListReportNotes(ctx context.Context, reportID int64) ([]ReportNote, error)
 	// Either concrete queue state, taken alone ("open" or "assigned").

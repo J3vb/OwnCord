@@ -8,8 +8,19 @@
 -- (migration 048) is the constraint expected to fire here on a race: two
 -- simultaneous filings of the same (reporter, target) both reach this
 -- INSERT, and the loser's violates that partial unique index.
+-- Re-validated inside the transaction (Codex review, P1-4 widened): the
+-- evidence snapshot is built and the reporter/subject resolved before the
+-- transaction opens, so an erasure landing between that resolution and this
+-- INSERT must not restore a since-erased reporter or subject id -- the
+-- INSERT ... SELECT ... WHERE EXISTS guard turns that race into zero rows
+-- (mapped to db.ErrNotFound) rather than a row naming an erased account.
+-- subject_id = 0 is a valid, principal-less target (an attachment with no
+-- resolvable uploader) and skips the EXISTS check for it.
 INSERT INTO reports (public_id, reporter_id, subject_id, target_type, target_ref, channel_id, reason, detail)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+SELECT sqlc.arg(public_id), sqlc.arg(reporter_id), sqlc.arg(subject_id), sqlc.arg(target_type),
+       sqlc.arg(target_ref), sqlc.arg(channel_id), sqlc.arg(reason), sqlc.arg(detail)
+ WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(reporter_id))
+   AND (sqlc.arg(subject_id) = 0 OR EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(subject_id)))
 RETURNING id;
 
 -- name: GetReportByID :one
@@ -105,8 +116,13 @@ UPDATE reports
  WHERE id = ? AND state IN ('open', 'assigned');
 
 -- name: InsertReportEvidence :exec
+-- Guarded (Codex review, P1-4 widened): an evidence row's author erased
+-- between the snapshot's capture and this transaction's commit must not
+-- land -- the row is silently dropped (0 = a valid author-less context row,
+-- e.g. a system message, and skips the check).
 INSERT INTO report_evidence (report_id, seq, message_id, author_id, content, attachments)
-VALUES (?, ?, ?, ?, ?, ?);
+SELECT sqlc.arg(report_id), sqlc.arg(seq), sqlc.arg(message_id), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(attachments)
+ WHERE sqlc.arg(author_id) = 0 OR EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(author_id));
 
 -- name: ListReportEvidence :many
 SELECT report_id, seq, message_id, author_id, author_token, content, attachments, captured_at
@@ -116,11 +132,16 @@ SELECT report_id, seq, message_id, author_id, author_token, content, attachments
 
 -- name: InsertReportNote :execrows
 -- INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
--- between requirePerm and this write must not land as a note's author.
--- Zero rows affected means the caller answers 409.
+-- between requirePerm and this write must not land as a note's author, and
+-- (Codex review) the report must still be open/assigned -- a note added
+-- between GetReport's read and this write, on a report a concurrent Close
+-- just closed, must not land either. Both guards are in the one INSERT's
+-- WHERE clause, so there is no read-then-write gap between them. Zero rows
+-- affected means the caller answers 409, for either cause.
 INSERT INTO report_notes (report_id, author_id, body)
 SELECT sqlc.arg(report_id), sqlc.arg(author_id), sqlc.arg(body)
- WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(author_id));
+ WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(author_id))
+   AND EXISTS (SELECT 1 FROM reports r WHERE r.id = sqlc.arg(report_id) AND r.state IN ('open', 'assigned'));
 
 -- name: ListReportNotes :many
 SELECT id, report_id, author_id, author_token, body, created_at
@@ -139,3 +160,16 @@ DELETE FROM report_notes
 -- name: PruneReportDetailOlderThan :execrows
 UPDATE reports SET detail = ''
  WHERE closed_at IS NOT NULL AND closed_at < ? AND detail != '';
+
+-- name: InsertReportEvent :exec
+-- report_events is this feature's own immutable history, never the shared
+-- audit_log (second Codex review): detail is the state or outcome word
+-- only, never free text.
+INSERT INTO report_events (report_id, actor_id, action, detail)
+VALUES (?, ?, ?, ?);
+
+-- name: ListReportEvents :many
+SELECT id, report_id, actor_id, actor_token, action, detail, created_at
+  FROM report_events
+ WHERE report_id = ?
+ ORDER BY id;

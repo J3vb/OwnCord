@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/db/audittest"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -567,28 +568,83 @@ func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
 // service call is the REST handler's job — so there is nothing left for a
 // service-package test to assert here that those two do not already prove.
 
-// TestReport_CreateAuditActorIsSystemNotReporter is P1-2's regression test:
-// the report_create audit row must never carry the reporter's identity as
-// actor_id, because VIEW_AUDIT_LOG and MODERATE_MEMBERS are two different
-// bits — a holder of the former (who may not hold the latter) must not be
-// able to read the reporter's id off the audit log.
-func TestReport_CreateAuditActorIsSystemNotReporter(t *testing.T) {
+// P1-2's original regression (the report_create audit row must not carry
+// the reporter's identity) is superseded by a second Codex review: report
+// lifecycle events do not go to the shared audit_log AT ALL any more, so
+// there is no audit row to read here at all. The system-actor assertion
+// lives on as part of TestReportEvents_EveryMutationWritesOne, over
+// report_events instead (audit_coverage_test.go's four report_* rows were
+// removed for the same reason).
+
+// TestReportEvents_EveryMutationWritesOne is the second Codex review's
+// regression test, replacing the four report_* rows audit_coverage_test.go
+// used to carry: File, Assign, Note and Close each write exactly one
+// report_events row (never the shared audit_log — VIEW_AUDIT_LOG holders
+// have no route to any of this any more), created's actor is the system (0,
+// hiding the reporter — P1-2's original point survives here), the rest
+// carry the acting moderator, and AssertSafeDetails proves detail never
+// carries the free text a fixture used (the note body, or the report's own
+// detail field) — only the state or outcome word.
+func TestReportEvents_EveryMutationWritesOne(t *testing.T) {
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
-	seedChannel(t, database, &db.Channel{ID: 1500, Name: "general"})
-	msgID := seedReportMessage(t, database, 1500, 11, "hi")
-	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
+	seedChannel(t, database, &db.Channel{ID: 1505, Name: "general"})
+	msgID := seedReportMessage(t, database, 1505, 11, "hi")
+
+	const detail = "password: hunter2, hash $2a$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
+	id, err := svc.File(ctx, FileReportParams{
+		ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10),
+		Reason: "harassment", Detail: detail,
+	})
 	if err != nil {
 		t.Fatalf("File: %v", err)
 	}
-	var actorID int64
-	if err := database.QueryRowContext(ctx,
-		`SELECT actor_id FROM audit_log WHERE action = 'report_create' AND target_type = 'report' AND target_id = ?`, id,
-	).Scan(&actorID); err != nil {
-		t.Fatalf("read report_create audit row: %v", err)
+	if err := svc.Assign(ctx, 2, id, false); err != nil {
+		t.Fatalf("Assign: %v", err)
 	}
-	if actorID != 0 {
-		t.Errorf("report_create actor_id = %d, want 0 (system actor, not the reporter)", actorID)
+	const noteBody = "moderator note mentioning password: hunter2secret"
+	if err := svc.Note(ctx, 2, id, noteBody); err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+	if _, err := svc.Close(ctx, 2, id, "actioned"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	events, err := database.ListReportEvents(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportEvents: %v", err)
+	}
+	wantActions := []string{"created", "assigned", "noted", "closed"}
+	if len(events) != len(wantActions) {
+		t.Fatalf("report_events = %d rows (%+v), want %d: %v", len(events), events, len(wantActions), wantActions)
+	}
+	for i, action := range wantActions {
+		if events[i].Action != action {
+			t.Errorf("event[%d].Action = %q, want %q", i, events[i].Action, action)
+		}
+	}
+	if events[0].ActorID != 0 {
+		t.Errorf("created event actor = %d, want 0 (system actor, hides the reporter)", events[0].ActorID)
+	}
+	for i := 1; i < len(events); i++ {
+		if events[i].ActorID != 2 {
+			t.Errorf("event[%d] (%s) actor = %d, want 2 (the acting moderator)", i, events[i].Action, events[i].ActorID)
+		}
+	}
+
+	corpus := make([]db.AuditEntry, len(events))
+	for i, e := range events {
+		corpus[i] = db.AuditEntry{Action: e.Action, Detail: e.Detail}
+	}
+	audittest.AssertSafeDetails(t, corpus, detail, noteBody, "hunter2", "$2a$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ")
+
+	// No route to any of this through the shared audit_log at all.
+	var auditRows int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE target_type = 'report'`).Scan(&auditRows); err != nil {
+		t.Fatalf("count audit_log report rows: %v", err)
+	}
+	if auditRows != 0 {
+		t.Errorf("audit_log has %d row(s) naming a report, want 0 (report lifecycle events live only in report_events)", auditRows)
 	}
 }
 

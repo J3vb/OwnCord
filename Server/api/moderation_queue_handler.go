@@ -46,6 +46,15 @@ type moderationNoteResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// moderationEventResponse is one row of report_events (second Codex review):
+// this feature's own immutable history, never the shared audit_log.
+type moderationEventResponse struct {
+	ActorID   int64  `json:"actor_id"`
+	Action    string `json:"action"`
+	Detail    string `json:"detail"`
+	CreatedAt string `json:"created_at"`
+}
+
 // moderationReportDetailResponse is GET /api/v1/moderation/queue/{id}. ID is
 // the PUBLIC id (P2-9).
 type moderationReportDetailResponse struct {
@@ -65,6 +74,7 @@ type moderationReportDetailResponse struct {
 	ClosedAt   *string                      `json:"closed_at,omitempty"`
 	Evidence   []moderationEvidenceResponse `json:"evidence"`
 	Notes      []moderationNoteResponse     `json:"notes"`
+	Events     []moderationEventResponse    `json:"events"`
 }
 
 type addNoteRequest struct {
@@ -102,7 +112,12 @@ func currentUserID(r *http.Request) (int64, bool) {
 
 // resolveReportIDParam reads the {id} route parameter (the report's PUBLIC
 // id) and resolves it to the internal id ReportService's methods take.
-// Writes the response and returns ok=false on any failure.
+// Writes the response and returns ok=false on any failure. Callers MUST run
+// requireModerateOrWrite first (P1, Codex review): resolving a route
+// parameter before checking authorization turns "unknown id" (404) and
+// "real id, no permission" (403) into an existence oracle through the
+// handler's own order of operations, even though every ReportService method
+// itself checks CanModerate before touching a report.
 func resolveReportIDParam(w http.ResponseWriter, r *http.Request, svc *service.Services) (int64, bool) {
 	publicID := chi.URLParam(r, "id")
 	id, err := svc.Reports.ResolveReportID(r.Context(), publicID)
@@ -111,6 +126,17 @@ func resolveReportIDParam(w http.ResponseWriter, r *http.Request, svc *service.S
 		return 0, false
 	}
 	return id, true
+}
+
+// requireModerateOrWrite is authorization-before-existence's front door: the
+// permission check every route below the queue index needs, run before the
+// route's {id} is ever resolved.
+func requireModerateOrWrite(w http.ResponseWriter, r *http.Request, svc *service.Services, actorID int64) bool {
+	if err := svc.Reports.RequireModerate(r.Context(), actorID); err != nil {
+		writeReportServiceError(r.Context(), w, err)
+		return false
+	}
+	return true
 }
 
 func handleModerationQueueList(svc *service.Services) http.HandlerFunc {
@@ -146,6 +172,9 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
 			return
 		}
+		if !requireModerateOrWrite(w, r, svc, actorID) {
+			return
+		}
 		id, ok := resolveReportIDParam(w, r, svc)
 		if !ok {
 			return
@@ -166,13 +195,17 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 		for _, n := range detail.Notes {
 			notes = append(notes, moderationNoteResponse{ID: n.ID, AuthorID: n.AuthorID, Body: n.Body, CreatedAt: n.CreatedAt})
 		}
+		events := make([]moderationEventResponse, 0, len(detail.Events))
+		for _, e := range detail.Events {
+			events = append(events, moderationEventResponse{ActorID: e.ActorID, Action: e.Action, Detail: e.Detail, CreatedAt: e.CreatedAt})
+		}
 		writeJSON(w, http.StatusOK, moderationReportDetailResponse{
 			ID: detail.Report.PublicID, ReporterID: detail.Report.ReporterID, SubjectID: detail.Report.SubjectID,
 			TargetType: detail.Report.TargetType, TargetRef: detail.Report.TargetRef, ChannelID: detail.Report.ChannelID,
 			Reason: detail.Report.Reason, Detail: detail.Report.Detail, State: detail.Report.State,
 			AssigneeID: detail.Report.AssigneeID, Outcome: detail.Report.Outcome,
 			CreatedAt: detail.Report.CreatedAt, UpdatedAt: detail.Report.UpdatedAt, ClosedAt: detail.Report.ClosedAt,
-			Evidence: evidence, Notes: notes,
+			Evidence: evidence, Notes: notes, Events: events,
 		})
 	}
 }
@@ -182,6 +215,9 @@ func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster)
 		actorID, ok := currentUserID(r)
 		if !ok {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			return
+		}
+		if !requireModerateOrWrite(w, r, svc, actorID) {
 			return
 		}
 		id, ok := resolveReportIDParam(w, r, svc)
@@ -207,6 +243,9 @@ func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
 			return
 		}
+		if !requireModerateOrWrite(w, r, svc, actorID) {
+			return
+		}
 		id, ok := resolveReportIDParam(w, r, svc)
 		if !ok {
 			return
@@ -230,6 +269,9 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 		actorID, ok := currentUserID(r)
 		if !ok {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			return
+		}
+		if !requireModerateOrWrite(w, r, svc, actorID) {
 			return
 		}
 		id, ok := resolveReportIDParam(w, r, svc)

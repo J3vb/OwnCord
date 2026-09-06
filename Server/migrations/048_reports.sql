@@ -122,6 +122,33 @@
 -- DUPLICATE_REPORT. `reporter_id <> 0` excludes an erased reporter's rows
 -- from the constraint, since decision 7 leaves many closed/erased reports
 -- sharing reporter_id = 0 and they must not collide with each other.
+--
+-- (12) report_events (second Codex review, not in the HP-5 draft, and a
+-- design change from this migration's first shipped version): report
+-- lifecycle events do NOT go to the shared audit_log at all. A system actor
+-- on report_create hid the reporter from a VIEW_AUDIT_LOG holder, but the
+-- rows were still readable there, and a subject holding that bit could still
+-- diff report ids, reasons, timestamps and counts against the queue view
+-- they separately see -- a side channel the shared, cross-feature log has no
+-- way to close by itself. report_events is this feature's OWN immutable
+-- history instead: created/assigned/noted/closed rows, exposed nowhere
+-- except inside one report's own queue detail (MODERATE_MEMBERS bit AND the
+-- confidentiality guard -- exactly Get's existing gate, no new one). detail
+-- is the state or outcome word only, same rule report_notes.body is exempt
+-- from: never free text, never a name. Unlinked on erasure like audit_log
+-- (actor_id to 0, actor_token filled -- inventory class 22f), and, unlike
+-- report_evidence/report_notes/detail, NEVER pruned by the retention sweep:
+-- it is metadata (an action word, a time, an actor link), not content.
+CREATE TABLE IF NOT EXISTS report_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id   INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    actor_id    INTEGER NOT NULL DEFAULT 0,
+    actor_token TEXT,
+    action      TEXT    NOT NULL,
+    detail      TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_report_events_report ON report_events(report_id, id);
 CREATE TABLE IF NOT EXISTS reports (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     public_id      TEXT    NOT NULL UNIQUE,
