@@ -19,6 +19,8 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // shutdownBudget is the total time Close is given, and the same 30 seconds
@@ -231,6 +233,17 @@ func (a *App) startPlugins() error {
 	return nil
 }
 
+// pushDispatchEnabled is the one gate the composition root checks before
+// constructing a PushDispatcher and installing it on MessageService: BOTH
+// push.enabled and push.dispatch_enabled must be true (plan decision 9,
+// HP-5 scorecard Question 6, item 1). Storage on with dispatch off — the
+// B5-4 state, and what an upgraded install starts in — must never dispatch,
+// which is why this is a named function rather than an inline condition:
+// TestPushDispatchGate_RequiresBothKeys pins the "&&", not just its effect.
+func pushDispatchEnabled(cfg *config.Config) bool {
+	return cfg.Push.Enabled && cfg.Push.DispatchEnabled
+}
+
 // startHub builds the hub and the collaborators it shares with the router
 // and starts the dispatch goroutine — B3-3 moved all of that out of
 // api.NewRouter so the hub has exactly one owner, and B3-4 moved the pre-Run
@@ -263,6 +276,19 @@ func (a *App) startHub() error {
 	if rt.Services != nil && rt.Services.Push != nil {
 		rt.Services.Push.SetVAPIDKey(a.pushVAPIDKey)
 		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
+		rt.Services.Push.SetContact(a.cfg.Push.Contact)
+	}
+	// Web Push dispatch (B5-11, behind HP-5): its own second opt-in on top
+	// of push.enabled (plan decision 9) — an operator who enabled storage
+	// in the B5-4 era does not acquire dispatch by upgrade. Installed on
+	// MessageService only when both keys are true; SetPushNotifier is never
+	// called otherwise, so the hook stays the nil PushNotifier it defaults
+	// to (TestPushDispatch_OffByDefaultSendsNothing).
+	if pushDispatchEnabled(a.cfg) &&
+		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
+		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
+		rt.Services.Messages.SetPushNotifier(dispatcher)
+		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)

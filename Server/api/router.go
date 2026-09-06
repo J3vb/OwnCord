@@ -474,6 +474,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
 			DiskMinFree:    cfg.Server.MinFreeDiskBytes(),
 			UploadBytes:    database.TotalAttachmentBytes,
+			PushCounters:   pushCountersSource(svc),
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
@@ -484,6 +485,17 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
+}
+
+// pushCountersSource returns nil when dispatch was never constructed (both
+// push.enabled and push.dispatch_enabled were not true at start-up — the
+// compiled default), so handleMetrics leaves the three push_* fields at
+// zero rather than calling into a nil *service.PushDispatcher.
+func pushCountersSource(svc *service.Services) func() (dispatched, failed, pruned uint64) {
+	if svc == nil || svc.PushDispatch == nil {
+		return nil
+	}
+	return svc.PushDispatch.Counters
 }
 
 // serverStartTime records when the process started; used for uptime in /health.

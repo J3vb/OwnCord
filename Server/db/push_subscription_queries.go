@@ -151,3 +151,55 @@ func (d *DB) CountPushSubscriptions(ctx context.Context) (int64, error) {
 	}
 	return n, nil
 }
+
+// PushSubscriptionForDispatch is one subscription row as dispatch (B5-11)
+// reads it: with the push credential (P256dh, Auth) a listing endpoint never
+// returns.
+type PushSubscriptionForDispatch struct {
+	ID       int64
+	UserID   int64
+	Endpoint string
+	P256dh   string
+	Auth     string
+}
+
+// ListPushSubscriptionsForDispatch returns every subscription belonging to
+// one of userIDs, scoped to the running VAPID key — the audience dispatch
+// already narrowed down (not the author, offline, permitted) is the caller's
+// to compute; this is the last step, fetching what to push to. An empty
+// userIDs returns no rows without a query round-trip.
+func (d *DB) ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]PushSubscriptionForDispatch, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := d.q.ListPushSubscriptionsForDispatch(ctx, dbgen.ListPushSubscriptionsForDispatchParams{
+		UserIds:    userIDs,
+		VapidKeyID: keyID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ListPushSubscriptionsForDispatch: %w", err)
+	}
+	out := make([]PushSubscriptionForDispatch, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PushSubscriptionForDispatch{
+			ID:       r.ID,
+			UserID:   r.UserID,
+			Endpoint: r.Endpoint,
+			P256dh:   r.P256dh,
+			Auth:     r.Auth,
+		})
+	}
+	return out, nil
+}
+
+// DeletePushSubscriptionByID removes a subscription by id, unscoped by user
+// — dispatch (B5-11) uses this to prune a row a push service answered
+// 404/410 for; it already read the id from a row it was allowed to read, and
+// nothing else calls it. Reports whether a row was deleted.
+func (d *DB) DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error) {
+	n, err := d.q.DeletePushSubscriptionByID(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("DeletePushSubscriptionByID: %w", err)
+	}
+	return n > 0, nil
+}
