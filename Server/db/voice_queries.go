@@ -214,6 +214,63 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 	return n > 0, nil
 }
 
+// CompareAndSetServerMute is SetVoiceServerMute's stricter sibling for the
+// timeout voice half (P1-3/P1-4 PARTIAL, Codex review round 3): matched
+// against the EXACT session — channelID and joinedAt, the join-instance
+// token JoinVoiceChannel mints — the caller already authorized, and reports
+// the PRIOR server_muted value read inside the SAME transaction as the
+// write, so the caller can tell whether THIS call caused the unmuted->muted
+// transition (transitioned=true, muted=true only) or the target was already
+// server-muted by someone/something else (transitioned=false — the caller
+// does not own that mute). matched=false covers both "no such session" and
+// "the write raced the target off it between the read and the write"; the
+// row is left untouched either way, same as SetVoiceServerMute's own
+// channel-scoped no-op. Read-then-write is atomic here because it runs
+// inside one transaction against the writer's single connection
+// (SetMaxOpenConns(1)) — the same guarantee recordModerationAction's live
+// rank check relies on.
+func (d *DB) CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return false, false, fmt.Errorf("CompareAndSetServerMute begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	q := dbgen.New(tx)
+
+	wasMuted, err := q.CompareVoiceServerMuteState(ctx, dbgen.CompareVoiceServerMuteStateParams{
+		UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("CompareAndSetServerMute: %w", err)
+	}
+
+	var res sql.Result
+	if muted {
+		res, err = q.ApplyVoiceServerMuteForSession(ctx, dbgen.ApplyVoiceServerMuteForSessionParams{
+			UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
+		})
+	} else {
+		res, err = q.ClearVoiceServerMuteForSession(ctx, dbgen.ClearVoiceServerMuteForSessionParams{
+			UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
+		})
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("CompareAndSetServerMute: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// The session moved on between the read above and this write.
+		return false, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, false, fmt.Errorf("CompareAndSetServerMute commit: %w", err)
+	}
+	return true, muted && wasMuted == 0, nil
+}
+
 // SetVoiceServerDeafen applies or clears the moderator-imposed deafen, scoped
 // to channelID. Mirrors SetVoiceServerMute, including the asymmetric handling
 // of deafened and the channel-scoped matched result.

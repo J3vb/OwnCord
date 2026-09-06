@@ -256,8 +256,8 @@ func TestLiftTimeout_ReportsVoiceMuted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	if err := database.SetTimeoutVoiceMuted(ctx, id); err != nil {
-		t.Fatalf("SetTimeoutVoiceMuted: %v", err)
+	if ok, err := database.SetTimeoutVoiceMuted(ctx, id); err != nil || !ok {
+		t.Fatalf("SetTimeoutVoiceMuted: ok=%v err=%v", ok, err)
 	}
 	_, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
@@ -265,6 +265,70 @@ func TestLiftTimeout_ReportsVoiceMuted(t *testing.T) {
 	}
 	if !voiceMuted {
 		t.Fatal("voiceMuted = false, want true: SetTimeoutVoiceMuted was called on the active row")
+	}
+}
+
+// TestSetTimeoutVoiceMuted_RefusesWhenNoLongerActive is P2 16 (Codex review
+// round 3): the flag update is guarded on the row still being active, so a
+// caller that lands here after the row was already lifted (a concurrent
+// LiftTimeout ran in the gap between the SFU mute landing and this call)
+// gets ok=false rather than silently stamping ownership onto a row nothing
+// will ever act on again — the service layer's compensating unmute depends
+// on seeing that false.
+func TestSetTimeoutVoiceMuted_RefusesWhenNoLongerActive(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	id, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil || !lifted {
+		t.Fatalf("LiftTimeout: lifted=%v err=%v", lifted, err)
+	}
+
+	ok, err := database.SetTimeoutVoiceMuted(ctx, id)
+	if err != nil {
+		t.Fatalf("SetTimeoutVoiceMuted: %v", err)
+	}
+	if ok {
+		t.Fatal("SetTimeoutVoiceMuted = true, want false: the row was already lifted")
+	}
+}
+
+// TestTimeoutUser_InheritsVoiceMutedFromSupersededRow is P2 17 (Codex review
+// round 3): timeout A applies (and owns) a mute; timeout B supersedes A
+// with its own voice half skipped entirely (no SetTimeoutVoiceMuted call for
+// B). B must still inherit ownership, because superseding never touches the
+// SFU — A's mute is still live, and only B is left for LiftTimeout to act
+// on. Observed through the public API: LiftTimeout's own voiceMuted return
+// is the only way this ledger's ownership is ever consumed.
+func TestTimeoutUser_InheritsVoiceMutedFromSupersededRow(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	idA, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "first", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(A): %v", err)
+	}
+	if ok, err := database.SetTimeoutVoiceMuted(ctx, idA); err != nil || !ok {
+		t.Fatalf("SetTimeoutVoiceMuted(A): ok=%v err=%v", ok, err)
+	}
+
+	// B supersedes A. B's own voice half is skipped this time (no
+	// SetTimeoutVoiceMuted call for B) — exactly the scenario that used to
+	// lose ownership.
+	if _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour)); err != nil {
+		t.Fatalf("TimeoutUser(B): %v", err)
+	}
+
+	_, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if !voiceMuted {
+		t.Fatal("voiceMuted = false, want true: B must inherit ownership of A's still-live mute")
 	}
 }
 

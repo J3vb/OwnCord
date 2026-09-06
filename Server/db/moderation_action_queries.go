@@ -167,6 +167,19 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 // twice in sequence. Set via SetModerationActionPreInsertHookForTest.
 var moderationActionPreInsertHook func()
 
+// moderationActionPreBeginTxHook, when non-nil, runs at the very top of
+// BanUserWithAction, before BeginTx is even called — no transaction open,
+// no connection held yet. Test-only (nil in production): P2-12 PARTIAL's
+// (Codex review round 3) gap in the original contention test used a barrier
+// placed AFTER BeginTx, which stays green even if a future refactor moved
+// the rank-position read to run on a bare (non-tx) connection before
+// BeginTx — a regression that reopens exactly the window a live connection
+// re-acquisition could land a promotion in. This hook lets a test force a
+// concurrent promotion to complete in full BEFORE this call ever opens its
+// transaction, proving the eventual rank check (which must run live, INSIDE
+// the tx, to see it) still refuses correctly.
+var moderationActionPreBeginTxHook func()
+
 // recordLedgerRow is "removal"'s ledger write: no rank guard (see
 // recordModerationAction's doc comment for why one would be wrong here) —
 // a DELIBERATE, reviewed exception (Codex review DECISION, not a gap):
@@ -237,6 +250,15 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 // timeout row for targetID (P2-9, Codex review): without this a repeated
 // timeout left overlapping active rows and LiftTimeout only ever reached the
 // newest one, orphaning the rest.
+//
+// Before superseding, it checks whether any of the rows about to be lifted
+// already owns an outstanding SFU mute (voice_muted=1) and, if so, stamps
+// that ownership onto the NEW row too (P2 17, Codex review round 3) — even
+// when THIS timeout's own voice half turns out to be skipped: superseding
+// never touches the SFU, so a mute a superseded row applied is still live
+// regardless, and ownership of eventually clearing it must transfer to
+// whichever row LiftTimeout will act on from now on, or a later lift would
+// see only the replacement's voice_muted=0 and strand it.
 func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -248,10 +270,23 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 	if err != nil {
 		return 0, err
 	}
-	if _, err := dbgen.New(tx).SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
+	q := dbgen.New(tx)
+	inherited, err := q.AnyActiveTimeoutVoiceMuted(ctx, dbgen.AnyActiveTimeoutVoiceMutedParams{TargetID: targetID, ID: id})
+	if err != nil {
+		return 0, fmt.Errorf("TimeoutUser inherited voice_muted check: %w", err)
+	}
+	if _, err := q.SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
 		LiftedBy: actorID, TargetID: targetID, ID: id,
 	}); err != nil {
 		return 0, fmt.Errorf("TimeoutUser supersede: %w", err)
+	}
+	if inherited != 0 {
+		// The new row is definitely still active (just inserted, in this
+		// same transaction) so SetTimeoutVoiceMuted's own guard trivially
+		// passes — reused rather than a second, unguarded UPDATE.
+		if _, err := q.SetTimeoutVoiceMuted(ctx, id); err != nil {
+			return 0, fmt.Errorf("TimeoutUser inherit voice_muted: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("TimeoutUser commit: %w", err)
@@ -259,17 +294,21 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 	return id, nil
 }
 
-// SetTimeoutVoiceMuted records that actionID's voice half actually landed a
-// mute (P1-4/P3-14): called once, right after the caller's voiceMuter
-// reports success, never reconsidered afterward. Best-effort in the sense
-// that a failure here does not undo the mute or the timeout — it only means
-// a later LiftTimeout will not know to clear it, which the target's own
-// natural session/reconnect flow does not depend on.
-func (d *DB) SetTimeoutVoiceMuted(ctx context.Context, actionID int64) error {
-	if err := d.q.SetTimeoutVoiceMuted(ctx, actionID); err != nil {
-		return fmt.Errorf("SetTimeoutVoiceMuted: %w", err)
+// SetTimeoutVoiceMuted records that actionID OWNS an outstanding SFU mute
+// (P1-4/P3-14): called once, right after the caller's voiceMuter reports it
+// caused the unmuted->muted transition. Guarded on the row still being
+// active — reports false when it is not (P2 16, Codex review round 3): a
+// concurrent LiftTimeout can run in the gap between the SFU mute landing and
+// this call, read voice_muted=0, and lift the row without clearing the
+// mute — the caller must treat false as "compensate by unmuting now", not
+// as a benign no-op, since nothing will ever clear it through the normal
+// lift path once the row is already gone.
+func (d *DB) SetTimeoutVoiceMuted(ctx context.Context, actionID int64) (bool, error) {
+	n, err := d.q.SetTimeoutVoiceMuted(ctx, actionID)
+	if err != nil {
+		return false, fmt.Errorf("SetTimeoutVoiceMuted: %w", err)
 	}
-	return nil
+	return n > 0, nil
 }
 
 // LiftTimeout ends targetID's active timeout(s) early. It re-checks the
@@ -393,6 +432,9 @@ func (d *DB) ListModerationActionsForReport(ctx context.Context, reportID int64)
 // (B5-9): a failure recording the row rolls the ban back too, so a ban
 // never lands without the ledger entry an appeal will need to reference.
 func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error) {
+	if moderationActionPreBeginTxHook != nil {
+		moderationActionPreBeginTxHook()
+	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("BanUserWithAction begin tx: %w", err)

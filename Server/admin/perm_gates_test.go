@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -220,21 +222,55 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 // any handler touches the param.
 var ownerOnlyRoutePathParam = regexp.MustCompile(`\{[^}]+\}`)
 
+// expectedOwnerOnlyRoutes is the exact, literal inventory of owner-only
+// admin routes (P2-13 PARTIAL, Codex review round 3: a vacuity guard
+// (">= N") only catches shrinkage or emptiness, not a route silently
+// swapped for a different one, or a stray extra — an exact comparison
+// against admin.OwnerOnlyRoutesForTest() catches drift in either
+// direction). Grown deliberately, alongside admin/api.go's own ownerOnly
+// call sites, when a new owner-only route is added.
+var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
+	{Method: http.MethodPost, Pattern: "/users/{id}/recovery-credential"},
+	{Method: http.MethodGet, Pattern: "/tokens"},
+	{Method: http.MethodPost, Pattern: "/tokens"},
+	{Method: http.MethodDelete, Pattern: "/tokens/{id}"},
+	{Method: http.MethodPost, Pattern: "/backup"},
+	{Method: http.MethodGet, Pattern: "/backups"},
+	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
+	{Method: http.MethodGet, Pattern: "/updates"},
+	{Method: http.MethodPost, Pattern: "/updates/apply"},
+}
+
+// sortedOwnerOnlyRoutes returns a copy of routes sorted by (Method, Pattern)
+// so two route lists can be compared regardless of registration order.
+func sortedOwnerOnlyRoutes(routes []admin.OwnerOnlyRoute) []admin.OwnerOnlyRoute {
+	sorted := append([]admin.OwnerOnlyRoute(nil), routes...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Method != sorted[j].Method {
+			return sorted[i].Method < sorted[j].Method
+		}
+		return sorted[i].Pattern < sorted[j].Pattern
+	})
+	return sorted
+}
+
 // TestOwnerOnlyControlsStayOwnerOnly extends TestOwnerOnlyRoutes_ModeratorForbidden
 // by walking the ACTUAL set of owner-only routes NewAdminAPI wires
 // (admin.OwnerOnlyRoutesForTest) instead of a hand-listed subset (P2-13,
 // Codex review: the previous version of this test hard-coded six routes and
-// had already drifted, missing backup delete and restore). A vacuity guard
-// fails loudly if that inventory is ever empty or unexpectedly small, so a
-// refactor that stopped recording routes could not pass this test by
-// accident. For each route: a narrow-but-AdminPerimeter role (MODERATE_
-// MEMBERS|KICK_MEMBERS|BAN_MEMBERS|MUTE_MEMBERS, none of them owner-only) is
-// refused with 403, and a POSITIVE CONTROL — an actual Owner-role user — is
-// never refused with 403, proving the walk exercises ownerOnlyMiddleware's
-// real gate rather than routes that would 403 (or 404, or panic) for
-// everyone regardless of role. admin.SetBackupBaseDir points the two backup
-// routes with real filesystem effects at a temp dir so the Owner's requests
-// stay hermetic.
+// had already drifted, missing backup delete and restore). It is compared
+// against expectedOwnerOnlyRoutes EXACTLY (P2-13 PARTIAL, round 3) rather
+// than a vacuity guard, so both a shrunk inventory and a swapped or
+// unexpectedly added route fail loudly. For each route: a
+// narrow-but-AdminPerimeter role (MODERATE_MEMBERS|KICK_MEMBERS|
+// BAN_MEMBERS|MUTE_MEMBERS, none of them owner-only) is refused with 403,
+// and a POSITIVE CONTROL — an actual Owner-role user — is never refused
+// with 403, proving the walk exercises ownerOnlyMiddleware's real gate
+// rather than routes that would 403 (or 404, or panic) for everyone
+// regardless of role. admin.SetBackupBaseDir points the two backup routes
+// with real filesystem effects at a temp dir so the Owner's requests stay
+// hermetic.
 func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	database := openAdminTestDB(t)
 	admin.SetBackupBaseDir(t.TempDir())
@@ -242,9 +278,9 @@ func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	routes := admin.OwnerOnlyRoutesForTest()
-	const minExpectedRoutes = 8 // vacuity guard — today's inventory has 10
-	if len(routes) < minExpectedRoutes {
-		t.Fatalf("admin.OwnerOnlyRoutesForTest() = %d routes, want >= %d: %+v", len(routes), minExpectedRoutes, routes)
+	got, want := sortedOwnerOnlyRoutes(routes), sortedOwnerOnlyRoutes(expectedOwnerOnlyRoutes)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("admin.OwnerOnlyRoutesForTest() = %+v, want exactly %+v", got, want)
 	}
 
 	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers

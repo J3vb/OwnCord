@@ -160,6 +160,11 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 
 	// ── base-bit early rejection ahead of CanModerateVoice ─────────────────
 	"ws.voiceModTarget": {classBaseBitRejection, "rejects on MUTE_MEMBERS before the voice-state lookup; never admits", calls{"HasServerPerm": 1}},
+	// service.(*ModerationService).actorCanModerateVoiceFor mirrors
+	// ws.voiceModTarget's exact guard (NEW P1, Codex review round 3): a
+	// channel-scoped MUTE_MEMBERS allow alone must not grant the timeout's
+	// voice half to a role whose base never held the bit.
+	"service.(*ModerationService).actorCanModerateVoiceFor": {classBaseBitRejection, "rejects on MUTE_MEMBERS before CanModerateVoice; never admits, mirrors ws.voiceModTarget", calls{"HasServerPerm": 1}},
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions

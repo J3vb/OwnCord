@@ -55,14 +55,25 @@
 -- rows stay until the account itself goes -- they are not on this clock.
 --
 -- voice_muted (Codex review, added on this same branch before release --
--- a 049 deviation from the HP-5 draft, not a new migration): 1 when this
--- timeout row's voice half actually landed a mute (the target was in a
--- voice channel, and the SFU accepted it), 0 otherwise, including when the
--- actor's channel-level authorization refused it (P1-3) or the row is not
--- a timeout at all. LiftTimeout reads it to decide whether clearing the
--- SFU mute on lift is this row's business at all (P1-4): unconditionally
--- clearing on every lift would undo a mute a DIFFERENT moderator applied
--- (voice_mod_mute) or one this timeout never actually set.
+-- a 049 deviation from the HP-5 draft, not a new migration): means
+-- OWNERSHIP of an outstanding SFU mute, never merely "we called mute". 1
+-- only for a genuine unmuted->muted transition THIS row caused (the target
+-- was in a voice channel the actor's channel-level authorization covered,
+-- P1-3, and the SFU accepted the write, P3-14) -- 0 when the target was
+-- already server-muted by someone/something else (P1-4 PARTIAL: applying a
+-- mute that was already in effect is not this row's mute to later clear),
+-- when the row is not a timeout at all, or when ownership could not be
+-- recorded before a concurrent lift won the race (compensated by an
+-- immediate unmute instead, P2 16). LiftTimeout reads it to decide whether
+-- clearing the SFU mute on lift is this row's business at all:
+-- unconditionally clearing on every lift would undo a mute a DIFFERENT
+-- moderator applied (voice_mod_mute) or one this timeout never actually
+-- set. Superseding an active row transfers its voice_muted onto the new
+-- row (P2 17): superseding never touches the SFU, so a mute an earlier
+-- timeout owns is still live regardless, and ownership of eventually
+-- clearing it must follow whichever row LiftTimeout will act on next, or a
+-- later lift would see only the replacement's own (possibly 0) value and
+-- strand it.
 CREATE TABLE IF NOT EXISTS moderation_actions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),

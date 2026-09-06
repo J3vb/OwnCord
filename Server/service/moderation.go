@@ -48,16 +48,26 @@ type ModActionNotifier interface {
 // TimeoutVoiceMuter is the minimal voice-hub surface Timeout/LiftTimeout use
 // to apply or lift the voice half of a timeout, reusing voice_mod_mute's own
 // SFU mechanism rather than reimplementing it. Muted with no live voice
-// connection is a silent no-op. *ws.Hub implements it. It reports whether the
-// mute was actually applied — false covers every no-op path (no voice store,
-// no live connection, a channel-switch race) so the caller's "voice":
-// "applied"/"skipped" outcome reflects what really happened rather than
-// merely that the call was attempted (P3-14, Codex review). Whether the
-// caller is even ELIGIBLE to attempt this is decided beforehand by
-// ModerationService (actorCanModerateVoiceFor, P1-3) — this method performs
-// no authorization of its own.
+// connection is a silent no-op. *ws.Hub implements it. channelID and
+// joinedAt are the EXACT session actorCanModerateVoiceFor already resolved
+// and authorized — binding the mute to that session, not a fresh re-read
+// that could resolve a different (unauthorized) one by the time this runs
+// (P1-3 PARTIAL, Codex review round 3).
+//
+// Reports applied — false covers every no-op path (no voice store, no live
+// connection, a channel-switch race, or an SFU failure: P3-14 PARTIAL, an
+// SFU error is NOT applied even though the DB half succeeded) — so the
+// caller's "voice": "applied"/"skipped" outcome reflects what really
+// happened. owned is meaningful only when muted=true and applied=true: true
+// means THIS call caused the unmuted->muted transition; false means the
+// target was already server-muted by someone/something else, and the
+// caller must not record ownership of a mute it does not own (P1-4
+// PARTIAL) — never true for muted=false. Whether the caller is even
+// ELIGIBLE to attempt this at all is decided beforehand by ModerationService
+// (actorCanModerateVoiceFor, P1-3) — this method performs no authorization
+// of its own.
 type TimeoutVoiceMuter interface {
-	ApplyTimeoutMute(ctx context.Context, userID int64, muted bool) bool
+	ApplyTimeoutMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (applied, owned bool)
 }
 
 // NewModerationService creates a ModerationService.
@@ -353,23 +363,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_timeout", "user", targetID,
 		fmt.Sprintf("timeout issued, expires %s", expires.UTC().Format(time.RFC3339)))
 
-	// The voice half's eligibility is the actor's CanModerateVoice standing in
-	// the TARGET's CURRENT voice channel (P1-3, Codex review) — not a bare
-	// server-wide MUTE_MEMBERS bit, which bypassed a channel-level deny, room
-	// visibility and DM membership entirely. "applied" additionally requires
-	// the voice muter to report success (P3-14): a target not currently in
-	// voice, or a channel-switch race, must not be reported as applied just
-	// because the actor was eligible.
-	voiceApplied := false
-	if s.actorCanModerateVoiceFor(ctx, actorID, targetID) && s.voiceMuter != nil {
-		if s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, true) {
-			voiceApplied = true
-			if err := s.st.SetTimeoutVoiceMuted(context.WithoutCancel(ctx), id); err != nil {
-				slog.Error("timeout: failed to record voice_muted", "err", err, "action_id", id)
-			}
-		}
-	}
-	voiceSkipped := !voiceApplied
+	voiceSkipped := !s.applyTimeoutVoiceHalf(ctx, actorID, targetID, id)
 
 	s.notifyModAction(targetID, id, "timeout", reason, &expires)
 
@@ -377,28 +371,121 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	return &TimeoutResult{ID: id, VoiceSkipped: voiceSkipped}, nil
 }
 
+// applyTimeoutVoiceHalf is Timeout's voice half, split out to keep Timeout
+// itself readable (cyclop): eligibility is the actor's CanModerateVoice
+// standing in the TARGET's CURRENT voice channel (P1-3, Codex review) — not
+// a bare server-wide MUTE_MEMBERS bit, which bypassed a channel-level deny,
+// room visibility and DM membership entirely. Reports "applied" requires the
+// voice muter to report success (P3-14): a target not currently in voice, a
+// channel-switch race, or an SFU failure must not be reported as applied
+// just because the actor was eligible.
+func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64) bool {
+	auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID)
+	if !ok || s.voiceMuter == nil {
+		return false
+	}
+	if timeoutPreMuteHook != nil {
+		timeoutPreMuteHook()
+	}
+	applied, owned := s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, auth.channelID, auth.joinedAt, true)
+	if !applied || !owned {
+		// !owned (P1-4 PARTIAL): a target already server-muted by someone/
+		// something else still counts as applied (the mute IS in effect),
+		// but this timeout does not own it — there is nothing to flag.
+		return applied
+	}
+	if timeoutPostMuteHook != nil {
+		timeoutPostMuteHook()
+	}
+	flagged, ferr := s.st.SetTimeoutVoiceMuted(context.WithoutCancel(ctx), actionID)
+	switch {
+	case ferr != nil:
+		slog.Error("timeout: failed to record voice_muted", "err", ferr, "action_id", actionID)
+		return true
+	case flagged:
+		return true
+	default:
+		// The row was already lifted (or expired) in the gap between the
+		// SFU mute landing and this flag update (P2 16, Codex review round
+		// 3) — nobody will ever clear this mute through the normal lift
+		// path now, since the ledger never got the chance to record that it
+		// owned it. Compensate immediately: the timeout itself is already
+		// gone (a concurrent lift won the race), so nothing is actually in
+		// effect by the time this returns.
+		slog.Warn("timeout: lifted before voice_muted could be recorded; compensating unmute",
+			"action_id", actionID, "target_id", targetID)
+		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, auth.channelID, auth.joinedAt, false)
+		return false
+	}
+}
+
+// voiceAuthorization is the target's CURRENT voice session
+// actorCanModerateVoiceFor authorized the caller against — channelID and
+// joinedAt (the join-instance token JoinVoiceChannel mints), bound together
+// so the voice muter's eventual mute/unmute call is scoped to the EXACT
+// session this authorized, not a fresh, separately-resolved one that could
+// answer differently if the target moved on in between (P1-3 PARTIAL, Codex
+// review round 3).
+type voiceAuthorization struct {
+	channelID int64
+	joinedAt  string
+}
+
+// timeoutPreMuteHook, when non-nil, runs after actorCanModerateVoiceFor
+// authorizes a session and before ApplyTimeoutMute is called against it.
+// Test-only (nil in production): P1-3 PARTIAL's race test (Codex review
+// round 3) uses it to move the target to a different session in the exact
+// gap between authorization and the mute, proving the two are bound to the
+// SAME session rather than the mute silently re-resolving a new one.
+var timeoutPreMuteHook func()
+
+// timeoutPostMuteHook, when non-nil, runs after ApplyTimeoutMute reports
+// ownership (owned=true) and before SetTimeoutVoiceMuted records it. Test
+// -only (nil in production), mirroring the db package's
+// moderationActionPreInsertHook: the barrier P2 16's race test (Codex
+// review round 3) uses to run a concurrent LiftTimeout in the exact gap a
+// stranded mute comes from.
+var timeoutPostMuteHook func()
+
 // actorCanModerateVoiceFor reports whether actorID may run the voice half of
 // a timeout or lift against targetID's CURRENT voice channel (P1-3, Codex
 // review): permissions.CanModerateVoice over the actor's Subject in that
 // channel, so a channel-level deny, a room the actor cannot see, or (for a
 // DM call) the actor not being a participant all refuse it exactly as
-// voice_mod_mute's own gate does — never a server-wide bit alone. False when
-// the target has no live voice connection at all: there is no channel to
-// authorize against, so the voice half is simply skipped, not refused.
-func (s *ModerationService) actorCanModerateVoiceFor(ctx context.Context, actorID, targetID int64) bool {
+// voice_mod_mute's own gate does — never a server-wide bit alone. ok=false
+// when the target has no live voice connection at all: there is no channel
+// to authorize against, so the voice half is simply skipped, not refused.
+// On ok=true the returned voiceAuthorization is the exact session to bind
+// the mute/unmute call to.
+func (s *ModerationService) actorCanModerateVoiceFor(ctx context.Context, actorID, targetID int64) (voiceAuthorization, bool) {
 	state, err := s.st.GetVoiceState(ctx, targetID)
 	if err != nil || state == nil {
-		return false
+		return voiceAuthorization{}, false
 	}
 	ch, err := s.st.GetChannel(ctx, state.ChannelID)
 	if err != nil || ch == nil {
-		return false
+		return voiceAuthorization{}, false
 	}
 	sub, err := channelSubject(ctx, s.st, s.perms, actorID, ch, false)
 	if err != nil {
-		return false
+		return voiceAuthorization{}, false
 	}
-	return permissions.CanModerateVoice(sub) == nil
+	// The base-bit early rejection ahead of CanModerateVoice (a B2-5
+	// decision, invariants/authz_chokepoint.go classBaseBitRejection) —
+	// mirroring ws.voiceModTarget's own guard, same helper, not a
+	// re-implementation (NEW P1, Codex review round 3): CanModerateVoice's
+	// own Has() check is satisfied by a channel-scoped MUTE_MEMBERS allow
+	// override alone, with no requirement that the actor's BASE role ever
+	// held the bit — a channel allow cannot manufacture voice-moderation
+	// authority a role could never exercise through the ordinary
+	// voice_mod_mute route.
+	if !permissions.HasServerPerm(sub.RolePerms, permissions.MuteMembers) {
+		return voiceAuthorization{}, false
+	}
+	if permissions.CanModerateVoice(sub) != nil {
+		return voiceAuthorization{}, false
+	}
+	return voiceAuthorization{channelID: state.ChannelID, joinedAt: state.JoinedAt}, true
 }
 
 // LiftTimeout ends targetID's active timeout early (decision 6): same
@@ -443,8 +530,10 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 	// current channel (P1-4, Codex review): unconditionally clearing here
 	// would silently undo a mute a DIFFERENT moderator set through
 	// voice_mod_mute, or one this timeout never applied in the first place.
-	if voiceMuted && s.voiceMuter != nil && s.actorCanModerateVoiceFor(ctx, actorID, targetID) {
-		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, false)
+	if voiceMuted && s.voiceMuter != nil {
+		if auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID); ok {
+			s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, auth.channelID, auth.joinedAt, false)
+		}
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_untimeout", "user", targetID, "timeout lifted")
 	s.notifyModAction(targetID, 0, "timeout", "", nil)

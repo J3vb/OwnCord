@@ -881,3 +881,160 @@ func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
 		t.Error("ServerDeafened = false, want true: a scoped write against the correct channel must still apply")
 	}
 }
+
+// ─── CompareAndSetServerMute (P1-3/P1-4 PARTIAL) ────────────────────────────
+
+// TestVoice_CompareAndSetServerMute_ChannelMismatch is TestVoice_
+// SetVoiceServerMute_ScopedToChannel's twin for the timeout voice half's
+// stricter, session-scoped compare-and-mute: a write authorized against the
+// channel a stale read showed must not follow the user to wherever they
+// moved next.
+func TestVoice_CompareAndSetServerMute_ChannelMismatch(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "cas-mismatch-user")
+	chanA := seedVoiceChannel(t, database, "vc-cas-mismatch-a")
+	chanB := seedVoiceChannel(t, database, "vc-cas-mismatch-b")
+
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel A: %v", err)
+	}
+	stale, err := database.GetVoiceState(ctx, userID)
+	if err != nil || stale == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	// The user moves to channel B — an authorization against channel A must
+	// not follow them there.
+	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
+		t.Fatalf("JoinVoiceChannel B: %v", err)
+	}
+
+	matched, transitioned, err := database.CompareAndSetServerMute(ctx, userID, chanA, stale.JoinedAt, true)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute: %v", err)
+	}
+	if matched || transitioned {
+		t.Fatalf("matched=%v transitioned=%v, want both false: the session moved to channel B", matched, transitioned)
+	}
+	state, err := database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ServerMuted {
+		t.Error("ServerMuted = true, want false: an unscoped write must not follow the user to an unauthorized channel")
+	}
+}
+
+// TestVoice_CompareAndSetServerMute_JoinedAtMismatch is the same guard for a
+// leave-and-rejoin of the SAME channel — the join-instance token
+// (JoinVoiceChannel's joined_at) changes even though channel_id does not,
+// which SetVoiceServerMute's own channel-only scoping would miss.
+func TestVoice_CompareAndSetServerMute_JoinedAtMismatch(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "cas-rejoin-user")
+	chanA := seedVoiceChannel(t, database, "vc-cas-rejoin-a")
+
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel (first): %v", err)
+	}
+	stale, err := database.GetVoiceState(ctx, userID)
+	if err != nil || stale == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	// Leave and rejoin the SAME channel — a new join-instance token.
+	if err := database.LeaveVoiceChannel(ctx, userID); err != nil {
+		t.Fatalf("LeaveVoiceChannel: %v", err)
+	}
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel (rejoin): %v", err)
+	}
+	fresh, err := database.GetVoiceState(ctx, userID)
+	if err != nil || fresh == nil {
+		t.Fatalf("GetVoiceState (after rejoin): %v", err)
+	}
+	if fresh.JoinedAt == stale.JoinedAt {
+		t.Fatal("test setup broken: rejoin produced the same joined_at token")
+	}
+
+	matched, _, err := database.CompareAndSetServerMute(ctx, userID, chanA, stale.JoinedAt, true)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute: %v", err)
+	}
+	if matched {
+		t.Fatal("matched = true, want false: the stale join instance is gone, even though the channel matches")
+	}
+}
+
+// TestVoice_CompareAndSetServerMute_Transitioned proves ownership (P1-4
+// PARTIAL): a genuine unmuted->muted transition reports transitioned=true;
+// muting a target ALREADY server-muted reports transitioned=false — the
+// caller does not own a mute someone/something else already set.
+func TestVoice_CompareAndSetServerMute_Transitioned(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "cas-transition-user")
+	chanA := seedVoiceChannel(t, database, "vc-cas-transition-a")
+
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	state, err := database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+
+	matched, transitioned, err := database.CompareAndSetServerMute(ctx, userID, chanA, state.JoinedAt, true)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute (first mute): %v", err)
+	}
+	if !matched || !transitioned {
+		t.Fatalf("matched=%v transitioned=%v, want both true: the first mute is a genuine unmuted->muted transition", matched, transitioned)
+	}
+
+	// Muting an already-muted target: matched, but NOT owned.
+	matched, transitioned, err = database.CompareAndSetServerMute(ctx, userID, chanA, state.JoinedAt, true)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute (already muted): %v", err)
+	}
+	if !matched {
+		t.Fatal("matched = false, want true: the session is still live and in the right channel")
+	}
+	if transitioned {
+		t.Fatal("transitioned = true, want false: the target was already server-muted — this call does not own that mute")
+	}
+
+	// Unmuting is never reported as "transitioned" (that flag is muted=true
+	// only); it still applies.
+	matched, transitioned, err = database.CompareAndSetServerMute(ctx, userID, chanA, state.JoinedAt, false)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute (unmute): %v", err)
+	}
+	if !matched || transitioned {
+		t.Fatalf("matched=%v transitioned=%v, want matched=true transitioned=false for an unmute", matched, transitioned)
+	}
+	final, err := database.GetVoiceState(ctx, userID)
+	if err != nil || final == nil {
+		t.Fatalf("GetVoiceState (final): %v", err)
+	}
+	if final.ServerMuted {
+		t.Error("ServerMuted = true, want false after the unmute")
+	}
+}
+
+// TestVoice_CompareAndSetServerMute_NoSession is the no-such-row case: never
+// joined, or already left entirely.
+func TestVoice_CompareAndSetServerMute_NoSession(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "cas-nosession-user")
+	chanA := seedVoiceChannel(t, database, "vc-cas-nosession-a")
+
+	matched, transitioned, err := database.CompareAndSetServerMute(ctx, userID, chanA, "no-such-join-token", true)
+	if err != nil {
+		t.Fatalf("CompareAndSetServerMute: %v", err)
+	}
+	if matched || transitioned {
+		t.Fatalf("matched=%v transitioned=%v, want both false: no such session", matched, transitioned)
+	}
+}

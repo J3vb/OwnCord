@@ -94,6 +94,27 @@ UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channe
 -- name: ClearVoiceServerMute :execresult
 UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?;
 
+-- The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL, Codex review
+-- round 3): scoped to channel_id AND joined_at, the join-instance token
+-- JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
+-- between authorization and this write also fails to match, not only a
+-- channel switch -- one step tighter than ApplyVoiceServerMute/
+-- ClearVoiceServerMute above, which voice_mod_mute has always scoped to
+-- channel_id alone. CompareVoiceServerMuteState reads the PRIOR value inside
+-- the same transaction as the write that follows (db.CompareAndSetServerMute)
+-- so the caller can tell "we made this transition" from "it was already
+-- muted by someone/something else" -- ownership, not merely "we called
+-- mute".
+
+-- name: CompareVoiceServerMuteState :one
+SELECT server_muted FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+
+-- name: ApplyVoiceServerMuteForSession :execresult
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+
+-- name: ClearVoiceServerMuteForSession :execresult
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+
 -- name: ApplyVoiceServerDeafen :execresult
 UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?;
 

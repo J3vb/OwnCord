@@ -88,27 +88,60 @@ func applyTimeoutMuteTestDB(t *testing.T) (*db.DB, int64) {
 // "voice": "applied"/"skipped" must reflect what actually happened).
 func TestApplyTimeoutMute_NoVoiceStore(t *testing.T) {
 	h := &Hub{}
-	if applied := h.ApplyTimeoutMute(context.Background(), 1, true); applied { // must not panic
-		t.Fatal("applied = true, want false: no voice store wired")
+	if applied, owned := h.ApplyTimeoutMute(context.Background(), 1, 100, "tok", true); applied || owned {
+		t.Fatalf("applied=%v owned=%v, want both false: no voice store wired", applied, owned)
 	}
 }
 
-// TestApplyTimeoutMute_NotInVoice is a silent no-op for a target with no
-// live voice state — Timeout's text/reaction restriction still lands
-// regardless — and reports applied=false.
-func TestApplyTimeoutMute_NotInVoice(t *testing.T) {
-	database, _ := applyTimeoutMuteTestDB(t)
+// TestApplyTimeoutMute_NoSession is a silent no-op for a target with no live
+// voice state matching the authorized (channelID, joinedAt) session —
+// Timeout's text/reaction restriction still lands regardless — and reports
+// applied=false.
+func TestApplyTimeoutMute_NoSession(t *testing.T) {
+	database, chID := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
-	if applied := h.ApplyTimeoutMute(context.Background(), 999, true); applied { // no voice_states row for 999
-		t.Fatal("applied = true, want false: target has no live voice state")
+	if applied, owned := h.ApplyTimeoutMute(context.Background(), 999, chID, "no-such-token", true); applied || owned {
+		t.Fatalf("applied=%v owned=%v, want both false: no voice_states row for 999", applied, owned)
 	}
 }
 
-// TestApplyTimeoutMute_MutesAndBroadcasts applies and then lifts the voice
-// half of a timeout on a connected target, through VoiceStore.SetServerMute
-// — the same mechanism voice_mod_mute uses — and confirms the persisted
-// server_muted flag flips both ways.
-func TestApplyTimeoutMute_MutesAndBroadcasts(t *testing.T) {
+// TestApplyTimeoutMute_SessionMismatch is P1-3 PARTIAL (Codex review round
+// 3): the target IS in voice, but not in the exact session (channel or join
+// instance) this call was authorized against — a channel switch or a
+// leave-and-rejoin race between authorization and this call. The write must
+// not follow them there.
+func TestApplyTimeoutMute_SessionMismatch(t *testing.T) {
+	database, chID := applyTimeoutMuteTestDB(t)
+	uid, err := database.CreateUser(context.Background(), "timedout-mismatch", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	h := newTestHub(t, database, nil, nil)
+	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if applied, owned := h.ApplyTimeoutMute(context.Background(), uid, chID, "stale-join-token", true); applied || owned {
+		t.Fatalf("applied=%v owned=%v, want both false: the join token does not match the live session", applied, owned)
+	}
+	state, err := h.voice.State(context.Background(), uid)
+	if err != nil || state == nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.ServerMuted {
+		t.Fatal("ServerMuted = true, want false: the mismatched-session write must not have landed")
+	}
+}
+
+// TestApplyTimeoutMute_SFUFailureReportsNotApplied is P3-14 PARTIAL (Codex
+// review round 3): a nil h.livekit (this hub's default, matching every
+// other ws unit test) makes MuteParticipant fail every time, exactly the
+// SFU failure the fix targets — applied must be false even though the DB
+// half (CompareAndSetServerMute) already committed successfully. This is
+// also the fix for "the ws success test no longer accepts a nil-LiveKit
+// case as applied": the old version of this test asserted applied=true
+// with a nil livekit, which was only true because the old code tolerated
+// an SFU failure silently.
+func TestApplyTimeoutMute_SFUFailureReportsNotApplied(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	uid, err := database.CreateUser(context.Background(), "timedout", "hash", 4)
 	if err != nil {
@@ -118,38 +151,36 @@ func TestApplyTimeoutMute_MutesAndBroadcasts(t *testing.T) {
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-
-	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); !applied {
-		t.Fatal("applied = false, want true: the target is in voice and SetServerMute matched")
-	}
 	state, err := h.voice.State(context.Background(), uid)
-	if err != nil {
+	if err != nil || state == nil {
 		t.Fatalf("State: %v", err)
 	}
-	if state == nil || !state.ServerMuted {
-		t.Fatalf("state = %+v, want ServerMuted", state)
-	}
 
-	if applied := h.ApplyTimeoutMute(context.Background(), uid, false); !applied {
-		t.Fatal("applied = false, want true: the lift matched too")
+	applied, owned := h.ApplyTimeoutMute(context.Background(), uid, chID, state.JoinedAt, true)
+	if applied || owned {
+		t.Fatalf("applied=%v owned=%v, want both false: h.livekit is nil, so MuteParticipant always fails", applied, owned)
 	}
-	state, err = h.voice.State(context.Background(), uid)
-	if err != nil {
-		t.Fatalf("State (after lift): %v", err)
+	// The DB half still committed (it runs before the SFU call) — proving
+	// this is genuinely an SFU-only failure, not a DB one.
+	after, err := h.voice.State(context.Background(), uid)
+	if err != nil || after == nil {
+		t.Fatalf("State (after): %v", err)
 	}
-	if state == nil || state.ServerMuted {
-		t.Fatalf("state = %+v, want ServerMuted cleared after the lift", state)
+	if !after.ServerMuted {
+		t.Fatal("ServerMuted = false, want true: the DB compare-and-mute must still have landed despite the SFU failure")
 	}
 }
 
 // errorVoiceStore wraps a real VoiceStore and injects failures on State/
-// SetServerMute, for ApplyTimeoutMute's error-path coverage — every other
-// method promotes straight through to the embedded implementation.
+// CompareAndSetServerMute, for ApplyTimeoutMute's error-path coverage —
+// every other method promotes straight through to the embedded
+// implementation.
 type errorVoiceStore struct {
 	VoiceStore
-	stateErr  error
-	muteErr   error
-	muteMatch bool
+	stateErr     error
+	compareErr   error
+	compareMatch bool
+	compareOwned bool
 }
 
 func (e *errorVoiceStore) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
@@ -159,57 +190,32 @@ func (e *errorVoiceStore) State(ctx context.Context, userID int64) (*db.VoiceSta
 	return e.VoiceStore.State(ctx, userID)
 }
 
-func (e *errorVoiceStore) SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error) {
-	if e.muteErr != nil {
-		return false, e.muteErr
+func (e *errorVoiceStore) CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (bool, bool, error) {
+	if e.compareErr != nil {
+		return false, false, e.compareErr
 	}
-	return e.muteMatch, nil
+	return e.compareMatch, e.compareOwned, nil
 }
 
-// TestApplyTimeoutMute_StateLookupFailed logs and returns rather than
-// panicking when the voice-state read itself fails.
-func TestApplyTimeoutMute_StateLookupFailed(t *testing.T) {
-	database, _ := applyTimeoutMuteTestDB(t)
-	h := newTestHub(t, database, nil, nil)
-	h.voice = &errorVoiceStore{VoiceStore: h.voice, stateErr: errors.New("boom")}
-	if applied := h.ApplyTimeoutMute(context.Background(), 1, true); applied { // must not panic
-		t.Fatal("applied = true, want false: the state lookup failed")
-	}
-}
-
-// TestApplyTimeoutMute_SetServerMuteFailed and
-// TestApplyTimeoutMute_SetServerMuteNoMatch cover SetServerMute's error and
-// no-match returns — a match failure means the target left (or switched
-// channels) between the State read and this write, so there is nothing left
-// to mute in the channel that was read.
-func TestApplyTimeoutMute_SetServerMuteFailed(t *testing.T) {
+// TestApplyTimeoutMute_CompareAndSetServerMuteFailed logs and returns rather
+// than panicking when the compare-and-mute write itself fails.
+func TestApplyTimeoutMute_CompareAndSetServerMuteFailed(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "timedout2", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
 	h := newTestHub(t, database, nil, nil)
-	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
-		t.Fatalf("Join: %v", err)
-	}
-	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteErr: errors.New("boom")}
-	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); applied { // must not panic
-		t.Fatal("applied = true, want false: SetServerMute failed")
+	h.voice = &errorVoiceStore{VoiceStore: h.voice, compareErr: errors.New("boom")}
+	if applied, owned := h.ApplyTimeoutMute(context.Background(), 1, chID, "tok", true); applied || owned { // must not panic
+		t.Fatalf("applied=%v owned=%v, want both false: CompareAndSetServerMute failed", applied, owned)
 	}
 }
 
-func TestApplyTimeoutMute_SetServerMuteNoMatch(t *testing.T) {
+// TestApplyTimeoutMute_CompareAndSetServerMuteNoMatch covers the no-match
+// return — the session moved between authorization and this call, so there
+// is nothing to mute in the channel that was authorized.
+func TestApplyTimeoutMute_CompareAndSetServerMuteNoMatch(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "timedout3", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
 	h := newTestHub(t, database, nil, nil)
-	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
-		t.Fatalf("Join: %v", err)
-	}
-	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteMatch: false}
-	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); applied { // must not panic, no broadcast
-		t.Fatal("applied = true, want false: SetServerMute reported no match")
+	h.voice = &errorVoiceStore{VoiceStore: h.voice, compareMatch: false}
+	if applied, owned := h.ApplyTimeoutMute(context.Background(), 1, chID, "tok", true); applied || owned { // must not panic, no broadcast
+		t.Fatalf("applied=%v owned=%v, want both false: CompareAndSetServerMute reported no match", applied, owned)
 	}
 }

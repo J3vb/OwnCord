@@ -2137,17 +2137,23 @@ join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
 { "id": 43, "voice": "applied" }
 ```
 
-`voice` is `"applied"` only when the mute actually landed: the actor holds
-effective `MUTE_MEMBERS` in the target's CURRENT voice channel specifically
-(a channel-level deny, a room the actor cannot see, or — for a DM call — the
-actor not being a participant all count as not holding it there, even with
-the server-wide bit), the target is currently connected to voice, and the
-underlying server-mute call actually matched a live connection. Every other
-case — no channel authority there, the target not in voice at all, or a
-channel-switch race that leaves the mute unmatched — answers `"skipped"`.
-The timeout still lands for text and reactions either way; it never grants a
-voice mute the actor could not perform through the ordinary voice-moderation
-route. A live target also receives a `mod_action` frame carrying
+`voice` is `"applied"` only when the mute actually landed: the actor's BASE
+role holds `MUTE_MEMBERS` (a channel-scoped allow cannot manufacture that
+authority from nothing) **and** the effective permission holds in the
+target's CURRENT voice channel specifically (a channel-level deny, a room
+the actor cannot see, or — for a DM call — the actor not being a
+participant all still refuse it, even with the base bit); the mute is then
+bound to that exact session (the target's current channel and join
+instance) and actually lands there — the target moving on before the SFU
+call runs, or the SFU itself failing, both answer `"skipped"` rather than
+`"applied"`. A target who was already server-muted by someone/something
+else when this timeout ran still answers `"applied"` (a mute is genuinely
+in effect), but this timeout does not take ownership of clearing it later.
+Every other case — no channel authority at all, or the target not in voice
+at all — answers `"skipped"`. The timeout still lands for text and
+reactions either way; it never grants a voice mute the actor could not
+perform through the ordinary voice-moderation route. A live target also
+receives a `mod_action` frame carrying
 `expires_at`. The restriction is live on the target's very next send — no
 reconnect needed.
 

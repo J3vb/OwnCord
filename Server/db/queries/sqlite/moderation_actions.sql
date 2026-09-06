@@ -56,11 +56,33 @@ UPDATE moderation_actions
    AND expires_at > datetime('now')
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(lifted_by));
 
--- name: SetTimeoutVoiceMuted :exec
--- Records that this timeout row's voice half actually landed a mute
--- (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
--- never reconsidered afterward.
-UPDATE moderation_actions SET voice_muted = 1 WHERE id = ? AND kind = 'timeout';
+-- name: SetTimeoutVoiceMuted :execrows
+-- Records that this timeout row OWNS an outstanding voice mute (P1-4/P3-14),
+-- called after ApplyTimeoutMute reports it caused the unmuted->muted
+-- transition. Guarded on the row still being active (P2 16, Codex review
+-- round 3): a concurrent LiftTimeout can run in the gap between the SFU
+-- mute landing and this call, read voice_muted=0, and lift the row without
+-- clearing the mute -- if that already happened, this UPDATE matches zero
+-- rows and the caller must compensate by unmuting immediately rather than
+-- stamp ownership onto a row nothing will ever act on again.
+UPDATE moderation_actions
+   SET voice_muted = 1
+ WHERE id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
+
+-- name: AnyActiveTimeoutVoiceMuted :one
+-- Whether any OTHER currently-active timeout row for target_id already owns
+-- an outstanding voice mute (P2 17, Codex review round 3), read BEFORE
+-- SupersedeActiveTimeouts lifts them: a timeout that supersedes a
+-- voice-applied one must inherit that ownership onto the new row even when
+-- its OWN voice half is skipped, or a later LiftTimeout would see only the
+-- replacement's voice_muted=0 and strand the still-live mute the superseded
+-- row was responsible for.
+SELECT CAST(COALESCE(MAX(voice_muted), 0) AS INTEGER) AS voice_muted FROM moderation_actions
+ WHERE target_id = sqlc.arg(target_id)
+   AND kind = 'timeout'
+   AND lifted_at IS NULL
+   AND expires_at > datetime('now')
+   AND id != sqlc.arg(id);
 
 -- name: ListUnacknowledgedWarnings :many
 -- ready's notices slot: every warning issued to userID that has not yet

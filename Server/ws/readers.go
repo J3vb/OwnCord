@@ -130,6 +130,11 @@ type VoiceStore interface {
 	// Moderator flags and their compensations.
 	SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error)
 	SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error)
+	// CompareAndSetServerMute is the timeout voice half's compare-and-mute
+	// (P1-3/P1-4 PARTIAL): scoped to one exact session (channelID,
+	// joinedAt), reporting whether this call owns the unmuted->muted
+	// transition.
+	CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error)
 	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool) *db.VoiceState
 	RollbackServerDeafen(ctx context.Context, targetID, authorizedChannelID int64, requestedDeafen bool)
 	WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string)

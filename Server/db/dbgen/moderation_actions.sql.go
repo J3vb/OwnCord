@@ -32,6 +32,34 @@ func (q *Queries) AcknowledgeWarning(ctx context.Context, arg AcknowledgeWarning
 	return result.RowsAffected()
 }
 
+const anyActiveTimeoutVoiceMuted = `-- name: AnyActiveTimeoutVoiceMuted :one
+SELECT CAST(COALESCE(MAX(voice_muted), 0) AS INTEGER) AS voice_muted FROM moderation_actions
+ WHERE target_id = ?1
+   AND kind = 'timeout'
+   AND lifted_at IS NULL
+   AND expires_at > datetime('now')
+   AND id != ?2
+`
+
+type AnyActiveTimeoutVoiceMutedParams struct {
+	TargetID int64 `json:"targetId"`
+	ID       int64 `json:"id"`
+}
+
+// Whether any OTHER currently-active timeout row for target_id already owns
+// an outstanding voice mute (P2 17, Codex review round 3), read BEFORE
+// SupersedeActiveTimeouts lifts them: a timeout that supersedes a
+// voice-applied one must inherit that ownership onto the new row even when
+// its OWN voice half is skipped, or a later LiftTimeout would see only the
+// replacement's voice_muted=0 and strand the still-live mute the superseded
+// row was responsible for.
+func (q *Queries) AnyActiveTimeoutVoiceMuted(ctx context.Context, arg AnyActiveTimeoutVoiceMutedParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, anyActiveTimeoutVoiceMuted, arg.TargetID, arg.ID)
+	var voice_muted int64
+	err := row.Scan(&voice_muted)
+	return voice_muted, err
+}
+
 const hasActiveTimeout = `-- name: HasActiveTimeout :one
 SELECT EXISTS (
     SELECT 1 FROM moderation_actions
@@ -335,16 +363,26 @@ func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (
 	return result.RowsAffected()
 }
 
-const setTimeoutVoiceMuted = `-- name: SetTimeoutVoiceMuted :exec
-UPDATE moderation_actions SET voice_muted = 1 WHERE id = ? AND kind = 'timeout'
+const setTimeoutVoiceMuted = `-- name: SetTimeoutVoiceMuted :execrows
+UPDATE moderation_actions
+   SET voice_muted = 1
+ WHERE id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
 `
 
-// Records that this timeout row's voice half actually landed a mute
-// (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
-// never reconsidered afterward.
-func (q *Queries) SetTimeoutVoiceMuted(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, setTimeoutVoiceMuted, id)
-	return err
+// Records that this timeout row OWNS an outstanding voice mute (P1-4/P3-14),
+// called after ApplyTimeoutMute reports it caused the unmuted->muted
+// transition. Guarded on the row still being active (P2 16, Codex review
+// round 3): a concurrent LiftTimeout can run in the gap between the SFU
+// mute landing and this call, read voice_muted=0, and lift the row without
+// clearing the mute -- if that already happened, this UPDATE matches zero
+// rows and the caller must compensate by unmuting immediately rather than
+// stamp ownership onto a row nothing will ever act on again.
+func (q *Queries) SetTimeoutVoiceMuted(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setTimeoutVoiceMuted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const supersedeActiveTimeouts = `-- name: SupersedeActiveTimeouts :execrows

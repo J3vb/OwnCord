@@ -43,6 +43,20 @@ func (q *Queries) ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServer
 	return q.db.ExecContext(ctx, applyVoiceServerMute, arg.UserID, arg.ChannelID)
 }
 
+const applyVoiceServerMuteForSession = `-- name: ApplyVoiceServerMuteForSession :execresult
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ? AND joined_at = ?
+`
+
+type ApplyVoiceServerMuteForSessionParams struct {
+	UserID    int64  `json:"userId"`
+	ChannelID int64  `json:"channelId"`
+	JoinedAt  string `json:"joinedAt"`
+}
+
+func (q *Queries) ApplyVoiceServerMuteForSession(ctx context.Context, arg ApplyVoiceServerMuteForSessionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, applyVoiceServerMuteForSession, arg.UserID, arg.ChannelID, arg.JoinedAt)
+}
+
 const clearAllVoiceStates = `-- name: ClearAllVoiceStates :exec
 DELETE FROM voice_states
 `
@@ -78,6 +92,20 @@ func (q *Queries) ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServer
 	return q.db.ExecContext(ctx, clearVoiceServerMute, arg.UserID, arg.ChannelID)
 }
 
+const clearVoiceServerMuteForSession = `-- name: ClearVoiceServerMuteForSession :execresult
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ? AND joined_at = ?
+`
+
+type ClearVoiceServerMuteForSessionParams struct {
+	UserID    int64  `json:"userId"`
+	ChannelID int64  `json:"channelId"`
+	JoinedAt  string `json:"joinedAt"`
+}
+
+func (q *Queries) ClearVoiceServerMuteForSession(ctx context.Context, arg ClearVoiceServerMuteForSessionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, clearVoiceServerMuteForSession, arg.UserID, arg.ChannelID, arg.JoinedAt)
+}
+
 const clearVoiceState = `-- name: ClearVoiceState :exec
 DELETE FROM voice_states WHERE user_id = ?
 `
@@ -85,6 +113,35 @@ DELETE FROM voice_states WHERE user_id = ?
 func (q *Queries) ClearVoiceState(ctx context.Context, userID int64) error {
 	_, err := q.db.ExecContext(ctx, clearVoiceState, userID)
 	return err
+}
+
+const compareVoiceServerMuteState = `-- name: CompareVoiceServerMuteState :one
+
+SELECT server_muted FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?
+`
+
+type CompareVoiceServerMuteStateParams struct {
+	UserID    int64  `json:"userId"`
+	ChannelID int64  `json:"channelId"`
+	JoinedAt  string `json:"joinedAt"`
+}
+
+// The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL, Codex review
+// round 3): scoped to channel_id AND joined_at, the join-instance token
+// JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
+// between authorization and this write also fails to match, not only a
+// channel switch -- one step tighter than ApplyVoiceServerMute/
+// ClearVoiceServerMute above, which voice_mod_mute has always scoped to
+// channel_id alone. CompareVoiceServerMuteState reads the PRIOR value inside
+// the same transaction as the write that follows (db.CompareAndSetServerMute)
+// so the caller can tell "we made this transition" from "it was already
+// muted by someone/something else" -- ownership, not merely "we called
+// mute".
+func (q *Queries) CompareVoiceServerMuteState(ctx context.Context, arg CompareVoiceServerMuteStateParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, compareVoiceServerMuteState, arg.UserID, arg.ChannelID, arg.JoinedAt)
+	var server_muted int64
+	err := row.Scan(&server_muted)
+	return server_muted, err
 }
 
 const countActiveCameras = `-- name: CountActiveCameras :one

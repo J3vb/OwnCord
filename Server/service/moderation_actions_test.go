@@ -387,6 +387,13 @@ func TestModeration_ReportLinkedActionCarriesTheReportID(t *testing.T) {
 			if rows[0].ReportID == nil || *rows[0].ReportID != reportID {
 				t.Fatalf("row report_id = %v, want %d", rows[0].ReportID, reportID)
 			}
+			// P2-10 test gap (Codex review round 3): the submitted reason is
+			// stored verbatim for every kind, including kick — which used to
+			// discard it in favor of the fixed phrase "all sessions
+			// terminated" before P2-10's fix threaded it through.
+			if rows[0].Reason != "linked" {
+				t.Fatalf("row reason = %q, want %q (kind=%s)", rows[0].Reason, "linked", tc.kind)
+			}
 		})
 	}
 
@@ -483,6 +490,35 @@ func TestTimeout_BlocksMessageEdit(t *testing.T) {
 	}
 }
 
+// TestTimeout_BlocksMessageEdit_DM is P1-2's DM test gap (Codex review round
+// 3): the guild-channel case above shares editMessageCheckAccess's fix with
+// the DM branch, but only the guild case had a red-then-green proof.
+// Restoring just the DM branch's old membership/block-only check (skipping
+// CanSendMessage) must fail this test.
+func TestTimeout_BlocksMessageEdit_DM(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	ctx := context.Background()
+
+	ch, _, err := f.database.GetOrCreateDMChannel(ctx, fixtureMember, fixtureMember2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: ch.ID, UserID: fixtureMember, Username: "u3", RoleName: "member", Content: "before",
+	})
+	if err != nil {
+		t.Fatalf("send before timeout: %v", err)
+	}
+
+	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+
+	if _, err := f.messages.EditMessage(ctx, fixtureMember, sent.MessageID, "after"); !errors.Is(err, ErrTimedOut) {
+		t.Fatalf("EditMessage (DM) after timeout: want ErrTimedOut, got %v", err)
+	}
+}
+
 // timeoutLookupErrorStore wraps a real Store and injects a failure on
 // HasActiveTimeout only, for P2-11's fail-closed proof — every other method
 // promotes straight through to the embedded implementation.
@@ -557,17 +593,37 @@ func TestTimeout_BlocksReactionsAndVoiceJoin(t *testing.T) {
 // fakeVoiceMuter records ApplyTimeoutMute calls, satisfying
 // service.TimeoutVoiceMuter. applied controls what each call reports back
 // (defaults to true, i.e. every attempted mute actually lands); set false to
-// model a channel-switch race or a target with no live SFU participant.
+// model a channel-switch race, an SFU failure, or a target with no live SFU
+// participant. owned controls what a muted=true call reports as ownership
+// (defaults to true — a genuine unmuted->muted transition); set false to
+// model a target already server-muted by someone/something else (P1-4
+// PARTIAL). sessions is the full per-call record (userID, channelID,
+// joinedAt) for tests that check the exact session a call was bound to
+// (P1-3 PARTIAL) — calls alone (just the `muted` argument) is enough for
+// every test that only cares how many mutes/unmutes happened.
 type fakeVoiceMuter struct {
-	calls   []bool // one entry per call, the `muted` argument
-	applied bool
+	calls    []bool // one entry per call, the `muted` argument
+	applied  bool
+	owned    bool
+	sessions []fakeMuteCall
 }
 
-func newFakeVoiceMuter() *fakeVoiceMuter { return &fakeVoiceMuter{applied: true} }
+// fakeMuteCall is one ApplyTimeoutMute call in full.
+type fakeMuteCall struct {
+	userID, channelID int64
+	joinedAt          string
+	muted             bool
+}
 
-func (f *fakeVoiceMuter) ApplyTimeoutMute(_ context.Context, _ int64, muted bool) bool {
+func newFakeVoiceMuter() *fakeVoiceMuter { return &fakeVoiceMuter{applied: true, owned: true} }
+
+func (f *fakeVoiceMuter) ApplyTimeoutMute(_ context.Context, userID, channelID int64, joinedAt string, muted bool) (bool, bool) {
 	f.calls = append(f.calls, muted)
-	return f.applied
+	f.sessions = append(f.sessions, fakeMuteCall{userID: userID, channelID: channelID, joinedAt: joinedAt, muted: muted})
+	if !f.applied {
+		return false, false
+	}
+	return true, muted && f.owned
 }
 
 // TestTimeout_VoiceHalf_ChannelScopedAuthorization is P1-3 (Codex review):
@@ -657,6 +713,68 @@ func TestTimeout_VoiceHalf_ChannelScopedAuthorization(t *testing.T) {
 		}
 		if !result.VoiceSkipped {
 			t.Fatal("VoiceSkipped = false, want true: the muter reported it did not actually apply the mute (P3-14)")
+		}
+	})
+
+	// NEW P1 (15, Codex review round 3): a channel-scoped MUTE_MEMBERS
+	// ALLOW override must not, on its own, grant the voice half to a role
+	// whose BASE never held the bit — voice_mod_mute (ws.voiceModTarget)
+	// refuses that actor before ever reaching CanModerateVoice, and
+	// actorCanModerateVoiceFor must refuse identically, not merely defer to
+	// CanModerateVoice's own (deliberately permissive, B2-5) channel check.
+	t.Run("channel allow grants nothing without the base bit: skipped", func(t *testing.T) {
+		f := newModerationActionsFixture(t)
+		if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+			t.Fatalf("JoinVoiceChannel: %v", err)
+		}
+		// A role with MODERATE_MEMBERS (so Timeout's own permission gate
+		// passes) but no MUTE_MEMBERS anywhere in its base mask, position
+		// above the target so the hierarchy check passes too.
+		//nolint:contextcheck // seedRole/seedUser/seedUserRole/seedChannelOverride always use context.Background() internally
+		seedRole(t, f.database, &db.Role{ID: 8, Name: "channelallow", Permissions: permissions.ModerateMembers | permissions.ReadMessages, Position: 70})
+		seedUser(t, f.database, &db.User{ID: 9, Username: "u9"})                          //nolint:contextcheck // see above
+		seedUserRole(t, f.database, 9, 8)                                                 //nolint:contextcheck // see above
+		seedChannelOverride(t, f.database, 8, fixtureChannel, permissions.MuteMembers, 0) //nolint:contextcheck // see above
+		muter := newFakeVoiceMuter()
+		f.mod.SetVoiceMuter(muter)
+
+		result, err := f.mod.Timeout(ctx, 9, fixtureMember, "cool off", time.Hour, nil)
+		if err != nil {
+			t.Fatalf("Timeout: %v", err)
+		}
+		if !result.VoiceSkipped {
+			t.Fatal("VoiceSkipped = false, want true: the actor's base role never held MUTE_MEMBERS")
+		}
+		if len(muter.calls) != 0 {
+			t.Fatalf("voice muter calls = %v, want none — a channel allow cannot manufacture voice-moderation authority", muter.calls)
+		}
+	})
+
+	// Positive control for the case above: identical role and channel
+	// override, but the base role ALSO holds MUTE_MEMBERS — isolating the
+	// base bit as the only variable that flips the outcome.
+	t.Run("channel allow plus the base bit: applied (positive control)", func(t *testing.T) {
+		f := newModerationActionsFixture(t)
+		if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+			t.Fatalf("JoinVoiceChannel: %v", err)
+		}
+		//nolint:contextcheck // seedRole/seedUser/seedUserRole/seedChannelOverride always use context.Background() internally
+		seedRole(t, f.database, &db.Role{ID: 8, Name: "channelallow", Permissions: permissions.ModerateMembers | permissions.MuteMembers | permissions.ReadMessages, Position: 70})
+		seedUser(t, f.database, &db.User{ID: 9, Username: "u9"})                          //nolint:contextcheck // see above
+		seedUserRole(t, f.database, 9, 8)                                                 //nolint:contextcheck // see above
+		seedChannelOverride(t, f.database, 8, fixtureChannel, permissions.MuteMembers, 0) //nolint:contextcheck // see above
+		muter := newFakeVoiceMuter()
+		f.mod.SetVoiceMuter(muter)
+
+		result, err := f.mod.Timeout(ctx, 9, fixtureMember, "cool off", time.Hour, nil)
+		if err != nil {
+			t.Fatalf("Timeout: %v", err)
+		}
+		if result.VoiceSkipped {
+			t.Fatal("VoiceSkipped = true, want false: the actor's base role holds MUTE_MEMBERS too")
+		}
+		if len(muter.calls) != 1 || !muter.calls[0] {
+			t.Fatalf("voice muter calls = %v, want exactly one mute(true)", muter.calls)
 		}
 	})
 }
@@ -789,6 +907,167 @@ func TestLiftTimeout_DoesNotClearAnotherModeratorsAuthority(t *testing.T) {
 	}
 	if active {
 		t.Fatal("the timeout itself must still be lifted regardless of the voice half")
+	}
+}
+
+// TestLiftTimeout_DoesNotClearAnAlreadyMutedTarget is P1-4 PARTIAL's
+// pre-muted branch (Codex review round 3): the target was ALREADY
+// server-muted (by another moderator, or by nothing this timeout did) when
+// Timeout ran, so the mute call reports applied=true but owned=false —
+// voice_muted must stay 0, and a later lift must not clear a mute this
+// timeout never owned.
+func TestLiftTimeout_DoesNotClearAnAlreadyMutedTarget(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	ctx := context.Background()
+	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	// applied=true (the mute call succeeds) but owned=false (someone/
+	// something else already muted the target) — a fakeVoiceMuter that
+	// models exactly the "already muted" case CompareAndSetServerMute
+	// reports at the DB layer.
+	muter := &fakeVoiceMuter{applied: true, owned: false}
+	f.mod.SetVoiceMuter(muter)
+
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if result.VoiceSkipped {
+		t.Fatal("VoiceSkipped = true, want false: the mute call itself succeeded (applied=true)")
+	}
+	if len(muter.calls) != 1 || !muter.calls[0] {
+		t.Fatalf("voice muter calls after Timeout = %v, want exactly one mute(true)", muter.calls)
+	}
+
+	if err := f.mod.LiftTimeout(ctx, fixtureMod, fixtureMember); err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if len(muter.calls) != 1 {
+		t.Fatalf("voice muter calls after LiftTimeout = %v, want still just the original mute(true) — "+
+			"this timeout never owned the mute (it was already muted)", muter.calls)
+	}
+}
+
+// dbBackedVoiceMuter routes ApplyTimeoutMute through the REAL
+// db.CompareAndSetServerMute (P1-3 PARTIAL, Codex review round 3) — no
+// ws.Hub or LiveKit involved — so a service-level test can prove the
+// session-binding contract against a real database instead of a fake that
+// always agrees with whatever channel/joinedAt it is handed.
+type dbBackedVoiceMuter struct {
+	database *db.DB
+}
+
+func (m *dbBackedVoiceMuter) ApplyTimeoutMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (bool, bool) {
+	matched, transitioned, err := m.database.CompareAndSetServerMute(ctx, userID, channelID, joinedAt, muted)
+	if err != nil || !matched {
+		return false, false
+	}
+	return true, muted && transitioned
+}
+
+// TestTimeout_VoiceHalf_TargetMovesBetweenCheckAndMute is P1-3 PARTIAL
+// (Codex review round 3): the target switches voice channel in the exact
+// gap between actorCanModerateVoiceFor's authorization and the voice
+// muter's call, via timeoutPreMuteHook. The mute must not follow them to
+// the unauthorized channel: applied is false, voice_muted stays 0, and the
+// target's new session is not muted.
+func TestTimeout_VoiceHalf_TargetMovesBetweenCheckAndMute(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	ctx := context.Background()
+	const otherChannel = int64(101)
+	seedChannel(t, f.database, &db.Channel{ID: otherChannel, Name: "other-voice", Type: "voice"})
+	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
+	timeoutPreMuteHook = func() {
+		// The target moves to a channel nobody authorized this call
+		// against, between the authorization read and the mute call.
+		if err := f.database.JoinVoiceChannel(context.Background(), fixtureMember, otherChannel); err != nil {
+			t.Fatalf("JoinVoiceChannel (race): %v", err)
+		}
+	}
+	t.Cleanup(func() { timeoutPreMuteHook = nil })
+
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if !result.VoiceSkipped {
+		t.Fatal("VoiceSkipped = false, want true: the target moved before the mute could bind to the authorized session")
+	}
+
+	state, err := f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ChannelID != otherChannel {
+		t.Fatalf("test setup broken: want the target in channel %d, got %d", otherChannel, state.ChannelID)
+	}
+	if state.ServerMuted {
+		t.Fatal("ServerMuted = true, want false: the mute must not have followed the target to the new channel")
+	}
+
+	_, voiceMuted, err := f.database.LiftTimeout(ctx, fixtureMember, fixtureMod)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if voiceMuted {
+		t.Fatal("voice_muted = true, want false: the mute never actually landed")
+	}
+}
+
+// TestTimeout_VoiceHalf_StrandedMuteCompensated is P2 16 (Codex review round
+// 3): a concurrent LiftTimeout runs in the gap between the SFU mute landing
+// (owned=true) and SetTimeoutVoiceMuted recording that ownership, via
+// timeoutPostMuteHook. SetTimeoutVoiceMuted's own guard then reports
+// nothing was updated (the row is already lifted), and Timeout must
+// compensate by unmuting immediately rather than leave the mute stranded
+// with no ledger row that will ever clear it.
+func TestTimeout_VoiceHalf_StrandedMuteCompensated(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	ctx := context.Background()
+	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
+	timeoutPostMuteHook = func() {
+		// A concurrent LiftTimeout, by a second moderator, runs to
+		// completion in the gap between the SFU mute landing and this
+		// timeout's own SetTimeoutVoiceMuted call. It sees voice_muted=0
+		// (not yet recorded) and lifts the row without clearing the mute —
+		// exactly the race that strands it.
+		if err := f.mod.LiftTimeout(context.Background(), fixturePeerMod, fixtureMember); err != nil {
+			t.Fatalf("LiftTimeout (race): %v", err)
+		}
+	}
+	t.Cleanup(func() { timeoutPostMuteHook = nil })
+
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if !result.VoiceSkipped {
+		t.Fatal("VoiceSkipped = false, want true: the ownership could not be recorded, so the outcome must not claim applied")
+	}
+
+	state, err := f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ServerMuted {
+		t.Fatal("ServerMuted = true, want false: the stranded mute must have been compensated (unmuted) immediately")
+	}
+
+	active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
+	if err != nil {
+		t.Fatalf("HasActiveTimeout: %v", err)
+	}
+	if active {
+		t.Fatal("test setup broken: the race's own LiftTimeout should have lifted the row")
 	}
 }
 

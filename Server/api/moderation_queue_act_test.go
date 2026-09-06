@@ -178,6 +178,39 @@ func TestModerationQueueAct_BanBroadcastsMemberBan(t *testing.T) {
 	}
 }
 
+// TestModerationQueueAct_NoBroadcastWhenActionFails is a P2-7 test gap
+// (Codex review round 3): the act route must not broadcast anything when
+// the underlying service call fails — here, an actor holding MODERATE_
+// MEMBERS (enough to pass the route's own gate and read the report) but
+// lacking BAN_MEMBERS, so banUser's own permission check refuses before any
+// write is attempted.
+func TestModerationQueueAct_NoBroadcastWhenActionFails(t *testing.T) {
+	h, database, broadcaster := buildModQueueActRouter(t)
+	modID := mintModerator(t, database, "act-nobroadcast-mod", 90, permissions.ModerateMembers) // no BanMembers
+	modToken, _ := mintSession(t, database, modID)
+	reporterID := mintUser(t, database, "act-nobroadcast-reporter")
+	reporterToken, _ := mintSession(t, database, reporterID)
+	targetID := mintUser(t, database, "act-nobroadcast-target")
+
+	publicID := fileUserReport(t, h, reporterToken, targetID)
+
+	status, body := actJSON(t, h, http.MethodPost, "/api/v1/moderation/queue/"+publicID+"/act", modToken,
+		`{"kind":"ban","reason":"repeated spam"}`)
+	if status != http.StatusForbidden {
+		t.Fatalf("act(ban) without BAN_MEMBERS: status = %d, body = %s, want 403", status, body)
+	}
+	if len(broadcaster.bans) != 0 {
+		t.Fatalf("BroadcastMemberBan calls = %v, want none — the ban was refused, nothing should have landed", broadcaster.bans)
+	}
+	target, err := database.GetUserByID(context.Background(), targetID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if target.Banned {
+		t.Fatal("target is banned despite the refused act(ban)")
+	}
+}
+
 // TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted is P2-7's removal
 // half: acting through the queue must send a chat_bulk_deleted broadcast for
 // the removed message — the direct purge route's own broadcast, reused

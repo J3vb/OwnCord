@@ -156,6 +156,16 @@ func (s *VoiceService) SetServerMute(ctx context.Context, userID, channelID int6
 	return s.st.SetVoiceServerMute(ctx, userID, channelID, muted)
 }
 
+// CompareAndSetServerMute is SetServerMute scoped to one exact voice session
+// (channelID, joinedAt) instead of channelID alone, reporting whether THIS
+// call caused the unmuted->muted transition (P1-3/P1-4 PARTIAL): the
+// timeout voice half's authorization and its SFU mute must bind to the
+// SAME session, not a channel a separate, later read could resolve
+// differently if the target moved on in between.
+func (s *VoiceService) CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error) {
+	return s.st.CompareAndSetServerMute(ctx, userID, channelID, joinedAt, muted)
+}
+
 // SetServerDeafen is SetServerMute for the server_deafened column, with the
 // same channel scoping and the same meaning for a false result.
 func (s *VoiceService) SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error) {
