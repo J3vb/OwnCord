@@ -72,6 +72,13 @@ type ServerMetrics struct {
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
 
+	// Web Push dispatch (B5-11, behind HP-5) — aggregate counters only,
+	// never per user. Zero on a server with dispatch off, which is the
+	// compiled default.
+	PushDispatched uint64 `json:"push_dispatched"`
+	PushFailed     uint64 `json:"push_failed"`
+	PushPruned     uint64 `json:"push_pruned"`
+
 	EventPersister *EventPersisterMetrics `json:"event_persister,omitempty"`
 }
 
@@ -92,6 +99,9 @@ type MetricsSources struct {
 	DiskFree       func() (uint64, error)
 	DiskMinFree    uint64
 	UploadBytes    func(context.Context) (int64, error)
+	// PushCounters is nil when dispatch is off (the compiled default); the
+	// three fields stay at their zero value then.
+	PushCounters func() (dispatched, failed, pruned uint64)
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
@@ -166,6 +176,9 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 				mb := float64(n) / 1024 / 1024
 				metrics.UploadStorageUsedMB = &mb
 			}
+		}
+		if src.PushCounters != nil {
+			metrics.PushDispatched, metrics.PushFailed, metrics.PushPruned = src.PushCounters()
 		}
 
 		writeJSON(w, http.StatusOK, metrics)

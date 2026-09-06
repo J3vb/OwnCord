@@ -293,6 +293,12 @@ type Store interface {
 	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
 	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
 	CountPushSubscriptions(ctx context.Context) (int64, error)
+	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
+	// dispatch-only (B5-11): the former returns the push credential for a
+	// caller-narrowed audience, the latter prunes by id alone on a push
+	// service's 404/410.
+	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
+	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

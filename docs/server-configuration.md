@@ -87,18 +87,31 @@ the server automatically when a startup-only value changed. Note that
 
 ### Web Push (`push`)
 
-Storage only in this release — nothing is dispatched to a stored
-subscription yet (see [Web Push](api.md#web-push) in the API reference).
 Disabled by default: with `push.enabled` false, every `/api/v1/push/*` route
 answers `503 PUSH_DISABLED` after authenticating the caller, and nothing is
 written. Turning it off again later keeps existing subscription rows —
 nothing dispatches to them either way — but the staleness sweep keeps
 running.
 
-| Key                          | Type | Default | Description                                                                                                                                                                                                |
-| ---------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `push.enabled`               | bool | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
-| `push.subscription_ttl_days` | int  | `90`    | A subscription whose `last_seen_at` is older than this many days is removed by the maintenance sweep. Clients keep a row alive by re-POSTing the same endpoint. Clamped to 1–3650; `0` falls back to `90`. |
+Dispatch (sending an actual push to a stored subscription) has its **own,
+second** opt-in: `push.dispatch_enabled`, false by default and independent
+of `push.enabled`, so an operator who enabled subscription storage before
+dispatch existed does not acquire dispatch on upgrade. **Turning dispatch on
+makes the server open outbound HTTPS connections to the push service named
+in each stored subscription's endpoint** — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table. With dispatch
+on, a new message in a channel or DM sends a generic `{"t":"activity"}`
+payload (no message text, channel name or sender) to every offline,
+permitted recipient's subscriptions, coalesced to at most one push per user
+per channel per 60 seconds; a `404`/`410` response prunes the subscription,
+other failures retry up to 3 times before being dropped.
+
+| Key                          | Type   | Default | Description                                                                                                                                                                                                |
+| ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push.enabled`               | bool   | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
+| `push.subscription_ttl_days` | int    | `90`    | A subscription whose `last_seen_at` is older than this many days is removed by the maintenance sweep. Clients keep a row alive by re-POSTing the same endpoint. Clamped to 1–3650; `0` falls back to `90`. |
+| `push.dispatch_enabled`      | bool   | `false` | Owner opt-in for actually sending pushes, separate from `push.enabled`. Dispatch runs only when both are true. Opens outbound connections to the push service named in each subscription's endpoint.       |
+| `push.contact`               | string | `""`    | Operator contact for VAPID JWTs (RFC 8292), sent as `mailto:<contact>` in the token's `sub` claim. Empty omits the claim; some push services require one and will refuse a request without it.             |
 
 **VAPID key and rotation.** The server generates (or loads) a P-256 VAPID key
 at `data/push_vapid.key`, the same fail-closed pattern as `totp.key` and
@@ -212,7 +225,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 62 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 64 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -237,6 +250,8 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `plugins.enabled`                           | Plugins (`plugins`)                     |
 | `plugins.http_allowlist`                    | Plugins (`plugins`)                     |
 | `plugins.max_memory_mb`                     | Plugins (`plugins`)                     |
+| `push.contact`                              | Web Push (`push`)                       |
+| `push.dispatch_enabled`                     | Web Push (`push`)                       |
 | `push.enabled`                              | Web Push (`push`)                       |
 | `push.subscription_ttl_days`                | Web Push (`push`)                       |
 | `security.auth_rate_limit_multiplier`       | Security (`security`)                   |
@@ -305,6 +320,8 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_UPLOAD_USER_QUOTA_MB`              | `upload.user_quota_mb`              |
 | `OWNCORD_PUSH_ENABLED`                      | `push.enabled`                      |
 | `OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS`        | `push.subscription_ttl_days`        |
+| `OWNCORD_PUSH_DISPATCH_ENABLED`             | `push.dispatch_enabled`             |
+| `OWNCORD_PUSH_CONTACT`                      | `push.contact`                      |
 | `OWNCORD_VOICE_LIVEKIT_API_KEY`             | `voice.livekit_api_key`             |
 | `OWNCORD_VOICE_LIVEKIT_API_SECRET`          | `voice.livekit_api_secret`          |
 | `OWNCORD_VOICE_LIVEKIT_URL`                 | `voice.livekit_url`                 |
@@ -361,10 +378,14 @@ upload:
   storage_dir: "data/uploads"
   user_quota_mb: 0 # per-user total in MiB; 0 = unlimited
 
-# Web Push subscription storage. Storage only -- nothing is dispatched yet.
+# Web Push. dispatch_enabled is a SECOND opt-in, separate from enabled --
+# turning it on makes the server open outbound HTTPS connections to the
+# push service named in each stored subscription's endpoint.
 push:
   enabled: false
   subscription_ttl_days: 90 # unrefreshed rows swept after this many days
+  dispatch_enabled: false
+  contact: "" # operator contact for VAPID JWTs, sent as "mailto:<contact>"
 
 voice:
   livekit_api_key: "your-api-key"

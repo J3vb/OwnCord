@@ -428,6 +428,37 @@ func TestFetch_EmptyBodySkipsSniff(t *testing.T) {
 	}
 }
 
+// TestFetch_EmptyBodyWithoutContentTypeIsAccepted: a 201/204 with no body
+// and no Content-Type header at all is a normal acknowledgement shape (a
+// Web Push service's success response, among others) — there is no content
+// to have a type, so it must not be refused for declaring none.
+func TestFetch_EmptyBodyWithoutContentTypeIsAccepted(t *testing.T) {
+	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header()["Content-Type"] = nil
+		w.WriteHeader(http.StatusCreated)
+	})
+	resp, err := get(newFetcher(t, srv, nil), srv.URL)
+	if err != nil {
+		t.Fatalf("an empty body with no declared Content-Type must be accepted: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated || len(resp.Body) != 0 {
+		t.Errorf("resp = %+v, want status 201 and an empty body", resp)
+	}
+}
+
+// TestFetch_NonEmptyBodyWithoutContentTypeIsRefused is the negative
+// control: the empty-body exception above must not widen to a body that
+// actually arrived with bytes.
+func TestFetch_NonEmptyBodyWithoutContentTypeIsRefused(t *testing.T) {
+	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	})
+	if _, err := get(newFetcher(t, srv, nil), srv.URL); !errors.Is(err, ErrContentType) {
+		t.Errorf("a non-empty body with no declared Content-Type: want ErrContentType, got %v", err)
+	}
+}
+
 // The concurrency cap holds under -race: never more than MaxConcurrent
 // fetches in flight, and every one of them still completes.
 func TestFetch_ConcurrencyCap(t *testing.T) {

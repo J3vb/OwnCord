@@ -605,6 +605,55 @@ func TestLoadPushDisabledByDefault(t *testing.T) {
 	}
 }
 
+// TestLoadPushDispatchDisabledByDefault pins B5-11's own gate: dispatch is
+// off on a fresh install even independently of push.enabled (HP-5 scorecard
+// Question 6, decision 1 — an operator who enabled storage in the B5-4 era
+// must not acquire dispatch by upgrade), and the shipped template keeps both
+// new keys commented so the compiled defaults win.
+func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Push.DispatchEnabled {
+		t.Error("push.dispatch_enabled is true on a fresh install; dispatch must be its own owner opt-in")
+	}
+	if cfg.Push.Contact != "" {
+		t.Errorf("push.contact = %q, want empty by default", cfg.Push.Contact)
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "dispatch_enabled:") || strings.HasPrefix(trimmed, "contact:") {
+			t.Errorf("the shipped template sets %q live — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// TestLoadPushDispatchEnvOverride proves OWNCORD_PUSH_DISPATCH_ENABLED and
+// OWNCORD_PUSH_CONTACT reach config.Push — run, not read.
+func TestLoadPushDispatchEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_PUSH_DISPATCH_ENABLED", "true")
+	t.Setenv("OWNCORD_PUSH_CONTACT", "ops@example.invalid")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Push.DispatchEnabled {
+		t.Error("push.dispatch_enabled = false, want true from OWNCORD_PUSH_DISPATCH_ENABLED")
+	}
+	if cfg.Push.Contact != "ops@example.invalid" {
+		t.Errorf("push.contact = %q, want the environment value", cfg.Push.Contact)
+	}
+}
+
 // ─── B5-2: the two bounded storage keys and the applyBounds seam ───────────
 
 // TestLoadStorageBoundsDefaults pins the compiled defaults through a fresh

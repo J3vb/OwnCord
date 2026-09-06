@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -60,11 +64,12 @@ type PushSubscribeInput struct {
 type PushService struct {
 	st Store
 
-	mu     syncutil.Mutex
-	priv   *ecdh.PrivateKey
-	pubB64 string
-	keyID  string
-	ttl    time.Duration
+	mu      syncutil.Mutex
+	priv    *ecdh.PrivateKey
+	pubB64  string
+	keyID   string
+	ttl     time.Duration
+	contact string
 }
 
 // NewPushService constructs a PushService with no key installed yet
@@ -102,6 +107,16 @@ func (s *PushService) SetSubscriptionTTL(d time.Duration) {
 		d = pushDefaultTTL
 	}
 	s.ttl = d
+}
+
+// SetContact installs push.contact (B5-11), the mailto address VAPID JWTs
+// carry as their "sub" claim. Empty (the default) means the claim is
+// omitted entirely, not sent as "mailto:" — an empty sub is not a valid
+// contact and a push service is entitled to reject it.
+func (s *PushService) SetContact(contact string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contact = contact
 }
 
 // PublicKey returns the running key's public bytes — base64url, no padding,
@@ -177,6 +192,79 @@ func (s *PushService) Sweep(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return n, nil
+}
+
+// ErrPushNotConfigured is returned by vapidAuthorization before any VAPID
+// key has been installed — SetVAPIDKey runs unconditionally at start-up
+// (B5-4), so in production this only fires in the instant before that stage
+// runs.
+var ErrPushNotConfigured = errors.New("push: no VAPID key installed")
+
+// vapidTokenTTL is the RFC 8292 JWT lifetime (plan decision 9: 12h). RFC
+// 8292 recommends staying well under 24h so a leaked token cannot be
+// replayed indefinitely.
+const vapidTokenTTL = 12 * time.Hour
+
+// vapidClaims is the RFC 8292 JWT claim set. Sub is omitted (not sent as an
+// empty "mailto:") when push.contact is unset — encoding/json's omitempty
+// on a string drops it precisely then.
+type vapidClaims struct {
+	Aud string `json:"aud"`
+	Exp int64  `json:"exp"`
+	Sub string `json:"sub,omitempty"`
+}
+
+// vapidAuthorization builds the RFC 8292 VAPID Authorization header value
+// for a push to endpoint: an ES256-signed JWT with header
+// {"typ":"JWT","alg":"ES256"}, claims aud (the endpoint's scheme://host),
+// exp (now+12h) and sub ("mailto:"+push.contact, omitted when empty), and
+// the header value "vapid t=<jwt>, k=<public key>". The private scalar
+// never leaves this method — every caller gets a finished header value, not
+// a key or a raw signature.
+//
+// The signature is raw r||s (64 octets, RFC 8292's JWS encoding), not
+// ASN.1: a JOSE ES256 signature is defined that way (RFC 7518 SS3.4), and a
+// push service validates it as such.
+func (s *PushService) vapidAuthorization(endpoint string) (string, error) {
+	s.mu.Lock()
+	priv, pubB64, contact := s.priv, s.pubB64, s.contact
+	s.mu.Unlock()
+	if priv == nil {
+		return "", ErrPushNotConfigured
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("%w: endpoint has no origin", ErrInvalidSubscription)
+	}
+	origin := u.Scheme + "://" + u.Host
+
+	claims := vapidClaims{Aud: origin, Exp: time.Now().Add(vapidTokenTTL).Unix()}
+	if contact != "" {
+		claims.Sub = "mailto:" + contact
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("%w: encoding VAPID claims: %w", ErrInternal, err)
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256"}`)) +
+		"." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+
+	ecdsaPriv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), priv.Bytes())
+	if err != nil {
+		return "", fmt.Errorf("%w: converting VAPID key: %w", ErrInternal, err)
+	}
+	digest := sha256.Sum256([]byte(signingInput))
+	r, sig, err := ecdsa.Sign(rand.Reader, ecdsaPriv, digest[:])
+	if err != nil {
+		return "", fmt.Errorf("%w: signing VAPID JWT: %w", ErrInternal, err)
+	}
+	rawSig := make([]byte, 64)
+	r.FillBytes(rawSig[:32])
+	sig.FillBytes(rawSig[32:])
+	jwt := signingInput + "." + base64.RawURLEncoding.EncodeToString(rawSig)
+
+	return fmt.Sprintf("vapid t=%s, k=%s", jwt, pubB64), nil
 }
 
 // validatePushSubscription checks in and returns the canonical (decoded and
