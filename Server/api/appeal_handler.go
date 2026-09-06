@@ -80,7 +80,7 @@ func MountAppealRoutes(r chi.Router, svc *service.Services, hub AppealQueueBroad
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleFileAppeal(svc, hub))
 		r.Get("/mine", handleMyAppeals(svc))
-		r.Post("/{id}/withdraw", handleWithdrawAppeal(svc))
+		r.Post("/{id}/withdraw", handleWithdrawAppeal(svc, hub))
 	})
 }
 
@@ -150,7 +150,12 @@ func handleMyAppeals(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
+// handleWithdrawAppeal is N3 review: withdrawal now broadcasts a
+// mod_queue "withdrawn" event too (previously only the appellant's own
+// appeal_status frame fired), the same shape submit/assign/decide already
+// use — a connected moderator should see a withdrawn appeal leave the
+// queue without needing to re-poll GET /api/v1/moderation/appeals.
+func handleWithdrawAppeal(svc *service.Services, hub AppealQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -161,6 +166,11 @@ func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
 		if err := svc.Appeals.Withdraw(r.Context(), user.ID, publicID); err != nil {
 			writeAppealServiceError(r.Context(), w, err)
 			return
+		}
+		if hub != nil {
+			if id, rerr := svc.Appeals.ResolveAppealID(context.WithoutCancel(r.Context()), publicID); rerr == nil {
+				hub.BroadcastAppealQueue(context.WithoutCancel(r.Context()), id, "withdrawn")
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -280,6 +290,10 @@ func writeAppealServiceError(ctx context.Context, w http.ResponseWriter, err err
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_APPEALED", Message: err.Error()})
 	case errors.Is(err, service.ErrSelfReview):
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "SELF_REVIEW", Message: err.Error()})
+	case errors.Is(err, service.ErrReversalFailed):
+		// F1 review: the decision's effect could not be applied, so neither
+		// it nor the decision itself committed.
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "REVERSAL_FAILED", Message: err.Error()})
 	default:
 		writeServiceError(ctx, w, err)
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // newModerationActionsTestDB seeds a fully migrated database with an owner
@@ -608,6 +609,14 @@ func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
 // row an appeals row references must survive the sweep regardless of age,
 // because decision 8's UNIQUE(action_id) memory is what forbids re-appealing
 // it, and sweeping the row away would silently reopen that door.
+// TestModerationRetention_SkipsAppealedActions covers three states an
+// appeals row can sit in when its action ages past the retention window:
+// open (appealedID), withdrawn (withdrawnAppealID) and decided/upheld
+// (upheldAppealID). The exclusion is "any row appeals references", not
+// "any row with a currently-live appeal" — a withdrawn or already-decided
+// appeal still carries decision 8's UNIQUE(action_id) memory, and sweeping
+// its action away would silently reopen the door to a second appeal
+// against the same action just as surely as sweeping an open one would.
 func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
@@ -616,24 +625,51 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WarnUser(appealed): %v", err)
 	}
+	withdrawnAppealID, err := database.WarnUser(ctx, memberID, ownerID, nil, "withdrawn")
+	if err != nil {
+		t.Fatalf("WarnUser(withdrawn): %v", err)
+	}
+	upheldAppealID, err := database.WarnUser(ctx, memberID, ownerID, nil, "upheld")
+	if err != nil {
+		t.Fatalf("WarnUser(upheld): %v", err)
+	}
 	unappealedID, err := database.WarnUser(ctx, memberID, ownerID, nil, "unappealed")
 	if err != nil {
 		t.Fatalf("WarnUser(unappealed): %v", err)
 	}
-	if _, err := database.AcknowledgeWarning(ctx, memberID, appealedID); err != nil {
-		t.Fatalf("ack appealed: %v", err)
+	for _, id := range []int64{appealedID, withdrawnAppealID, upheldAppealID, unappealedID} {
+		if _, err := database.AcknowledgeWarning(ctx, memberID, id); err != nil {
+			t.Fatalf("ack %d: %v", id, err)
+		}
 	}
-	if _, err := database.AcknowledgeWarning(ctx, memberID, unappealedID); err != nil {
-		t.Fatalf("ack unappealed: %v", err)
-	}
-	// Backdate both past the retention window.
+	// Backdate all four past the retention window.
 	if _, err := database.ExecContext(ctx,
-		`UPDATE moderation_actions SET acknowledged_at = datetime('now', '-100 days') WHERE id IN (?, ?)`,
-		appealedID, unappealedID); err != nil {
+		`UPDATE moderation_actions SET acknowledged_at = datetime('now', '-100 days') WHERE id IN (?, ?, ?, ?)`,
+		appealedID, withdrawnAppealID, upheldAppealID, unappealedID); err != nil {
 		t.Fatalf("backdate: %v", err)
 	}
 	if _, err := database.InsertAppeal(ctx, "pub-retention-appeal", appealedID, memberID, "please reconsider"); err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
+		t.Fatalf("InsertAppeal(open): %v", err)
+	}
+	withdrawnID, err := database.InsertAppeal(ctx, "pub-retention-withdrawn", withdrawnAppealID, memberID, "please reconsider")
+	if err != nil {
+		t.Fatalf("InsertAppeal(withdrawn): %v", err)
+	}
+	if ok, err := database.WithdrawAppeal(ctx, withdrawnID, memberID); err != nil || !ok {
+		t.Fatalf("WithdrawAppeal: (%v, %v), want (true, nil)", ok, err)
+	}
+	upheldID, err := database.InsertAppeal(ctx, "pub-retention-upheld", upheldAppealID, memberID, "please reconsider")
+	if err != nil {
+		t.Fatalf("InsertAppeal(upheld): %v", err)
+	}
+	action, err := database.GetModerationAction(ctx, upheldAppealID)
+	if err != nil {
+		t.Fatalf("GetModerationAction: %v", err)
+	}
+	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	if result, _, err := database.DecideAppealTx(ctx, upheldID, "open", 0, "upheld", ownerID, "no",
+		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal); err != nil || result != db.AppealWriteOK {
+		t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 	}
 
 	n, err := database.RetireModerationActions(ctx, 90)
@@ -652,7 +688,13 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 		remaining[r.ID] = true
 	}
 	if !remaining[appealedID] {
-		t.Error("the appealed warning was retired — decision 8's UNIQUE(action_id) memory is now unenforceable for it")
+		t.Error("the openly-appealed warning was retired — decision 8's UNIQUE(action_id) memory is now unenforceable for it")
+	}
+	if !remaining[withdrawnAppealID] {
+		t.Error("the withdrawn-appeal warning was retired — a withdrawn appeal still carries the UNIQUE(action_id) memory")
+	}
+	if !remaining[upheldAppealID] {
+		t.Error("the upheld-appeal warning was retired — a decided appeal still carries the UNIQUE(action_id) memory")
 	}
 	if remaining[unappealedID] {
 		t.Error("the unappealed warning was not retired")

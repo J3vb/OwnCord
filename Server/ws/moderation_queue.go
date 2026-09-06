@@ -97,11 +97,13 @@ func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state strin
 
 // BroadcastAppealQueue notifies every connected moderation-bit holder that
 // appeal appealID (the INTERNAL id, resolved to a public id below before it
-// ever reaches the wire) changed, on submit, assign and decide. Unlike a
-// report, an appeal carries no confidentiality rule against its own
-// appellant or the acting moderator — both may already see it through
-// their own views — so, unlike BroadcastModQueue, no principal is excluded
-// from the audience here.
+// ever reaches the wire) changed, on submit, assign and decide. The
+// APPELLANT is excluded (F5 review: a moderator-appellant must not learn
+// about their own appeal's queue movement through the surface built for
+// reviewing other people's, the same confidentiality rule Queue/Get apply
+// to the read side) — but the acting moderator is NOT excluded (decided:
+// they may already see their own action's appeal move through the queue
+// like any other bit holder).
 func (h *Hub) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
 	if h.db == nil {
 		return
@@ -111,7 +113,7 @@ func (h *Hub) BroadcastAppealQueue(ctx context.Context, appealID int64, state st
 		return
 	}
 	msg := buildAppealModQueue(appeal.PublicID, state)
-	for _, uid := range h.moderationAudience(ctx) {
+	for _, uid := range h.moderationAudience(ctx, appeal.AppellantID) {
 		h.SendToUserLow(uid, msg)
 	}
 }

@@ -329,20 +329,21 @@ func (d *DB) AssignReport(ctx context.Context, id, assigneeID, observedAssigneeI
 }
 
 // forceReassignGuarded is the shared machinery behind AssignReportForced and
-// AssignAppealForced (B5-10): the observed assignee's CURRENT role position
-// is read through this same transaction's connection, and compared to
-// actorRolePosition, immediately before doUpdate runs — closing the gap the
-// plain outrank check leaves, where the read (of the target's role) and the
-// write happen as two separate statements, one of which SQLite's
-// single-writer serialization does not otherwise force together. Returns
-// (true, nil) on success, (false, nil) for the ordinary state/observed/
-// existence conflict doUpdate's own guard already covers (including the
-// observed assignee no longer resolving to any role at all, erased
-// mid-race — nothing to outrank, and doUpdate's own EXISTS(users) guard
-// would refuse it too), and (false, ErrForbidden) when actorRolePosition
-// does not outrank the assignee's fresh position — the caller maps that to
-// a 403, distinctly from the 409 the plain conflict gets.
-func forceReassignGuarded(ctx context.Context, writer *sql.DB, observedAssigneeID, actorRolePosition int64, doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
+// AssignAppealForced (B5-10): BOTH principals' role positions are read
+// through this same transaction's connection immediately before doUpdate
+// runs (inherited-P2 review — the actor's position used to be read by the
+// CALLER before this transaction opened and trusted stale here, closing
+// only half the gap the plain outrank check leaves; a demotion racing
+// between that read and this write could still force-reassign with a rank
+// the actor no longer holds). Returns (true, nil) on success, (false, nil)
+// for the ordinary state/observed/existence conflict doUpdate's own guard
+// already covers (including either principal no longer resolving to a role
+// at all, erased mid-race — nothing to outrank, and doUpdate's own
+// EXISTS(users) guard would refuse it too), and (false, ErrForbidden) when
+// the actor's fresh position does not outrank the assignee's fresh
+// position — the caller maps that to a 403, distinctly from the 409 the
+// plain conflict gets.
+func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observedAssigneeID int64, doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
 	tx, err := writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("forceReassignGuarded begin tx: %w", err)
@@ -350,6 +351,10 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, observedAssigneeI
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
 
+	actorPos, ok := rolePosition(ctx, tx, actorID)
+	if !ok {
+		return false, fmt.Errorf("forceReassignGuarded: %w", ErrForbidden)
+	}
 	targetRole, err := q.GetRoleForUser(ctx, observedAssigneeID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -357,7 +362,7 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, observedAssigneeI
 		}
 		return false, fmt.Errorf("forceReassignGuarded role lookup: %w", err)
 	}
-	if actorRolePosition <= targetRole.Position {
+	if int64(actorPos) <= targetRole.Position {
 		return false, ErrForbidden
 	}
 
@@ -376,8 +381,8 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, observedAssigneeI
 
 // AssignReportForced is the report queue's force-reassign path. See
 // forceReassignGuarded for the shared mechanics.
-func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error) {
-	return forceReassignGuarded(ctx, d.writer, observedAssigneeID, actorRolePosition, func(q *dbgen.Queries) (int64, error) {
+func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error) {
+	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, func(q *dbgen.Queries) (int64, error) {
 		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
 	})
 }

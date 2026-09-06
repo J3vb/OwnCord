@@ -135,13 +135,21 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if _, err := s.st.InsertAppeal(ctx, publicID, actionID, appellantID, body); err != nil {
-		if errors.Is(err, db.ErrConflict) {
+		switch {
+		case errors.Is(err, db.ErrConflict):
 			// The UNIQUE(action_id) race-proof half of decision 8: a second
 			// submission landed between FindAppealForAction's pre-check and
 			// this insert.
 			return "", ErrAlreadyAppealed
+		case errors.Is(err, db.ErrNotFound):
+			// N4 review: the action was erased (its target's account erasure
+			// cascades) between the GetModerationAction lookup above and this
+			// insert. Same refusal as an action that never existed — no
+			// existence oracle either way.
+			return "", errAppealActionNotFound
+		default:
+			return "", fmt.Errorf("%w: %w", ErrInternal, err)
 		}
-		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the appeal committed.
@@ -245,30 +253,38 @@ func (s *AppealService) ResolveAppealID(ctx context.Context, publicID string) (i
 // codes, an existence oracle through the handler's own order of
 // operations.
 func (s *AppealService) RequireModerate(ctx context.Context, actorID int64) error {
-	_, err := s.requireModerate(ctx, actorID)
-	return err
+	return s.requireModerate(ctx, actorID)
 }
 
 // requireModerate loads actorID's role and checks the canonical predicate
-// (permissions.CanModerate), returning the role for a follow-up hierarchy
-// check. Runs before any appeal lookup, so an actor without the bit sees
-// Forbidden regardless of whether the appeal id exists.
-func (s *AppealService) requireModerate(ctx context.Context, actorID int64) (*db.Role, error) {
+// (permissions.CanModerate). Runs before any appeal lookup, so an actor
+// without the bit sees Forbidden regardless of whether the appeal id
+// exists. No longer returns the role itself (unparam, golangci-lint
+// review, mirroring the identical fix on ReportService.requireModerate):
+// Assign's force-reassign path reads the acting principal's position fresh
+// inside its own write transaction (forceReassignGuarded) rather than
+// trusting a role read here.
+func (s *AppealService) requireModerate(ctx context.Context, actorID int64) error {
 	role, err := s.perms.GetRoleForUser(ctx, actorID)
 	if err != nil || role == nil {
-		return nil, fmt.Errorf("%w: failed to load role", ErrForbidden)
+		return fmt.Errorf("%w: failed to load role", ErrForbidden)
 	}
 	if err := permissions.CanModerate(permissions.Subject{RolePerms: role.Permissions}); err != nil {
-		return nil, fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
+		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	}
-	return role, nil
+	return nil
 }
 
 // Queue lists appeals for the moderator view: state is "open", "assigned",
 // "decided" (both terminal decision states together), or "" for the
-// default open+assigned view.
+// default open+assigned view. F5 review: an appeal whose appellant is the
+// CALLER is omitted even when it would otherwise match — the same
+// confidentiality rule reports' Queue applies to reporter/subject, applied
+// here to the appellant: a moderator must not learn who is assigned to, or
+// how the queue is filling up around, their OWN appeal through the surface
+// built for reviewing OTHER people's.
 func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) ([]db.AppealQueueRow, error) {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return nil, err
 	}
 	switch state {
@@ -280,7 +296,13 @@ func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	return rows, nil
+	out := make([]db.AppealQueueRow, 0, len(rows))
+	for i := range rows {
+		if r := &rows[i]; r.AppellantID == 0 || r.AppellantID != actorID {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
 }
 
 // AppealDetail is GET .../appeals/{id}'s payload: the appeal, the appealed
@@ -292,17 +314,25 @@ type AppealDetail struct {
 	Action db.ModerationAction
 }
 
-// Get returns one appeal with its appealed action. 404 for an unknown id;
-// no confidentiality rule beyond the bit — unlike a report, an appeal's
-// existence is not something its appellant or the acting moderator must be
-// kept unaware of.
+// Get returns one appeal with its appealed action. 404 for an unknown id.
+// F5 review: a moderator-appellant is refused their OWN appeal here with
+// 403 SELF_REVIEW — unlike a report's subject (who must never learn the
+// report exists at all, hence NotFound), an appellant already knows their
+// own appeal exists (it is in their own GET /api/v1/appeals/mine view), so
+// there is no existence oracle to protect against, only the same
+// conflict-of-interest guardAppellantSelfReview already refuses on the
+// write side, applied here to the read that would otherwise show them who
+// is assigned, who decided, and the acting moderator's identity.
 func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string) (*AppealDetail, error) {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return nil, err
 	}
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: appeal not found", ErrNotFound)
+	}
+	if err := s.guardAppellantSelfReview(actorID, appeal); err != nil {
+		return nil, err
 	}
 	action, err := s.st.GetModerationAction(ctx, appeal.ActionID)
 	if err != nil {
@@ -330,9 +360,16 @@ func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appea
 // Assign assigns appeal publicID to actorID. 409 if it is already assigned
 // to someone else, unless force is set and the caller outranks the current
 // assignee (the same rule ban/kick/timeout and the report queue use).
+// Claim 6 review: symmetric with Decide's self-review rule — the moderator
+// who took the appealed action may not assign it to themself either, where
+// another eligible reviewer exists. Unlike Decide (F2/F3), this eligibility
+// check is NOT run inside the assign write's own transaction: assigning is
+// reversible (a later force-reassign, or simply deciding, both still apply
+// their own guards), so the narrower TOCTOU window a non-transactional
+// check leaves here does not carry the same "irreversible decision landed
+// on stale data" risk Decide's does.
 func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID string, force bool) error {
-	actorRole, err := s.requireModerate(ctx, actorID)
-	if err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
@@ -342,12 +379,19 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	if err := s.guardAppellantSelfReview(actorID, appeal); err != nil {
 		return err
 	}
+	action, err := s.st.GetModerationAction(ctx, appeal.ActionID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	if _, err := s.checkSelfReview(ctx, actorID, action.ActorID, appeal.AppellantID); err != nil {
+		return err
+	}
 	observed := appeal.AssigneeID
 	if observed != 0 && observed != actorID {
 		if !force {
 			return fmt.Errorf("%w: already assigned", ErrConflict)
 		}
-		if err := s.assignAppealForced(ctx, appeal.ID, actorID, observed, actorRole.Position); err != nil {
+		if err := s.assignAppealForced(ctx, appeal.ID, actorID, observed); err != nil {
 			return err
 		}
 	} else if err := s.assignAppealPlain(ctx, appeal.ID, actorID, observed); err != nil {
@@ -358,10 +402,11 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	return nil
 }
 
-// assignAppealForced is Assign's force-reassign branch: actorRolePosition
-// must outrank the observed assignee's fresh position.
-func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorID, observed int64, actorRolePosition int) error {
-	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, int64(actorRolePosition))
+// assignAppealForced is Assign's force-reassign branch: actorID must
+// outrank the observed assignee's fresh position, read inside the write's
+// own transaction (see forceReassignGuarded).
+func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorID, observed int64) error {
+	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, actorID)
 	if err != nil {
 		if errors.Is(err, db.ErrForbidden) {
 			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
@@ -390,18 +435,27 @@ func (s *AppealService) assignAppealPlain(ctx context.Context, appealID, actorID
 // validAppealOutcomes is Decide's outcome enum.
 var validAppealOutcomes = map[string]bool{"upheld": true, "overturned": true}
 
-// checkSelfReview is decision 8's deciding-moderator rule: the moderator
-// who took the action may not decide its own appeal WHERE ANOTHER eligible
-// moderator exists — eligible meaning a different user holding CanModerate.
-// When the acting moderator is the only eligible one, they may decide, and
-// the caller must record that in the audit detail ("sole moderator").
+// ErrReversalFailed is a 409: overturning an appeal committed to a
+// reversal that a genuine error prevented from applying (F1 review) — the
+// whole decision was rolled back with it, so the appellant was never told
+// "overturned" while the sanction it named stayed in effect.
+var ErrReversalFailed = fmt.Errorf("%w: could not apply the decision's effect", ErrConflict)
+
+// checkSelfReview is decision 8's deciding-moderator rule (Assign's
+// non-transactional pre-check only — Decide runs the equivalent count
+// inside its own write transaction via db.DecideAppealTx, F2/F3 review):
+// the moderator who took the action may not decide (or, Claim 6, assign)
+// its own appeal WHERE ANOTHER eligible moderator exists — eligible meaning
+// a different, non-appellant, non-banned user holding CanModerate. When the
+// acting moderator is the only eligible one, they may proceed, and the
+// caller must record that in the audit detail ("sole moderator").
 // actionActorID == 0 (the action's actor already erased) never triggers
 // self-review — there is no "self" left to protect against.
-func (s *AppealService) checkSelfReview(ctx context.Context, actorID, actionActorID int64) (soleModerator bool, err error) {
+func (s *AppealService) checkSelfReview(ctx context.Context, actorID, actionActorID, appellantID int64) (soleModerator bool, err error) {
 	if actionActorID == 0 || actionActorID != actorID {
 		return false, nil
 	}
-	eligible, err := s.st.CountEligibleModerators(ctx, actorID, permissions.ModerateMembers, permissions.Administrator)
+	eligible, err := s.st.CountEligibleModerators(ctx, actorID, appellantID, permissions.ModerateMembers, permissions.Administrator)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
@@ -412,12 +466,15 @@ func (s *AppealService) checkSelfReview(ctx context.Context, actorID, actionActo
 }
 
 // Decide records outcome ("upheld" or "overturned") against appeal
-// publicID, refusing the acting moderator's own action's appeal where
-// another eligible moderator exists (checkSelfReview). Upholding changes
-// nothing further; overturning applies the kind-specific effect
-// (applyOverturn). Both audit appeal_decide with the outcome word.
+// publicID. The self-review eligibility count, the guarded write (on the
+// OBSERVED state/assignee, Claim 5), and — for an overturn — the
+// kind-specific reversal all run in ONE transaction (db.DecideAppealTx,
+// F1/F2/F3/N1 review): a moderator banned or erased between the count and
+// the write, or a reversal that genuinely fails, cannot land a decision the
+// data no longer supports. Upholding changes nothing further. Both audit
+// appeal_decide with the outcome word.
 func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, outcome, note string) error {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
 	if !validAppealOutcomes[outcome] {
@@ -441,21 +498,23 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	soleModerator, err := s.checkSelfReview(ctx, actorID, action.ActorID)
-	if err != nil {
-		return err
-	}
 
-	ok, err := s.st.DecideAppeal(ctx, appeal.ID, outcome, actorID, note)
+	needsSelfReviewCheck := action.ActorID != 0 && action.ActorID == actorID
+	result, soleModerator, err := s.st.DecideAppealTx(ctx, appeal.ID, appeal.State, appeal.AssigneeID, outcome, actorID, note,
+		needsSelfReviewCheck, appeal.AppellantID, permissions.ModerateMembers, permissions.Administrator,
+		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID})
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInternal, err)
+		slog.Error("appeal decide: transaction error", "appeal_id", appeal.ID, "action_id", action.ID, "err", err)
 	}
-	if !ok {
+	switch result {
+	case db.AppealWriteOK:
+		// fall through to the audit/notify below.
+	case db.AppealWriteSelfReview:
+		return ErrSelfReview
+	case db.AppealWriteReversalFailed:
+		return ErrReversalFailed
+	default: // db.AppealWriteConflict, including the plain Go error case above.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
-	}
-
-	if outcome == "overturned" {
-		s.applyOverturn(ctx, actorID, action)
 	}
 
 	detail := outcome
@@ -468,37 +527,4 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 
 	slog.Info("appeal decided", "actor_id", actorID, "appeal_id", appeal.ID, "outcome", outcome, "sole_moderator", soleModerator)
 	return nil
-}
-
-// applyOverturn applies the kind-specific effect of overturning action
-// (decided by decidedBy): timeout is lifted through B5-9's LiftTimeout
-// (which also handles its voice half and the live mod_action frame); ban
-// is undone through UnbanUser; warning is acknowledged, so the notice
-// disappears from the target's next connect. Removal has nothing to
-// restore — the content is gone. A failure here (e.g. nothing left to
-// lift, or the deciding moderator lacks the kind-specific permission the
-// underlying method itself gates on) is logged and swallowed: the appeal
-// decision itself has already committed, and the decision is the primary
-// contract this method's caller owes.
-func (s *AppealService) applyOverturn(ctx context.Context, decidedBy int64, action *db.ModerationAction) {
-	ctx = context.WithoutCancel(ctx)
-	if s.moderation == nil {
-		return
-	}
-	switch action.Kind {
-	case "timeout":
-		if err := s.moderation.LiftTimeout(ctx, decidedBy, action.TargetID); err != nil && !errors.Is(err, ErrNotFound) {
-			slog.Warn("appeal overturn: LiftTimeout failed", "action_id", action.ID, "err", err)
-		}
-	case "ban":
-		if err := s.moderation.UnbanUser(ctx, decidedBy, action.TargetID); err != nil {
-			slog.Warn("appeal overturn: UnbanUser failed", "action_id", action.ID, "err", err)
-		}
-	case "warning":
-		if err := s.moderation.AcknowledgeWarning(ctx, action.TargetID, action.ID); err != nil && !errors.Is(err, ErrNotFound) {
-			slog.Warn("appeal overturn: AcknowledgeWarning failed", "action_id", action.ID, "err", err)
-		}
-	case "removal":
-		// Nothing to restore — the content is gone.
-	}
 }

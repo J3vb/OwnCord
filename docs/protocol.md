@@ -1001,11 +1001,17 @@ set on a given frame:
 }
 ```
 
-Unlike a report, an appeal carries no confidentiality rule against its own
-appellant or the acting moderator — both may already see it through their
-own views — so this frame is not filtered against either principal the way
-the report variant excludes the reporter and subject. `state` here is one
-of `open`, `assigned`, `upheld`, `overturned`.
+Like the report variant, this frame is filtered against one principal: the
+appellant. A moderator who filed the appeal being changed never receives
+this frame about their OWN appeal, even though they can see its state
+through `GET /api/v1/appeals/mine` — the same confidentiality rule
+`mod_queue`'s report variant applies to the reporter and subject. The
+ACTING moderator on the appealed action is deliberately NOT excluded: they
+may already see the appeal through the queue and detail views, so there is
+no oracle to protect against for them. `state` here is one of `open`,
+`assigned`, `upheld`, `overturned`, `withdrawn` — a withdrawal broadcasts
+this frame too, so a connected moderator's queue view drops the row
+immediately rather than only on their next `GET`.
 
 ---
 

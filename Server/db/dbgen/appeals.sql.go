@@ -40,23 +40,38 @@ func (q *Queries) AssignAppeal(ctx context.Context, arg AssignAppealParams) (int
 const countUsersWithPermission = `-- name: CountUsersWithPermission :one
 SELECT COUNT(*) FROM users u
   JOIN roles r ON r.id = u.role_id
- WHERE u.id != ?1
-   AND ((r.permissions & ?2) != 0 OR (r.permissions & ?3) != 0)
+ WHERE u.id != 0
+   AND u.id != ?1
+   AND u.id != ?2
+   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND u.ban_expires <= datetime('now')))
+   AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0)
 `
 
 type CountUsersWithPermissionParams struct {
-	ExcludeID int64 `json:"excludeId"`
-	PermBit   int64 `json:"permBit"`
-	AdminBit  int64 `json:"adminBit"`
+	ExcludeActorID     int64 `json:"excludeActorId"`
+	ExcludeAppellantID int64 `json:"excludeAppellantId"`
+	PermBit            int64 `json:"permBit"`
+	AdminBit           int64 `json:"adminBit"`
 }
 
 // The eligible-moderator count for decision 8's self-review escape: every
-// user (other than exclude_id, the acting moderator) whose role holds
-// perm_bit or the Administrator bit. The bit test is done in SQL rather
-// than fetched row-by-row and checked in Go, since the count alone is all
-// the caller needs.
+// OTHER user whose role holds perm_bit or the Administrator bit, excluding
+// the acting moderator, the appellant (F2/F3 review: an appellant who
+// happens to also hold the bit must never count as their own alternative
+// reviewer), id 0 (the system actor is never a reviewer), and anyone
+// effectively banned (banned = 1 with no expiry, or an expiry still in the
+// future -- the same rule auth.IsEffectivelyBanned applies, mirrored here in
+// SQL so the count can run inside the caller's own write transaction rather
+// than round-tripping every candidate through Go). The bit test is done in
+// SQL rather than fetched row-by-row and checked in Go, since the count
+// alone is all the caller needs.
 func (q *Queries) CountUsersWithPermission(ctx context.Context, arg CountUsersWithPermissionParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countUsersWithPermission, arg.ExcludeID, arg.PermBit, arg.AdminBit)
+	row := q.db.QueryRowContext(ctx, countUsersWithPermission,
+		arg.ExcludeActorID,
+		arg.ExcludeAppellantID,
+		arg.PermBit,
+		arg.AdminBit,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -68,18 +83,26 @@ UPDATE appeals
        decision_note = ?3, decided_at = datetime('now')
  WHERE appeals.id = ?4
    AND appeals.state IN ('open', 'assigned')
+   AND appeals.state = ?5
+   AND appeals.assignee_id = ?6
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?2)
 `
 
 type DecideAppealParams struct {
-	NewState     string `json:"newState"`
-	DecidedBy    int64  `json:"decidedBy"`
-	DecisionNote string `json:"decisionNote"`
-	ID           int64  `json:"id"`
+	NewState           string `json:"newState"`
+	DecidedBy          int64  `json:"decidedBy"`
+	DecisionNote       string `json:"decisionNote"`
+	ID                 int64  `json:"id"`
+	ObservedState      string `json:"observedState"`
+	ObservedAssigneeID int64  `json:"observedAssigneeId"`
 }
 
-// new_state is 'upheld' or 'overturned', validated in Go. Guarded to
-// open/assigned states -- nothing leaves a decided or withdrawn state -- and
+// new_state is 'upheld' or 'overturned', validated in Go. Guarded on the
+// OBSERVED state and assignee (optimistic concurrency, Claim 5 review: a
+// bare "state IN ('open','assigned')" let an Assign and a Decide the caller
+// read as sequential actually land out of order -- Assign after the caller
+// read 'open' but before this write, or vice versa, both invisible to a
+// guard that does not pin the exact row the caller observed), and
 // EXISTS(users) for the deciding moderator (erased mid-flight cannot land).
 func (q *Queries) DecideAppeal(ctx context.Context, arg DecideAppealParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, decideAppeal,
@@ -87,6 +110,8 @@ func (q *Queries) DecideAppeal(ctx context.Context, arg DecideAppealParams) (int
 		arg.DecidedBy,
 		arg.DecisionNote,
 		arg.ID,
+		arg.ObservedState,
+		arg.ObservedAssigneeID,
 	)
 	if err != nil {
 		return 0, err
@@ -170,7 +195,8 @@ func (q *Queries) GetAppealByPublicID(ctx context.Context, publicID string) (App
 
 const insertAppeal = `-- name: InsertAppeal :one
 INSERT INTO appeals (public_id, action_id, appellant_id, body)
-VALUES (?, ?, ?, ?)
+SELECT ?1, ?2, ?3, ?4
+ WHERE EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?2)
 RETURNING id
 `
 
@@ -185,6 +211,11 @@ type InsertAppealParams struct {
 // shape reports.public_id uses. A violation of UNIQUE(action_id) here is the
 // race-proof half of decision 8: two simultaneous appeals against the same
 // action both reach this INSERT, and the loser's violates the constraint.
+// N4 review: INSERT ... SELECT ... WHERE EXISTS, the same shape reports'
+// InsertReport uses, so an action erased between Submit's ownership lookup
+// and this write (the target's account erasure cascades and removes the
+// action row) surfaces as zero rows (mapped to db.ErrNotFound) rather than
+// a raw foreign-key constraint error reaching the caller as a 500.
 func (q *Queries) InsertAppeal(ctx context.Context, arg InsertAppealParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, insertAppeal,
 		arg.PublicID,
@@ -195,6 +226,31 @@ func (q *Queries) InsertAppeal(ctx context.Context, arg InsertAppealParams) (int
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const liftTimeoutByActionID = `-- name: LiftTimeoutByActionID :execrows
+UPDATE moderation_actions
+   SET lifted_at = datetime('now'), lifted_by = 0
+ WHERE id = ?1 AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+`
+
+// F1/N1 review: overturning an appeal reverses the SPECIFIC appealed action,
+// never "whatever timeout is active for this target now" -- two timeouts,
+// appeal the older, overturn must not touch a newer one. Guarded on id AND
+// still-active (lifted_at IS NULL AND expires_at > now): if this row was
+// already lifted (expired naturally, lifted directly, or superseded by a
+// later TimeoutUser call, N1) overturning it is a record only, zero rows
+// affected, not an error. Runs under the system actor (0, no EXISTS(users)
+// guard): the reversal is a mechanical consequence of the appeal DECISION,
+// audited on the appeal row with the human decider's id -- it is not a
+// second moderation action by that human, so 0 is a blessed sentinel here
+// rather than a live user id needing re-validation.
+func (q *Queries) LiftTimeoutByActionID(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, liftTimeoutByActionID, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const listAppealsByState = `-- name: ListAppealsByState :many

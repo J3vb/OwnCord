@@ -274,3 +274,51 @@ func TestRateLimiter_LenSumsAcrossShards(t *testing.T) {
 		t.Errorf("Len().windows = %d after Cleanup, want 0 across all shards", wins)
 	}
 }
+
+// TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory is N2's
+// (B5-10 review) documentation of the bug a too-short cleanup horizon
+// causes, and the regression guard for its fix: three submissions seven
+// hours ago (past a 6h horizon, well under a 24h window — e.g. api's old
+// rateLimiterCleanupMaxWindow against service/appeal.go's 3-per-24h cap) are
+// wiped by a 6h cleanup even though the window they belong to has not
+// elapsed, letting a fourth submission through that a real 24h memory would
+// still refuse. A cleanup horizon that actually covers the window (24h)
+// must not lose them.
+func TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory(t *testing.T) {
+	const key = "appeal:1"
+	sevenHoursAgo := time.Now().Add(-7 * time.Hour)
+
+	t.Run("a 6h horizon forgets a 7h-old submission (the bug)", func(t *testing.T) {
+		rl := auth.NewRateLimiter()
+		for range 3 {
+			rl.SeedTimestampForTest(key, sevenHoursAgo)
+		}
+		rl.Cleanup(6 * time.Hour)
+		if wins, _ := rl.Len(); wins != 0 {
+			t.Fatalf("Len().windows = %d after a 6h cleanup, want 0 (the entry should have been evicted)", wins)
+		}
+		// With the history gone, three more submissions are allowed even
+		// though the real 24h window should still remember the first three.
+		for i := range 3 {
+			if !rl.Allow(key, 3, 24*time.Hour) {
+				t.Fatalf("Allow() = false at iteration %d after the cleanup wiped history, want true (demonstrating the bug)", i)
+			}
+		}
+	})
+
+	t.Run("a 24h horizon remembers a 7h-old submission (the fix)", func(t *testing.T) {
+		rl := auth.NewRateLimiter()
+		for range 3 {
+			rl.SeedTimestampForTest(key, sevenHoursAgo)
+		}
+		rl.Cleanup(24 * time.Hour)
+		if wins, _ := rl.Len(); wins != 1 {
+			t.Fatalf("Len().windows = %d after a 24h cleanup, want 1 (the entry must survive)", wins)
+		}
+		// The three 7h-old submissions still count against the 24h window,
+		// so a fourth is refused.
+		if rl.Allow(key, 3, 24*time.Hour) {
+			t.Fatal("Allow() = true for a 4th submission within 24h of three others, want false")
+		}
+	})
+}

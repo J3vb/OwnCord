@@ -299,10 +299,12 @@ type Store interface {
 	// AssignReport is guarded on state, the caller's last-observed assignee
 	// (optimistic concurrency) and EXISTS(users) — see db/report_queries.go.
 	AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
-	// AssignReportForced is the force-reassign path: the outrank comparison
-	// runs inside the same transaction as the write (Codex review) —
-	// ErrForbidden means the caller does not outrank the current assignee.
-	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error)
+	// AssignReportForced is the force-reassign path: BOTH principals' role
+	// positions are read fresh inside the same transaction as the write
+	// (Codex review, widened — the actor's used to be trusted stale from
+	// before the transaction opened) — ErrForbidden means the caller does
+	// not outrank the current assignee.
+	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
 	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
 	InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
@@ -374,12 +376,16 @@ type Store interface {
 	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
 	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
 	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
-	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error)
-	DecideAppeal(ctx context.Context, id int64, outcome string, decidedBy int64, note string) (bool, error)
+	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
+	// DecideAppealTx runs the self-review eligibility count, the guarded
+	// decide UPDATE (on the OBSERVED state/assignee) and, for an overturn,
+	// the reversal, all in one transaction — see db.DecideAppealTx.
+	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction) (db.AppealWriteOutcome, bool, error)
 	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
 	// CountEligibleModerators is decision 8's self-review escape: the count
-	// of users (other than excludeID) whose role holds permBit or adminBit.
-	CountEligibleModerators(ctx context.Context, excludeID, permBit, adminBit int64) (int64, error)
+	// of OTHER users (excluding excludeActorID, excludeAppellantID, id 0,
+	// and anyone effectively banned) whose role holds permBit or adminBit.
+	CountEligibleModerators(ctx context.Context, excludeActorID, excludeAppellantID, permBit, adminBit int64) (int64, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

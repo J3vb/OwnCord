@@ -474,12 +474,17 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 	subject := seedUser(t, database, "rq-forced-subject")
 	lowMod := seedUser(t, database, "rq-forced-lowmod")
 	highMod := seedUser(t, database, "rq-forced-highmod")
+	lowerActor := seedUser(t, database, "rq-forced-loweractor")
+	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5000, 'rq-forced-lower-role', 0, 5)`); err != nil {
+		t.Fatalf("seed lower role: %v", err)
+	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5001, 'rq-forced-low-role', 0, 10)`); err != nil {
 		t.Fatalf("seed low role: %v", err)
 	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5002, 'rq-forced-high-role', 0, 90)`); err != nil {
 		t.Fatalf("seed high role: %v", err)
 	}
+	setRole(t, database, lowerActor, 5000)
 	setRole(t, database, lowMod, 5001)
 	setRole(t, database, highMod, 5002)
 
@@ -488,9 +493,10 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 		t.Fatalf("first assign: %v, %v", ok, err)
 	}
 
-	// lowMod (position 10) cannot force-take it from... itself is moot; try
-	// the actual failing direction: a caller who does NOT outrank lowMod.
-	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 5); !errors.Is(err, db.ErrForbidden) || ok {
+	// lowerActor (position 5, read fresh from their own real role — the
+	// inherited-P2 fix: forceReassignGuarded takes an actor id, never a
+	// caller-supplied position) does not outrank lowMod (position 10).
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, lowerActor); !errors.Is(err, db.ErrForbidden) || ok {
 		t.Errorf("AssignReportForced without outranking = %v, %v, want false, ErrForbidden", ok, err)
 	}
 	report, err := database.GetReport(ctx, id)
@@ -503,7 +509,7 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 
 	// A caller who genuinely outranks the current (fresh-read) assignee
 	// succeeds.
-	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 90); err != nil || !ok {
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, highMod); err != nil || !ok {
 		t.Errorf("AssignReportForced outranking = %v, %v, want true, nil", ok, err)
 	}
 	report, err = database.GetReport(ctx, id)
@@ -528,7 +534,7 @@ func TestReportQueries_AssignReportForcedRefusesAnErasedCurrentAssignee(t *testi
 	const erasedAssignee = int64(999999)
 
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
-	if ok, err := database.AssignReportForced(ctx, id, newMod, erasedAssignee, 90); err != nil || ok {
+	if ok, err := database.AssignReportForced(ctx, id, newMod, erasedAssignee, newMod); err != nil || ok {
 		t.Errorf("AssignReportForced with a gone current assignee = %v, %v, want false, nil", ok, err)
 	}
 }
@@ -559,7 +565,7 @@ func TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed(t *testing.T) 
 	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || !ok {
 		t.Fatalf("close: %v, %v", ok, err)
 	}
-	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 90); err != nil || ok {
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, highMod); err != nil || ok {
 		t.Errorf("AssignReportForced on a closed report = %v, %v, want false, nil", ok, err)
 	}
 }

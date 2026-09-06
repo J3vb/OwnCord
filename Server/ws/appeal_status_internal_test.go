@@ -40,6 +40,25 @@ func TestAppeal_StatusFrameReachesAppellantAndOtherDevices(t *testing.T) {
 	if msgs := drainChan(bystander, 50*time.Millisecond); len(msgs) != 0 {
 		t.Fatalf("a different connected user received %d messages, want 0: %v", len(msgs), msgs)
 	}
+
+	// "Other devices": h.clients is keyed by user id, so a second socket for
+	// the SAME appellant (a reconnect on another device) replaces the first
+	// registration, exactly as a real device switch does — the frame must
+	// reach whichever socket is CURRENTLY registered, and the replaced one
+	// must get nothing further.
+	secondDevice := registerEmitTestClient(h, 42, 0)
+	h.NotifyAppealStatus(42, "pub-appeal-1", "upheld", &note)
+
+	if msgs := drainChan(appellant, 50*time.Millisecond); len(msgs) != 0 {
+		t.Fatalf("the replaced (first) device received %d messages, want 0: %v", len(msgs), msgs)
+	}
+	msgs = drainChan(secondDevice, 200*time.Millisecond)
+	if len(msgs) != 1 {
+		t.Fatalf("the second device got %d messages, want 1: %v", len(msgs), msgs)
+	}
+	if !bytes.Contains(msgs[0], []byte(`"state":"upheld"`)) {
+		t.Fatalf("frame = %s, want state=upheld", msgs[0])
+	}
 }
 
 // TestAppeal_StatusFrameNilDecisionNote: a submission-adjacent transition

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // I-7: loginRateLimitPerMinute must be 5 (not 60).
@@ -23,6 +24,18 @@ func TestRateLimiterCleanupHorizon_CoversMaxSlowMode(t *testing.T) {
 	if rateLimiterCleanupMaxWindow.Seconds() < maxSlowMode {
 		t.Errorf("rateLimiterCleanupMaxWindow = %v, must cover the %ds slow-mode cap",
 			rateLimiterCleanupMaxWindow, maxSlowMode)
+	}
+}
+
+// N2 (B5-10 review): the horizon must also cover every 24-hour window a
+// caller actually uses (service/auth.go's register_ip, service/appeal.go's
+// per-appellant cap) — a shorter horizon silently forgets a submission
+// before its own window elapses, so a limit meant to hold for 24 hours
+// really only holds for the horizon.
+func TestRateLimiterCleanupHorizon_CoversDailyWindows(t *testing.T) {
+	if rateLimiterCleanupMaxWindow < 24*time.Hour {
+		t.Errorf("rateLimiterCleanupMaxWindow = %v, must cover the 24h windows in service/auth.go and service/appeal.go",
+			rateLimiterCleanupMaxWindow)
 	}
 }
 

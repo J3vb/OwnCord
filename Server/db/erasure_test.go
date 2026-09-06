@@ -106,7 +106,9 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO moderation_actions (id, kind, target_id, actor_id, reason) VALUES (950, 'warning', ?, ?, 'seed warning for appeal by subject')`, other, uid)
 	exec(`INSERT INTO appeals (public_id, action_id, appellant_id, body) VALUES ('pub-appeal-950', 950, ?, 'appeal by subject')`, uid)
 	exec(`INSERT INTO moderation_actions (id, kind, target_id, actor_id, reason) VALUES (951, 'warning', ?, ?, 'seed warning decided by subject')`, other, other)
-	exec(`INSERT INTO appeals (public_id, action_id, appellant_id, body, decided_by, state, decision_note) VALUES ('pub-appeal-951', 951, ?, 'please reconsider', ?, 'upheld', 'decided')`, other, uid)
+	// assignee_id is also the subject here (24c): a real appeal is assigned
+	// before it is decided, and both columns must survive erasure zeroed.
+	exec(`INSERT INTO appeals (public_id, action_id, appellant_id, body, assignee_id, decided_by, state, decision_note) VALUES ('pub-appeal-951', 951, ?, 'please reconsider', ?, ?, 'upheld', 'decided')`, other, uid, uid)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 

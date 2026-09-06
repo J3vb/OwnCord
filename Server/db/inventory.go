@@ -76,6 +76,10 @@ var SubjectInventory = []InventoryClass{
 	// shape as every actor class above.
 	{"24a appeals by the subject", `SELECT COUNT(*) FROM appeals WHERE appellant_id = ?`, inventoryByUID},
 	{"24b appeals decided by the subject", `SELECT COUNT(*) FROM appeals WHERE decided_by = ?`, inventoryByUID},
+	// 24c: assignee_id has no token column of its own (mirrors reports'
+	// 22e and moderation_actions.lifted_by) — a bare id, its own class so a
+	// row assigned to but not yet decided by the subject is still caught.
+	{"24c appeals assigned to the subject", `SELECT COUNT(*) FROM appeals WHERE assignee_id = ?`, inventoryByUID},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.

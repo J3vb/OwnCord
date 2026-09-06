@@ -15,8 +15,14 @@ SELECT id FROM appeals WHERE action_id = ? LIMIT 1;
 -- shape reports.public_id uses. A violation of UNIQUE(action_id) here is the
 -- race-proof half of decision 8: two simultaneous appeals against the same
 -- action both reach this INSERT, and the loser's violates the constraint.
+-- N4 review: INSERT ... SELECT ... WHERE EXISTS, the same shape reports'
+-- InsertReport uses, so an action erased between Submit's ownership lookup
+-- and this write (the target's account erasure cascades and removes the
+-- action row) surfaces as zero rows (mapped to db.ErrNotFound) rather than
+-- a raw foreign-key constraint error reaching the caller as a 500.
 INSERT INTO appeals (public_id, action_id, appellant_id, body)
-VALUES (?, ?, ?, ?)
+SELECT sqlc.arg(public_id), sqlc.arg(action_id), sqlc.arg(appellant_id), sqlc.arg(body)
+ WHERE EXISTS (SELECT 1 FROM moderation_actions WHERE id = sqlc.arg(action_id))
 RETURNING id;
 
 -- name: GetAppealByID :one
@@ -78,14 +84,20 @@ UPDATE appeals
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(assignee_id));
 
 -- name: DecideAppeal :execrows
--- new_state is 'upheld' or 'overturned', validated in Go. Guarded to
--- open/assigned states -- nothing leaves a decided or withdrawn state -- and
+-- new_state is 'upheld' or 'overturned', validated in Go. Guarded on the
+-- OBSERVED state and assignee (optimistic concurrency, Claim 5 review: a
+-- bare "state IN ('open','assigned')" let an Assign and a Decide the caller
+-- read as sequential actually land out of order -- Assign after the caller
+-- read 'open' but before this write, or vice versa, both invisible to a
+-- guard that does not pin the exact row the caller observed), and
 -- EXISTS(users) for the deciding moderator (erased mid-flight cannot land).
 UPDATE appeals
    SET state = sqlc.arg(new_state), decided_by = sqlc.arg(decided_by),
        decision_note = sqlc.arg(decision_note), decided_at = datetime('now')
  WHERE appeals.id = sqlc.arg(id)
    AND appeals.state IN ('open', 'assigned')
+   AND appeals.state = sqlc.arg(observed_state)
+   AND appeals.assignee_id = sqlc.arg(observed_assignee_id)
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(decided_by));
 
 -- name: WithdrawAppeal :execrows
@@ -96,14 +108,39 @@ UPDATE appeals
 
 -- name: CountUsersWithPermission :one
 -- The eligible-moderator count for decision 8's self-review escape: every
--- user (other than exclude_id, the acting moderator) whose role holds
--- perm_bit or the Administrator bit. The bit test is done in SQL rather
--- than fetched row-by-row and checked in Go, since the count alone is all
--- the caller needs.
+-- OTHER user whose role holds perm_bit or the Administrator bit, excluding
+-- the acting moderator, the appellant (F2/F3 review: an appellant who
+-- happens to also hold the bit must never count as their own alternative
+-- reviewer), id 0 (the system actor is never a reviewer), and anyone
+-- effectively banned (banned = 1 with no expiry, or an expiry still in the
+-- future -- the same rule auth.IsEffectivelyBanned applies, mirrored here in
+-- SQL so the count can run inside the caller's own write transaction rather
+-- than round-tripping every candidate through Go). The bit test is done in
+-- SQL rather than fetched row-by-row and checked in Go, since the count
+-- alone is all the caller needs.
 SELECT COUNT(*) FROM users u
   JOIN roles r ON r.id = u.role_id
- WHERE u.id != sqlc.arg(exclude_id)
+ WHERE u.id != 0
+   AND u.id != sqlc.arg(exclude_actor_id)
+   AND u.id != sqlc.arg(exclude_appellant_id)
+   AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND u.ban_expires <= datetime('now')))
    AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0);
+
+-- name: LiftTimeoutByActionID :execrows
+-- F1/N1 review: overturning an appeal reverses the SPECIFIC appealed action,
+-- never "whatever timeout is active for this target now" -- two timeouts,
+-- appeal the older, overturn must not touch a newer one. Guarded on id AND
+-- still-active (lifted_at IS NULL AND expires_at > now): if this row was
+-- already lifted (expired naturally, lifted directly, or superseded by a
+-- later TimeoutUser call, N1) overturning it is a record only, zero rows
+-- affected, not an error. Runs under the system actor (0, no EXISTS(users)
+-- guard): the reversal is a mechanical consequence of the appeal DECISION,
+-- audited on the appeal row with the human decider's id -- it is not a
+-- second moderation action by that human, so 0 is a blessed sentinel here
+-- rather than a live user id needing re-validation.
+UPDATE moderation_actions
+   SET lifted_at = datetime('now'), lifted_by = 0
+ WHERE id = sqlc.arg(id) AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
 
 -- name: RetireRetiredCandidatesExcludingAppealed :execrows
 -- B5-10's completion of the // B5-10: comment RetireModerationActions left
