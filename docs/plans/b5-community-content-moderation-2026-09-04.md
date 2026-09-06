@@ -1647,7 +1647,7 @@ therefore **proves nothing** about the gate. Write the coverage; do not read
 the fixture as evidence.
 
 **Evidence, 2026-09-06** — branch `feature/b5-6-message-requests` from `dev`
-`a504d61e`, **behind HP-5**: draft PR to `dev` #TBD-B5-6, never merged before
+`a504d61e`, **behind HP-5**: draft PR to `dev` #1549, never merged before
 the owner signs the scorecard; commits `4b7635b8` (the feature), `be48ff25`
 (the independent review round) and `61d9696c` (its verification round). The premise the plan corrected held at the
 base: first contact happens at `sendMessageDMSideEffects`' `OpenDM`
