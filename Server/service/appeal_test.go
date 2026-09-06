@@ -165,7 +165,7 @@ func TestAppeal_KickIsNotAppealable(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.database.ForceLogoutWithAction(ctx, fixtureMember, fixtureMod, nil)
+	actionID, err := f.database.ForceLogoutWithAction(ctx, fixtureMember, fixtureMod, nil, "kicked")
 	if err != nil {
 		t.Fatalf("ForceLogoutWithAction: %v", err)
 	}

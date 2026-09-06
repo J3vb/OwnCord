@@ -54,8 +54,13 @@ type moderationActionResponse struct {
 
 // moderationActionResponses maps a ledger slice to the wire shape, resolving
 // each row's internal report_id to its public one (P2-9) — the sequential
-// id never reaches a response.
-func moderationActionResponses(ctx context.Context, svc *service.Services, rows []db.ModerationAction) []moderationActionResponse {
+// id never reaches a response. viewerID authorizes each row's report link
+// individually through the report's own confidentiality guard (P1-5, Codex
+// review): a moderator who is the SUBJECT of a report linked from their own
+// action ledger must not have that report's id surface here just because
+// they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
+// the row still renders) rather than the whole read failing.
+func moderationActionResponses(ctx context.Context, svc *service.Services, viewerID int64, rows []db.ModerationAction) []moderationActionResponse {
 	out := make([]moderationActionResponse, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
@@ -65,7 +70,7 @@ func moderationActionResponses(ctx context.Context, svc *service.Services, rows 
 			LiftedBy: r.LiftedBy, CreatedAt: r.CreatedAt,
 		}
 		if r.ReportID != nil {
-			if pub, err := svc.Reports.PublicIDFor(ctx, *r.ReportID); err == nil {
+			if pub, ok := svc.Reports.VisibleReportPublicID(ctx, viewerID, *r.ReportID); ok {
 				resp.ReportID = &pub
 			}
 		}
@@ -192,7 +197,7 @@ func handleModerationActions(svc *service.Services) http.HandlerFunc {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, moderationActionResponses(r.Context(), svc, rows))
+		writeJSON(w, http.StatusOK, moderationActionResponses(r.Context(), svc, actorID, rows))
 	}
 }
 

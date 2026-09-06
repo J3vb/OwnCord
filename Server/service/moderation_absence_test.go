@@ -88,7 +88,8 @@ func TestModerationService_RefusesNonHumanActor(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CreateMessage: %v", err)
 			}
-			return f.mod.ActOnReport(ctx, ActOnReportParams{ActorID: actorID, Kind: "removal", MessageID: msgID, ReportID: 1})
+			_, err = f.mod.ActOnReport(ctx, ActOnReportParams{ActorID: actorID, Kind: "removal", MessageID: msgID, ReportID: 1})
+			return err
 		}},
 	}
 	for _, actorID := range []int64{0, -1} {

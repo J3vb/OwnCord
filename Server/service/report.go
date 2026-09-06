@@ -453,6 +453,37 @@ func guardSelfReview(actorID int64, report *db.Report) error {
 	return nil
 }
 
+// GuardSelfReviewFor exports guardSelfReview for a caller outside this
+// package that already holds a *db.Report from another entry point (the
+// queue's act route, from Get, P2-6 Codex review) and must apply the same
+// self-review refusal before dispatching an action: Get allows a reporter to
+// read their own filing, but acting on it is the identical conflict of
+// interest Assign/Note/Close already refuse.
+func GuardSelfReviewFor(actorID int64, report *db.Report) error {
+	return guardSelfReview(actorID, report)
+}
+
+// VisibleReportPublicID resolves reportID's public id for viewerID, applying
+// the same confidentiality guard Get uses (guardConfidentiality): the
+// viewer's own report as SUBJECT never surfaces its id, even from a surface
+// that already authorized the read on other grounds — a moderator who still
+// holds MODERATE_MEMBERS reading their own moderation-action ledger, in
+// particular (P1-5, Codex review: GET .../users/{id}/actions and the queue
+// detail's action list both render a linked report's public id with no
+// per-row check of their own). false also covers a report id that no longer
+// resolves — a lookup failure is not itself a leak, so the caller renders
+// the field absent rather than surfacing an internal error.
+func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, reportID int64) (string, bool) {
+	report, err := s.st.GetReport(ctx, reportID)
+	if err != nil {
+		return "", false
+	}
+	if guardConfidentiality(viewerID, report) != nil {
+		return "", false
+	}
+	return report.PublicID, true
+}
+
 // Queue lists reports for the moderator view: state is "open", "assigned",
 // "closed" (every terminal state), or "" for the default open+assigned
 // view. A report about the caller is excluded even when it would otherwise

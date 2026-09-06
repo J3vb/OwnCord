@@ -195,6 +195,7 @@ type ModerationAction struct {
 	AcknowledgedAt *string `json:"acknowledgedAt"`
 	LiftedAt       *string `json:"liftedAt"`
 	LiftedBy       int64   `json:"liftedBy"`
+	VoiceMuted     int64   `json:"voiceMuted"`
 	CreatedAt      string  `json:"createdAt"`
 }
 

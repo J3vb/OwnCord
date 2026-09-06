@@ -209,10 +209,10 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 			Body: detail.Appeal.Body, State: detail.Appeal.State, AssigneeID: detail.Appeal.AssigneeID,
 			DecidedBy: detail.Appeal.DecidedBy, DecisionNote: detail.Appeal.DecisionNote,
 			CreatedAt: detail.Appeal.CreatedAt, DecidedAt: detail.Appeal.DecidedAt,
-			Action: moderationActionResponses(r.Context(), svc, []db.ModerationAction{detail.Action})[0],
+			Action: moderationActionResponses(r.Context(), svc, actorID, []db.ModerationAction{detail.Action})[0],
 		}
 		if detail.Action.ReportID != nil {
-			if pub, err := svc.Reports.PublicIDFor(r.Context(), *detail.Action.ReportID); err == nil {
+			if pub, ok := svc.Reports.VisibleReportPublicID(r.Context(), actorID, *detail.Action.ReportID); ok {
 				resp.ReportID = &pub
 			}
 		}

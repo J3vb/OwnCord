@@ -2035,13 +2035,27 @@ then requires the bit that action needs (see the permission ladder below).
 28 days). `message_id` applies to `removal` only, and defaults to the
 report's own target when the report is against a message.
 
+Dispatches through the exact same service call the direct route for that
+`kind` uses, and sends the same post-commit transport: `ban` broadcasts
+`member_ban` (and disconnects the target) exactly like
+`PATCH /admin/api/users/{id}` does; `removal` broadcasts `chat_bulk_deleted`
+for the removed message exactly like the channel purge route does.
+
 #### Response 204 No Content
+
+...for every `kind` except `timeout`, which answers `200 OK` with the same
+`voice` outcome `POST .../timeout` returns:
+
+```json
+{ "voice": "applied" }
+```
 
 #### Errors
 
 Same shape as `POST /api/v1/moderation/users/{id}/warn`/`timeout` below,
-plus the report read's own `403 SELF_REVIEW` and `404 NOT_FOUND` (missing
-report, or the caller is its subject).
+plus the report read's own `403 SELF_REVIEW` (also given when the caller
+files the report and then tries to act on it themselves) and `404 NOT_FOUND`
+(missing report, or the caller is its subject).
 
 ---
 
@@ -2066,10 +2080,20 @@ returning immediately.
 
 Every action writes a row to the moderator-action ledger, in the same
 transaction as its effect, so an appeal (B5-10) always has something to
-reference. The actor must strictly outrank the target by role position
-(`requireOutranks`), re-validated live at write time so a target promoted
-between the check and the write is refused, not sanctioned. Self, a peer, a
-superior, and the owner as target are all refused.
+reference.
+
+**Removal is the one exception to the hierarchy rule below** (a conscious
+decision, not an oversight): it is governed by channel `MANAGE_MESSAGES`
+alone, exactly as message deletion always has been, with no requirement to
+outrank the message's author — a channel moderator routinely removes content
+from users the role hierarchy does not place them above. This holds through
+every entry point removal has, including the report-linked `act` route.
+
+Warning, timeout, kick and ban all additionally require the actor to
+strictly outrank the target by role position (`requireOutranks`),
+re-validated live at write time so a target promoted between the check and
+the write is refused, not sanctioned. Self, a peer, a superior, and the
+owner as target are all refused for these four kinds.
 
 ### POST /api/v1/moderation/users/{id}/warn
 
@@ -2122,13 +2146,19 @@ join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
 { "id": 43, "voice": "applied" }
 ```
 
-`voice` is `"applied"` when the actor also holds `MUTE_MEMBERS` and the
-target is currently in voice (the existing server-mute mechanism is
-applied), or `"skipped"` when the actor lacks `MUTE_MEMBERS` — the timeout
-still lands for text and reactions either way; it never grants a voice mute
-a `MUTE_MEMBERS`-less moderator could not perform themselves. A live target
-also receives a `mod_action` frame carrying `expires_at`. The restriction is
-live on the target's very next send — no reconnect needed.
+`voice` is `"applied"` only when the mute actually landed: the actor holds
+effective `MUTE_MEMBERS` in the target's CURRENT voice channel specifically
+(a channel-level deny, a room the actor cannot see, or — for a DM call — the
+actor not being a participant all count as not holding it there, even with
+the server-wide bit), the target is currently connected to voice, and the
+underlying server-mute call actually matched a live connection. Every other
+case — no channel authority there, the target not in voice at all, or a
+channel-switch race that leaves the mute unmatched — answers `"skipped"`.
+The timeout still lands for text and reactions either way; it never grants a
+voice mute the actor could not perform through the ordinary voice-moderation
+route. A live target also receives a `mod_action` frame carrying
+`expires_at`. The restriction is live on the target's very next send — no
+reconnect needed.
 
 #### Errors
 
@@ -2158,6 +2188,12 @@ timeout to lift.
 The full moderator-action ledger for one user, newest first: kind, actor,
 reason, timestamps, and the linked report's public id when one exists.
 **Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+A row's `report_id` is omitted (never rendered, not merely nulled) when the
+caller is the confidential SUBJECT of that report — the same guard
+`GET .../queue/{id}` applies, run per row here: holding `MODERATE_MEMBERS`
+is not enough to read a report's id about yourself just because it happens
+to be linked from your own action ledger.
 
 ---
 

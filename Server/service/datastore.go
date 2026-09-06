@@ -326,7 +326,15 @@ type Store interface {
 	// refused (db.ErrOutranked), not sanctioned.
 	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
 	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error)
-	LiftTimeout(ctx context.Context, targetID, actorID int64) (bool, error)
+	// LiftTimeout reports whether any row was lifted and whether any of the
+	// lifted rows had actually applied the voice half (voice_muted, P1-4) —
+	// the caller decides whether to clear the SFU mute from that and its own
+	// permissions.CanModerateVoice check.
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (lifted bool, voiceMuted bool, err error)
+	// SetTimeoutVoiceMuted records that actionID's voice half actually
+	// landed a mute (P1-4/P3-14), after the fact — Timeout's own write
+	// cannot know the outcome until the voice muter has been called.
+	SetTimeoutVoiceMuted(ctx context.Context, actionID int64) error
 	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
 	// Subject.TimedOut is filled from.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
@@ -339,11 +347,16 @@ type Store interface {
 	// shape the plan asks for, so the existing BanUser/ForceLogoutUser
 	// signatures on this interface are untouched.
 	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
-	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64) (int64, error)
+	// ForceLogoutWithAction's reason is the ledger row's text; empty falls
+	// back to the fixed phrase every direct caller used before P2-10 (Codex
+	// review) let ActOnReport store a caller-submitted one instead.
+	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
 	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are
 	// DeleteMessage/PurgeChannelMessages plus a removal ledger row, in the
 	// same transaction, when the deleter is not the author.
-	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64) error
+	// DeleteMessageWithRemoval's reason is the ledger row's text; empty
+	// falls back to the fixed phrase "message removed" (P2-10).
+	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
 	// GetModerationAction is B5-10's appeal submission and decision both

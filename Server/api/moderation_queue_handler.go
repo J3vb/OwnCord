@@ -99,6 +99,14 @@ type actOnReportRequest struct {
 	MessageID       string `json:"message_id,omitempty"`
 }
 
+// actOnReportResponse is POST .../act's success body for kind="timeout"
+// only (every other kind answers 204, unchanged): Voice is "applied" or
+// "skipped", mirroring the direct timeout route's own response (P2-7,
+// Codex review — this outcome used to be dropped entirely here).
+type actOnReportResponse struct {
+	Voice string `json:"voice"`
+}
+
 // MountModerationQueueRoutes registers the moderator queue: read, assign,
 // note, close. Authorization is enforced inside ReportService (CanModerate,
 // the canonical predicate) so these handlers carry no permission check of
@@ -113,7 +121,7 @@ func MountModerationQueueRoutes(r chi.Router, svc *service.Services, hub ModQueu
 		r.Post("/{id}/assign", handleModerationQueueAssign(svc, hub))
 		r.Post("/{id}/notes", handleModerationQueueNote(svc))
 		r.Post("/{id}/close", handleModerationQueueClose(svc, hub))
-		r.Post("/{id}/act", handleModerationQueueAct(svc))
+		r.Post("/{id}/act", handleModerationQueueAct(svc, hub))
 	})
 }
 
@@ -226,7 +234,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 			AssigneeID: detail.Report.AssigneeID, Outcome: detail.Report.Outcome,
 			CreatedAt: detail.Report.CreatedAt, UpdatedAt: detail.Report.UpdatedAt, ClosedAt: detail.Report.ClosedAt,
 			Evidence: evidence, Notes: notes, Events: events,
-			Actions: moderationActionResponses(r.Context(), svc, actionRows),
+			Actions: moderationActionResponses(r.Context(), svc, actorID, actionRows),
 		})
 	}
 }
@@ -236,7 +244,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 // item 7). svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
 // confidentiality, self-review) and resolves the subject/target this
 // dispatches against.
-func handleModerationQueueAct(svc *service.Services) http.HandlerFunc {
+func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
@@ -261,6 +269,15 @@ func handleModerationQueueAct(svc *service.Services) http.HandlerFunc {
 			writeReportServiceError(r.Context(), w, err)
 			return
 		}
+		// Get allows the report's own REPORTER to read it (it is their own
+		// filing, already visible via Mine()), but acting on it is the same
+		// conflict of interest Assign/Note/Close already refuse (P2-6, Codex
+		// review): without this a moderator could act on a report they
+		// themselves filed.
+		if err := service.GuardSelfReviewFor(actorID, &detail.Report); err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
 		params := service.ActOnReportParams{
 			ActorID: actorID, Kind: req.Kind, Reason: req.Reason,
 			DurationSeconds: req.DurationSeconds, TargetID: detail.Report.SubjectID, ReportID: id,
@@ -277,8 +294,26 @@ func handleModerationQueueAct(svc *service.Services) http.HandlerFunc {
 			}
 			params.MessageID = msgID
 		}
-		if err := svc.Moderation.ActOnReport(r.Context(), params); err != nil {
+		result, err := svc.Moderation.ActOnReport(r.Context(), params)
+		if err != nil {
 			writeServiceError(r.Context(), w, err)
+			return
+		}
+		// Dispatch the SAME transport broadcasts the direct routes send after
+		// their own commit (P2-7, Codex review: this used to be a bare 204,
+		// silently dropping chat_deleted for removal and member_ban/disconnect
+		// for ban — only Warn/Timeout's own ModActionNotifier reaches a live
+		// target through this path, since ModerationService owns that one).
+		if hub != nil {
+			switch result.Kind {
+			case "ban":
+				hub.BroadcastMemberBan(result.TargetID)
+			case "removal":
+				hub.BroadcastChatBulkDeleted(result.ChannelID, []int64{result.MessageID})
+			}
+		}
+		if result.Kind == "timeout" {
+			writeJSON(w, http.StatusOK, actOnReportResponse{Voice: result.Voice})
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

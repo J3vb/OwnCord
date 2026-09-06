@@ -265,6 +265,6 @@ func (d *DB) GetModerationAction(ctx context.Context, id int64) (*ModerationActi
 		}
 		return nil, fmt.Errorf("GetModerationAction: %w", err)
 	}
-	a := moderationActionFromRow(r)
+	a := moderationActionFromRow(moderationActionRow(r))
 	return &a, nil
 }

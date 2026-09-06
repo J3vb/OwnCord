@@ -47,7 +47,43 @@ func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, pe
 		Delete("/users/{id}/sessions", handleForceLogout(mod))
 	r.With(requirePerm(permissions.Administrator)).
 		Delete("/users/{id}", handleDeleteUser(mod, hub))
-	r.Post("/users/{id}/recovery-credential", ownerOnlyMiddleware(handleIssueRecoveryCredential(svc.Auth)).ServeHTTP)
+	ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
+}
+
+// OwnerOnlyRoute is one (method, pattern) pair ownerOnly registered, relative
+// to NewAdminAPI's own router (the same shape doRequest's test helper takes
+// paths in — no "/admin/api" prefix).
+type OwnerOnlyRoute struct {
+	Method  string
+	Pattern string
+}
+
+// ownerOnlyRoutes accumulates every route ownerOnly registers during the
+// most recent NewAdminAPI call — reset at the top of NewAdminAPI, since each
+// call builds one fresh router and its own complete set. Not safe for
+// concurrent NewAdminAPI calls (none exist today; production builds exactly
+// one router at startup).
+var ownerOnlyRoutes []OwnerOnlyRoute
+
+// OwnerOnlyRoutesForTest returns the routes the most recent NewAdminAPI call
+// registered through ownerOnly. Test-only surface (admin_test's route-walk
+// test, P2-13 Codex review); production code never reads this.
+func OwnerOnlyRoutesForTest() []OwnerOnlyRoute {
+	return ownerOnlyRoutes
+}
+
+// ownerOnly is the ONE call site every Owner-gated admin route goes through
+// (minting or revoking an API token, taking or restoring a backup, checking
+// or applying an update, issuing a recovery credential) — registering h on r
+// wrapped in ownerOnlyMiddleware, and recording the (method, pattern) pair so
+// a test can walk the exact set NewAdminAPI wires (OwnerOnlyRoutesForTest)
+// instead of a second, hand-maintained list beside it that the addition of a
+// new owner-only route could leave stale (P2-13, Codex review: the previous
+// test hard-coded six routes and had already drifted, missing backup delete
+// and restore).
+func ownerOnly(r chi.Router, method, pattern string, h http.Handler) {
+	ownerOnlyRoutes = append(ownerOnlyRoutes, OwnerOnlyRoute{Method: method, Pattern: pattern})
+	r.Method(method, pattern, ownerOnlyMiddleware(h))
 }
 
 // mountRetentionRoutes registers message retention (B4-11) under
@@ -140,6 +176,9 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
+	// Fresh per call: ownerOnly (below) rebuilds this from scratch for the
+	// router this call is about to return.
+	ownerOnlyRoutes = nil
 
 	// The four services this mux routes to, named once. NewAdminAPI used to
 	// take them as four positional parameters; each B3-8 family that moved an
@@ -236,38 +275,20 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			Get("/audit-log", handleGetAuditLog(settings))
 		// API tokens — Owner-only. Minting a network-reachable, revocation-
 		// surviving bearer credential is gated like backups/updates.
-		r.Get("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleListAPITokens(svc.Tokens)).ServeHTTP(w, req)
-		}))
-		r.Post("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleCreateAPIToken(svc.Tokens)).ServeHTTP(w, req)
-		}))
-		r.Delete("/tokens/{id}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleRevokeAPIToken(svc.Tokens)).ServeHTTP(w, req)
-		}))
+		ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
+		ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
+		ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
 			r.Patch("/settings", handlePatchSettings(settings))
 		})
-		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleBackup(database)).ServeHTTP(w, req)
-		}))
-		r.Get("/backups", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleListBackups()).ServeHTTP(w, req)
-		}))
-		r.Delete("/backups/{name}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleDeleteBackup(database)).ServeHTTP(w, req)
-		}))
-		r.Post("/backups/{name}/restore", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleRestoreBackup(database, hub)).ServeHTTP(w, req)
-		}))
-		r.Get("/updates", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleCheckUpdate(u)).ServeHTTP(w, req)
-		}))
-		r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleApplyUpdate(database, u, hub, version)).ServeHTTP(w, req)
-		}))
+		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))
+		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
+		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
+		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, hub))
+		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
+		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version))
 	})
 
 	return r

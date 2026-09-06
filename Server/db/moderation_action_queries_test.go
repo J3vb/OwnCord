@@ -79,12 +79,15 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 		t.Fatal("HasActiveTimeout = false right after TimeoutUser")
 	}
 
-	lifted, err := database.LiftTimeout(ctx, memberID, ownerID)
+	lifted, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("LiftTimeout: %v", err)
 	}
 	if !lifted {
 		t.Fatal("LiftTimeout reported nothing lifted")
+	}
+	if voiceMuted {
+		t.Fatal("voiceMuted = true, want false: this timeout never called SetTimeoutVoiceMuted")
 	}
 	active, err = database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
@@ -95,7 +98,7 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 	}
 
 	// Lifting again finds nothing.
-	lifted, err = database.LiftTimeout(ctx, memberID, ownerID)
+	lifted, _, err = database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("second LiftTimeout: %v", err)
 	}
@@ -104,25 +107,164 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 	}
 }
 
-func TestLiftTimeout_ErasedLifterRefused(t *testing.T) {
+// TestLiftTimeout_NonexistentLifterRefused: a lifter id with no users row —
+// erased mid-flight, or simply never existed — fails the transactional rank
+// re-check (P2-8, Codex review: LiftTimeout previously had no rank check at
+// all) rather than silently reporting "nothing lifted".
+func TestLiftTimeout_NonexistentLifterRefused(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
 	if _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	if _, err := database.EraseAccount(ctx, ownerID, ""); err != nil {
-		// The owner is the only admin-class account here, so EraseAccount may
-		// refuse with ErrLastAdmin -- either way the point is the GUARD,
-		// exercised directly below regardless of whether this erasure landed.
-		t.Logf("EraseAccount(owner): %v (continuing to exercise the guard directly)", err)
+	lifted, _, err := database.LiftTimeout(ctx, memberID, 999999)
+	if !errors.Is(err, db.ErrOutranked) {
+		t.Fatalf("LiftTimeout with a nonexistent lifter: want db.ErrOutranked, got (%v, %v)", lifted, err)
 	}
-	lifted, err := database.LiftTimeout(ctx, memberID, 999999)
+	active, err := database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
-		t.Fatalf("LiftTimeout with a nonexistent lifter: %v", err)
+		t.Fatalf("HasActiveTimeout: %v", err)
 	}
-	if lifted {
-		t.Fatal("LiftTimeout succeeded for a lifter id with no users row")
+	if !active {
+		t.Fatal("a refused lift left the timeout inactive")
+	}
+}
+
+// TestLiftTimeout_DemotedActorRefused is P2-8's live rank re-check: an actor
+// who outranked the target when the timeout was issued but has since been
+// demoted to the target's rank or below is refused AT THE WRITE, not merely
+// by a caller's earlier (possibly stale) check.
+func TestLiftTimeout_DemotedActorRefused(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	if _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	// Demote the "owner" role itself to the member role's own position (40),
+	// so ownerID no longer outranks memberID.
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET position = 40 WHERE id = 1`); err != nil {
+		t.Fatalf("demote owner role: %v", err)
+	}
+	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if !errors.Is(err, db.ErrOutranked) {
+		t.Fatalf("LiftTimeout by a demoted actor: want db.ErrOutranked, got (%v, %v)", lifted, err)
+	}
+	active, err := database.HasActiveTimeout(ctx, memberID)
+	if err != nil {
+		t.Fatalf("HasActiveTimeout: %v", err)
+	}
+	if !active {
+		t.Fatal("a refused lift left the timeout inactive")
+	}
+}
+
+// TestTimeoutUser_SupersedesEarlierActiveTimeout is P2-9: issuing a new
+// timeout on a target who already has one active lifts the earlier row in
+// the SAME transaction, so LiftTimeout is never left choosing between
+// overlapping active rows.
+func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	firstID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "first", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(first): %v", err)
+	}
+	secondID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(second): %v", err)
+	}
+
+	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
+	if err != nil {
+		t.Fatalf("ListModerationActionsForTarget: %v", err)
+	}
+	byID := map[int64]int{}
+	for i, r := range rows {
+		byID[r.ID] = i
+	}
+	first, ok := byID[firstID]
+	if !ok {
+		t.Fatalf("first timeout row %d missing from %+v", firstID, rows)
+	}
+	if rows[first].LiftedAt == nil {
+		t.Fatal("the first (superseded) timeout was not lifted when the second was issued")
+	}
+	second, ok := byID[secondID]
+	if !ok {
+		t.Fatalf("second timeout row %d missing from %+v", secondID, rows)
+	}
+	if rows[second].LiftedAt != nil {
+		t.Fatal("the second (current) timeout must stay active, not lifted by its own insert")
+	}
+
+	// Only the second is active; a single lift call lifts exactly it.
+	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if !lifted {
+		t.Fatal("LiftTimeout found nothing active after supersede left exactly one row")
+	}
+}
+
+// TestLiftTimeout_LiftsEveryActiveRow is P2-9's defensive half: even if more
+// than one row is somehow active at once (bypassing TimeoutUser's own
+// supersede, as a raw insert below does to model a pre-existing overlap),
+// LiftTimeout lifts ALL of them in one call, not only the newest.
+func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	future := time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:04:05")
+	for range 2 {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO moderation_actions (kind, target_id, actor_id, reason, expires_at) VALUES ('timeout', ?, ?, 'x', ?)`,
+			memberID, ownerID, future); err != nil {
+			t.Fatalf("seed overlapping active timeout: %v", err)
+		}
+	}
+
+	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if !lifted {
+		t.Fatal("LiftTimeout reported nothing lifted")
+	}
+	active, err := database.HasActiveTimeout(ctx, memberID)
+	if err != nil {
+		t.Fatalf("HasActiveTimeout: %v", err)
+	}
+	if active {
+		t.Fatal("a row was still active after LiftTimeout — it must lift every active row, not just one")
+	}
+}
+
+// TestLiftTimeout_ReportsVoiceMuted is P1-4's db-level half: LiftTimeout
+// reports voiceMuted=true only when SetTimeoutVoiceMuted was called on the
+// active row, and false otherwise — the caller (ModerationService) decides
+// from that, plus its own live CanModerateVoice check, whether to clear the
+// SFU mute.
+func TestLiftTimeout_ReportsVoiceMuted(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	id, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	if err := database.SetTimeoutVoiceMuted(ctx, id); err != nil {
+		t.Fatalf("SetTimeoutVoiceMuted: %v", err)
+	}
+	_, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if !voiceMuted {
+		t.Fatal("voiceMuted = false, want true: SetTimeoutVoiceMuted was called on the active row")
 	}
 }
 
@@ -245,7 +387,7 @@ func TestForceLogoutWithAction_WritesLedgerRowAndRevokesSessions(t *testing.T) {
 	if _, err := database.CreateSession(ctx, memberID, "moderation-kick-test", "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	id, err := database.ForceLogoutWithAction(ctx, memberID, ownerID, nil)
+	id, err := database.ForceLogoutWithAction(ctx, memberID, ownerID, nil, "")
 	if err != nil {
 		t.Fatalf("ForceLogoutWithAction: %v", err)
 	}
@@ -282,7 +424,7 @@ func TestDeleteMessageWithRemoval(t *testing.T) {
 	}
 	// A self-delete (or non-mod delete) writes no ledger row: unchanged
 	// DeleteMessage behavior.
-	if err := database.DeleteMessageWithRemoval(ctx, selfMsgID, memberID, false, memberID, nil); err != nil {
+	if err := database.DeleteMessageWithRemoval(ctx, selfMsgID, memberID, false, memberID, nil, ""); err != nil {
 		t.Fatalf("DeleteMessageWithRemoval (self): %v", err)
 	}
 	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
@@ -297,7 +439,7 @@ func TestDeleteMessageWithRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMessage(mod): %v", err)
 	}
-	if err := database.DeleteMessageWithRemoval(ctx, modMsgID, ownerID, true, memberID, nil); err != nil {
+	if err := database.DeleteMessageWithRemoval(ctx, modMsgID, ownerID, true, memberID, nil, "violated rule 3"); err != nil {
 		t.Fatalf("DeleteMessageWithRemoval (moderator): %v", err)
 	}
 	msg, err := database.GetMessage(ctx, modMsgID)
@@ -311,8 +453,10 @@ func TestDeleteMessageWithRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModerationActionsForTarget (2): %v", err)
 	}
-	if len(rows) != 1 || rows[0].Kind != "removal" {
-		t.Fatalf("rows = %+v, want exactly one removal row", rows)
+	// The submitted reason is stored verbatim (P2-10, Codex review) rather
+	// than always the fixed phrase "message removed".
+	if len(rows) != 1 || rows[0].Kind != "removal" || rows[0].Reason != "violated rule 3" {
+		t.Fatalf("rows = %+v, want exactly one removal row reasoned %q", rows, "violated rule 3")
 	}
 }
 
@@ -331,7 +475,7 @@ func TestDeleteMessageWithRemoval_ErasedActorRefused(t *testing.T) {
 	}
 
 	const noSuchActor = int64(999999)
-	if err := database.DeleteMessageWithRemoval(ctx, msgID, noSuchActor, true, memberID, nil); !errors.Is(err, db.ErrOutranked) {
+	if err := database.DeleteMessageWithRemoval(ctx, msgID, noSuchActor, true, memberID, nil, ""); !errors.Is(err, db.ErrOutranked) {
 		t.Fatalf("DeleteMessageWithRemoval with a nonexistent actor: want db.ErrOutranked, got %v", err)
 	}
 	msg, err := database.GetMessage(ctx, msgID)

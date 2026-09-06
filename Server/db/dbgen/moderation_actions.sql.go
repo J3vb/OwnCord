@@ -32,40 +32,6 @@ func (q *Queries) AcknowledgeWarning(ctx context.Context, arg AcknowledgeWarning
 	return result.RowsAffected()
 }
 
-const getActiveTimeout = `-- name: GetActiveTimeout :one
-SELECT id, target_id, actor_id, report_id, reason, expires_at, created_at
-  FROM moderation_actions
- WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
- ORDER BY id DESC
- LIMIT 1
-`
-
-type GetActiveTimeoutRow struct {
-	ID        int64   `json:"id"`
-	TargetID  int64   `json:"targetId"`
-	ActorID   int64   `json:"actorId"`
-	ReportID  *int64  `json:"reportId"`
-	Reason    string  `json:"reason"`
-	ExpiresAt *string `json:"expiresAt"`
-	CreatedAt string  `json:"createdAt"`
-}
-
-// The active timeout row itself, for LiftTimeout's guard.
-func (q *Queries) GetActiveTimeout(ctx context.Context, targetID int64) (GetActiveTimeoutRow, error) {
-	row := q.db.QueryRowContext(ctx, getActiveTimeout, targetID)
-	var i GetActiveTimeoutRow
-	err := row.Scan(
-		&i.ID,
-		&i.TargetID,
-		&i.ActorID,
-		&i.ReportID,
-		&i.Reason,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getModerationActionByID = `-- name: GetModerationActionByID :one
 SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
        expires_at, acknowledged_at, lifted_at, lifted_by, created_at
@@ -73,12 +39,27 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  WHERE id = ?
 `
 
+type GetModerationActionByIDRow struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	TargetID       int64   `json:"targetId"`
+	ActorID        int64   `json:"actorId"`
+	ActorToken     *string `json:"actorToken"`
+	ReportID       *int64  `json:"reportId"`
+	Reason         string  `json:"reason"`
+	ExpiresAt      *string `json:"expiresAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	LiftedBy       int64   `json:"liftedBy"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
 // B5-10's appeal submission and decision both need the appealed action's
 // own row: its kind (appealable or not), its target (must be the appellant),
 // and its actor (the deciding-moderator self-review check).
-func (q *Queries) GetModerationActionByID(ctx context.Context, id int64) (ModerationAction, error) {
+func (q *Queries) GetModerationActionByID(ctx context.Context, id int64) (GetModerationActionByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getModerationActionByID, id)
-	var i ModerationAction
+	var i GetModerationActionByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,
@@ -150,28 +131,67 @@ func (q *Queries) InsertModerationAction(ctx context.Context, arg InsertModerati
 	return id, err
 }
 
-const liftTimeout = `-- name: LiftTimeout :execrows
+const liftAllActiveTimeouts = `-- name: LiftAllActiveTimeouts :execrows
 UPDATE moderation_actions
    SET lifted_at = datetime('now'), lifted_by = ?1
- WHERE moderation_actions.id = ?2
+ WHERE target_id = ?2
    AND kind = 'timeout'
    AND lifted_at IS NULL
+   AND expires_at > datetime('now')
    AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?1)
 `
 
-type LiftTimeoutParams struct {
+type LiftAllActiveTimeoutsParams struct {
 	LiftedBy int64 `json:"liftedBy"`
-	ActionID int64 `json:"actionId"`
+	TargetID int64 `json:"targetId"`
 }
 
-// Guarded on EXISTS(users) for the lifting actor, same shape as the report
-// queries' moderator-erased-mid-flight guard.
-func (q *Queries) LiftTimeout(ctx context.Context, arg LiftTimeoutParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, liftTimeout, arg.LiftedBy, arg.ActionID)
+// Lifts EVERY currently-active timeout row for target_id in one statement
+// (P2-9), guarded on EXISTS(users) for the lifting actor same as before --
+// rather than the single newest row LiftTimeout used to touch.
+func (q *Queries) LiftAllActiveTimeouts(ctx context.Context, arg LiftAllActiveTimeoutsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, liftAllActiveTimeouts, arg.LiftedBy, arg.TargetID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const listActiveTimeouts = `-- name: ListActiveTimeouts :many
+SELECT id, voice_muted FROM moderation_actions
+ WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+`
+
+type ListActiveTimeoutsRow struct {
+	ID         int64 `json:"id"`
+	VoiceMuted int64 `json:"voiceMuted"`
+}
+
+// Every currently-active timeout row for target_id -- normally at most one
+// after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts on
+// all of them defensively (P2-9). voice_muted tells LiftTimeout whether any
+// of them actually applied the voice half (P1-4).
+func (q *Queries) ListActiveTimeouts(ctx context.Context, targetID int64) ([]ListActiveTimeoutsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveTimeouts, targetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTimeoutsRow{}
+	for rows.Next() {
+		var i ListActiveTimeoutsRow
+		if err := rows.Scan(&i.ID, &i.VoiceMuted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listModerationActionsForReport = `-- name: ListModerationActionsForReport :many
@@ -182,16 +202,31 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  ORDER BY created_at, id
 `
 
+type ListModerationActionsForReportRow struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	TargetID       int64   `json:"targetId"`
+	ActorID        int64   `json:"actorId"`
+	ActorToken     *string `json:"actorToken"`
+	ReportID       *int64  `json:"reportId"`
+	Reason         string  `json:"reason"`
+	ExpiresAt      *string `json:"expiresAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	LiftedBy       int64   `json:"liftedBy"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
 // The queue detail's "actions taken" list.
-func (q *Queries) ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ModerationAction, error) {
+func (q *Queries) ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ListModerationActionsForReportRow, error) {
 	rows, err := q.db.QueryContext(ctx, listModerationActionsForReport, reportID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ModerationAction{}
+	items := []ListModerationActionsForReportRow{}
 	for rows.Next() {
-		var i ModerationAction
+		var i ListModerationActionsForReportRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Kind,
@@ -227,17 +262,32 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  ORDER BY created_at DESC, id DESC
 `
 
+type ListModerationActionsForTargetRow struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	TargetID       int64   `json:"targetId"`
+	ActorID        int64   `json:"actorId"`
+	ActorToken     *string `json:"actorToken"`
+	ReportID       *int64  `json:"reportId"`
+	Reason         string  `json:"reason"`
+	ExpiresAt      *string `json:"expiresAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	LiftedBy       int64   `json:"liftedBy"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
 // GET /api/v1/moderation/users/{id}/actions: the full ledger for one user,
 // newest first.
-func (q *Queries) ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ModerationAction, error) {
+func (q *Queries) ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ListModerationActionsForTargetRow, error) {
 	rows, err := q.db.QueryContext(ctx, listModerationActionsForTarget, targetID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ModerationAction{}
+	items := []ListModerationActionsForTargetRow{}
 	for rows.Next() {
-		var i ModerationAction
+		var i ListModerationActionsForTargetRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Kind,
@@ -326,6 +376,49 @@ DELETE FROM moderation_actions
 // touched here.
 func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retireRetiredCandidates, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setTimeoutVoiceMuted = `-- name: SetTimeoutVoiceMuted :exec
+UPDATE moderation_actions SET voice_muted = 1 WHERE id = ? AND kind = 'timeout'
+`
+
+// Records that this timeout row's voice half actually landed a mute
+// (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
+// never reconsidered afterward.
+func (q *Queries) SetTimeoutVoiceMuted(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, setTimeoutVoiceMuted, id)
+	return err
+}
+
+const supersedeActiveTimeouts = `-- name: SupersedeActiveTimeouts :execrows
+UPDATE moderation_actions
+   SET lifted_at = datetime('now'), lifted_by = ?1
+ WHERE target_id = ?2
+   AND kind = 'timeout'
+   AND lifted_at IS NULL
+   AND expires_at > datetime('now')
+   AND id != ?3
+`
+
+type SupersedeActiveTimeoutsParams struct {
+	LiftedBy int64 `json:"liftedBy"`
+	TargetID int64 `json:"targetId"`
+	ID       int64 `json:"id"`
+}
+
+// On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
+// still-active timeout row for the same target, in the same transaction as
+// the new row's insert, so a repeated timeout never leaves two overlapping
+// active rows for LiftTimeout to pick between -- the single-row
+// GetActiveTimeout this replaced used to silently orphan every row but the
+// newest. id excludes the row this same transaction just inserted, which
+// must stay active.
+func (q *Queries) SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, supersedeActiveTimeouts, arg.LiftedBy, arg.TargetID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
