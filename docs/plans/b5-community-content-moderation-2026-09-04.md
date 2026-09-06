@@ -1832,6 +1832,114 @@ plus `TestNoAutomaticTelemetry_Capture` still green on compiled defaults and
 `TestEgressAllowIsLive` green with the new row. There is no OwnCord relay and
 the tests must make that unfalsifiable.
 
+**Evidence, 2026-09-06** — branch `feature/b5-11-push-dispatch` from `dev`
+`a504d61e`, **behind HP-5**: draft PR to `dev` #TBD-B5-11, never merged before
+the owner signs the scorecard; commits `5bdba8df` (the feature), `fa741ff7`
+(the independent review round) and `b7f638c5` (its verification round). Premise held at the base: B5-4's storage was
+on `dev`, with the private scalar on `svc.Push` and no dispatch anywhere; B5-6's
+and B5-7's tables were not (both behind the hold), so the two gates that read
+them are stubbed as the plan allows and say so in a comment (no push at all
+for a labelled channel; DM trust left to the participant check).
+
+- **Its own key.** `push.dispatch_enabled` (bool, false) beside `push.enabled`;
+  dispatch runs only when both are true, so an operator who enabled storage in
+  the B5-4 era acquires nothing by upgrade (`TestPushDispatchGate_RequiresBothKeys`,
+  `TestLoadPushDispatchDisabledByDefault`, `TestLoadPushDispatchEnvOverride`).
+  `push.contact` (string, empty) is the VAPID `sub`, omitted when empty.
+  `TestNoAutomaticTelemetry_Capture` is untouched: compiled defaults open
+  nothing.
+- **What is sent, and to whom.** Exactly `{"t":"activity"}`
+  (`TestPushDispatch_PayloadIsGenericAlways` decrypts it with the subscriber's
+  key). Audience: direct `@mentions` in a guild channel, the other participant
+  in a one-to-one DM; never the author, never a group DM
+  (`TestPushDispatch_GroupDMExcluded`, failing closed on a lookup error), never
+  a user who blocked the author (`TestPushDispatch_BlockedByAuthorExcluded`,
+  the same exclusion the mention bookkeeping applies), only offline
+  subscribers, and — re-evaluated **immediately before every attempt**, first
+  and retries alike — only while `CanViewChannel` still holds and the channel
+  is not labelled (`TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline`,
+  `_LosesAccess`, `TestPushDispatch_LabelledChannelSendsNothingUnacknowledged`).
+  One push per user per channel per 60 seconds, the coalescer sweeping
+  expired entries and capped at 10 000
+  (`TestPushDispatch_CoalescesPerUserPerChannel`,
+  `_CoalesceMapEvictsExpiredAndCapsSize`). `@everyone`/`@here` are not
+  expanded: with a payload that says nothing, a ping to every viewer is noise.
+- **The crypto, in stdlib.** RFC 8291 aes128gcm (ephemeral P-256 key and salt
+  per message, HKDF-SHA256 through the auth secret, one record, the `0x02`
+  delimiter) and RFC 8292 VAPID (ES256, raw `r||s`, `aud` the RFC 6454 origin,
+  `exp` twelve hours) — no new module; `crypto/hkdf` is stdlib now. The
+  encryptor takes its key and salt by injection so
+  `TestPushCrypto_RFC8291KnownAnswer` pins the RFC's own header and ciphertext
+  bytes, not a round trip through our decryptor;
+  `TestPushCrypto_SaltAndEphemeralKeyAreFresh` is the revert-proof the
+  known-answer test cannot be. The private scalar never leaves `PushService`:
+  `vapidAuthorization` signs inside it (`TestPushVAPID_JWTVerifiesAndClaims`,
+  `_AudIsRFC6454Origin`, `_EmptyContactOmitsSub`).
+- **Through `safefetch`, with one relaxation.** One `Fetcher`: https on 443,
+  `POST`, no redirects, 10 s, 64 KiB both ceilings, eight concurrent; the
+  production `Policy` shape `TestProductionPolicyShape` requires. A hostile
+  endpoint resolving to a private address is refused before any dial
+  (`TestPushDispatch_HostileEndpointResolvingPrivateIsRefused`, with a `Dial`
+  spy asserting zero dials, and its positive control
+  `_ClassificationRemovedWouldDial`). The relaxation: `checkContentType` now
+  accepts an **empty** body with no `Content-Type` — a bare `201` from a push
+  service was being refused, counted failed and retried, so a delivered push
+  could be sent three times (`TestFetch_EmptyBodyWithoutContentTypeIsAccepted`,
+  its negative control for a non-empty body, and
+  `TestPushDispatch_Empty201IsSuccessNotRetry` through the production policy).
+  Nothing changes for a body with bytes in it.
+- **Failure handling, nothing persisted.** `201` counts; `404`/`410` deletes
+  the row through a new unscoped delete reachable only from dispatch
+  (`TestPushDispatch_410PrunesTheRow`); `429`, `5xx` and network errors get
+  two retries — three attempts — then drop (`TestPushDispatch_RetryBudgetThenDrop`);
+  any other status drops at once. Fan-out is bounded (four at a time) so one
+  stalled endpoint cannot starve the rest
+  (`TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall`); a restart forgets
+  the queue, by design (`push_dispatch_state.md`). Three aggregate counters —
+  `push_dispatched`, `push_failed`, `push_pruned` — join the metrics surface
+  (`TestHandleMetrics_PushCounters`); no per-user delivery history exists.
+- **No relay, inventoried.** Every URL is a stored `endpoint`
+  (`TestPushDispatch_EndpointsAreOnlyStoredOnes`,
+  `TestAbsenceContract_NoPushRelay`: no string key under `push.`, no route
+  matching `relay`, the request set equals the stored set). The egress row
+  lives in `docs/architecture/diagnostics.md`, gated on both keys, destination
+  "the push service named in each stored subscription endpoint" — a code-level
+  row on `service/push_dispatch.go` is refused by `TestEgressAllowIsLive`
+  because the file itself dials nothing: the dial rides `safefetch`'s two
+  listed rows, and the scanner still covers the file, so a `net/http` call
+  placed there fails `TestServerInvariants`.
+- **The hook.** One call in `MessageService`'s existing background side
+  effects, nil when dispatch is off; `TestPushDispatch_ThroughSendMessageHook`
+  drives the real `SendMessage`.
+- **An independent review**, briefed on S7's abuse table, found one P1 and
+  seven P2s, all fixed in `fa741ff7`, and its verification round four more
+  (an IPv6 or IDN host in the VAPID `aud`, retries occupying pool slots before
+  every first attempt had run, the coalescer reserving a window for an
+  ineligible recipient, and capacity eviction dropping live windows), fixed in
+  `b7f638c5`. The first round: eligibility evaluated once before a
+  sequential fan-out (now per attempt); a non-canonical VAPID `aud`; group DMs
+  and blocked authors not excluded; a coalescer that never evicted; a shared
+  60 s budget two slow endpoints could exhaust; a hostile-endpoint test that
+  passed without classification; and no test through the production hook.
+- **Revert-proof, eleven mutations**: the permission re-check, the offline
+  filter, the `410` prune, a payload carrying the channel id, the egress row,
+  a reused salt, `dispatch_enabled` ignored, the per-attempt re-check, the
+  group-DM exclusion, the blocker exclusion, classification removed (the spy
+  sees dials). Each red for its named test, each green restored.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs`, prettier from the worktree root, the coverage floor (`db`,
+  `service`, `auth`, `permissions`, aggregate over their floors on this
+  machine; `ws` reads under floor on Windows by the documented measurement
+  gap and is untouched by this branch).
+
+**Not included, deliberately.** No per-message or per-channel payload option;
+no persisted dispatch state; no admin surface; no `Client/` file; no protocol
+change; no findings-ledger row. The B5-6 trust check and the B5-7
+acknowledgement check are one-line follow-ups once those steps are in the
+same tree, each marked where it goes.
+
 ## B5-12 — Register and roadmap reconciliation
 
 **Size:** 1 day. **Protocol effects:** none. **Parallel with:** everything
