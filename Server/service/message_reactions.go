@@ -186,9 +186,9 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		// used to) risked a reaction persisted with no participant list to
 		// broadcast it to, which reactionV2Handler would then fan out to
 		// nobody while reporting success to the caller.
-		ids, pErr := s.st.GetDMParticipantIDs(ctx, channelID)
+		ids, pErr := s.dmAudience(ctx, channelID, userID)
 		if pErr != nil {
-			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", channelID)
+			slog.Error("MessageService.handleReaction DMAudience", "err", pErr, "channel_id", channelID)
 			return nil, false, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)
 		}
 		participantIDs = ids

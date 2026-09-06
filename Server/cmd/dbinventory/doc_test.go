@@ -226,8 +226,8 @@ func checkProse(t *testing.T, generated, prose string) {
 		re   *regexp.Regexp
 		want func(m []string) []int
 	}{{
-		what: `"down from N rows to M"`,
-		re:   regexp.MustCompile(`down from \d+ rows to (\d+)`),
+		what: `"down/up from N rows to M"`,
+		re:   regexp.MustCompile(`(?:down|up) from \d+ rows to (\d+)`),
 		want: func([]string) []int { return []int{n.total} },
 	}, {
 		what: `"N of the M rows are type-only, K of them adapter"`,

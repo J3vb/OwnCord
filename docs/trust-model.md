@@ -277,7 +277,8 @@ allowlist, and the consumer that needs them is B7's broker. `Server/safefetch`
 is shaped so B7 adds them without a rewrite.
 
 Status: contract (this document, B2-7); server half implemented B5-1, desktop
-broker B7; tracked as C-09 in
+broker B7, per B5 decisions 1 and 2, the split recorded in the register's
+SEC-03 row (B5-12, 2026-09-05); tracked as C-09 in
 [plans/repo-health-issue-register-2026-08-23.md](plans/repo-health-issue-register-2026-08-23.md).
 
 ## At rest

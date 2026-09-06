@@ -102,6 +102,17 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 // for the analogous races elsewhere in this package (OC-0206).
 var handleReconnectPreRegisterRaceHook func()
 
+// handleReconnectPostCheckPreRegisterRaceHook, when non-nil, runs once
+// inside handleReconnect's h.seqMu critical section immediately AFTER the
+// mustFullResync re-check passes and immediately before registerNow (Codex
+// round 4, item A). Test-only (nil in production): unlike
+// handleReconnectPreRegisterRaceHook (which fires before that re-check),
+// this pins the exact gap a concurrent MarkVisibilityChanged call must not
+// be able to land in unnoticed — since it now also takes h.seqMu, a real
+// concurrent caller starting here is provably blocked until this critical
+// section (and registerNow within it) completes.
+var handleReconnectPostCheckPreRegisterRaceHook func()
+
 // freshConnectPreRegisterRaceHook, when non-nil, runs once inside
 // handleFreshConnect after refreshUserSnapshot has re-read the user row but
 // before registerNow. Test-only (nil in production); pins the

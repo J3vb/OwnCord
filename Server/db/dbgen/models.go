@@ -179,6 +179,17 @@ type MessageMention struct {
 	MentionedUserID int64 `json:"mentionedUserId"`
 }
 
+type MessageRequest struct {
+	ID             int64   `json:"id"`
+	SenderID       int64   `json:"senderId"`
+	RecipientID    int64   `json:"recipientId"`
+	ChannelID      int64   `json:"channelId"`
+	FirstMessageID *int64  `json:"firstMessageId"`
+	State          string  `json:"state"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
 }
@@ -195,8 +206,13 @@ type ModerationAction struct {
 	AcknowledgedAt *string `json:"acknowledgedAt"`
 	LiftedAt       *string `json:"liftedAt"`
 	LiftedBy       int64   `json:"liftedBy"`
-	VoiceMuted     int64   `json:"voiceMuted"`
 	CreatedAt      string  `json:"createdAt"`
+}
+
+type NsfwAcknowledgement struct {
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	AcknowledgedAt string `json:"acknowledgedAt"`
 }
 
 type PartialAuthChallenge struct {
@@ -227,6 +243,18 @@ type PluginKv struct {
 	PluginID int64  `json:"pluginId"`
 	Key      string `json:"key"`
 	Value    []byte `json:"value"`
+}
+
+type PushSubscription struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"userId"`
+	Endpoint   string `json:"endpoint"`
+	P256dh     string `json:"p256dh"`
+	Auth       string `json:"auth"`
+	DeviceName string `json:"deviceName"`
+	VapidKeyID string `json:"vapidKeyId"`
+	CreatedAt  string `json:"createdAt"`
+	LastSeenAt string `json:"lastSeenAt"`
 }
 
 type RateLockout struct {
@@ -366,6 +394,13 @@ type TotpUsedCode struct {
 	ExpiresAt string `json:"expiresAt"`
 }
 
+type TrustedSender struct {
+	RecipientID int64  `json:"recipientId"`
+	SenderID    int64  `json:"senderId"`
+	Source      string `json:"source"`
+	CreatedAt   string `json:"createdAt"`
+}
+
 type User struct {
 	ID                 int64   `json:"id"`
 	Username           string  `json:"username"`
@@ -408,4 +443,5 @@ type VoiceState struct {
 	Screenshare    int64  `json:"screenshare"`
 	ServerMuted    int64  `json:"serverMuted"`
 	ServerDeafened int64  `json:"serverDeafened"`
+	ServerMutedBy  *int64 `json:"serverMutedBy"`
 }

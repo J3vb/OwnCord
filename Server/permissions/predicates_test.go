@@ -14,7 +14,10 @@ const (
 	modBits    = memberBits | ManageMessages | MuteMembers
 )
 
-func text(archived bool) ChannelRef        { return ChannelRef{Type: "text", Archived: archived} }
+func text(archived bool) ChannelRef { return ChannelRef{Type: "text", Archived: archived} }
+func nsfwText(archived bool) ChannelRef {
+	return ChannelRef{Type: "text", Archived: archived, NSFW: true}
+}
 func announcement() ChannelRef             { return ChannelRef{Type: "announcement"} }
 func voice(archived bool) ChannelRef       { return ChannelRef{Type: "voice", Archived: archived} }
 func dm() ChannelRef                       { return ChannelRef{Type: "dm"} }
@@ -132,6 +135,22 @@ func TestCanModerateVoice(t *testing.T) {
 	})
 }
 
+// TestAuthorizeVoiceModerator pins the round-4 canonical authorizer
+// (Codex review Part C): the actor's BASE role must hold MUTE_MEMBERS on
+// its own, a stricter gate than CanModerateVoice's channel-scoped OR
+// alone — a channel override cannot manufacture voice-moderation authority
+// a role never held at all.
+func TestAuthorizeVoiceModerator(t *testing.T) {
+	runPredicate(t, "AuthorizeVoiceModerator", AuthorizeVoiceModerator, []predicateCase{
+		{"moderator with base MUTE_MEMBERS allowed", Subject{RolePerms: modBits, Channel: voice(false)}, nil},
+		{"no MUTE_MEMBERS at all refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
+		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"base bit present but a channel deny still refuses", Subject{RolePerms: modBits, Override: deny(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"base bit present but channel hidden still refuses", Subject{RolePerms: modBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+	})
+}
+
 // TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
 // server-wide, and — unlike every channel predicate above — never moved by a
 // channel override, because moderation authority is not a channel property.
@@ -177,6 +196,25 @@ func TestTimedOutSubject(t *testing.T) {
 	runPredicate(t, "CanJoinVoice/timedOut", CanJoinVoice, []predicateCase{
 		{"timed out refused before CONNECT_VOICE is even checked", Subject{Channel: voice(false), TimedOut: true}, ErrTimedOut},
 		{"timed out refused in a dm call", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+	})
+}
+
+func TestCanReadContent(t *testing.T) {
+	runPredicate(t, "CanReadContent", CanReadContent, []predicateCase{
+		{"unlabelled channel needs no ack", Subject{RolePerms: memberBits, Channel: text(false)}, nil},
+		{"labelled and acknowledged", Subject{RolePerms: memberBits, Channel: nsfwText(false), NSFWAcknowledged: true}, nil},
+		{"labelled and not acknowledged", Subject{RolePerms: memberBits, Channel: nsfwText(false)}, ErrNSFWUnacknowledged},
+		// Decision 13: no bit and no admin bypass skips the consent gate — an
+		// administrator without a row is refused exactly like anyone else.
+		{"admin without a row is refused", Subject{RolePerms: Administrator, Channel: nsfwText(false)}, ErrNSFWUnacknowledged},
+		{"admin with a row is allowed", Subject{RolePerms: Administrator, Channel: nsfwText(false), NSFWAcknowledged: true}, nil},
+		// Visibility is checked first: an unauthorized caller learns nothing
+		// about the label, and archived still hides content entirely.
+		{"no role fails closed before the label is even consulted", Subject{Channel: nsfwText(false)}, ErrPermissionDenied},
+		{"archived labelled channel is ErrArchived, not the NSFW sentinel", Subject{RolePerms: memberBits, Channel: nsfwText(true)}, ErrArchived},
+		// DMs cannot be labelled; a participant with no ack sees no gate.
+		{"dm participant needs no ack", Subject{Channel: dm(), DMParticipant: true}, nil},
+		{"dm non-participant learns nothing", Subject{Channel: dm()}, ErrNotDMParticipant},
 	})
 }
 

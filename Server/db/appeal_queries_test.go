@@ -642,7 +642,7 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
-		actionID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+		actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatalf("TimeoutUser: %v", err)
 		}

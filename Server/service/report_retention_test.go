@@ -9,15 +9,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// countRows runs a COUNT(*)-shaped query and returns the scalar.
-func countRows(t *testing.T, database *db.DB, query string, args ...any) int {
-	t.Helper()
-	var n int
-	if err := database.QueryRowContext(context.Background(), query, args...).Scan(&n); err != nil {
-		t.Fatalf("%s: %v", query, err)
-	}
-	return n
-}
+// countRows is declared in message_request_test.go (identical body) — this
+// file's own copy was dropped as a merge fixup (both B5-6 and B5-8 wrote the
+// same helper independently, in different files of the same package).
 
 // TestReportRetention_PrunesContentKeepsRow pins S5-d: content bounded, the
 // outcome indefinite. A report closed longer ago than the window loses its

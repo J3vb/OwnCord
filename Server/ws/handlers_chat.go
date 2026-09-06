@@ -100,6 +100,19 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		}
 	}
 
+	// B5-6: one dm_request per recipient a first-contact request was just
+	// created for. Skipped (not a fallback shape) when the sender lookup
+	// failed — SenderUser nil means the frame has no profile to carry, and
+	// the recipient still recovers the request from GET /api/v1/dm-requests.
+	if result.SenderUser != nil {
+		for _, req := range result.RequestCreatedFor {
+			events = append(events, DMRequestEvent{
+				targetUserID: req.RecipientID,
+				payload:      buildDMRequestForCreation(req, result.SenderUser, result.RequestPreview),
+			})
+		}
+	}
+
 	events = append(events, dmEventOrFallback(
 		MessageSentDMEvent{channelID: sendCmd.ChannelID(), participantIDs: result.ParticipantIDs, payload: broadcast},
 		MessageSentChannelEvent{channelID: sendCmd.ChannelID(), payload: broadcast},

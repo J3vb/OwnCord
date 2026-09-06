@@ -144,6 +144,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		settings:        settingsReader,
 		readers:         opts.Readers,
 		voice:           opts.Voice,
+		voiceMod:        newVoiceModLocks(),
 		presence:        opts.Presence,
 		authn:           opts.Auth,
 		broadcast:       make(chan broadcastMsg, 1024),
@@ -180,6 +181,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if svc != nil {
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels
+		presenceDeps.MessageSvc = svc.Messages
 		reactionDeps.MessageSvc = svc.Messages
 		callDeps.DMSvc = svc.DMs
 		h.messageSvc = svc.Messages

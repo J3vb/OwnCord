@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -71,7 +72,10 @@ type App struct {
 	prunerDone  <-chan struct{}
 	auditWriter *db.AuditWriter
 	markers     *db.MarkerStore
-	serveCtx    context.Context
+	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
+	// by startHub once the service layer exists (B5-4).
+	pushVAPIDKey *ecdh.PrivateKey
+	serveCtx     context.Context
 
 	closers []closeStep
 	closed  bool

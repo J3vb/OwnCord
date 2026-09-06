@@ -20,47 +20,50 @@ SELECT EXISTS (
      WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
 ) AS active;
 
--- name: SupersedeActiveTimeouts :execrows
+-- name: TimeoutActionIsActiveForTarget :one
+-- Disambiguates MuteForSession's own no-match result (round 5, Codex review
+-- P2): whether the INCOMING action_id is still a live timeout on this
+-- target, so a delayed mute call (its own row already lifted, or expired,
+-- by the time it finally reaches the SFU/DB) is told matched=false rather
+-- than mistaken for "already muted by someone else".
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE id = ? AND target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active;
+
+-- name: SupersedeActiveTimeouts :many
 -- On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
 -- still-active timeout row for the same target, in the same transaction as
 -- the new row's insert, so a repeated timeout never leaves two overlapping
 -- active rows for LiftTimeout to pick between -- the single-row
 -- GetActiveTimeout this replaced used to silently orphan every row but the
 -- newest. id excludes the row this same transaction just inserted, which
--- must stay active.
+-- must stay active. RETURNING id (round 4, Codex review): the caller
+-- transfers voice-mute ownership from these ids onto the new row
+-- (voice_states.server_muted_by) in the same transaction, so a mute an
+-- earlier timeout owns is not stranded when its row stops being the active
+-- one LiftTimeout will act on.
 UPDATE moderation_actions
    SET lifted_at = datetime('now'), lifted_by = sqlc.arg(lifted_by)
  WHERE target_id = sqlc.arg(target_id)
    AND kind = 'timeout'
    AND lifted_at IS NULL
    AND expires_at > datetime('now')
-   AND id != sqlc.arg(id);
+   AND id != sqlc.arg(id)
+RETURNING id;
 
 -- name: ListActiveTimeouts :many
--- Every currently-active timeout row for target_id -- normally at most one
--- after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts on
--- all of them defensively (P2-9). voice_muted tells LiftTimeout whether any
--- of them actually applied the voice half (P1-4).
-SELECT id, voice_muted FROM moderation_actions
+-- Every currently-active timeout row id for target_id -- normally at most
+-- one after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts
+-- on all of them defensively (P2-9). LiftTimeout passes these ids to
+-- db.LiftTimeoutActionsByID (round 4, B5-10 addendum -- replacing
+-- LiftAllActiveTimeouts's own WHERE target_id=... shape with the by-id
+-- primitive an appeal overturn can also call inside its own transaction),
+-- then to db.ClearServerMuteOwnedBy, which clears whichever voice_states
+-- row's server_muted_by currently matches one of them -- ownership lives on
+-- the session now, not a column read here (see migration 049's comment).
+SELECT id FROM moderation_actions
  WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
-
--- name: LiftAllActiveTimeouts :execrows
--- Lifts EVERY currently-active timeout row for target_id in one statement
--- (P2-9), guarded on EXISTS(users) for the lifting actor same as before --
--- rather than the single newest row LiftTimeout used to touch.
-UPDATE moderation_actions
-   SET lifted_at = datetime('now'), lifted_by = sqlc.arg(lifted_by)
- WHERE target_id = sqlc.arg(target_id)
-   AND kind = 'timeout'
-   AND lifted_at IS NULL
-   AND expires_at > datetime('now')
-   AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(lifted_by));
-
--- name: SetTimeoutVoiceMuted :exec
--- Records that this timeout row's voice half actually landed a mute
--- (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
--- never reconsidered afterward.
-UPDATE moderation_actions SET voice_muted = 1 WHERE id = ? AND kind = 'timeout';
 
 -- name: ListUnacknowledgedWarnings :many
 -- ready's notices slot: every warning issued to userID that has not yet

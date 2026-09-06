@@ -241,9 +241,25 @@ type Store interface {
 	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
 	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
 	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
+	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact
+	// session (channelID, joinedAt), stamping actionID as owner
+	// (voice_states.server_muted_by) atomically with the mute, only on a
+	// genuine unmuted->muted transition (round 4, replacing round 3's
+	// CompareAndSetServerMute — see migration 049's comment).
+	// supersededIDs transfers ownership from those just-superseded ledger
+	// ids onto actionID, inside the same transaction as the mute (round 5,
+	// Codex review P2) — the caller (ws.Hub, under its per-user lock) is
+	// the only place this transfer may happen; see moderation.go's
+	// TimeoutVoiceMuter.MuteForTimeout doc comment.
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears server_muted for whichever voice_states
+	// row currently names one of actionIDs as owner and reports its
+	// channel/join token for the paired SFU call (round 4).
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
@@ -259,12 +275,30 @@ type Store interface {
 	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
+	// ── Message requests (migration 046, B5-6) ──
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error)
+	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
+	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)
+	TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error)
+	AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
 	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
 	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
+
+	// ── NSFW acknowledgements (migration 047, B5-7) ──
+	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
+	RevokeNSFW(ctx context.Context, userID, channelID int64) error
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error
+	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
 	// ── Attachments ──
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
@@ -327,16 +361,16 @@ type Store interface {
 	// a target promoted between the caller's check and this write is
 	// refused (db.ErrOutranked), not sanctioned.
 	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
-	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error)
-	// LiftTimeout reports whether any row was lifted and whether any of the
-	// lifted rows had actually applied the voice half (voice_muted, P1-4) —
-	// the caller decides whether to clear the SFU mute from that and its own
-	// permissions.CanModerateVoice check.
-	LiftTimeout(ctx context.Context, targetID, actorID int64) (lifted bool, voiceMuted bool, err error)
-	// SetTimeoutVoiceMuted records that actionID's voice half actually
-	// landed a mute (P1-4/P3-14), after the fact — Timeout's own write
-	// cannot know the outcome until the voice muter has been called.
-	SetTimeoutVoiceMuted(ctx context.Context, actionID int64) error
+	// TimeoutUser also returns the ids it just superseded (round 5, Codex
+	// review P2): the caller passes them to the voice half's mute call so
+	// the ownership transfer runs under ITS per-user lock, not here.
+	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error)
+	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none
+	// lifted). The caller passes them to ClearServerMuteOwnedBy, which
+	// clears whichever voice_states row (if any) is currently owned by one
+	// of them — ownership lives on the session now, not this ledger
+	// (round 4, replacing round 3's voiceMuted bool).
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
 	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
 	// Subject.TimedOut is filled from.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
@@ -399,6 +433,21 @@ type Store interface {
 	// of OTHER users (excluding excludeActorID, excludeAppellantID, id 0,
 	// and anyone effectively banned) whose role holds permBit or adminBit.
 	CountEligibleModerators(ctx context.Context, excludeActorID, excludeAppellantID, permBit, adminBit int64) (int64, error)
+
+	// ── Push (migration 045, B5-4) ──
+	// UpsertPushSubscription's keep is the per-user device cap; the upsert,
+	// the eviction ranking and the eviction delete run in one transaction.
+	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
+	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
+	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
+	CountPushSubscriptions(ctx context.Context) (int64, error)
+	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
+	// dispatch-only (B5-11): the former returns the push credential for a
+	// caller-narrowed audience, the latter prunes by id alone on a push
+	// service's 404/410.
+	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
+	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

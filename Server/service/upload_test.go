@@ -312,3 +312,93 @@ func TestUploadRecord_WritesAnUnlinkedRowOwnedByItsUploader(t *testing.T) {
 		t.Errorf("row = %+v, want the record's metadata", got)
 	}
 }
+
+// TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot is P2-6: a
+// non-member (no READ_MESSAGES) probing an attachment URL must not be able
+// to tell a labelled channel from an unlabelled one by the error it gets
+// back — ordinary visibility is checked before NSFW consent, so both cases
+// answer with the same ErrForbidden.
+func TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot(t *testing.T) {
+	uploads, database := newUploadFixture(t)
+	seedUser(t, database, &db.User{ID: 1})
+	nonMember := &db.Role{ID: 6, Name: "non-member", Permissions: 0, Position: 5}
+	seedRole(t, database, nonMember)
+	seedUser(t, database, &db.User{ID: 2})
+	seedUserRole(t, database, 2, 6)
+
+	seedChannel(t, database, &db.Channel{ID: 40, Name: "plain"})
+	plainMsg := seedMessage(t, database, 40, 1, false)
+	uploader := int64(1)
+	seedAttachment(t, database, "plainfile", &uploader, &plainMsg)
+	plainAA, err := uploads.Resolve(context.Background(), "plainfile")
+	if err != nil {
+		t.Fatalf("Resolve(plain): %v", err)
+	}
+
+	seedChannel(t, database, &db.Channel{ID: 41, Name: "labelled"})
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE channels SET nsfw = 1 WHERE id = ?`, 41); err != nil {
+		t.Fatalf("labelling channel 41: %v", err)
+	}
+	labelledMsg := seedMessage(t, database, 41, 1, false)
+	seedAttachment(t, database, "labelledfile", &uploader, &labelledMsg)
+	labelledAA, err := uploads.Resolve(context.Background(), "labelledfile")
+	if err != nil {
+		t.Fatalf("Resolve(labelled): %v", err)
+	}
+
+	plainErr := uploads.Authorize(context.Background(), plainAA, &db.User{ID: 2}, nonMember)
+	labelledErr := uploads.Authorize(context.Background(), labelledAA, &db.User{ID: 2}, nonMember)
+
+	if !errors.Is(plainErr, ErrForbidden) {
+		t.Fatalf("non-member on plain channel: error = %v, want ErrForbidden", plainErr)
+	}
+	if !errors.Is(labelledErr, ErrForbidden) {
+		t.Fatalf("non-member on labelled channel: error = %v, want ErrForbidden — "+
+			"got a different code (e.g. NSFW_ACKNOWLEDGEMENT_REQUIRED), which leaks the label to a non-viewer", labelledErr)
+	}
+	if plainErr.Error() != labelledErr.Error() {
+		t.Errorf("refusals differ: plain=%q labelled=%q — a non-member must not be able to "+
+			"tell a labelled channel from an unlabelled one", plainErr.Error(), labelledErr.Error())
+	}
+}
+
+// TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel
+// pins decision 13 alongside P2-6's reorder: moving the visibility check
+// earlier must not accidentally let an administrator skip the NSFW consent
+// check too — an admin is exempt from ordinary visibility but not from
+// consent.
+func TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel(t *testing.T) {
+	uploads, database := newUploadFixture(t)
+	admin := &db.Role{ID: 1, Name: "admin", Permissions: permissions.AllPerms, Position: 100}
+	seedRole(t, database, admin)
+	seedUser(t, database, &db.User{ID: 1})
+	seedUser(t, database, &db.User{ID: 3})
+	seedUserRole(t, database, 3, 1)
+
+	seedChannel(t, database, &db.Channel{ID: 42, Name: "labelled-for-admin"})
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE channels SET nsfw = 1 WHERE id = ?`, 42); err != nil {
+		t.Fatalf("labelling channel: %v", err)
+	}
+	msgID := seedMessage(t, database, 42, 1, false)
+	uploader := int64(1)
+	seedAttachment(t, database, "adminfile", &uploader, &msgID)
+	aa, err := uploads.Resolve(context.Background(), "adminfile")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	err = uploads.Authorize(context.Background(), aa, &db.User{ID: 3}, admin)
+	if !errors.Is(err, permissions.ErrNSFWUnacknowledged) {
+		t.Fatalf("administrator without an acknowledgement: error = %v, want ErrNSFWUnacknowledged", err)
+	}
+
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, 3, 42); err != nil {
+		t.Fatalf("seeding acknowledgement: %v", err)
+	}
+	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 3}, admin); err != nil {
+		t.Errorf("administrator with an acknowledgement was refused: %v", err)
+	}
+}

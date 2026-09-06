@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,16 +30,35 @@ import (
 // lost — it simply applies once the connection is free, after this
 // transaction ends.
 func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t *testing.T) {
+	t.Run("promotion queued after the rank check, before the insert", func(t *testing.T) {
+		runBanUserWithActionConcurrentRoleChangeCannotPreempt(t, db.SetModerationActionPreInsertHookForTest)
+	})
+	// Codex review follow-up: the same property, one step earlier — a
+	// promotion attempted between BeginTx (and BanUser's own effect write,
+	// already landed by the time recordModerationAction runs) and the rank
+	// snapshot itself, not only after it. Structurally the SAME writer
+	// connection guarantee applies either way, but a future refactor that
+	// moved the rank read onto a path not covered by ONE specific barrier
+	// position must not go unnoticed just because the OTHER position still
+	// passes.
+	t.Run("promotion queued between BeginTx and the rank check", func(t *testing.T) {
+		runBanUserWithActionConcurrentRoleChangeCannotPreempt(t, db.SetModerationActionPreRankCheckHookForTest)
+	})
+}
+
+// runBanUserWithActionConcurrentRoleChangeCannotPreempt drives the shared
+// scenario through whichever barrier setter the caller supplies.
+func runBanUserWithActionConcurrentRoleChangeCannotPreempt(t *testing.T, setHook func(func())) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
 	reached := make(chan struct{})
 	release := make(chan struct{})
-	db.SetModerationActionPreInsertHookForTest(func() {
+	setHook(func() {
 		close(reached)
 		<-release
 	})
-	defer db.SetModerationActionPreInsertHookForTest(nil)
+	defer setHook(nil)
 
 	type banOutcome struct {
 		id  int64
@@ -53,7 +73,7 @@ func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t
 	select {
 	case <-reached:
 	case <-time.After(5 * time.Second):
-		t.Fatal("BanUserWithAction never reached the pre-insert hook — the contention barrier never armed")
+		t.Fatal("BanUserWithAction never reached the contention barrier — it never armed")
 	}
 
 	// A genuinely concurrent writer, contending for the exact one writer
@@ -97,8 +117,8 @@ func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t
 		t.Fatalf("ListModerationActionsForTarget: %v", err)
 	}
 	found := false
-	for _, r := range rows {
-		if r.ID == outcome.id && r.Kind == "ban" {
+	for i := range rows {
+		if rows[i].ID == outcome.id && rows[i].Kind == "ban" {
 			found = true
 		}
 	}
@@ -110,5 +130,63 @@ func TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision(t
 	if target.RoleID != 1 {
 		t.Fatalf("memberID.role_id = %d after the race settled, want 1 (the concurrent promotion applied once the "+
 			"connection freed up)", target.RoleID)
+	}
+}
+
+// TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx is
+// P2-12 PARTIAL (Codex review round 3): the test above only ever forces the
+// concurrent promotion to queue behind an ALREADY-open transaction — it
+// stays green even if a future refactor moved the rank-position read onto a
+// bare, non-tx connection call BEFORE BeginTx, since that regression would
+// only matter in the window between that read and BeginTx, which the other
+// test's barrier (placed after BeginTx) can never reach. This one forces a
+// second writer — a role change on the same target — to run to completion
+// on a genuinely free connection BEFORE BanUserWithAction ever calls
+// BeginTx (via db.SetModerationActionPreBeginTxHookForTest), so the only
+// way this call can still refuse correctly is if its rank check reads LIVE,
+// INSIDE its own transaction, rather than trusting an earlier snapshot.
+// Asserts BOTH halves land nowhere: no ban, no ledger row.
+func TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+
+	promoted := make(chan struct{})
+	db.SetModerationActionPreBeginTxHookForTest(func() {
+		<-promoted
+	})
+	defer db.SetModerationActionPreBeginTxHookForTest(nil)
+
+	banDone := make(chan error, 1)
+	go func() {
+		_, err := database.BanUserWithAction(ctx, memberID, "concurrent", nil, ownerID, nil)
+		banDone <- err
+	}()
+
+	// The promotion runs on a connection nothing is holding yet (the hook
+	// above blocks BanUserWithAction before it ever calls BeginTx) and
+	// fully commits before the ban's own transaction opens.
+	if _, err := database.ExecContext(ctx, `UPDATE users SET role_id = 1 WHERE id = ?`, memberID); err != nil {
+		t.Fatalf("promote member: %v", err)
+	}
+	close(promoted)
+
+	banErr := <-banDone
+	if !errors.Is(banErr, db.ErrOutranked) {
+		t.Fatalf("BanUserWithAction: want db.ErrOutranked (the rank check must see the already-committed promotion), got %v", banErr)
+	}
+
+	target, err := database.GetUserByID(ctx, memberID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if target.Banned {
+		t.Fatal("a refused ban left the target banned — the effect did not roll back")
+	}
+	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
+	if err != nil {
+		t.Fatalf("ListModerationActionsForTarget: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("a refused ban left %d ledger row(s) — refused must mean nothing landed", len(rows))
 	}
 }

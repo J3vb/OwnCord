@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -52,12 +53,9 @@ type ModerationNotice struct {
 	CreatedAt string
 }
 
-// moderationActionRow is the field set ListModerationActionsForTarget and
-// ListModerationActionsForReport's generated row types both have — they
-// stopped being the same dbgen type once the queries' explicit column list
-// no longer covered every column on the table (voice_muted, B5-9 Codex
-// review deviation), so this local shape lets moderationActionFromRow keep
-// converting either one without duplicating the field-by-field copy.
+// moderationActionRow mirrors dbgen.ModerationAction's field set, letting
+// moderationActionFromRow convert it (and, historically, a second
+// query-specific row type) without duplicating the field-by-field copy.
 type moderationActionRow struct {
 	ID             int64
 	Kind           string
@@ -135,6 +133,9 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	if actorID == targetID {
 		return 0, fmt.Errorf("recordModerationAction: actor equals target: %w", ErrOutranked)
 	}
+	if moderationActionPreRankCheckHook != nil {
+		moderationActionPreRankCheckHook()
+	}
 	actorPos, ok := rolePosition(ctx, tx, actorID)
 	if !ok {
 		return 0, fmt.Errorf("recordModerationAction: actor role: %w", ErrOutranked)
@@ -156,6 +157,18 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	return insertModerationActionRow(ctx, tx, kind, targetID, actorID, reportID, reason, expiresAt)
 }
 
+// moderationActionPreRankCheckHook, when non-nil, runs inside
+// recordModerationAction's transaction, BEFORE either rolePosition call —
+// the window between BeginTx (already open by the time this function runs;
+// BanUserWithAction's own effect write, BanUser, has already landed too)
+// and the rank snapshot itself. Test-only (nil in production): the
+// contention test's second interleaving (Codex review follow-up) uses this
+// to force a concurrent role change to contend for the writer connection
+// one step earlier than moderationActionPreInsertHook does, so the "cannot
+// preempt an in-flight decision" property is proved at both ends of the
+// rank check, not just after it.
+var moderationActionPreRankCheckHook func()
+
 // moderationActionPreInsertHook, when non-nil, runs after the rank check has
 // read both positions and before the insert — while tx, and so the writer's
 // one connection, is still held open. Test-only (nil in production),
@@ -166,6 +179,19 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 // open, rather than merely simulating the race by calling this function
 // twice in sequence. Set via SetModerationActionPreInsertHookForTest.
 var moderationActionPreInsertHook func()
+
+// moderationActionPreBeginTxHook, when non-nil, runs at the very top of
+// BanUserWithAction, before BeginTx is even called — no transaction open,
+// no connection held yet. Test-only (nil in production): P2-12 PARTIAL's
+// (Codex review round 3) gap in the original contention test used a barrier
+// placed AFTER BeginTx, which stays green even if a future refactor moved
+// the rank-position read to run on a bare (non-tx) connection before
+// BeginTx — a regression that reopens exactly the window a live connection
+// re-acquisition could land a promotion in. This hook lets a test force a
+// concurrent promotion to complete in full BEFORE this call ever opens its
+// transaction, proving the eventual rank check (which must run live, INSIDE
+// the tx, to see it) still refuses correctly.
+var moderationActionPreBeginTxHook func()
 
 // recordLedgerRow is "removal"'s ledger write: no rank guard (see
 // recordModerationAction's doc comment for why one would be wrong here) —
@@ -237,39 +263,60 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 // timeout row for targetID (P2-9, Codex review): without this a repeated
 // timeout left overlapping active rows and LiftTimeout only ever reached the
 // newest one, orphaning the rest.
-func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error) {
+//
+// Ownership of an outstanding SFU mute lives on the voice session, not this
+// ledger (voice_states.server_muted_by, round 4, Codex review — see
+// migration 049's comment for the full rationale). Superseding a row that
+// owns a mute must transfer it to the NEW row, or that mute is stranded
+// once LiftTimeout stops acting on the superseded one — but the transfer
+// itself does NOT happen here (round 5, Codex review P2): it runs inside
+// MuteForTimeoutSession's own transaction, under the ws-layer per-target
+// lock the voice half already holds, so it can never land between that
+// lock's DB write and its paired SFU call (the exact gap a transfer here,
+// outside the lock, would race). TimeoutUser only returns the superseded
+// ids for the caller (service.applyTimeoutVoiceHalf) to pass through.
+func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("TimeoutUser begin tx: %w", err)
+		return 0, nil, fmt.Errorf("TimeoutUser begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	expires := expiresAt.UTC().Format(sqliteDatetimeFormat)
-	id, err := recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
+	id, err = recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	if _, err := dbgen.New(tx).SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
+	q := dbgen.New(tx)
+	supersededIDs, err = q.SupersedeActiveTimeouts(ctx, dbgen.SupersedeActiveTimeoutsParams{
 		LiftedBy: actorID, TargetID: targetID, ID: id,
-	}); err != nil {
-		return 0, fmt.Errorf("TimeoutUser supersede: %w", err)
+	})
+	if err != nil {
+		return 0, nil, fmt.Errorf("TimeoutUser supersede: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("TimeoutUser commit: %w", err)
+		return 0, nil, fmt.Errorf("TimeoutUser commit: %w", err)
 	}
-	return id, nil
+	return id, supersededIDs, nil
 }
 
-// SetTimeoutVoiceMuted records that actionID's voice half actually landed a
-// mute (P1-4/P3-14): called once, right after the caller's voiceMuter
-// reports success, never reconsidered afterward. Best-effort in the sense
-// that a failure here does not undo the mute or the timeout — it only means
-// a later LiftTimeout will not know to clear it, which the target's own
-// natural session/reconnect flow does not depend on.
-func (d *DB) SetTimeoutVoiceMuted(ctx context.Context, actionID int64) error {
-	if err := d.q.SetTimeoutVoiceMuted(ctx, actionID); err != nil {
-		return fmt.Errorf("SetTimeoutVoiceMuted: %w", err)
+// transferVoiceMuteOwnership repoints voice_states.server_muted_by from any
+// of fromIDs onto toID, inside tx. Hand-rolled (a dynamic IN list, mirroring
+// the bulk-delete pattern in message_queries.go) rather than sqlc: the
+// number of superseded rows is unbounded in principle (P2-9's defensive
+// lift-all applies here too), so no fixed-arity generated query fits.
+func transferVoiceMuteOwnership(ctx context.Context, tx *sql.Tx, fromIDs []int64, toID int64) error {
+	placeholders := make([]string, len(fromIDs))
+	args := make([]any, 0, len(fromIDs)+1)
+	args = append(args, toID)
+	for i, id := range fromIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
 	}
-	return nil
+	_, err := tx.ExecContext(ctx,
+		"UPDATE voice_states SET server_muted_by = ? WHERE server_muted_by IN ("+strings.Join(placeholders, ",")+")", //nolint:gosec // placeholders are "?" repeated, not user input
+		args...,
+	)
+	return err
 }
 
 // LiftTimeout ends targetID's active timeout(s) early. It re-checks the
@@ -277,24 +324,21 @@ func (d *DB) SetTimeoutVoiceMuted(ctx context.Context, actionID int64) error {
 // Codex review — this previously had no rank re-check at all, so a demoted
 // moderator could still cancel a superior's sanction), then lifts EVERY
 // still-active timeout row for targetID (P2-9: TimeoutUser's supersede keeps
-// this to normally one row, but a defensive lift-all costs nothing). Reports
-// whether any row was lifted, and whether ANY of the lifted rows had
-// actually applied the voice half (voice_muted) — the caller
-// (ModerationService.LiftTimeout) decides, using the ACTOR of this call's
-// own permissions.CanModerateVoice standing, whether clearing the SFU mute
-// now is this call's business at all (P1-4): a mute set by, or belonging
-// to, a different moderator's authority must not be silently undone just
-// because this actor happens to outrank the target.
-func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (lifted bool, voiceMuted bool, err error) {
+// this to normally one row, but a defensive lift-all costs nothing). Returns
+// the ids just lifted, so the caller can clear whichever voice_states row (if
+// any) is currently owned by one of them (db.ClearServerMuteOwnedBy,
+// round 4) — session-bound for free, since ownership no longer lives on
+// this ledger.
+func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return false, false, fmt.Errorf("LiftTimeout begin tx: %w", err)
+		return nil, fmt.Errorf("LiftTimeout begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	actorPos, ok := rolePosition(ctx, tx, actorID)
 	if !ok {
-		return false, false, fmt.Errorf("LiftTimeout: %w", ErrOutranked)
+		return nil, fmt.Errorf("LiftTimeout: %w", ErrOutranked)
 	}
 	targetPos, ok := rolePosition(ctx, tx, targetID)
 	if !ok {
@@ -303,29 +347,68 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (lifted b
 		targetPos = math.MaxInt
 	}
 	if actorPos <= targetPos {
-		return false, false, ErrOutranked
+		return nil, ErrOutranked
 	}
 
-	rows, err := dbgen.New(tx).ListActiveTimeouts(ctx, targetID)
+	ids, err := dbgen.New(tx).ListActiveTimeouts(ctx, targetID)
 	if err != nil {
-		return false, false, fmt.Errorf("LiftTimeout: %w", err)
+		return nil, fmt.Errorf("LiftTimeout: %w", err)
 	}
-	if len(rows) == 0 {
-		return false, false, nil
+	if len(ids) == 0 {
+		return nil, nil
 	}
-	for _, r := range rows {
-		if r.VoiceMuted != 0 {
-			voiceMuted = true
-		}
-	}
-	n, err := dbgen.New(tx).LiftAllActiveTimeouts(ctx, dbgen.LiftAllActiveTimeoutsParams{LiftedBy: actorID, TargetID: targetID})
+	lifted, err := LiftTimeoutActionsByID(ctx, tx, ids, actorID)
 	if err != nil {
-		return false, false, fmt.Errorf("LiftTimeout: %w", err)
+		return nil, fmt.Errorf("LiftTimeout: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return false, false, fmt.Errorf("LiftTimeout commit: %w", err)
+		return nil, fmt.Errorf("LiftTimeout commit: %w", err)
 	}
-	return n > 0, voiceMuted, nil
+	return lifted, nil
+}
+
+// LiftTimeoutActionsByID marks each of ids lifted (lifted_at IS NULL AND
+// kind = 'timeout', i.e. still active — an already-lifted or non-timeout id
+// is silently skipped, not an error), inside tx: callable inside a CALLER's
+// own transaction, not just LiftTimeout's (round 4, B5-10 addendum) — an
+// appeal overturn lifts a timeout by its specific action id inside the
+// appeal-decision transaction, and LiftTimeout above resolves ITS ids via
+// ListActiveTimeouts first, then calls this same primitive with them. This
+// function does ONLY the ledger write: no rank check, no voice half, no
+// audit row — the caller owns authorization and post-commit effects
+// (service.ModerationService.FinalizeTimeoutLift is the shared post-commit
+// half both callers use). Returns exactly the ids that were genuinely still
+// active and are now lifted.
+func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, liftedBy int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, liftedBy)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	rows, err := tx.QueryContext(ctx,
+		"UPDATE moderation_actions SET lifted_at = datetime('now'), lifted_by = ?"+ //nolint:gosec // placeholders are "?" repeated, not user input
+			" WHERE kind = 'timeout' AND lifted_at IS NULL AND id IN ("+strings.Join(placeholders, ",")+")"+
+			" RETURNING id",
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("LiftTimeoutActionsByID: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("LiftTimeoutActionsByID scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // HasActiveTimeout is the one indexed lookup permissions.Checker.Subject and
@@ -393,6 +476,9 @@ func (d *DB) ListModerationActionsForReport(ctx context.Context, reportID int64)
 // (B5-9): a failure recording the row rolls the ban back too, so a ban
 // never lands without the ledger entry an appeal will need to reference.
 func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error) {
+	if moderationActionPreBeginTxHook != nil {
+		moderationActionPreBeginTxHook()
+	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("BanUserWithAction begin tx: %w", err)

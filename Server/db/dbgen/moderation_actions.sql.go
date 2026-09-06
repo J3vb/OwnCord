@@ -39,27 +39,12 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  WHERE id = ?
 `
 
-type GetModerationActionByIDRow struct {
-	ID             int64   `json:"id"`
-	Kind           string  `json:"kind"`
-	TargetID       int64   `json:"targetId"`
-	ActorID        int64   `json:"actorId"`
-	ActorToken     *string `json:"actorToken"`
-	ReportID       *int64  `json:"reportId"`
-	Reason         string  `json:"reason"`
-	ExpiresAt      *string `json:"expiresAt"`
-	AcknowledgedAt *string `json:"acknowledgedAt"`
-	LiftedAt       *string `json:"liftedAt"`
-	LiftedBy       int64   `json:"liftedBy"`
-	CreatedAt      string  `json:"createdAt"`
-}
-
 // B5-10's appeal submission and decision both need the appealed action's
 // own row: its kind (appealable or not), its target (must be the appellant),
 // and its actor (the deciding-moderator self-review check).
-func (q *Queries) GetModerationActionByID(ctx context.Context, id int64) (GetModerationActionByIDRow, error) {
+func (q *Queries) GetModerationActionByID(ctx context.Context, id int64) (ModerationAction, error) {
 	row := q.db.QueryRowContext(ctx, getModerationActionByID, id)
-	var i GetModerationActionByIDRow
+	var i ModerationAction
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,
@@ -131,59 +116,33 @@ func (q *Queries) InsertModerationAction(ctx context.Context, arg InsertModerati
 	return id, err
 }
 
-const liftAllActiveTimeouts = `-- name: LiftAllActiveTimeouts :execrows
-UPDATE moderation_actions
-   SET lifted_at = datetime('now'), lifted_by = ?1
- WHERE target_id = ?2
-   AND kind = 'timeout'
-   AND lifted_at IS NULL
-   AND expires_at > datetime('now')
-   AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?1)
-`
-
-type LiftAllActiveTimeoutsParams struct {
-	LiftedBy int64 `json:"liftedBy"`
-	TargetID int64 `json:"targetId"`
-}
-
-// Lifts EVERY currently-active timeout row for target_id in one statement
-// (P2-9), guarded on EXISTS(users) for the lifting actor same as before --
-// rather than the single newest row LiftTimeout used to touch.
-func (q *Queries) LiftAllActiveTimeouts(ctx context.Context, arg LiftAllActiveTimeoutsParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, liftAllActiveTimeouts, arg.LiftedBy, arg.TargetID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const listActiveTimeouts = `-- name: ListActiveTimeouts :many
-SELECT id, voice_muted FROM moderation_actions
+SELECT id FROM moderation_actions
  WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
 `
 
-type ListActiveTimeoutsRow struct {
-	ID         int64 `json:"id"`
-	VoiceMuted int64 `json:"voiceMuted"`
-}
-
-// Every currently-active timeout row for target_id -- normally at most one
-// after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts on
-// all of them defensively (P2-9). voice_muted tells LiftTimeout whether any
-// of them actually applied the voice half (P1-4).
-func (q *Queries) ListActiveTimeouts(ctx context.Context, targetID int64) ([]ListActiveTimeoutsRow, error) {
+// Every currently-active timeout row id for target_id -- normally at most
+// one after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts
+// on all of them defensively (P2-9). LiftTimeout passes these ids to
+// db.LiftTimeoutActionsByID (round 4, B5-10 addendum -- replacing
+// LiftAllActiveTimeouts's own WHERE target_id=... shape with the by-id
+// primitive an appeal overturn can also call inside its own transaction),
+// then to db.ClearServerMuteOwnedBy, which clears whichever voice_states
+// row's server_muted_by currently matches one of them -- ownership lives on
+// the session now, not a column read here (see migration 049's comment).
+func (q *Queries) ListActiveTimeouts(ctx context.Context, targetID int64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listActiveTimeouts, targetID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListActiveTimeoutsRow{}
+	items := []int64{}
 	for rows.Next() {
-		var i ListActiveTimeoutsRow
-		if err := rows.Scan(&i.ID, &i.VoiceMuted); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -202,31 +161,16 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  ORDER BY created_at, id
 `
 
-type ListModerationActionsForReportRow struct {
-	ID             int64   `json:"id"`
-	Kind           string  `json:"kind"`
-	TargetID       int64   `json:"targetId"`
-	ActorID        int64   `json:"actorId"`
-	ActorToken     *string `json:"actorToken"`
-	ReportID       *int64  `json:"reportId"`
-	Reason         string  `json:"reason"`
-	ExpiresAt      *string `json:"expiresAt"`
-	AcknowledgedAt *string `json:"acknowledgedAt"`
-	LiftedAt       *string `json:"liftedAt"`
-	LiftedBy       int64   `json:"liftedBy"`
-	CreatedAt      string  `json:"createdAt"`
-}
-
 // The queue detail's "actions taken" list.
-func (q *Queries) ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ListModerationActionsForReportRow, error) {
+func (q *Queries) ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ModerationAction, error) {
 	rows, err := q.db.QueryContext(ctx, listModerationActionsForReport, reportID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListModerationActionsForReportRow{}
+	items := []ModerationAction{}
 	for rows.Next() {
-		var i ListModerationActionsForReportRow
+		var i ModerationAction
 		if err := rows.Scan(
 			&i.ID,
 			&i.Kind,
@@ -262,32 +206,17 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  ORDER BY created_at DESC, id DESC
 `
 
-type ListModerationActionsForTargetRow struct {
-	ID             int64   `json:"id"`
-	Kind           string  `json:"kind"`
-	TargetID       int64   `json:"targetId"`
-	ActorID        int64   `json:"actorId"`
-	ActorToken     *string `json:"actorToken"`
-	ReportID       *int64  `json:"reportId"`
-	Reason         string  `json:"reason"`
-	ExpiresAt      *string `json:"expiresAt"`
-	AcknowledgedAt *string `json:"acknowledgedAt"`
-	LiftedAt       *string `json:"liftedAt"`
-	LiftedBy       int64   `json:"liftedBy"`
-	CreatedAt      string  `json:"createdAt"`
-}
-
 // GET /api/v1/moderation/users/{id}/actions: the full ledger for one user,
 // newest first.
-func (q *Queries) ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ListModerationActionsForTargetRow, error) {
+func (q *Queries) ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ModerationAction, error) {
 	rows, err := q.db.QueryContext(ctx, listModerationActionsForTarget, targetID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListModerationActionsForTargetRow{}
+	items := []ModerationAction{}
 	for rows.Next() {
-		var i ListModerationActionsForTargetRow
+		var i ModerationAction
 		if err := rows.Scan(
 			&i.ID,
 			&i.Kind,
@@ -382,19 +311,7 @@ func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (
 	return result.RowsAffected()
 }
 
-const setTimeoutVoiceMuted = `-- name: SetTimeoutVoiceMuted :exec
-UPDATE moderation_actions SET voice_muted = 1 WHERE id = ? AND kind = 'timeout'
-`
-
-// Records that this timeout row's voice half actually landed a mute
-// (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
-// never reconsidered afterward.
-func (q *Queries) SetTimeoutVoiceMuted(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, setTimeoutVoiceMuted, id)
-	return err
-}
-
-const supersedeActiveTimeouts = `-- name: SupersedeActiveTimeouts :execrows
+const supersedeActiveTimeouts = `-- name: SupersedeActiveTimeouts :many
 UPDATE moderation_actions
    SET lifted_at = datetime('now'), lifted_by = ?1
  WHERE target_id = ?2
@@ -402,6 +319,7 @@ UPDATE moderation_actions
    AND lifted_at IS NULL
    AND expires_at > datetime('now')
    AND id != ?3
+RETURNING id
 `
 
 type SupersedeActiveTimeoutsParams struct {
@@ -416,13 +334,56 @@ type SupersedeActiveTimeoutsParams struct {
 // active rows for LiftTimeout to pick between -- the single-row
 // GetActiveTimeout this replaced used to silently orphan every row but the
 // newest. id excludes the row this same transaction just inserted, which
-// must stay active.
-func (q *Queries) SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, supersedeActiveTimeouts, arg.LiftedBy, arg.TargetID, arg.ID)
+// must stay active. RETURNING id (round 4, Codex review): the caller
+// transfers voice-mute ownership from these ids onto the new row
+// (voice_states.server_muted_by) in the same transaction, so a mute an
+// earlier timeout owns is not stranded when its row stops being the active
+// one LiftTimeout will act on.
+func (q *Queries) SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, supersedeActiveTimeouts, arg.LiftedBy, arg.TargetID, arg.ID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected()
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const timeoutActionIsActiveForTarget = `-- name: TimeoutActionIsActiveForTarget :one
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE id = ? AND target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active
+`
+
+type TimeoutActionIsActiveForTargetParams struct {
+	ID       int64 `json:"id"`
+	TargetID int64 `json:"targetId"`
+}
+
+// Disambiguates MuteForSession's own no-match result (round 5, Codex review
+// P2): whether the INCOMING action_id is still a live timeout on this
+// target, so a delayed mute call (its own row already lifted, or expired,
+// by the time it finally reaches the SFU/DB) is told matched=false rather
+// than mistaken for "already muted by someone else".
+func (q *Queries) TimeoutActionIsActiveForTarget(ctx context.Context, arg TimeoutActionIsActiveForTargetParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, timeoutActionIsActiveForTarget, arg.ID, arg.TargetID)
+	var active int64
+	err := row.Scan(&active)
+	return active, err
 }
 
 const unlinkModerationActionsByActor = `-- name: UnlinkModerationActionsByActor :exec

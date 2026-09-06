@@ -25,6 +25,14 @@ var ErrBlocked = errors.New("user is blocked")
 // no voice room (text, announcement).
 var ErrNotVoiceChannel = errors.New("not a voice channel")
 
+// ErrNSFWUnacknowledged is returned by CanReadContent for a labelled channel
+// the subject has not acknowledged (decision 13, BG-18's server half, B5-7).
+// Every content path — REST reads, search, live/replayed socket delivery,
+// attachment bytes — reports this identically; the caller maps it to its own
+// status code (403 NSFW_ACKNOWLEDGEMENT_REQUIRED on the REST/attachment
+// surfaces; the socket and search simply withhold the content).
+var ErrNSFWUnacknowledged = errors.New("nsfw content not acknowledged")
+
 // ErrTimedOut is returned by CanSendMessage, CanAddReaction and CanJoinVoice
 // for a subject with an active timeout row (B5-9, decision 6): a time-boxed
 // restriction distinct from a ban, checked through the predicates like every
@@ -45,6 +53,11 @@ type Subject struct {
 	// creation, not per message (service.requireDMNotBlocked).
 	DMParticipant bool
 	DMBlocked     bool
+	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether
+	// THIS subject has a row acknowledging the channel's label (B5-7). The
+	// caller resolves it live, never from a cache — CanReadContent's whole
+	// point is that a revocation takes effect on the very next read.
+	NSFWAcknowledged bool
 	// TimedOut is filled from a live, uncached lookup ("an active timeout
 	// row exists for this subject") by permissions.Checker.Subject and
 	// service.PermissionService.Subject — never from the 30s permission
@@ -220,6 +233,46 @@ func CanModerateVoice(s Subject) error {
 	}
 	if !s.Has(ReadMessages | MuteMembers) {
 		return missing(MuteMembers)
+	}
+	return nil
+}
+
+// AuthorizeVoiceModerator is the base-bit gate every voice-moderation call
+// site needs ahead of CanModerateVoice, combined with the predicate itself
+// into one canonical check (round 4, Codex review Part C — the pair was
+// duplicated between ws.voiceModTarget and the timeout voice half's own
+// authorization, each with its own raw HasServerPerm call). The actor's
+// BASE role must hold MUTE_MEMBERS (or Administrator) on its own:
+// CanModerateVoice's s.Has(MuteMembers) is a channel-scoped OR that a
+// channel override CAN satisfy even when the base role lacks the bit
+// (deliberate — B2-5, matching CanSendMessage's announcement-channel
+// precedent) — but a channel-scoped allow must never be able to manufacture
+// voice-moderation authority the actor's base role never held at all.
+func AuthorizeVoiceModerator(s Subject) error {
+	if !HasServerPerm(s.RolePerms, MuteMembers) {
+		return missing(MuteMembers)
+	}
+	return CanModerateVoice(s)
+}
+
+// CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled
+// channel returns no content — message bodies and metadata that carries them
+// (history, around, pins, reaction users, search hits, live and replayed
+// chat_message/chat_edited/reaction_update frames) and attachment bytes —
+// until the subject's own row exists. It is CanViewChannel's caller that
+// decides whether a channel is visible at all; this only adds the narrower
+// consent question on top, so a channel that is not visible is still
+// ErrNotDMParticipant/missing(ReadMessages)/ErrArchived, never this sentinel.
+//
+// Decision 13: no bit and no admin bypass skips this — a moderator or
+// administrator acknowledges like anyone else, so the caller resolves
+// NSFWAcknowledged from the row the same way for every subject.
+func CanReadContent(s Subject) error {
+	if err := CanViewChannel(s); err != nil {
+		return err
+	}
+	if s.Channel.NSFW && !s.NSFWAcknowledged {
+		return ErrNSFWUnacknowledged
 	}
 	return nil
 }

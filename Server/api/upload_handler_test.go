@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS channels (
     archived       INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     voice_max_users INTEGER NOT NULL DEFAULT 0,
-    is_group        INTEGER NOT NULL DEFAULT 0
+    is_group        INTEGER NOT NULL DEFAULT 0,
+    nsfw            INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

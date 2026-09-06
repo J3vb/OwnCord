@@ -57,6 +57,13 @@ type keyFileSpec struct {
 	orphans string
 	// generated is the operator advice logged when a key is auto-generated.
 	generated string
+	// valid, when non-nil, is checked only on the generate branch: random
+	// bytes that fail it are discarded and regenerated rather than written.
+	// nil means every byte string of the right length is valid (every
+	// existing caller). The push VAPID key uses this because a uniform
+	// random 32-byte scalar has a small chance of falling outside the P-256
+	// curve order.
+	valid func([]byte) bool
 }
 
 // loadOrGenerateKeyFile is the fail-closed key loader the TOTP key and the
@@ -100,8 +107,13 @@ func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 	}
 
 	key := make([]byte, spec.size)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("generating %s: %w", spec.what, err)
+	for {
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("generating %s: %w", spec.what, err)
+		}
+		if spec.valid == nil || spec.valid(key) {
+			break
+		}
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating data directory for %s: %w", spec.file, err)

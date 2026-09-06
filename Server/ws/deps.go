@@ -46,6 +46,13 @@ type ChatDeps struct {
 type PresenceDeps struct {
 	Limiter    *auth.RateLimiter
 	ChannelSvc *service.ChannelService
+	// MessageSvc backs the DM half of typing_start's audience: B5-6's
+	// message-request gate (MessageService.DMAudience) lives there, not on
+	// ChannelService. nil (a test built without it) falls back to
+	// ChannelSvc.GetDMParticipantIDs — the pre-B5-6 unfiltered list —
+	// exactly like MessageService.dmAudience's own nil-messageRequests
+	// fallback for the other DM frame paths.
+	MessageSvc *service.MessageService
 }
 
 // ReactionDeps holds dependencies for reaction handlers.

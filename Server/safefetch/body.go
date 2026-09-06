@@ -123,9 +123,16 @@ func (f *Fetcher) readError(ctx context.Context, err error) error {
 // is handed an HTML page or an image decoder is handed a script.
 //
 // An empty body has nothing to sniff, so only the declared type is checked.
+// A response with an empty body AND no declared Content-Type passes: there
+// is no content to have a type, which is a normal shape for a 201/204
+// acknowledgement (RFC 8030's push-service response, among others) — this
+// does not relax anything for a body that actually arrived with bytes.
 func (f *Fetcher) checkContentType(declared string, body []byte) (string, string, error) {
 	media := normaliseType(declared)
 	if len(f.policy.ContentTypes) == 0 {
+		return media, "", nil
+	}
+	if media == "" && len(body) == 0 {
 		return media, "", nil
 	}
 	if media == "" {

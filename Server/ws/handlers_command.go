@@ -83,7 +83,25 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 			return *gate
 		}
 		msg := buildCommandBroadcast(cc.channelID, cc.userID, cc.command, result.Broadcast)
-		out.Events = append(out.Events, PluginBroadcastEvent{channelID: cc.channelID, payload: msg})
+		// B5-6 (Codex P1-2): a DM's plugin broadcast must reach the same
+		// sender-aware audience chat/typing/reactions do, not the plain
+		// per-channel-topic fan-out — channel_focus subscribes any DM
+		// participant to the topic regardless of message-request trust.
+		// A lookup failure fails closed to the DM shape (sender only),
+		// never to the wider, untrusted-reaching plain broadcast.
+		isDM, dmErr := d.MessageSvc.ChannelIsDM(ctx, cc.channelID)
+		if dmErr != nil || isDM {
+			var participantIDs []int64
+			if dmErr == nil {
+				participantIDs, _ = d.MessageSvc.DMAudience(ctx, cc.channelID, cc.userID)
+			}
+			if len(participantIDs) == 0 {
+				participantIDs = []int64{cc.userID}
+			}
+			out.Events = append(out.Events, PluginBroadcastDMEvent{channelID: cc.channelID, participantIDs: participantIDs, payload: msg})
+		} else {
+			out.Events = append(out.Events, PluginBroadcastEvent{channelID: cc.channelID, payload: msg})
+		}
 		slog.Info("plugin command broadcast", "cmd", cc.command, "channel_id", cc.channelID, "user_id", cc.userID)
 	}
 	return out

@@ -25,7 +25,7 @@ func TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction(t *testing.T) {
 	ctx := context.Background()
 
 	expires := time.Now().Add(time.Hour)
-	actionID, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", expires)
+	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", expires)
 	if err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}

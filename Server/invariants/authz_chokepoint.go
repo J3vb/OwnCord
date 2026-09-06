@@ -114,12 +114,15 @@ type AuthzResidueEntry struct {
 // family behind a service. Raising a count is a reviewable edit here, never a
 // side effect of editing the function.
 //
-// 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4; B5-9
-// added service.(*PermissionService).Subject for the TimedOut admin
+// 17 symbols, 19 bound calls (was 19/21 at dev 75d64dd4, HP-2 question 5);
+// B5-9 added service.(*PermissionService).Subject for the TimedOut admin
 // short-circuit, and (briefly) service.(*ModerationService).Timeout for a
 // bare MUTE_MEMBERS check — P1-3 (Codex review) replaced that check with
 // permissions.CanModerateVoice over a real Subject, so Timeout's own row is
-// gone again; only Subject's remains.
+// gone again; only Subject's remains. Round 4 (Codex review Part C) removed
+// the two classBaseBitRejection rows (ws.voiceModTarget and
+// service.(*ModerationService).actorCanModerateVoiceFor) once both moved
+// onto permissions.AuthorizeVoiceModerator.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -158,8 +161,14 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// read test.
 	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
-	// ── base-bit early rejection ahead of CanModerateVoice ─────────────────
-	"ws.voiceModTarget": {classBaseBitRejection, "rejects on MUTE_MEMBERS before the voice-state lookup; never admits", calls{"HasServerPerm": 1}},
+	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
+	// own base-bit-rejection rows are GONE (round 4, Codex review Part C):
+	// both used to duplicate a base-bit HasServerPerm(MUTE_MEMBERS) check
+	// ahead of CanModerateVoice (NEW P1, Codex review round 3); they now
+	// call permissions.AuthorizeVoiceModerator, the canonical combined
+	// predicate, not a residue. classBaseBitRejection is unused as a result
+	// but stays defined — a future call site with the same shape reuses it
+	// rather than inventing a new class.
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions
@@ -243,7 +252,7 @@ func (h authzHit) excessMessage(want, got int) string {
 }
 
 // authzPredicateList names the B2-5 predicates a call site should be using.
-const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice"
+const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent"
 
 // authzHits reports every raw permission check in one file, whether or not it
 // is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same

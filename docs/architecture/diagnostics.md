@@ -60,8 +60,22 @@ default.
 | `api/livekit_proxy.go` — `proxyWebSocket`                                      | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there) | `voice.livekit_url`, and only while a signed-in client holds a voice session                                                 | that client's LiveKit signalling, proxied — it leaves the machine when the URL is remote                                                                   |
 | `safefetch/policy.go` — `New`, `defaultDial`                                   | config   | only a destination a caller passed in, and only an address `ClassifyAddr` accepted                         | the caller's gate: `gif.api_key`, or `plugins.http_allowlist`                                                                | nothing of its own — the shared client, transport and dialer; `Fetcher.dial` connects to the vetted addresses and to nothing else                          |
 | `safefetch/fetch.go` — `(*Fetcher).roundTrip`                                  | config   | the same, one redirect hop at a time                                                                       | the caller's gate: `gif.api_key`, or `plugins.http_allowlist`                                                                | the GIF proxy's search terms, or whatever a plugin asks — bounded by the C-09 ceilings below                                                               |
+| `service/push_dispatch.go` — `(*PushDispatcher).sendOne`                       | config   | the push service named in each stored subscription's `endpoint`                                            | `push.dispatch_enabled` **and** `push.enabled` (both false by default)                                                       | a Web Push message: an encrypted `{"t":"activity"}` payload (RFC 8291) and a VAPID `Authorization` header — no message text, channel name or sender        |
 | `internal/app/healthcheck.go` — `RunHealthcheckCLI`                            | loopback | this server's `/health`                                                                                    | the `--healthcheck` flag                                                                                                     | nothing                                                                                                                                                    |
 | `telemetry/telemetry_otel.go` — the OTLP exporter import                       | config   | `telemetry.otlp_endpoint`                                                                                  | `-tags otel` + `telemetry.enabled` + `exporter: otlp`                                                                        | traces and metrics, to the operator's own collector                                                                                                        |
+
+B5-11's dispatcher row is deliberately **not** a code-level entry in
+`Server/invariants/egress_sites.go`'s `EgressAllow` map. `service/push_dispatch.go`
+never spells `net/http`, `net.Dial` or any of the other constructs
+`egress-sites`' AST scan looks for — it builds a `safefetch.Request` and
+calls the shared `pushFetcher.Fetch`, exactly as the GIF proxy does. The
+actual outbound construct is the one the two `safefetch/*.go` rows above
+already inventory; a code-level row naming a file with no matching AST hit
+would fail `TestEgressAllowIsLive` ("but it no longer opens an outbound
+path — drop the row"). The row above is this table's own — the
+human-readable half of BPR-055 — recording the gate and the destination for
+an operator reading this page, which the safefetch rows describe only
+generically ("only a destination a caller passed in").
 
 Since B5-1 the last two rows are the _only_ outbound content path in the
 server. `api/gif_handler.go` and `plugin/host_http.go` used to dial for

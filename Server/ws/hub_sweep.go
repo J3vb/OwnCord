@@ -283,7 +283,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
+		h.broadcastVoiceEvent(ctx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this
 		// (finishVoiceLeave, the LiveKit webhook, registerNow,

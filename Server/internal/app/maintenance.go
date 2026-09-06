@@ -19,18 +19,20 @@ import (
 // new sweep is a method plus one row in steps() — B5-4 and B5-11 add theirs
 // there rather than growing tick.
 type maintenance struct {
-	log       *slog.Logger
-	database  *db.DB
-	files     *storage.Storage
-	settings  *service.SettingsService
-	erasure   *service.ErasureService
-	retention *service.RetentionService
-	uploads   *service.UploadService
-	reports   *service.ReportService
+	log        *slog.Logger
+	database   *db.DB
+	files      *storage.Storage
+	settings   *service.SettingsService
+	erasure    *service.ErasureService
+	retention  *service.RetentionService
+	uploads    *service.UploadService
+	reports    *service.ReportService
+	moderation *service.ModerationService
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
 	actionRetentionDays int
+	push                *service.PushService
 }
 
 // maintenanceStep is one sweep: name is the warning logged when run fails.
@@ -51,6 +53,8 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	if svc != nil {
 		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
 		m.reports = svc.Reports
+		m.moderation = svc.Moderation
+		m.push = svc.Push
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -102,11 +106,28 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	if err := m.resumeErasure(bgCtx); err != nil {
 		m.log.Warn("erasure jobs still pending", "error", err)
 	}
+	// Deliberately NOT run here at start-up (round 5, Codex review): this
+	// runs AFTER initDatabase's ClearAllVoiceStates (database.go), which
+	// wipes every voice_states row on every restart regardless — a real
+	// voice session cannot survive the process dying anyway (the LiveKit
+	// participant is gone with it). There is nothing left here to repair by
+	// the time this loop starts, so reconcileOrphanedVoiceMutes runs only
+	// on the periodic tick (steps() below) — catching a crash between a
+	// lift's ledger commit and its own post-commit voice finalize, or a
+	// timeout that simply expired with nobody ever lifting it, within one
+	// 15-minute tick of it happening, same as every other tick-only sweep.
 	// Storage counters charged by a process that died between the charge
 	// and the write are settled now, so a restart is a repair point rather
 	// than fifteen minutes of a user seeing a phantom charge (B5-2).
 	if err := m.recountStorage(bgCtx); err != nil {
 		m.log.Warn("storage recount failed", "error", err)
+	}
+	// A VAPID key rotation takes effect on the first boot with the new key,
+	// not fifteen minutes later (B5-4): rows the rotation orphaned stop
+	// being listed the instant the new key is installed, but the sweep is
+	// what actually removes them.
+	if err := m.sweepPushSubscriptions(bgCtx); err != nil {
+		m.log.Warn("push subscription sweep failed", "error", err)
 	}
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
@@ -141,11 +162,13 @@ func (m *maintenance) steps() []maintenanceStep {
 	return []maintenanceStep{
 		{"failed to delete expired sessions", m.sweepSessions},
 		{"failed to clean up expired second-factor state", m.sweepSecondFactor},
+		{"push subscription sweep failed", m.sweepPushSubscriptions},
 		{"backup maintenance failed", m.maintainBackups},
 		{"failed to delete orphaned attachments", m.sweepOrphans},
 		{"retention sweep failed", m.sweepRetention},
 		{"report content retention failed", m.pruneReportContent},
 		{"moderation action retention failed", m.retireModerationActions},
+		{"orphaned voice mute reconciliation failed", m.reconcileOrphanedVoiceMutes},
 		{"erasure jobs still pending", m.resumeErasure},
 		{"storage reconciliation failed", m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
@@ -175,6 +198,18 @@ func (m *maintenance) sweepSessions(ctx context.Context) error {
 // spent TOTP codes (migration 032) — the persisted second-factor state's sweep.
 func (m *maintenance) sweepSecondFactor(ctx context.Context) error {
 	return m.database.CleanupExpiredSecondFactorState(ctx)
+}
+
+// sweepPushSubscriptions removes stale Web Push subscriptions and every
+// subscription a VAPID key rotation orphaned (B5-4, decisions 2 and 5). Nil
+// push means no service layer at all (a partial wiring in tests); a no-op
+// tick is the point, not a failure.
+func (m *maintenance) sweepPushSubscriptions(ctx context.Context) error {
+	if m.push == nil {
+		return nil
+	}
+	_, err := m.push.Sweep(ctx)
+	return err
 }
 
 // maintainBackups runs scheduled backups and retention pruning, driven by the
@@ -255,6 +290,37 @@ func (m *maintenance) retireModerationActions(ctx context.Context) error {
 	}
 	_, err := m.database.RetireModerationActions(ctx, m.actionRetentionDays)
 	return err
+}
+
+// reconcileOrphanedVoiceMutes is the round-4 (B5-10 addendum) reconcile
+// sweep: every voice_states row whose server_muted_by now points at a
+// lifted or expired timeout gets the SAME post-commit finalize
+// (ModerationService.FinalizeTimeoutLift) a normal lift runs, with actor 0
+// (system-initiated, mirroring backup_maintenance.go's scheduled-backup
+// audit rows) — repairing a crash between a lift's ledger commit and its
+// own finalize call, and closing the gap that otherwise left a naturally
+// EXPIRED timeout's voice mute in effect forever (nothing else ever calls
+// UnmuteForTimeout for an expiry). Tick-only, NOT at loop start (round 5,
+// Codex review): by the time this loop starts, initDatabase's
+// ClearAllVoiceStates has already wiped every voice_states row this restart
+// — there is nothing left here for a start-up call to repair, and a
+// voice_states row is only ever real again once a live client re-joins
+// after the restart, which the next ordinary tick already covers.
+func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
+	if m.moderation == nil {
+		return nil
+	}
+	orphans, err := m.database.FindOrphanedVoiceMutes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range orphans {
+		m.moderation.FinalizeTimeoutLift(ctx, o.UserID, []int64{o.ActionID}, 0)
+	}
+	if len(orphans) > 0 {
+		m.log.Info("reconciled orphaned voice mutes", "count", len(orphans))
+	}
+	return nil
 }
 
 // resumeErasure runs every unfinished erasure job once (no runner is a

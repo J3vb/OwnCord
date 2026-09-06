@@ -19,6 +19,8 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // shutdownBudget is the total time Close is given, and the same 30 seconds
@@ -53,6 +55,7 @@ func (a *App) stages() []stage {
 		{"database", a.startDatabase},
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
+		{"push-vapid-key", a.startPushVAPIDKey},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
 		{"hub", a.startHub},
@@ -191,6 +194,22 @@ func (a *App) startErasureMarkers() error {
 	return nil
 }
 
+// startPushVAPIDKey loads (or generates, on a confirmed absence) the Web
+// Push VAPID key beside totp.key and erasure.key, unconditionally — B5-4:
+// regardless of push.enabled, because the file is cheap and the maintenance
+// sweep needs the key id to recognise (and remove) rows a rotation orphaned
+// even while the feature is off. A load failure is fatal at start-up, same
+// as the erasure key's (startErasureMarkers, mirrored here). startHub
+// installs the loaded key on svc.Push once the service layer exists.
+func (a *App) startPushVAPIDKey() error {
+	key, err := auth.LoadOrGeneratePushVAPIDKey(a.cfg.Server.DataDir)
+	if err != nil {
+		return fmt.Errorf("push VAPID key: %w", err)
+	}
+	a.pushVAPIDKey = key
+	return nil
+}
+
 // startTelemetry initialises OpenTelemetry. Its shutdown is bounded by its
 // own 5s budget inside the returned step.
 func (a *App) startTelemetry() error {
@@ -212,6 +231,17 @@ func (a *App) startPlugins() error {
 		return nil
 	})
 	return nil
+}
+
+// pushDispatchEnabled is the one gate the composition root checks before
+// constructing a PushDispatcher and installing it on MessageService: BOTH
+// push.enabled and push.dispatch_enabled must be true (plan decision 9,
+// HP-5 scorecard Question 6, item 1). Storage on with dispatch off — the
+// B5-4 state, and what an upgraded install starts in — must never dispatch,
+// which is why this is a named function rather than an inline condition:
+// TestPushDispatchGate_RequiresBothKeys pins the "&&", not just its effect.
+func pushDispatchEnabled(cfg *config.Config) bool {
+	return cfg.Push.Enabled && cfg.Push.DispatchEnabled
 }
 
 // startHub builds the hub and the collaborators it shares with the router
@@ -238,6 +268,27 @@ func (a *App) startHub() error {
 	}
 	if rt.Services != nil && rt.Services.Retention != nil {
 		rt.Services.Retention.SetMarkers(a.markers)
+	}
+	// The VAPID key startPushVAPIDKey loaded earlier, installed once the
+	// service layer exists (B5-4). SetSubscriptionTTL(0) falls back to the
+	// PushService default, so a partial wiring with no push-vapid-key stage
+	// (a direct StartRuntime call in a test) still leaves a usable default.
+	if rt.Services != nil && rt.Services.Push != nil {
+		rt.Services.Push.SetVAPIDKey(a.pushVAPIDKey)
+		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
+		rt.Services.Push.SetContact(a.cfg.Push.Contact)
+	}
+	// Web Push dispatch (B5-11, behind HP-5): its own second opt-in on top
+	// of push.enabled (plan decision 9) — an operator who enabled storage
+	// in the B5-4 era does not acquire dispatch by upgrade. Installed on
+	// MessageService only when both keys are true; SetPushNotifier is never
+	// called otherwise, so the hook stays the nil PushNotifier it defaults
+	// to (TestPushDispatch_OffByDefaultSendsNothing).
+	if pushDispatchEnabled(a.cfg) &&
+		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
+		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
+		rt.Services.Messages.SetPushNotifier(dispatcher)
+		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)
