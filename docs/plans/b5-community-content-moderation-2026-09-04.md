@@ -2050,7 +2050,7 @@ fails any new wire name matching `(?i)federat|directory|discover|listing`. A
 `1311fee9`, then B5-7's final `9016707a` merged in (carrying `dev` through
 the B5-6 squash and the signed scorecard) so the stack reads
 B5-6 → B5-7 → B5-8: built behind HP-5, which the owner accepted on
-2026-09-06 (#1547, signature recorded in #1550); PR to `dev` #TBD-B5-8,
+2026-09-06 (#1547, signature recorded in #1550); PR to `dev` #1552,
 after B5-7's #1551; commits `120bfaab` (the
 feature), `83602340` (the independent review round), `f8722464` (its
 verification round), `36b812a0` (the S5-d rows of `community-services.md`
