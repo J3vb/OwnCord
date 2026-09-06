@@ -532,6 +532,114 @@ func TestPushDispatch_CoalescesPerUserPerChannel(t *testing.T) {
 	}
 }
 
+// TestPushDispatch_CoalesceOnlyReservedAfterEligibility is item 3 of the
+// third Codex review round: coalescing must not run before eligibility. An
+// online recipient's mention must not reserve the 60s window -- nothing was
+// ever going to be sent for it -- or a later, genuinely eligible mention
+// (the recipient disconnects, then is mentioned again) would silently
+// receive nothing even though it is well inside what would have been that
+// bogus reservation.
+func TestPushDispatch_CoalesceOnlyReservedAfterEligibility(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.example.net/was-online")
+
+	var online atomic.Bool
+	online.Store(true)
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, func(uid int64) bool {
+		return uid == 2 && online.Load()
+	}, fetch)
+
+	// First mention: the recipient is online, so nothing is sent.
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Fatalf("first Notify (recipient online) sent %v, want nothing", urls)
+	}
+
+	// The recipient disconnects; a second mention, immediately after (well
+	// inside what a bogus reservation from the first would have covered),
+	// must still be pushed.
+	online.Store(false)
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+	if got := fetch.countFor("https://push.example.net/was-online"); got != 1 {
+		t.Errorf("second Notify (recipient now offline) delivered %d pushes, want 1 -- "+
+			"the first, ineligible mention must not have reserved the coalescing window", got)
+	}
+}
+
+// TestPushDispatch_RetriesRunAfterEveryFirstAttempt is item 2 of the third
+// Codex review round: with more subscriptions than pushMaxConcurrentSends,
+// no subscription's second attempt may happen before every subscription
+// has had its first -- a bare per-subscription retry-with-backoff loop
+// running inside a bounded worker pool lets a handful of always-transient
+// endpoints hold their pool slot through their own retries while healthy
+// subscriptions still wait for a first attempt. This is checked on the
+// actual global call order, not on timing, so it cannot be flaky.
+func TestPushDispatch_RetriesRunAfterEveryFirstAttempt(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+
+	fetch := newRecordingPushFetcher()
+	candidates := make([]int64, 0, 10)
+	const stallCount = 8
+	stallURLs := make([]string, stallCount)
+	for i := range stallCount {
+		uid := int64(2 + i)
+		seedUserRole(t, f.database, uid, 4)
+		url := fmt.Sprintf("https://push.example.net/stall-%d", i)
+		stallURLs[i] = url
+		f.subscribe(t, uid, url)
+		fetch.always(url, 503) // always transient: every subscription uses its whole retry budget
+		candidates = append(candidates, uid)
+	}
+	fastURLs := []string{"https://push.example.net/fast-a", "https://push.example.net/fast-b"}
+	for i, url := range fastURLs {
+		uid := int64(100 + i)
+		seedUserRole(t, f.database, uid, 4)
+		f.subscribe(t, uid, url)
+		fetch.always(url, 201)
+		candidates = append(candidates, uid)
+	}
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 10, 1, candidates)
+
+	// Compute, for every recorded call in the order it actually happened,
+	// which attempt number (1-based) it was for its own URL -- then check
+	// that no URL's 2nd-or-later attempt happened before every URL's own
+	// 1st attempt had.
+	seenCount := map[string]int{}
+	lastFirstAttemptIdx := -1
+	firstLaterAttemptIdx := -1
+	for idx, url := range fetch.urls() {
+		seenCount[url]++
+		if seenCount[url] == 1 {
+			lastFirstAttemptIdx = idx
+		} else if firstLaterAttemptIdx == -1 {
+			firstLaterAttemptIdx = idx
+		}
+	}
+	if firstLaterAttemptIdx != -1 && firstLaterAttemptIdx < lastFirstAttemptIdx {
+		t.Errorf("a retry (global call #%d) happened before every subscription's first attempt (last first attempt at #%d)",
+			firstLaterAttemptIdx, lastFirstAttemptIdx)
+	}
+	for _, url := range fastURLs {
+		if got := fetch.countFor(url); got != 1 {
+			t.Errorf("fast URL %s was called %d times, want exactly 1", url, got)
+		}
+	}
+	for _, url := range stallURLs {
+		if got := fetch.countFor(url); got != pushMaxAttempts {
+			t.Errorf("stalling URL %s was called %d times, want the full budget of %d", url, got, pushMaxAttempts)
+		}
+	}
+}
+
 // TestPushDispatch_EndpointsAreOnlyStoredOnes proves there is no relay: the
 // set of URLs dispatch ever calls Fetch with is exactly the set of stored
 // push_subscriptions.endpoint values, for every subscriber pushed to.
@@ -955,10 +1063,9 @@ func TestPushDispatch_BlockerLookupFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// TestPushDispatch_CoalesceMapEvictsExpiredAndCapsSize is P2-5: an expired
-// entry is swept on a later call, and the map never grows past
-// pushCoalesceMapCap even when every entry is still within its window.
-func TestPushDispatch_CoalesceMapEvictsExpiredAndCapsSize(t *testing.T) {
+// TestPushDispatch_CoalesceMapEvictsExpired is P2-5's expiry half: an
+// expired entry is swept on a later call.
+func TestPushDispatch_CoalesceMapEvictsExpired(t *testing.T) {
 	f := newPushDispatchFixture(t)
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
 
@@ -973,15 +1080,44 @@ func TestPushDispatch_CoalesceMapEvictsExpiredAndCapsSize(t *testing.T) {
 	if _, ok := dispatcher.lastSent[pushCoalesceKey{userID: 1, channelID: 100}]; ok {
 		t.Error("an entry older than the coalescing window survived a later call's sweep")
 	}
+}
 
-	// Cap: every one of these is within the window, so only the cap
-	// eviction -- not expiry -- can be what keeps the map bounded.
+// TestPushDispatch_CoalesceMapAtCapacityRefusesNewPairsWithoutEvictingLiveOnes
+// is item 4 of the third Codex review round: at capacity with nothing
+// expired, a brand-new pair must be refused (reported as already
+// coalesced) rather than evicting a still-active window -- an evicted but
+// unexpired entry would let that pair be pushed again before its own 60s
+// were actually up. Once an entry does expire, the freed slot admits a new
+// pair again.
+func TestPushDispatch_CoalesceMapAtCapacityRefusesNewPairsWithoutEvictingLiveOnes(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
+
 	now := time.Now()
-	for i := range int64(pushCoalesceMapCap + 10) {
-		dispatcher.coalesced(i, 1, now)
+	for i := range int64(pushCoalesceMapCap) {
+		if dispatcher.coalesced(i, 1, now) {
+			t.Fatalf("filling the map: pair %d unexpectedly reported already coalesced", i)
+		}
 	}
-	if len(dispatcher.lastSent) > pushCoalesceMapCap {
-		t.Errorf("lastSent has %d entries after exceeding the cap, want <= %d", len(dispatcher.lastSent), pushCoalesceMapCap)
+	if len(dispatcher.lastSent) != pushCoalesceMapCap {
+		t.Fatalf("lastSent has %d entries after filling to capacity, want %d", len(dispatcher.lastSent), pushCoalesceMapCap)
+	}
+
+	if !dispatcher.coalesced(999999, 1, now) {
+		t.Error("a new pair at capacity with nothing expired was admitted; want it refused")
+	}
+	if len(dispatcher.lastSent) != pushCoalesceMapCap {
+		t.Errorf("lastSent has %d entries after a refused admission, want it unchanged at %d", len(dispatcher.lastSent), pushCoalesceMapCap)
+	}
+	if _, ok := dispatcher.lastSent[pushCoalesceKey{userID: 0, channelID: 1}]; !ok {
+		t.Error("an existing, still-active window was evicted to make room for a refused new pair")
+	}
+
+	// Once every filling entry has expired, the freed capacity admits a new
+	// pair normally.
+	later := now.Add(2 * pushCoalesceWindow)
+	if dispatcher.coalesced(999999, 1, later) {
+		t.Error("a new pair was still refused after every entry had expired")
 	}
 }
 

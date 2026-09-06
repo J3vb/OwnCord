@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math/big"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -165,5 +166,37 @@ func TestPushVAPID_AudIsRFC6454Origin(t *testing.T) {
 	}
 	if claims.Aud != "https://push.example.net" {
 		t.Errorf("aud = %q, want %q", claims.Aud, "https://push.example.net")
+	}
+}
+
+// TestWebOrigin_TableCases pins the RFC 6454 edge cases a bare
+// scheme+"://"+Host copy gets wrong: an IPv6 literal needs its brackets
+// back (url.Hostname() strips them), an uppercase IDN label must fold to
+// the same Punycode as its lowercase spelling, and a default port survives
+// re-parsing regardless of how it was spelled (a leading zero is still the
+// same port number).
+func TestWebOrigin_TableCases(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"IPv6 literal, brackets restored", "https://[2001:db8::1]/x", "https://[2001:db8::1]"},
+		{"IPv6 literal with an explicit default port", "https://[2001:db8::1]:443/x", "https://[2001:db8::1]"},
+		{"uppercase IDN folds to the same Punycode as lowercase", "https://MÜLLER.DE/x", "https://xn--mller-kva.de"},
+		{"non-canonical default port spelling", "https://push.example.net:0443/x", "https://push.example.net"},
+		{"http's own default port", "http://x:80/x", "http://x"},
+		{"a non-default port survives", "https://push.example.net:8443/x", "https://push.example.net:8443"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u, err := url.Parse(c.in)
+			if err != nil {
+				t.Fatalf("url.Parse(%q): %v", c.in, err)
+			}
+			if got := webOrigin(u); got != c.want {
+				t.Errorf("webOrigin(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }

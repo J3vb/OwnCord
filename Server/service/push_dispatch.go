@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,10 +27,12 @@ var pushActivityPayload = []byte(`{"t":"activity"}`)
 const pushCoalesceWindow = 60 * time.Second
 
 // pushCoalesceMapCap bounds the coalescer's memory: past this many live
-// entries, the oldest are evicted to make room, on top of the ordinary
-// expiry sweep. 10000 concurrently "recently pushed" (user, channel) pairs
-// is far past anything a self-hosted deployment produces; this is a ceiling
-// against an unbounded growth path, not a tuned capacity.
+// (unexpired) entries, a brand-new pair is refused admission rather than
+// evicting one of them -- an evicted-but-still-inside-its-window entry
+// would let that pair be pushed again before its 60s were actually up.
+// 10000 concurrently "recently pushed" (user, channel) pairs is far past
+// anything a self-hosted deployment produces; this is a ceiling against an
+// unbounded growth path, not a tuned capacity.
 const pushCoalesceMapCap = 10000
 
 // pushDispatchTimeout bounds one Notify call end to end: the channel and
@@ -41,22 +42,23 @@ const pushCoalesceMapCap = 10000
 // that triggered it has already returned.
 const pushDispatchTimeout = 60 * time.Second
 
-// pushMaxConcurrentSends bounds how many subscriptions Notify delivers to at
-// once, within the shared pushFetcher's own MaxConcurrent (8): a handful of
-// slow or stuck endpoints must not serialise behind each other and starve
-// the rest of pushDispatchTimeout (a bare sequential loop did exactly that).
+// pushMaxConcurrentSends bounds how many subscriptions one round delivers to
+// at once, within the shared pushFetcher's own MaxConcurrent (8): a handful
+// of slow or stuck endpoints must not serialise behind each other and starve
+// the rest of the round.
 const pushMaxConcurrentSends = 4
 
 // pushMaxAttempts is the retry budget for one subscription: the initial
 // attempt plus two retries, backing off by pushRetryBackoffs between them.
 const pushMaxAttempts = 3
 
-// pushRetryBackoffs is the backoff schedule between attempts. Only the first
-// two entries are ever used -- pushMaxAttempts caps the loop at 3 attempts,
+// pushRetryBackoffs is the backoff schedule between rounds. Only the first
+// two entries are ever used -- pushMaxAttempts caps the loop at 3 rounds,
 // which needs 2 waits -- the third is kept so the schedule reads as the
 // intended exponential curve (1s, 4s, 16s) rather than stopping short of it
-// by coincidence. The wait happens after safefetch.Fetcher.Fetch has already
-// returned (or timed out at its own 10s policy deadline), so it is always
+// by coincidence. Each wait runs once per round (not once per subscription):
+// round N's fetches have all already returned (or hit safefetch's own 10s
+// policy deadline) before the wait for round N+1 starts, so it is always
 // outside any one attempt's fetch deadline.
 var pushRetryBackoffs = []time.Duration{time.Second, 4 * time.Second, 16 * time.Second}
 
@@ -111,6 +113,14 @@ var pushFetcher = safefetch.MustNew(pushPolicy())
 type pushCoalesceKey struct {
 	userID    int64
 	channelID int64
+}
+
+// pushRoundItem is one subscription's state carried between dispatch
+// rounds: the request is built once (encryption and VAPID signing happen a
+// single time), and re-sent unchanged on every round it survives to.
+type pushRoundItem struct {
+	sub db.PushSubscriptionForDispatch
+	req safefetch.Request
 }
 
 // PushDispatcher is the composition root's PushNotifier: it resolves the
@@ -183,8 +193,7 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	// behind HP-5 too and may not have merged yet). Once it does, a
 	// subscriber with an acknowledgement row for this channel should still
 	// receive the (generic) push; until then, gate on the label alone --
-	// no push at all for a labelled channel. Re-checked per attempt in
-	// stillEligible too, since dispatch can outlive a label change.
+	// no push at all for a labelled channel.
 	if ch.NSFW {
 		return
 	}
@@ -214,7 +223,7 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		blockedByAuthor[b] = true
 	}
 
-	coalesced := d.coalesceAudience(candidateIDs, authorID, blockedByAuthor, channelID)
+	coalesced := d.coalesceAudience(ctx, ch, candidateIDs, authorID, blockedByAuthor)
 	if len(coalesced) == 0 {
 		return
 	}
@@ -226,149 +235,80 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		return
 	}
 
-	// Bounded fan-out: a semaphore of pushMaxConcurrentSends, so a handful
-	// of slow or stuck subscriptions run alongside healthy ones instead of
-	// queuing behind them for the whole shared pushDispatchTimeout.
+	items := make([]pushRoundItem, 0, len(subs))
+	for _, sub := range subs {
+		if req, ok := d.prepareRequest(sub); ok {
+			items = append(items, pushRoundItem{sub: sub, req: req})
+		}
+	}
+
+	// Round-based delivery: every surviving item's Nth attempt runs through
+	// the bounded pool before any item's (N+1)th. A sequential
+	// attempt-then-retry-then-backoff loop per subscription let a handful of
+	// slow or failing endpoints hold their pool slot through every retry,
+	// starving subscriptions that had not even had a first attempt yet; this
+	// guarantees every item gets attempt N before any gets attempt N+1.
+	for attempt := 1; attempt <= pushMaxAttempts && len(items) > 0; attempt++ {
+		if attempt > 1 {
+			d.sleep(ctx, pushRetryBackoffs[attempt-2])
+		}
+		items = d.runRound(ctx, channelID, items, attempt)
+	}
+}
+
+// runRound performs attempt (1-based) for every item in items, bounded by
+// pushMaxConcurrentSends concurrent sends, and returns the subset that
+// should be retried in a later round.
+func (d *PushDispatcher) runRound(ctx context.Context, channelID int64, items []pushRoundItem, attempt int) []pushRoundItem {
 	sem := make(chan struct{}, pushMaxConcurrentSends)
 	var wg sync.WaitGroup
-	for _, sub := range subs {
+	var mu sync.Mutex
+	retry := make([]pushRoundItem, 0, len(items))
+	for i := range items {
+		item := &items[i]
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(sub db.PushSubscriptionForDispatch) {
+		go func(item *pushRoundItem) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			d.sendOne(ctx, channelID, sub)
-		}(sub)
+			if d.attemptOne(ctx, channelID, *item, attempt) {
+				mu.Lock()
+				retry = append(retry, *item)
+				mu.Unlock()
+			}
+		}(item)
 	}
 	wg.Wait()
+	return retry
 }
 
-// coalesceAudience narrows candidateIDs to the users a push is even worth
-// attempting for: distinct, not the author, not blocked by (a blocker of)
-// the author, and not inside their coalescing window for channelID.
-//
-// Permission and online state are deliberately NOT checked here: a bounded
-// but potentially slow dispatch (retries, a bounded worker pool) can take
-// long enough that either changes mid-flight, so both are re-checked
-// immediately before every delivery attempt in stillEligible instead of
-// once up front.
-//
-// For a DM, permission IS participation (permissions.CanViewChannel checks
-// only DMParticipant for a "dm" channel), so a non-participant candidate is
-// excluded by stillEligible the same way. B5-6: trusted_senders does not
-// exist on this branch (B5-6 is behind HP-5 too and may not have merged
-// yet). Once it does, a DM push should also require that the recipient
-// trusts the sender -- the same row Message Requests gates on -- so a
-// first-contact message from an unknown sender cannot ring a stranger's
-// phone before they have decided to accept it.
-func (d *PushDispatcher) coalesceAudience(candidateIDs []int64, authorID int64, blockedByAuthor map[int64]bool, channelID int64) []int64 {
-	seen := make(map[int64]bool, len(candidateIDs))
-	out := make([]int64, 0, len(candidateIDs))
-	now := time.Now()
-	for _, uid := range candidateIDs {
-		if uid == authorID || uid <= 0 || seen[uid] || blockedByAuthor[uid] {
-			continue
-		}
-		seen[uid] = true
-		if d.coalesced(uid, channelID, now) {
-			continue
-		}
-		out = append(out, uid)
-	}
-	return out
-}
-
-// stillEligible re-resolves, immediately before one delivery attempt, the
-// three things that can change while a bounded dispatch is in flight: the
-// recipient came online (their client already has the message), the
-// channel was labelled nsfw, or the recipient lost CanViewChannel. Called
-// before the first attempt and again before every retry.
-func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, userID int64) bool {
-	if d.online != nil && d.online(userID) {
-		return false
-	}
-	ch, err := d.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil || ch.NSFW {
-		return false
-	}
-	sub, err := channelSubject(ctx, d.st, d.perms, userID, ch, false)
-	if err != nil {
-		return false
-	}
-	return permissions.CanViewChannel(sub) == nil
-}
-
-// coalesced reports whether userID was already pushed about channelID
-// within pushCoalesceWindow, and if not, starts a new window from now.
-func (d *PushDispatcher) coalesced(userID, channelID int64, now time.Time) bool {
-	key := pushCoalesceKey{userID, channelID}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if last, ok := d.lastSent[key]; ok && now.Sub(last) < pushCoalesceWindow {
-		return true
-	}
-	d.sweepCoalesceLocked(now)
-	d.lastSent[key] = now
-	return false
-}
-
-// sweepCoalesceLocked removes every entry whose window has already expired,
-// then, if the map is still at pushCoalesceMapCap or over, evicts the
-// oldest entries down under it. Called with d.mu held.
-//
-// ponytail: a full linear scan (and, on the rare cap-exceeded path, a full
-// sort) on every call, bounded by pushCoalesceMapCap entries. Fine at that
-// size; move to a background ticker or a time-ordered structure if the cap
-// is ever raised enough for this to show up in profiles.
-func (d *PushDispatcher) sweepCoalesceLocked(now time.Time) {
-	for k, t := range d.lastSent {
-		if now.Sub(t) >= pushCoalesceWindow {
-			delete(d.lastSent, k)
-		}
-	}
-	if len(d.lastSent) < pushCoalesceMapCap {
-		return
-	}
-	type entry struct {
-		key pushCoalesceKey
-		at  time.Time
-	}
-	entries := make([]entry, 0, len(d.lastSent))
-	for k, t := range d.lastSent {
-		entries = append(entries, entry{k, t})
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].at.Before(entries[j].at) })
-	for _, e := range entries[:len(entries)-pushCoalesceMapCap+1] {
-		delete(d.lastSent, e.key)
-	}
-}
-
-// sendOne encrypts and POSTs one push to one subscription, re-checking
-// eligibility and retrying a transient failure within pushMaxAttempts. It
-// never returns an error; every outcome lands in exactly one counter (or
-// none, if stillEligible refuses an attempt).
-func (d *PushDispatcher) sendOne(ctx context.Context, channelID int64, sub db.PushSubscriptionForDispatch) {
+// prepareRequest builds the (fixed, never re-encrypted) safefetch.Request
+// for sub once: decoding its credential, encrypting the generic payload,
+// and signing a VAPID header. Any failure here is terminal and unrelated to
+// the destination being reachable, so it is counted failed once and never
+// retried.
+func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (safefetch.Request, bool) {
 	p256dh, err := decodePushBase64(sub.P256dh)
 	if err != nil {
 		d.failed.Add(1)
-		return
+		return safefetch.Request{}, false
 	}
 	authSecret, err := decodePushBase64(sub.Auth)
 	if err != nil {
 		d.failed.Add(1)
-		return
+		return safefetch.Request{}, false
 	}
 	body, err := encryptWebPushMessage(pushActivityPayload, p256dh, authSecret)
 	if err != nil {
 		d.failed.Add(1)
-		return
+		return safefetch.Request{}, false
 	}
 	authorization, err := d.push.vapidAuthorization(sub.Endpoint)
 	if err != nil {
 		d.failed.Add(1)
-		return
+		return safefetch.Request{}, false
 	}
-	req := safefetch.Request{
+	return safefetch.Request{
 		Method: http.MethodPost,
 		URL:    sub.Endpoint,
 		Body:   body,
@@ -379,33 +319,145 @@ func (d *PushDispatcher) sendOne(ctx context.Context, channelID int64, sub db.Pu
 			"Urgency":          "normal",
 			"Content-Type":     "application/octet-stream",
 		},
-	}
+	}, true
+}
 
-	for attempt := 1; attempt <= pushMaxAttempts; attempt++ {
-		if !d.stillEligible(ctx, channelID, sub.UserID) {
-			return
-		}
-		resp, err := d.fetch.Fetch(ctx, req)
-		if err == nil {
-			switch {
-			case resp.StatusCode == http.StatusCreated:
-				d.dispatched.Add(1)
-				return
-			case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-				d.prune(ctx, sub.ID)
-				return
-			case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-				// transient -- fall through to the retry below
-			default:
-				d.failed.Add(1)
-				return
-			}
-		}
-		if attempt == pushMaxAttempts {
+// attemptOne performs one delivery attempt (1-based attempt number) for
+// item, re-checking eligibility immediately before it. It reports whether
+// item should be retried in a later round; every terminal outcome (success,
+// prune, non-retryable failure, or the retry budget running out) lands in
+// exactly one counter before returning false.
+func (d *PushDispatcher) attemptOne(ctx context.Context, channelID int64, item pushRoundItem, attempt int) bool {
+	if !d.stillEligible(ctx, channelID, item.sub.UserID) {
+		return false
+	}
+	resp, err := d.fetch.Fetch(ctx, item.req)
+	if err == nil {
+		switch {
+		case resp.StatusCode == http.StatusCreated:
+			d.dispatched.Add(1)
+			return false
+		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+			d.prune(ctx, item.sub.ID)
+			return false
+		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+			// transient -- retry in a later round if the budget allows
+		default:
 			d.failed.Add(1)
-			return
+			return false
 		}
-		d.sleep(ctx, pushRetryBackoffs[attempt-1])
+	}
+	if attempt == pushMaxAttempts {
+		d.failed.Add(1)
+		return false
+	}
+	return true
+}
+
+// coalesceAudience narrows candidateIDs to the users a push is actually
+// sent to: distinct, not the author, not blocked by (a blocker of) the
+// author, currently eligible (offline and permitted -- see eligibleFor),
+// and not inside their coalescing window for ch.
+//
+// Eligibility is checked BEFORE coalescing, not after: an online or
+// unauthorized candidate must not reserve the 60s window for a channel they
+// were never going to be pushed about, or a later, genuinely eligible
+// mention (the recipient came back online, or a mention five seconds after
+// an ineligible one) would silently receive nothing. Eligibility is
+// re-checked again immediately before every delivery attempt in
+// stillEligible, because a bounded but potentially slow dispatch (retries,
+// a worker pool) can take long enough for it to change again in the other
+// direction.
+//
+// For a DM, permission IS participation (permissions.CanViewChannel checks
+// only DMParticipant for a "dm" channel). B5-6: trusted_senders does not
+// exist on this branch (B5-6 is behind HP-5 too and may not have merged
+// yet). Once it does, a DM push should also require that the recipient
+// trusts the sender -- the same row Message Requests gates on -- so a
+// first-contact message from an unknown sender cannot ring a stranger's
+// phone before they have decided to accept it.
+func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, candidateIDs []int64, authorID int64, blockedByAuthor map[int64]bool) []int64 {
+	seen := make(map[int64]bool, len(candidateIDs))
+	out := make([]int64, 0, len(candidateIDs))
+	now := time.Now()
+	for _, uid := range candidateIDs {
+		if uid == authorID || uid <= 0 || seen[uid] || blockedByAuthor[uid] {
+			continue
+		}
+		seen[uid] = true
+		if !d.eligibleFor(ctx, ch, uid) {
+			continue
+		}
+		if d.coalesced(uid, ch.ID, now) {
+			continue
+		}
+		out = append(out, uid)
+	}
+	return out
+}
+
+// eligibleFor reports whether userID may be pushed to for ch right now:
+// not currently connected (their client already has the message), and
+// permitted to view ch. ch is the caller's already-resolved channel; a
+// caller that needs it re-fetched fresh (because time may have passed)
+// uses stillEligible instead.
+func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID int64) bool {
+	if d.online != nil && d.online(userID) {
+		return false
+	}
+	sub, err := channelSubject(ctx, d.st, d.perms, userID, ch, false)
+	if err != nil {
+		return false
+	}
+	return permissions.CanViewChannel(sub) == nil
+}
+
+// stillEligible re-resolves, immediately before one delivery attempt, the
+// three things that can change while a bounded dispatch is in flight: the
+// recipient came online, the channel was labelled nsfw, or the recipient
+// lost CanViewChannel. Called before every attempt, first and retry alike.
+func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, userID int64) bool {
+	ch, err := d.st.GetChannel(ctx, channelID)
+	if err != nil || ch == nil || ch.NSFW {
+		return false
+	}
+	return d.eligibleFor(ctx, ch, userID)
+}
+
+// coalesced reports whether userID was already pushed about channelID
+// within pushCoalesceWindow. If not, and the map has room (see
+// expireCoalesceLocked), it starts a new window from now and returns false;
+// if the map is at capacity with no room even after expiring stale entries,
+// the new pair is refused (reported as coalesced) rather than evicting a
+// still-active window, which would let that evicted pair be pushed again
+// before its own 60s were actually up.
+func (d *PushDispatcher) coalesced(userID, channelID int64, now time.Time) bool {
+	key := pushCoalesceKey{userID, channelID}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if last, ok := d.lastSent[key]; ok && now.Sub(last) < pushCoalesceWindow {
+		return true
+	}
+	d.expireCoalesceLocked(now)
+	if len(d.lastSent) >= pushCoalesceMapCap {
+		return true
+	}
+	d.lastSent[key] = now
+	return false
+}
+
+// expireCoalesceLocked removes every entry whose window has already
+// expired. Called with d.mu held.
+//
+// ponytail: a full linear scan on every call, bounded by pushCoalesceMapCap
+// entries. Fine at that size; move to a background ticker or a
+// time-ordered structure if the cap is ever raised enough for this to show
+// up in profiles.
+func (d *PushDispatcher) expireCoalesceLocked(now time.Time) {
+	for k, t := range d.lastSent {
+		if now.Sub(t) >= pushCoalesceWindow {
+			delete(d.lastSent, k)
+		}
 	}
 }
 

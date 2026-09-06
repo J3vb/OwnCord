@@ -12,11 +12,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -222,11 +226,47 @@ type vapidClaims struct {
 // either way.
 func webOrigin(u *url.URL) string {
 	scheme := strings.ToLower(u.Scheme)
-	host := strings.ToLower(u.Hostname())
-	if port := u.Port(); port != "" && port != defaultPortFor(scheme) {
+	host := normaliseOriginHost(u.Hostname())
+	if port := normalisePort(u.Port()); port != "" && port != defaultPortFor(scheme) {
 		host = host + ":" + port
 	}
 	return scheme + "://" + host
+}
+
+// normaliseOriginHost is the host component of webOrigin's result:
+//   - an IP literal (v4 or v6) is re-bracketed if it is v6 -- url.Hostname()
+//     strips the brackets a URI writes an IPv6 host with, and "aud" needs
+//     them back or the value parses as a hostname full of colons;
+//   - anything else is folded to its canonical ASCII (Punycode) form with
+//     golang.org/x/net/idna's Lookup profile (RFC 5891 SS5), which also
+//     case-folds -- an uppercase Unicode label and its lowercase spelling
+//     must produce the same origin string. idna is already in go.mod
+//     (pulled in transitively); this is the first direct import of it.
+//     A host idna refuses is lowercased instead, ASCII-only, same as
+//     before this fix.
+func normaliseOriginHost(host string) string {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.Is6() {
+			return "[" + ip.String() + "]"
+		}
+		return ip.String()
+	}
+	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		return ascii
+	}
+	return strings.ToLower(host)
+}
+
+// normalisePort returns port's canonical decimal form ("0443" -> "443"),
+// so a numerically-default port in a non-canonical spelling is still
+// recognised as default by webOrigin. A non-numeric port (never valid in a
+// URL, but url.URL does not itself refuse one) passes through unchanged.
+func normalisePort(port string) string {
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return port
+	}
+	return strconv.Itoa(n)
 }
 
 // defaultPortFor is the scheme's default port per RFC 6454; "" for any
