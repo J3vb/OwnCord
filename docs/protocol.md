@@ -97,7 +97,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`                                                                                                                           |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`                                                                                                          |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
@@ -1029,6 +1029,105 @@ correlate `report_id` values in order could otherwise infer a report's
 position relative to reports they cannot see). `state` is one of `open`,
 `assigned`, `resolved`, `dismissed`.
 
+**B5-10 reuses this same wire type for an appeal-queue change** (a
+submission, assignment or decision), carrying `appeal_id` instead of
+`report_id` — one wire type, two optional ids, exactly one of which is ever
+set on a given frame:
+
+```json
+{
+  "type": "mod_queue",
+  "payload": {
+    "appeal_id": "1a2b3c4d5e6f7081920a1b2c3d4e5f60",
+    "state": "overturned"
+  }
+}
+```
+
+Like the report variant, this frame is filtered against one principal: the
+appellant. A moderator who filed the appeal being changed never receives
+this frame about their OWN appeal, even though they can see its state
+through `GET /api/v1/appeals/mine` — the same confidentiality rule
+`mod_queue`'s report variant applies to the reporter and subject. The
+ACTING moderator on the appealed action is deliberately NOT excluded: they
+may already see the appeal through the queue and detail views, so there is
+no oracle to protect against for them. `state` here is one of `open`,
+`assigned`, `upheld`, `overturned`, `withdrawn` — a withdrawal broadcasts
+this frame too, so a connected moderator's queue view drops the row
+immediately rather than only on their next `GET`.
+
+---
+
+## Moderator Actions
+
+### mod_action (Server -> Client)
+
+B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
+ONLY to the live target — targeted and unsequenced, never replayed. A
+disconnected target simply sees the warning in `ready`'s `notices` on next
+connect, or feels the timeout on their next attempted send.
+
+```json
+{
+  "type": "mod_action",
+  "payload": {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "at most 500 runes, no control characters",
+    "expires_at": "2026-09-06T12:00:00Z"
+  }
+}
+```
+
+`kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
+for a lifted timeout; present for an active timeout.
+
+## Appeals
+
+### appeal_status (Server -> Client)
+
+B5-10: an appeal's state changed (assigned, decided, or withdrawn),
+delivered ONLY to the appellant — targeted and unsequenced, never replayed.
+A disconnected appellant simply sees the current state on their next
+`GET /api/v1/appeals/mine`.
+
+```json
+{
+  "type": "appeal_status",
+  "payload": {
+    "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "state": "overturned",
+    "decision_note": "at most 2000 runes, no control characters"
+  }
+}
+```
+
+`id` is the appeal's opaque public id. `state` is one of `assigned`,
+`upheld`, `overturned`, `withdrawn`. `decision_note` is `null` until the
+appeal is decided.
+
+### ready's notices
+
+`ready`'s payload carries a `notices` array: every warning issued to the
+connecting user that they have not yet acknowledged.
+
+```json
+{
+  "notices": [
+    {
+      "id": 42,
+      "kind": "warning",
+      "reason": "at most 500 runes, no control characters",
+      "created_at": "2026-09-05T10:00:00Z"
+    }
+  ]
+}
+```
+
+Acknowledge one with `POST /api/v1/users/me/notices/{id}/ack` (see
+[api.md](api.md)) — own rows only. An acknowledged warning never reappears
+here.
+
 ---
 
 ## Moderator Actions
@@ -1827,6 +1926,7 @@ tables below add per-type behavioral notes.
 | `server_restart`      | Yes      | All clients                                                             |
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `mod_action`          | No       | Direct to the live target only                                          |
+| `appeal_status`       | No       | Direct to the appellant only                                            |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

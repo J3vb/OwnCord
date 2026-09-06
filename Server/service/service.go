@@ -40,6 +40,8 @@ type Services struct {
 	Auth *AuthService
 	// Reports is the local report intake and moderator queue (B5-8).
 	Reports *ReportService
+	// Appeals is the rate-limited appeal against a moderation action (B5-10).
+	Appeals *AppealService
 	// Push stores Web Push subscriptions (B5-4); the composition root
 	// installs the VAPID key and the staleness TTL on it. A pointer field
 	// so Services stays comparable (admin/services_bundle_test.go compares
@@ -98,6 +100,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Sessions:        NewSessionService(st),
 		Setup:           NewSetupService(st),
 		Reports:         NewReportService(st, permSvc, messages, uploads, moderation, limiter),
+		Appeals:         NewAppealService(st, permSvc, moderation, limiter),
 		Push:            NewPushService(st),
 		MessageRequests: messageRequests,
 		NSFW:            NewNSFWService(st, permSvc),

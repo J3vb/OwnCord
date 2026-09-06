@@ -94,6 +94,78 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, nil
 		}},
+		{"appeal submit", "appeal_submit", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			const body = "appeal body sentinel 3f0c9a1e"
+			rec := audittest.Install(t, f.database)
+			if _, err := appeals.Submit(context.Background(), fixtureMember, actionID, body); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			return rec, []string{body}
+		}},
+		{"appeal withdraw", "appeal_withdraw", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			const body = "appeal body sentinel 3f0c9a1e"
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
+				t.Fatalf("Withdraw: %v", err)
+			}
+			return rec, []string{body}
+		}},
+		{"appeal assign", "appeal_assign", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			const body = "appeal body sentinel 3f0c9a1e"
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
+				t.Fatalf("Assign: %v", err)
+			}
+			return rec, []string{body}
+		}},
+		{"appeal decide", "appeal_decide", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			const body = "appeal body sentinel 3f0c9a1e"
+			const note = "decision note sentinel 8a41d02c"
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			// "overturned" (not "upheld"): item 4's reversal audit row
+			// (user_warning_acknowledged, for a warning) is written alongside
+			// appeal_decide, and both must clear the sentinel denylist.
+			if err := appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", note); err != nil {
+				t.Fatalf("Decide: %v", err)
+			}
+			return rec, []string{body, note}
+		}},
 		{"kick (force logout)", "force_logout", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
 			rec := audittest.Install(t, database)

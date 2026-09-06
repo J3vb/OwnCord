@@ -70,8 +70,9 @@ const (
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeServerRestart       = "server_restart"
-	MsgTypeModQueue            = "mod_queue"  // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
-	MsgTypeModAction           = "mod_action" // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeModQueue            = "mod_queue"     // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+	MsgTypeModAction           = "mod_action"    // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeAppealStatus        = "appeal_status" // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"

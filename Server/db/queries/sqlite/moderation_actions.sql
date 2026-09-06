@@ -99,14 +99,25 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
  WHERE report_id = ?
  ORDER BY created_at, id;
 
+-- name: GetModerationActionByID :one
+-- B5-10's appeal submission and decision both need the appealed action's
+-- own row: its kind (appealable or not), its target (must be the appellant),
+-- and its actor (the deciding-moderator self-review check).
+SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
+       expires_at, acknowledged_at, lifted_at, lifted_by, created_at
+  FROM moderation_actions
+ WHERE id = ?;
+
 -- name: RetireRetiredCandidates :execrows
--- The maintenance-tick retention sweep, run only when no appeals table
--- exists yet (B5-9; B5-10's migration 050 adds appeals and this query is
--- replaced by one that excludes referenced ids -- see the // B5-10: comment
--- in Server/db/moderation_action_queries.go). Warnings retire
--- moderation.action_retention_days after acknowledged_at; timeouts the same
--- number of days after expires_at, or after lifted_at when lifted early.
--- Ban, kick and removal rows are never touched here.
+-- The maintenance-tick retention sweep, kept only as the pre-appeals
+-- fallback RetireModerationActions falls back to if the appeals table is
+-- somehow absent (Server/db/moderation_action_queries.go) -- in ordinary
+-- operation migration 050 has always run by the time this executes, so
+-- RetireRetiredCandidatesExcludingAppealed (appeals.sql) is the query that
+-- actually runs. Warnings retire moderation.action_retention_days after
+-- acknowledged_at; timeouts the same number of days after expires_at, or
+-- after lifted_at when lifted early. Ban, kick and removal rows are never
+-- touched here.
 DELETE FROM moderation_actions
  WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));

@@ -347,7 +347,10 @@ func erasureUnlinkPrincipalRows(ctx context.Context, tx *sql.Tx, userID int64, s
 	if err := erasureUnlinkReports(ctx, tx, userID, subjectToken); err != nil {
 		return err
 	}
-	return erasureUnlinkModerationActions(ctx, tx, userID, subjectToken)
+	if err := erasureUnlinkModerationActions(ctx, tx, userID, subjectToken); err != nil {
+		return err
+	}
+	return erasureUnlinkAppeals(ctx, tx, userID, subjectToken)
 }
 
 // erasureUnlinkAudit is the unlinkable integrity history (B4-10, BPR-053):
@@ -491,6 +494,35 @@ func erasureUnlinkModerationActions(ctx context.Context, tx *sql.Tx, userID int6
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE moderation_actions SET lifted_by = 0 WHERE lifted_by = ?`, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink moderation action lifter: %w", err)
+	}
+	return nil
+}
+
+// erasureUnlinkAppeals is B5-10's half of erasure, beside
+// erasureUnlinkModerationActions: the APPELLANT's own appeal rows cascade
+// with the users DELETE below (appeals.appellant_id is ON DELETE CASCADE —
+// S6-d says an appeal is deleted for the appellant, not kept, unlike a
+// report's outcome row: the UNIQUE(action_id) memory that forbids re-appeal
+// survives with the row gone, because the action itself still exists and a
+// fresh appeal against it would need a fresh appellant who no longer
+// exists either), so there is nothing for this function to do on that side.
+// What it unlinks is the erased user acting as a MODERATOR elsewhere:
+// decided_by/decided_by_token (the bare-id-plus-token pattern every other
+// unlinker in this file uses) and assignee_id (a bare id with no token
+// column, mirroring reports.assignee_id and moderation_actions.lifted_by —
+// inventory class 24b, SubjectInventory).
+func erasureUnlinkAppeals(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
+	var token any
+	if subjectToken != "" {
+		token = subjectToken
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE appeals SET decided_by = 0, decided_by_token = ? WHERE decided_by = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink appeal decider: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE appeals SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink appeal assignment: %w", err)
 	}
 	return nil
 }

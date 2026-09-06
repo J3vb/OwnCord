@@ -22,6 +22,12 @@ type Querier interface {
 	AcknowledgeWarning(ctx context.Context, arg AcknowledgeWarningParams) (int64, error)
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
+	// P3 review: reject a stale/terminal appeal BEFORE running the (possibly
+	// expensive) self-review eligibility test below -- the exact row+state+
+	// assignee the caller observed, mirroring DecideAppeal's own guard so a
+	// decide that is going to fail its guarded UPDATE anyway never pays for the
+	// eligibility check first.
+	AppealObservedRowExists(ctx context.Context, arg AppealObservedRowExistsParams) (int64, error)
 	ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error)
 	// Scoped to channel_id as well as user_id: the moderator's authorization is
 	// checked against a channel snapshot several round trips before this write
@@ -36,6 +42,12 @@ type Querier interface {
 	// ClearVoiceServerMute's own unmute.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
+	// Guarded three ways, the same shape as reports' AssignReport: state (only
+	// 'open' may be assigned -- nothing leaves a decided or withdrawn state),
+	// the OBSERVED assignee (optimistic concurrency), and EXISTS(users) (a
+	// moderator erased between requirePerm and this write cannot land as the
+	// new assignee).
+	AssignAppeal(ctx context.Context, arg AssignAppealParams) (int64, error)
 	// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
 	// assignee (optimistic concurrency -- a concurrent reassignment moves this
 	// out from under a racing caller, so its stale outrank verdict can never be
@@ -95,6 +107,22 @@ type Querier interface {
 	// everyone exactly while some user's avatar points at it. Covered by the
 	// partial index on users(avatar) added in migration 027.
 	CountUsersWithAvatar(ctx context.Context, avatar *string) (int64, error)
+	// The eligible-moderator COUNT for decision 8's self-review escape (the
+	// exported db.CountEligibleModerators contract -- Assign's non-transactional
+	// checkSelfReview and its own direct tests want the actual count, not just
+	// ">0"): every OTHER user, excluding the acting moderator, the appellant
+	// (F2/F3 review: an appellant who happens to also hold the bit must never
+	// count as their own alternative reviewer), id 0 (the system actor is never
+	// a reviewer), and anyone effectively banned, who holds perm_bit or the
+	// Administrator bit. The ban comparison is normalised the same way
+	// mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
+	// writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
+	// "ban_expires <= datetime('now')" compares that against SQLite's space-form
+	// "2006-01-02 15:04:05" -- a bare ' ' sorts BELOW 'T', so a same-day expiry
+	// would compare as still-active until midnight and wrongly exclude an
+	// eligible moderator (the exact bug notBannedClause's own comment
+	// documents). replace() normalises the separator before comparing.
+	CountUsersWithPermission(ctx context.Context, arg CountUsersWithPermissionParams) (int64, error)
 	// A lapsed temporary ban must not hide a TOTP-less user from this count: the
 	// ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause /
 	// ListMembers above), which treats an elapsed ban as "not banned" and lets
@@ -118,6 +146,14 @@ type Querier interface {
 	CreatePendingUser(ctx context.Context, arg CreatePendingUserParams) (sql.Result, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
+	// new_state is 'upheld' or 'overturned', validated in Go. Guarded on the
+	// OBSERVED state and assignee (optimistic concurrency, Claim 5 review: a
+	// bare "state IN ('open','assigned')" let an Assign and a Decide the caller
+	// read as sequential actually land out of order -- Assign after the caller
+	// read 'open' but before this write, or vice versa, both invisible to a
+	// guard that does not pin the exact row the caller observed), and
+	// EXISTS(users) for the deciding moderator (erased mid-flight cannot land).
+	DecideAppeal(ctx context.Context, arg DecideAppealParams) (int64, error)
 	DeleteChannel(ctx context.Context, id int64) error
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
 	DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error
@@ -169,6 +205,13 @@ type Querier interface {
 	// tombstone. No row comes back when it loses, which the wrapper reports as
 	// ErrNotFound rather than a silent success (OC-0358).
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
+	// DecideAppealTx's own self-review escape test (P3 review): the identical
+	// WHERE clause as CountUsersWithPermission above, but SELECT EXISTS rather
+	// than SELECT COUNT(*) -- DecideAppealTx only ever tests ">0", so scanning
+	// until the first match is strictly less work than counting every match,
+	// and it now runs only after AppealObservedRowExists has already confirmed
+	// the appeal is not stale/terminal, inside the same transaction.
+	EligibleModeratorExists(ctx context.Context, arg EligibleModeratorExistsParams) (int64, error)
 	// Camera and screenshare share one voice_max_video budget, counted in
 	// STREAMS, not rows: a channel capped at N simultaneous video streams must
 	// not let a camera publish ignore screenshare occupants (or vice versa,
@@ -194,6 +237,15 @@ type Querier interface {
 	// byte/rune difference of any multi-byte character.
 	EnsureUserStorage(ctx context.Context, userID int64) error
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
+	// appeals is the B5-10 rate-limited appeal against a moderation action
+	// (migration 050). Keep this file ASCII-only: sqlc v1.30 truncates the next
+	// query by the byte/rune difference of any multi-byte character.
+	// The dedupe FAST PATH (mirrors reports' FindOpenOrAssignedReport): decision
+	// 8 forbids re-appealing a decided appeal, and this table's UNIQUE(action_id)
+	// forbids ANY second appeal against the same action, ever. This query alone
+	// is a pre-check only and is not race-proof; the UNIQUE constraint on
+	// InsertAppeal is what actually enforces it under concurrency.
+	FindAppealForAction(ctx context.Context, actionID int64) (int64, error)
 	// The 1:1 DM channel between two users, if one exists. Mirrors the lookup
 	// inside GetOrCreateDMChannel (raw, transactional) without creating anything:
 	// the is_group clause keeps group DMs out, matching the block-enforcement
@@ -222,6 +274,10 @@ type Querier interface {
 	GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAllSettings(ctx context.Context) ([]Setting, error)
 	GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error)
+	GetAppealByID(ctx context.Context, id int64) (Appeal, error)
+	// The only lookup a route parameter or a mod_queue frame's appeal_id ever
+	// drives: public_id is the sole externally-visible identifier.
+	GetAppealByPublicID(ctx context.Context, publicID string) (Appeal, error)
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
 	// c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
 	// NULL when the attachment is unlinked or its message/channel is gone, same
@@ -255,6 +311,10 @@ type Querier interface {
 	GetMessageRequestByPair(ctx context.Context, arg GetMessageRequestByPairParams) (MessageRequest, error)
 	GetMessageRequestForRecipient(ctx context.Context, arg GetMessageRequestForRecipientParams) (MessageRequest, error)
 	GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIParams) ([]GetMessagesForAPIRow, error)
+	// B5-10's appeal submission and decision both need the appealed action's
+	// own row: its kind (appealable or not), its target (must be the appellant),
+	// and its actor (the deciding-moderator self-review check).
+	GetModerationActionByID(ctx context.Context, id int64) (ModerationAction, error)
 	// The highest-privilege account (role with the greatest position), used as the
 	// default identity for `token create`. FROM is users-only (role position is a
 	// correlated subquery, not a join) so the row maps through userFromGen exactly
@@ -319,6 +379,16 @@ type Querier interface {
 	// run, uncached, to fill Subject.TimedOut.
 	HasActiveTimeout(ctx context.Context, targetID int64) (int64, error)
 	HasNSFWAcknowledgement(ctx context.Context, arg HasNSFWAcknowledgementParams) (int64, error)
+	// public_id is generated in Go (crypto/rand) before this runs, the same
+	// shape reports.public_id uses. A violation of UNIQUE(action_id) here is the
+	// race-proof half of decision 8: two simultaneous appeals against the same
+	// action both reach this INSERT, and the loser's violates the constraint.
+	// N4 review: INSERT ... SELECT ... WHERE EXISTS, the same shape reports'
+	// InsertReport uses, so an action erased between Submit's ownership lookup
+	// and this write (the target's account erasure cascades and removes the
+	// action row) surfaces as zero rows (mapped to db.ErrNotFound) rather than
+	// a raw foreign-key constraint error reaching the caller as a 500.
+	InsertAppeal(ctx context.Context, arg InsertAppealParams) (int64, error)
 	// Erasure jobs (migration 037, B4-9): the durable file half of an account
 	// erasure. The row is written inside the erasure transaction with the
 	// stored_as names of every file the subject owned; the runner removes them
@@ -396,6 +466,18 @@ type Querier interface {
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
+	// F1/N1 review: overturning an appeal reverses the SPECIFIC appealed action,
+	// never "whatever timeout is active for this target now" -- two timeouts,
+	// appeal the older, overturn must not touch a newer one. Guarded on id AND
+	// still-active (lifted_at IS NULL AND expires_at > now): if this row was
+	// already lifted (expired naturally, lifted directly, or superseded by a
+	// later TimeoutUser call, N1) overturning it is a record only, zero rows
+	// affected, not an error. Runs under the system actor (0, no EXISTS(users)
+	// guard): the reversal is a mechanical consequence of the appeal DECISION,
+	// audited on the appeal row with the human decider's id -- it is not a
+	// second moderation action by that human, so 0 is a blessed sentinel here
+	// rather than a live user id needing re-validation.
+	LiftTimeoutByActionID(ctx context.Context, id int64) (int64, error)
 	// Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
 	// token shown at creation is usable).
 	ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
@@ -410,6 +492,16 @@ type Querier interface {
 	// the session now, not a column read here (see migration 049's comment).
 	ListActiveTimeouts(ctx context.Context, targetID int64) ([]int64, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
+	// The moderation queue view for one state ("open", "assigned", "decided" --
+	// decided groups both terminal decision states together, mirroring reports'
+	// "closed" grouping resolved/dismissed).
+	ListAppealsByState(ctx context.Context, state string) ([]ListAppealsByStateRow, error)
+	ListAppealsDecided(ctx context.Context) ([]ListAppealsDecidedRow, error)
+	// The appellant's own view: their appeals, newest first.
+	ListAppealsMine(ctx context.Context, appellantID int64) ([]ListAppealsMineRow, error)
+	// The default queue view (state omitted): open and assigned together,
+	// mirroring reports' ListReportsOpenOrAssigned.
+	ListAppealsOpenOrAssigned(ctx context.Context) ([]ListAppealsOpenOrAssignedRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error)
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
@@ -565,14 +657,24 @@ type Querier interface {
 	// from the previous process. Chosen statuses survive for the same reason they
 	// survive a disconnect.
 	ResetAllUserStatuses(ctx context.Context) error
-	// The maintenance-tick retention sweep, run only when no appeals table
-	// exists yet (B5-9; B5-10's migration 050 adds appeals and this query is
-	// replaced by one that excludes referenced ids -- see the // B5-10: comment
-	// in Server/db/moderation_action_queries.go). Warnings retire
-	// moderation.action_retention_days after acknowledged_at; timeouts the same
-	// number of days after expires_at, or after lifted_at when lifted early.
-	// Ban, kick and removal rows are never touched here.
+	// The maintenance-tick retention sweep, kept only as the pre-appeals
+	// fallback RetireModerationActions falls back to if the appeals table is
+	// somehow absent (Server/db/moderation_action_queries.go) -- in ordinary
+	// operation migration 050 has always run by the time this executes, so
+	// RetireRetiredCandidatesExcludingAppealed (appeals.sql) is the query that
+	// actually runs. Warnings retire moderation.action_retention_days after
+	// acknowledged_at; timeouts the same number of days after expires_at, or
+	// after lifted_at when lifted early. Ban, kick and removal rows are never
+	// touched here.
 	RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error)
+	// B5-10's completion of the // B5-10: comment RetireModerationActions left
+	// in Server/db/moderation_action_queries.go: the same warning/timeout
+	// retention sweep as RetireRetiredCandidates (moderation_actions.sql), but
+	// excluding any id an appeals row references -- decision 8's UNIQUE(action_id)
+	// memory must not be swept out from under a decided appeal, or a fresh
+	// appeal against the same action could slip past the "one appeal per action,
+	// ever" rule the row alone enforces.
+	RetireRetiredCandidatesExcludingAppealed(ctx context.Context, cutoff *string) (int64, error)
 	RevokeAPIToken(ctx context.Context, id int64) (sql.Result, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error)
 	RevokeInvite(ctx context.Context, code string) error
@@ -618,6 +720,14 @@ type Querier interface {
 	UnbanUser(ctx context.Context, id int64) error
 	UnblockUser(ctx context.Context, arg UnblockUserParams) error
 	UninstallPlugin(ctx context.Context, id int64) error
+	// Same, for assignee_id: no token column of its own (mirrors reports'
+	// assignee_id and moderation_actions.lifted_by), so an erased assignee's id
+	// simply goes to 0.
+	UnlinkAppealsByAssignee(ctx context.Context, assigneeID int64) error
+	// Erasure's actor-token unlink (mirrors UnlinkModerationActionsByActor): an
+	// erased moderator's decisions keep their row, decision and order, but the
+	// deciding id goes to 0 and the token takes its place.
+	UnlinkAppealsByDecider(ctx context.Context, arg UnlinkAppealsByDeciderParams) error
 	// Erasure's actor-token unlink (mirrors erasureUnlinkReports): an erased
 	// moderator's actions keep their row, action, time and order, but the
 	// actor id goes to 0 and the token takes its place.
@@ -675,6 +785,8 @@ type Querier interface {
 	// PARTIAL) from "session exists but was already server-muted by
 	// someone/something else" (not this action's ownership to claim).
 	VoiceSessionExists(ctx context.Context, arg VoiceSessionExistsParams) (int64, error)
+	// The appellant only, guarded to open/assigned states.
+	WithdrawAppeal(ctx context.Context, arg WithdrawAppealParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -333,10 +333,12 @@ type Store interface {
 	// AssignReport is guarded on state, the caller's last-observed assignee
 	// (optimistic concurrency) and EXISTS(users) — see db/report_queries.go.
 	AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
-	// AssignReportForced is the force-reassign path: the outrank comparison
-	// runs inside the same transaction as the write (Codex review) —
-	// ErrForbidden means the caller does not outrank the current assignee.
-	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error)
+	// AssignReportForced is the force-reassign path: BOTH principals' role
+	// positions are read fresh inside the same transaction as the write
+	// (Codex review, widened — the actor's used to be trusted stale from
+	// before the transaction opened) — ErrForbidden means the caller does
+	// not outrank the current assignee.
+	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
 	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
 	InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
@@ -393,6 +395,44 @@ type Store interface {
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
+	// GetModerationAction is B5-10's appeal submission and decision both
+	// needing the appealed action's own kind, target and actor.
+	GetModerationAction(ctx context.Context, id int64) (*db.ModerationAction, error)
+
+	// ── Appeals (migration 050, B5-10) ──
+	// FindAppealForAction is the dedupe FAST PATH; InsertAppeal's
+	// UNIQUE(action_id) violation is what actually enforces decision 8's
+	// "one appeal per action, ever" under concurrency.
+	FindAppealForAction(ctx context.Context, actionID int64) (int64, error)
+	InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error)
+	GetAppeal(ctx context.Context, id int64) (*db.Appeal, error)
+	GetAppealByPublicID(ctx context.Context, publicID string) (*db.Appeal, error)
+	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
+	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
+	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
+	// AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
+	// transaction with a fresh authority re-check (P2) and, when
+	// checkSelfReview is true, decision 8's deciding-moderator eligibility
+	// test (round 4) — both inside the same transaction — see db.AssignAppealTx.
+	AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkSelfReview bool, appellantID, permBit, adminBit int64,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	// DecideAppealTx runs a fresh authority re-check (P2), the stale/terminal
+	// row rejection (P3), the self-review eligibility test, the guarded
+	// decide UPDATE (on the OBSERVED state/assignee) and, for an overturn,
+	// the reversal, all in one transaction — see db.DecideAppealTx.
+	// reversalApplied tells the caller whether to write the reversal's own
+	// audit row (item 4), best-effort, AFTER this commits.
+	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction,
+		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (result db.AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error)
+	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
+	// CountEligibleModerators is decision 8's self-review escape: the count
+	// of OTHER users (excluding excludeActorID, excludeAppellantID, id 0,
+	// and anyone effectively banned) whose role holds permBit or adminBit.
+	CountEligibleModerators(ctx context.Context, excludeActorID, excludeAppellantID, permBit, adminBit int64) (int64, error)
 
 	// ── Push (migration 045, B5-4) ──
 	// UpsertPushSubscription's keep is the per-user device cap; the upsert,

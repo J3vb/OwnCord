@@ -109,7 +109,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.
 	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(rateLimiterCleanupInterval, rateLimiterCleanupMaxWindow, limiterStopCh)
+	go limiter.StartCleanup(rateLimiterCleanupInterval, limiterStopCh)
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -199,9 +199,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountEmojiRoutes(r, database, svc, store, limiter, hub)
 	}
 
-	// Report intake, the moderation queue, and warning/timeout/notice-ack
-	// (B5-8/B5-9) — mounted after hub creation so a filed report, an
-	// assignment, a close or an action can notify connected clients.
+	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
+	// mounted after hub creation so a filed report, an assignment, a
+	// decision or an action can notify connected clients.
 	routerReportRoutes(r, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
@@ -388,6 +388,16 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 			svc.Moderation.SetNotifier(hub)
 			svc.Moderation.SetVoiceMuter(hub)
 		}
+		if svc.Appeals != nil {
+			// B5-10: a live appellant gets the appeal_status frame on
+			// assignment, decision and withdrawal. F4 review: the mod_queue
+			// broadcaster is wired here too, so Assign/Decide/Withdraw issue
+			// BOTH live frames themselves, under the same per-appeal lock —
+			// the handler no longer calls BroadcastAppealQueue for these
+			// three after the fact, once the lock has already been released.
+			svc.Appeals.SetNotifier(hub)
+			svc.Appeals.SetQueueBroadcaster(hub)
+		}
 	}
 	if svc.Erasure != nil {
 		authSvc.UseErasure(svc.Erasure)
@@ -442,14 +452,17 @@ func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, l
 }
 
 // routerReportRoutes mounts report intake, the reporter's own status view,
-// the moderation queue (B5-8), and warning/timeout/notice-ack (B5-9) beside
-// it since both gate on the same MODERATE_MEMBERS bit and both can notify a
-// connected client — the hub is the mod_queue/mod_action broadcaster for a
-// filed report, an assignment, a close, or an action.
+// the moderation queue (B5-8), warning/timeout/notice-ack (B5-9), and
+// appeals (B5-10) beside them since all gate on the same MODERATE_MEMBERS
+// bit and all can notify a connected client — the hub is the
+// mod_queue/mod_action/appeal_status broadcaster for a filed report, an
+// assignment, a close, an action, or an appeal decision.
 func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 	MountReportRoutes(r, svc, hub)
 	MountModerationQueueRoutes(r, svc, hub)
 	MountModerationRoutes(r, svc)
+	MountAppealRoutes(r, svc)
+	MountModerationAppealRoutes(r, svc)
 }
 
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy

@@ -405,23 +405,25 @@ func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.Report
 // oracle through the handler's own order of operations. Call this before
 // resolveReportIDParam, not after.
 func (s *ReportService) RequireModerate(ctx context.Context, actorID int64) error {
-	_, err := s.requireModerate(ctx, actorID)
-	return err
+	return s.requireModerate(ctx, actorID)
 }
 
 // requireModerate loads actorID's role and checks the canonical predicate
-// (permissions.CanModerate), returning the role for a follow-up hierarchy
-// check. Runs before any report lookup, so an actor without the bit sees
-// Forbidden regardless of whether the report id exists.
-func (s *ReportService) requireModerate(ctx context.Context, actorID int64) (*db.Role, error) {
+// (permissions.CanModerate). Runs before any report lookup, so an actor
+// without the bit sees Forbidden regardless of whether the report id
+// exists. No longer returns the role itself (unparam, golangci-lint review):
+// every force-reassign path now reads the acting principal's position fresh
+// inside its own write transaction (forceReassignGuarded) rather than
+// trusting a role read here, so nothing downstream needs it anymore.
+func (s *ReportService) requireModerate(ctx context.Context, actorID int64) error {
 	role, err := s.perms.GetRoleForUser(ctx, actorID)
 	if err != nil || role == nil {
-		return nil, fmt.Errorf("%w: failed to load role", ErrForbidden)
+		return fmt.Errorf("%w: failed to load role", ErrForbidden)
 	}
 	if err := permissions.CanModerate(permissions.Subject{RolePerms: role.Permissions}); err != nil {
-		return nil, fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
+		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	}
-	return role, nil
+	return nil
 }
 
 // guardConfidentiality is the reciprocal of requireModerate: even a bit
@@ -490,7 +492,7 @@ func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, rep
 // match — the confidentiality rule applies to the listing too, not only to
 // GET by id.
 func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) ([]db.ReportQueueRow, error) {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return nil, err
 	}
 	switch state {
@@ -532,7 +534,7 @@ type ReportDetail struct {
 // Assign/Note/Close). report_events is exposed here and nowhere else — the
 // same bit-plus-confidentiality gate this method already runs, no new one.
 func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*ReportDetail, error) {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return nil, err
 	}
 	report, err := s.st.GetReport(ctx, reportID)
@@ -572,8 +574,7 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 // open/assigned, a moderator erased between requirePerm and the write, and
 // (force only) failing to outrank, all as 409 except the last, which is 403.
 func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, force bool) error {
-	actorRole, err := s.requireModerate(ctx, actorID)
-	if err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
 	report, err := s.st.GetReport(ctx, reportID)
@@ -591,7 +592,7 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 		if !force {
 			return fmt.Errorf("%w: already assigned", ErrConflict)
 		}
-		ok, err := s.st.AssignReportForced(ctx, reportID, actorID, observed, int64(actorRole.Position))
+		ok, err := s.st.AssignReportForced(ctx, reportID, actorID, observed, actorID)
 		if err != nil {
 			if errors.Is(err, db.ErrForbidden) {
 				return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
@@ -619,7 +620,7 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 // either party (the reporter cannot read it either — guardSelfReview — and
 // the subject cannot see the report at all), the name is the contract.
 func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body string) error {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
 	if body == "" || len([]rune(body)) > maxNoteRunes {
@@ -658,7 +659,7 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 // mod_queue frame. Guarded to open/assigned states; a report already closed
 // by a concurrent call answers Conflict, never a second success.
 func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outcome string) (string, error) {
-	if _, err := s.requireModerate(ctx, actorID); err != nil {
+	if err := s.requireModerate(ctx, actorID); err != nil {
 		return "", err
 	}
 	if !validOutcomes[outcome] {

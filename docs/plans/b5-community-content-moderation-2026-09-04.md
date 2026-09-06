@@ -2430,6 +2430,166 @@ assignment, status, decision, notification, repeat and closed cases, blocked
 users, deletion, retention and audit — plus decision 8's rule that the
 moderator who acted does not decide the appeal where another is eligible.
 
+**Evidence, 2026-09-06** — branch `feature/b5-10-appeals`, built on B5-9
+before it was squashed (`91251b3e` merged its review round), then merged
+with B5-9's final tip `c3852795` (`0f54ba43`), which carries `dev` at
+`ae6b9c04` and so every earlier B5 step: built behind HP-5, which the owner
+accepted on 2026-09-06 (#1547, signature recorded in #1550); PR to `dev`
+#1555, after B5-9's #1553. Commits `e24805fd` (the feature),
+`14511571`, `ea3fc3bc`, `3f1b3fac` (three independent review rounds), the
+merge, and `9c1c92b8` (the voice reversal, wired once B5-9's reconcile
+existed). One premise the plan inherited was false at the base: moderation
+actions do **not** carry an opaque public id — the target reads their own
+ledger by sequential id, and an appeal names that id — so only the appeal
+itself gained one.
+
+- **The row.** Migration `050_appeals.sql`: one appeal per action, ever
+  (`UNIQUE(action_id)`, withdrawn included — the memory is the point of
+  decision 8); `public_id`, sixteen random bytes, on every response, route
+  and frame; states `open → assigned → upheld | overturned`, or
+  `withdrawn`; the appellant's reason, an assignee, the decider and their
+  token, a decision note. Both halves cascade: the appellant's erasure takes
+  the appeal, and the action's erasure (B5-9's cascade on the target, who
+  **is** the appellant) takes it too — the spec's shape, not an outcome row,
+  because the action row already carries the unlinkable outcome. Reversal
+  first in `rollback.Order` with its cost row; classes `24a`–`24c` join
+  `erasureStatements` and `SubjectInventory`, so a deciding or assigned
+  moderator's erasure unlinks and keeps the token
+  (`TestAppeal_DecidingModeratorErasureUnlinks`,
+  `TestEraseAccount_EveryInventoryClassIsZero`).
+- **Who may file.** `POST /api/v1/appeals` for a warning, timeout,
+  removal or ban — kick is not appealable — by the action's target alone:
+  anyone else, and an unknown id, get byte-identical not-found before kind,
+  limiter or duplicate are consulted, so the ledger cannot be enumerated
+  (`TestAppeal_OnlyTheTargetMaySubmit`, `TestAppeal_KickIsNotAppealable`).
+  Three per appellant per day on the appeal's own limiter key — and the
+  shared limiter's cleanup horizon, six hours until now, is raised to the
+  longest window it is asked to keep, because a bucket forgotten at six hours
+  restored three more filings inside the same day
+  (`TestAppeal_RateLimit`, `TestAppeal_RateLimitKeyIndependentOfReports`,
+  `TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory`). A
+  second filing for the same action is `409`, under concurrent submits too
+  (`TestAppeal_OnePerActionEver` with its concurrent subtest); an action
+  the retention sweep removes between the ownership read and the insert is
+  not-found, not `500` (`TestAppealQueries_InsertAppealRefusesAnUnknownAction`).
+  A banned caller cannot reach any route, so a ban is appealable only once
+  it has lapsed or been reversed; `docs/api.md` says so and names the
+  out-of-band path.
+- **Who may decide.** `GET /api/v1/moderation/appeals`, `/{id}`,
+  `/{id}/assign`, `/{id}/decide` behind `CanModerate`. The moderator who
+  took the action may neither assign nor decide its appeal while another
+  eligible moderator exists — counted **inside the decision's transaction**,
+  Administrators included, the appellant, the actor, id 0 and banned
+  accounts excluded — and when they are the sole moderator, they may, and
+  the audit row says `(sole moderator)`
+  (`TestAppeal_ActingModeratorMayNotDecideWhereAnotherExists`,
+  `TestAppeal_ActingModeratorMayNotAssignWhereAnotherExists`,
+  `TestAppeal_SoleModeratorMayDecideAndAuditSaysSo`,
+  `TestAppeal_AdministratorCountsAsEligibleModerator`,
+  `TestAppealQueries_CountEligibleModerators_ExcludesBannedModerators`).
+  The appellant may never assign or decide their own appeal, even as a
+  moderator, with no sole-moderator escape; their own appeal is absent from
+  the queue and refused on detail, so the assignee's, decider's and actor's
+  identities stay behind `/mine`'s narrower view
+  (`TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator`,
+  `TestAppeal_QueueExcludesTheCallersOwnAppeal`,
+  `TestAppeal_GetRefusesTheCallersOwnAppeal`). Every transition is a
+  guarded `UPDATE` on the observed state and assignee: two decisions,
+  assign-then-decide out of order, or a delayed assign after a decision —
+  one wins and the loser sends no frame
+  (`TestAppeal_ConcurrentDecideOneWins`,
+  `TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead`,
+  `TestAppeal_DelayedAssignAfterDecisionDoesNotBroadcast`); a forced
+  re-assignment reads **both** principals' ranks inside the write's
+  transaction, through the helper reports share, which fixes the same gap
+  there (`TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank`).
+- **Overturn is a consequence, not a second action.** The reversal runs
+  **inside the decision's transaction**, under the system actor with the
+  human decider on the `appeal_decide` audit row, **by the appealed action's
+  id**: the appealed timeout is lifted and no other; the appealed ban is
+  reversed only if no newer ban row exists for the target (compared by
+  ledger id — a same-second re-ban made a timestamp comparison always
+  false, and the test caught it); the appealed warning is acknowledged; a
+  removal is record-only. A decider who holds `MODERATE_MEMBERS` but not the
+  bits the standalone lift or unban would demand still overturns; if the
+  reversal cannot apply, **nothing commits** and the appellant is never told
+  "overturned" while still sanctioned. The voice half follows after the
+  commit through the very step B5-9 built for it: the same
+  `FinalizeTimeoutLift` a standalone lift runs, which unmutes only what the
+  appealed action owns on the voice session, writes its own audit row, sends
+  the cleared frame, and stays silent when a newer timeout has superseded
+  the appealed one (`TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied`,
+  `TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState`, and the
+  superseded case inside
+  `TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout`)
+  (`TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers`,
+  `TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout`,
+  `TestAppeal_OverturnFirstBanDoesNotUnbanAfterReban`,
+  `TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction`,
+  `TestAppealQueries_DecideAppealTxAppliesEachReversalKind`,
+  `TestAppeal_UpholdChangesNothing`).
+- **Protocol.** One new server→client type, `appeal_status`, to the
+  appellant's own sockets — every device currently registered, with the
+  decision note, which the spec gives them
+  (`TestAppeal_StatusFrameReachesAppellantAndOtherDevices`); `mod_queue`
+  gains an `appeal_id` alongside `report_id` (exactly one set) and reaches
+  bit holders minus the appellant — the acting moderator included, since
+  they may be the sole one — on submit, assign, withdraw and outcome
+  (`TestBroadcastAppealQueue_ExcludesTheAppellant`,
+  `TestBroadcastAppealQueue_ReachesConnectedModeratorsOnly`). B5-8's report
+  frames and the epoch-1 fixtures are byte-identical.
+- **Retention and audit.** An action with an appeal in any state is never
+  retired — the join B5-9 left for this step, with the refusal removed
+  (`TestModerationRetention_SkipsAppealedActions`, seeding open, withdrawn
+  and upheld). `appeal_submit`, `appeal_withdraw`, `appeal_assign` and
+  `appeal_decide` carry the human caller; the appeal's body and the
+  decision note never reach `audit_log` detail, proven with sentinels
+  (`TestAuditCoverage_ServiceMutations`).
+- **Three independent review rounds**, briefed on S6's abuse table. The
+  first found two P1s and six P2s, fixed in `14511571`: a decision that
+  committed before its reversal ran and swallowed the failure; a reversal
+  that lifted the newest sanction rather than the appealed one; the
+  eligibility count outside the transaction and counting the appellant;
+  decide accepting an assign it had not observed; the acting moderator free
+  to self-assign; a delayed assign regressing live state; a
+  moderator-appellant reading their own appeal's moderators; the forced
+  re-assign trusting a stale caller rank; the limiter horizon; withdrawal
+  silent to the queue; and the intake-versus-retention `500`. The second
+  (`ea3fc3bc`) closed the notification ordering with a per-appeal lock, the
+  decider's authority read inside the deciding transaction, a lapsed ban
+  wrongly excluded from eligibility by a timestamp compared in two formats,
+  and the reversal's own audit rows. The third found that the lock added by
+  the second was itself an abuse path — allocated per public id **before**
+  the appeal was known to exist, and never reclaimed, so any member could
+  pin memory with invented ids — fixed in `3f1b3fac` by reference-counted
+  eviction and by taking the lock only once the appeal exists, along with
+  the assignment self-review exception moving inside both transactions, a
+  queue broadcast that survives a cancelled request, submit's first frame
+  ordered with the rest, and a rate-limit window that never shrinks. Each
+  round also named tests that would stay green with their guard removed;
+  every one was rewritten to depend on what it claims.
+- **Revert-proof, ten mutations**: the self-review guard, the
+  Administrator count, the timeout lift on overturn, the limiter key, the
+  retention join, the appellant guard, the swallowed reversal, the
+  by-timestamp ban comparison, the observed-state guard, the appellant
+  exclusion from the queue frame. Each red for its named test, each green
+  restored. The duplicate pre-check is the one mutation with no red test:
+  `UNIQUE(action_id)` and the conflict mapping hold without it, which is
+  the defence in depth working.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (`050` extends `049` in order once stacked), prettier from
+  the worktree root, the coverage floor (`db` sits at its floor on this
+  machine and oscillates a tenth either way between runs; the Linux leg is
+  the authority; `ws` reads under floor on Windows by the documented gap).
+
+**Not included, deliberately.** A public id on moderation actions (the
+target reads only their own ledger); age-based retention of appeal rows;
+handler-level tests for the appeal routes beyond the service and socket
+suites (a follow-up, noted); the Moderation Center UI (B9); a
+findings-ledger row.
+
 ## B5-11 — Web Push dispatch
 
 **Audit status, 2026-09-06:** merged as #1548 (`897e21b`), with the B5-6 trust

@@ -78,9 +78,16 @@ delete outright rather than unlink.
   (`AssignReportForced`) read the current assignee's rank inside the same
   transaction as the write -- both close a race between the read that
   justified the write and the write itself.
-- **049 (B5-9)** added `moderation_actions.voice_muted`, recording whether
-  the timeout action itself applied the server mute, so lifting that timeout
-  cannot undo a mute a different moderator set independently.
+- **049 (B5-9)** added `voice_states.server_muted_by` (not a
+  `moderation_actions` column, and not a plain boolean, per Codex review
+  round 4): ownership of a server mute lives on the voice SESSION, naming
+  the specific timeout action that applied it. Ownership transfers to a
+  newer timeout on supersede (in the same transaction as the new row's
+  insert) and is dropped outright when the session ends -- voice_states is
+  itself session-bound, deleted on leave -- so lifting a timeout can only
+  ever clear a mute it actually owns, never one a different moderator set
+  independently through `voice_mod_mute`, and never one a strictly newer,
+  still-active timeout has since taken over.
 - **049 (B5-9)** adds no `CHECK` on `actor_id` -- a constraint requiring
   `actor_id > 0` would forbid the erasure transition that sets it to 0.
   Instead B5-9 refuses a non-human actor (a plugin, a system job with no

@@ -551,22 +551,26 @@ func tableExists(ctx context.Context, q interface {
 // acknowledged_at, timeout rows the same number of days after expires_at or
 // lifted_at when lifted early. Ban, kick and removal rows are never touched.
 //
-// B5-10: once the appeals table exists, this must additionally exclude any
-// id an appeals row references (appeals.action_id) — the join is not written
-// yet because the table does not exist on this branch. tableExists guards
-// against running that join prematurely; extend it here when B5-10 lands
-// rather than adding a second sweep.
+// B5-10 wires the join this comment used to say was missing: an id an
+// appeals row references (appeals.action_id) is excluded from the sweep —
+// decision 8's UNIQUE(action_id) memory that forbids re-appealing an action
+// must not be swept out from under a decided appeal. In ordinary operation
+// migration 050 has always run by the time this executes, so the
+// tableExists check below is a defensive fallback (a database caught
+// mid-migration, or a test that seeds a bare moderation_actions table
+// without the rest of the schema) rather than the expected path.
 func (d *DB) RetireModerationActions(ctx context.Context, days int) (int64, error) {
 	if days <= 0 {
 		return 0, nil
 	}
-	if tableExists(ctx, d.writer, "appeals") {
-		// B5-10: exclude ids referenced by an appeals row before deleting.
-		// Falling through to the unconditional sweep below would be wrong
-		// once appeals exist, so refuse to guess at the join shape here.
-		return 0, fmt.Errorf("RetireModerationActions: appeals table exists but B5-9 has no exclusion query for it (B5-10 must add one)")
-	}
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(sqliteDatetimeFormat)
+	if tableExists(ctx, d.writer, "appeals") {
+		n, err := d.q.RetireRetiredCandidatesExcludingAppealed(ctx, &cutoff)
+		if err != nil {
+			return 0, fmt.Errorf("RetireModerationActions: %w", err)
+		}
+		return n, nil
+	}
 	n, err := d.q.RetireRetiredCandidates(ctx, &cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("RetireModerationActions: %w", err)

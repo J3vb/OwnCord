@@ -13,18 +13,21 @@ func TestLoginRateLimit_Value(t *testing.T) {
 	}
 }
 
-// The rate-limiter reaper deletes any window entry whose timestamps are all
-// older than rateLimiterCleanupMaxWindow, which is only safe for windows no
-// longer than that horizon (auth/ratelimit.go). Slow mode uses the limiter
-// with windows up to admin's maxSlowModeSeconds (21600 s = 6 h), so a shorter
-// horizon silently resets long slow modes after ~15 minutes.
-func TestRateLimiterCleanupHorizon_CoversMaxSlowMode(t *testing.T) {
-	const maxSlowMode = 21600 // admin/handlers_channels.go maxSlowModeSeconds
-	if rateLimiterCleanupMaxWindow.Seconds() < maxSlowMode {
-		t.Errorf("rateLimiterCleanupMaxWindow = %v, must cover the %ds slow-mode cap",
-			rateLimiterCleanupMaxWindow, maxSlowMode)
-	}
-}
+// The rate-limiter reaper used to delete any window entry whose timestamps
+// were all older than one server-wide rateLimiterCleanupMaxWindow horizon —
+// safe only for windows no longer than that horizon (N2, B5-10 review), and
+// impossible to size correctly for every caller at once: short enough to
+// reclaim a minutes-long window promptly, or long enough to cover
+// service.AppealRateWindow's 24h cap, never both (the exact trade-off that
+// made the horizon approach wrong). Cleanup is per-key-window-aware now
+// (item 6, round 3 review: auth/ratelimit.go's entry.window) — there is no
+// shared horizon left to size, so there is nothing left to test here. The
+// meaningful regression guard moved to
+// auth.TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory, which
+// asserts the actual BEHAVIOR (a 7h-old appeal submission survives a
+// Cleanup sweep) against service.AppealRateWindow, the real exported
+// production constant, rather than a local literal that could drift from
+// it silently.
 
 // setAuthRateScale/scaledAuthLimit gate every per-IP auth limit
 // (auth_handler.go MountAuthRoutes) and, through auth.ScaledLimit, the per-IP

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 159 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 166 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -99,6 +99,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/admin/plugins/{id}`                                         |
 | POST    | `/api/v1/admin/plugins/{id}/disable`                                 |
 | POST    | `/api/v1/admin/plugins/{id}/enable`                                  |
+| POST    | `/api/v1/appeals/`                                                   |
+| GET     | `/api/v1/appeals/mine`                                               |
+| POST    | `/api/v1/appeals/{id}/withdraw`                                      |
 | DELETE  | `/api/v1/auth/account`                                               |
 | POST    | `/api/v1/auth/login`                                                 |
 | POST    | `/api/v1/auth/logout`                                                |
@@ -146,6 +149,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/moderation/appeals/`                                        |
+| GET     | `/api/v1/moderation/appeals/{id}`                                    |
+| POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
+| POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
 | POST    | `/api/v1/moderation/queue/{id}/act`                                  |
@@ -228,6 +235,9 @@ endpoints return plain-text errors — see their section):
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
+| `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                         |
+| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                         |
+| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                |
 | `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
@@ -2290,6 +2300,440 @@ Nothing leaves a closed state — closing an already-closed report answers
 `409 CONFLICT`, including under a concurrent double-close.
 
 #### Response 204 No Content
+
+---
+
+### POST /api/v1/moderation/queue/{id}/act
+
+Perform a moderator action against the report's subject (or, for
+`"removal"`, the reported message) with `report_id` set on the ledger row,
+in one transaction with the action's effect. `{id}` is the opaque public id.
+**Auth:** Required. Reading the report first requires `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`) — the same read `GET .../{id}` gates; the action itself
+then requires the bit that action needs (see the permission ladder below).
+`403 SELF_REVIEW` if the caller is the report's own reporter.
+
+#### Request
+
+```json
+{
+  "kind": "timeout",
+  "reason": "at most 500 runes, no control characters",
+  "duration_seconds": 3600,
+  "message_id": "1234"
+}
+```
+
+`kind` is one of `warning`, `timeout`, `kick`, `ban`, `removal`.
+`duration_seconds` applies to `timeout` only (60..2419200, i.e. 1 minute to
+28 days). `message_id` applies to `removal` only, and defaults to the
+report's own target when the report is against a message.
+
+Dispatches through the exact same service call the direct route for that
+`kind` uses, and sends the same post-commit transport: `ban` broadcasts
+`member_ban` (and disconnects the target) exactly like
+`PATCH /admin/api/users/{id}` does; `removal` broadcasts `chat_bulk_deleted`
+for the removed message exactly like the channel purge route does.
+
+#### Response 204 No Content
+
+...for every `kind` except `timeout`, which answers `200 OK` with the same
+`voice` outcome `POST .../timeout` returns:
+
+```json
+{ "voice": "applied" }
+```
+
+#### Errors
+
+Same shape as `POST /api/v1/moderation/users/{id}/warn`/`timeout` below,
+plus the report read's own `403 SELF_REVIEW` (also given when the caller
+files the report and then tries to act on it themselves) and `404 NOT_FOUND`
+(missing report, or the caller is its subject).
+
+---
+
+## Moderator actions
+
+Warning, timeout, kick and ban (BPR-072), narrowly permissioned per action —
+gating a gentle warning on the ability to ban would invert the moderation
+ladder:
+
+| Action                   | Permission                   |
+| ------------------------ | ---------------------------- |
+| Warning                  | `MODERATE_MEMBERS`           |
+| Timeout / lift a timeout | `MODERATE_MEMBERS`           |
+| Content removal          | `MANAGE_MESSAGES` (existing) |
+| Kick                     | `KICK_MEMBERS` (existing)    |
+| Ban                      | `BAN_MEMBERS` (existing)     |
+
+**Kick's real meaning.** OwnCord is single-server, so "remove from guild"
+has no referent — kick is `ForceLogout`: every session of the target is
+revoked and they must sign in again. It does not restrict the account from
+returning immediately.
+
+Every action writes a row to the moderator-action ledger, in the same
+transaction as its effect, so an appeal (B5-10) always has something to
+reference.
+
+**Removal is the one exception to the hierarchy rule below** (a conscious
+decision, not an oversight): it is governed by channel `MANAGE_MESSAGES`
+alone, exactly as message deletion always has been, with no requirement to
+outrank the message's author — a channel moderator routinely removes content
+from users the role hierarchy does not place them above. This holds through
+every entry point removal has, including the report-linked `act` route.
+
+Warning, timeout, kick and ban all additionally require the actor to
+strictly outrank the target by role position (`requireOutranks`),
+re-validated live at write time so a target promoted between the check and
+the write is refused, not sanctioned. Self, a peer, a superior, and the
+owner as target are all refused for these four kinds.
+
+### POST /api/v1/moderation/users/{id}/warn
+
+Issue a warning: an audited notice the target must acknowledge on next
+connect. **Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters" }
+```
+
+#### Response 201 Created
+
+```json
+{ "id": 42 }
+```
+
+A live target also receives a `mod_action` frame
+(`{"id":42,"kind":"warning","reason":"...","expires_at":null}`), targeted
+and unsequenced.
+
+#### Errors
+
+| Status | Code          | Cause                                                           |
+| ------ | ------------- | --------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | invalid id, self-target, or reason too long/unsafe              |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or does not outrank the target |
+| 404    | `NOT_FOUND`   | no such user                                                    |
+
+---
+
+### POST /api/v1/moderation/users/{id}/timeout
+
+Time-box a restriction: the target cannot send messages, add reactions, or
+join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters", "duration_seconds": 3600 }
+```
+
+`duration_seconds` is bounded 60..2419200 (1 minute to 28 days).
+
+#### Response 201 Created
+
+```json
+{ "id": 43, "voice": "applied" }
+```
+
+`voice` is `"applied"` only when the mute actually landed: the actor holds
+effective `MUTE_MEMBERS` in the target's CURRENT voice channel specifically
+(a channel-level deny, a room the actor cannot see, or — for a DM call — the
+actor not being a participant all count as not holding it there, even with
+the server-wide bit), the target is currently connected to voice, and the
+underlying server-mute call actually matched a live connection. Every other
+case — no channel authority there, the target not in voice at all, or a
+channel-switch race that leaves the mute unmatched — answers `"skipped"`.
+The timeout still lands for text and reactions either way; it never grants a
+voice mute the actor could not perform through the ordinary voice-moderation
+route. A live target also receives a `mod_action` frame carrying
+`expires_at`. The restriction is live on the target's very next send — no
+reconnect needed.
+
+#### Errors
+
+Same shape as `warn` above, plus `400 BAD_REQUEST` for a duration outside
+60..2419200.
+
+---
+
+### POST /api/v1/moderation/users/{id}/untimeout
+
+Lift an active timeout early, including its voice half if it was applied.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Response 204 No Content
+
+A live target also receives a `mod_action` frame with `expires_at: null`.
+
+#### Errors
+
+Same shape as `warn` above, plus `404 NOT_FOUND` when there is no active
+timeout to lift.
+
+---
+
+### GET /api/v1/moderation/users/{id}/actions
+
+The full moderator-action ledger for one user, newest first: kind, actor,
+reason, timestamps, and the linked report's public id when one exists.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+A row's `report_id` is omitted (never rendered, not merely nulled) when the
+caller is the confidential SUBJECT of that report — the same guard
+`GET .../queue/{id}` applies, run per row here: holding `MODERATE_MEMBERS`
+is not enough to read a report's id about yourself just because it happens
+to be linked from your own action ledger.
+
+---
+
+### POST /api/v1/users/me/notices/{id}/ack
+
+Acknowledge a warning — own rows only. `{id}` is the ledger row id from
+`ready`'s `notices` (see [protocol.md](protocol.md)). **Auth:** Required
+(session).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                           |
+| ------ | ------------- | --------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer                                    |
+| 404    | `NOT_FOUND`   | not a warning, already acknowledged, or belongs to another user |
+
+---
+
+## Appeals
+
+Rate-limited appeals against a moderation action (BPR-073, plan decision 8).
+`action_id` is the moderator-action ledger's own id (`GET
+/api/v1/moderation/users/{id}/actions`'s `id`, or the `id` a live
+`mod_action` frame or a `ready` notice already carried to the target) — not
+an opaque public id; only reports and appeals carry one of those.
+
+**Appealable kinds:** `warning`, `timeout`, `removal`, and `ban`. Kick is
+never appealable — a force-logout persists nothing to reverse, the target
+simply signs back in. A **ban appeal has no path here while the ban is still
+in effect**: every route in this API rejects a currently effectively-banned
+caller (`api/middleware.go`), including this one, so a `ban`-kind
+submission can only ever arrive from a target whose ban has since lapsed or
+been reversed. A ban appeal from a target who is still banned must arrive
+out of band — the operator's own contact channel — until a later phase adds
+one.
+
+### POST /api/v1/appeals
+
+File an appeal against a moderation action. **Auth:** Required. Rate-limited:
+3 per 24 hours per appellant (a "blocked appellant" per decision 8 — over
+the window, the caller submits nothing).
+
+#### Request
+
+```json
+{ "action_id": 42, "body": "at most 4000 runes, no control characters" }
+```
+
+#### Response 201 Created
+
+```json
+{ "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9" }
+```
+
+`id` is an opaque 32-character hex string, the same shape reports' public id
+uses and for the identical reason — appeals are filed in sequence
+server-side, so a moderator who can see appeals 1 and 3 but never 2 could
+otherwise infer appeal 2 concerns someone specific.
+
+#### Errors
+
+| Status | Code               | Cause                                                                                      |
+| ------ | ------------------ | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`      | invalid `action_id`, body too long/unsafe, or the action's kind is not appealable (`kick`) |
+| 404    | `NOT_FOUND`        | no such action, or the caller is not its target (never `403` — no existence oracle)        |
+| 409    | `ALREADY_APPEALED` | an appeal against this action already exists, in any state                                 |
+| 429    | `RATE_LIMITED`     | more than 3 appeals from this appellant in 24 hours                                        |
+
+---
+
+### GET /api/v1/appeals/mine
+
+The caller's own appeals: id, the appealed action's kind/reason/
+`created_at`, state, `decision_note` (once decided), `created_at`,
+`decided_at`. **Auth:** Required.
+
+A state change (assignment, decision, or withdrawal) sends the appellant an
+`appeal_status` frame — see [protocol.md](protocol.md).
+
+---
+
+### POST /api/v1/appeals/{id}/withdraw
+
+Withdraw the caller's own appeal — the appellant only, `open` or `assigned`
+states only. `{id}` is the opaque public id. **Auth:** Required. Sends the
+appellant an `appeal_status` frame and a connected moderator queue a
+`mod_queue` `"withdrawn"` frame, both under decision 8's per-appeal write
+ordering (a delayed assignment or decision can never notify out of order
+with this one) — see [protocol.md](protocol.md).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Cause                                         |
+| ------ | ----------- | --------------------------------------------- |
+| 404    | `NOT_FOUND` | no such appeal, or it belongs to someone else |
+| 409    | `CONFLICT`  | the appeal is already decided                 |
+
+---
+
+### GET /api/v1/moderation/appeals
+
+The moderator appeal queue. **Auth:** Required. **Permission:**
+`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `state` — `open`, `assigned` or `decided` (both `upheld` and
+`overturned` together); omitted defaults to open+assigned together.
+
+**The appellant's own appeal rule:** a moderator viewing this queue never
+sees their OWN filed appeal in the list, even when it matches the requested
+state — the same confidentiality rule reports apply between the reporter
+and the subject. Their own appeal's state is still visible through `GET
+/api/v1/appeals/mine` and the live `appeal_status` frame; only the
+moderation-facing surfaces built for reviewing OTHER people's appeals hide
+it.
+
+---
+
+### GET /api/v1/moderation/appeals/{id}
+
+One appeal, the appealed action, and the action's linked report's public id
+when the action was report-linked. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+The appellant's own appeal rule applies here too: a moderator requesting
+their OWN appeal's detail gets `403 SELF_REVIEW`, not the row — it would
+otherwise show them who is assigned and who decided, neither of which is
+visible on the appeal surfaces any other way. The acting moderator's
+identity is a narrower case: this response would be the first appeal
+surface to show it, but a moderator (holding `MODERATE_MEMBERS`) can
+already see it via the moderation ledger (`GET
+/api/v1/moderation/users/{id}/actions`), so the 403 does not newly hide
+that fact from them — only from a non-moderator appellant, who cannot
+reach the ledger either way.
+
+#### Errors
+
+| Status | Code          | Cause                                     |
+| ------ | ------------- | ----------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`           |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant |
+| 404    | `NOT_FOUND`   | no such appeal                            |
+
+---
+
+### POST /api/v1/moderation/appeals/{id}/assign
+
+Assign the appeal to the caller. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `force=1` reassigns an appeal already assigned to someone else,
+and only succeeds when the caller outranks the current assignee (the same
+hierarchy rule ban/kick/timeout and the report queue use).
+
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not assign it to themself **where another
+eligible moderator exists** (decision 8's deciding-moderator rule, applied
+symmetrically to assignment) — on a one-moderator install, where no one
+else is eligible, they may. Separately, and with **no such escape**, the
+appellant themself may never assign their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS` — a governance gap on a
+one-moderator install, not a bug this route papers over.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                                |
+| ------ | ------------- | ---------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                     |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists |
+| 404    | `NOT_FOUND`   | no such appeal                                                                                       |
+| 409    | `CONFLICT`    | already assigned to someone else and `force` was not set, or the appeal is no longer open/assigned   |
+
+---
+
+### POST /api/v1/moderation/appeals/{id}/decide
+
+Decide the appeal. `{id}` is the opaque public id. **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not decide its appeal **where another eligible
+moderator exists** — eligible meaning a different user holding
+`MODERATE_MEMBERS` or `ADMINISTRATOR`, and not currently banned. On a
+one-moderator install, where no one else is eligible, the acting moderator
+may decide their own appeal, and the audit row records that it was the
+sole-moderator exception. Separately, and with **no such escape**, the
+appellant themself may never decide their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "outcome": "overturned", "note": "at most 2000 runes, no control characters" }
+```
+
+`outcome` is one of `upheld`, `overturned`.
+
+#### Response 204 No Content
+
+**Effect of overturning:** the self-review check, the decision, and the
+kind-specific ledger reversal below all commit in ONE transaction — a
+decider who fails a fresh in-transaction check (their own `MODERATE_MEMBERS`
+bit revoked, or a ban landed, since the request was authorized), or a
+reversal that genuinely fails, leaves NOTHING committed: the appellant is
+never told "overturned" while the sanction it named is still in effect.
+The reversal targets the SPECIFIC appealed action by its ledger id, never
+"whatever is currently active for this target" — appealing an older,
+already-superseded timeout or ban cannot disturb a newer one. A `timeout`
+is lifted; a `ban` is undone, but only if no strictly newer ban exists for
+the same target (ban → unban → re-ban → overturn the first ban leaves the
+target still banned); a `warning` is marked acknowledged, so the notice
+disappears from the target's next connect. A `removal` has nothing to
+restore — the reported content is already gone; overturning a removal
+appeal is a record of the decision only. Upholding changes nothing further.
+Each reversal that actually changes something writes its own audit row
+(`user_untimeout`, `user_unban`, or a warning-acknowledged equivalent),
+actor `0` (a mechanical consequence of the decision, not a second
+moderation action by the human decider), alongside the decision's own
+`appeal_decide` row.
+
+**Voice**, for a live target server-muted by the overturned timeout: lifts
+alongside the ledger reversal above, through
+`ModerationService.FinalizeTimeoutLift` — the same post-commit method a
+moderator's direct `POST .../untimeout` uses. It clears only a mute the
+appealed action itself put in place (session-bound ownership, never a
+different moderator's own `voice_mod_mute`, and never a still-active,
+strictly newer timeout that has since superseded this one — that mute stays
+until ITS OWN issue or lift decides it, and this overturn sends no frame
+for it). A ban carries no voice-mute reconcile of its own; the target's
+live session was already ended when the ban landed.
+
+#### Errors
+
+| Status | Code              | Cause                                                                                                            |
+| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
+| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, or the decider's own authority no longer holds when re-checked at decision time |
+| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
+| 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
+| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
+| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself  |
 
 ---
 

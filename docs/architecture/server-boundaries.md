@@ -86,7 +86,7 @@ happens to that use — one of four dispositions from the
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
 | `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |    0 |
-| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   41 |
+| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   42 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   20 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
 
@@ -125,12 +125,14 @@ added two more — `api/moderation_queue_handler.go` and
 `api/report_handler.go`, both type-only `adapter` (`db.User` from the auth
 context only; ReportService owns every call) — and B5-9 added one more —
 `api/moderation_handler.go`, type-only `adapter` (`db.ModerationAction`
-response type only; `ModerationService` owns every call) — so the table is
-down from 59 rows to 61, and every row left is an `adapter` (db types, no persistence
-call) or a `boundary` that owns a
-handle on purpose. A future `move` row is a deliberate statement that something
-is on its way out, not a parking space: the alternative to writing one is
-moving the code.
+response type only; `ModerationService` owns every call) — and B5-10 added
+one more still — `api/appeal_handler.go`, type-only `adapter` (`db.User`
+from the auth context and `db.ModerationAction` response type only;
+`AppealService` owns every call) — so the table is up from 57 rows to 62,
+and every row left is an `adapter` (db types, no persistence call) or a
+`boundary` that owns a handle on purpose. A future `move` row is a
+deliberate statement that something is on its way out, not a parking
+space: the alternative to writing one is moving the code.
 
 ## How the measurement works
 
@@ -156,7 +158,7 @@ which is a row worth reading. Since the channel family's part 3, the hub's
 read seams (`ws/readers.go`) are deliberately that shape: the consumer rows
 name their seam, `DBReaders` wires the handle behind them at the composition
 root, and the seam interfaces are the authoritative list of what those files
-may read. 40 of the 61 rows are type-only, 32 of them `adapter`.
+may read. 41 of the 62 rows are type-only, 33 of them `adapter`.
 
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
@@ -195,6 +197,7 @@ handle-backed read seams.
 | `admin/middleware.go`             | `Role×2`                                                                                                                                                        | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | Role/User/Session types in the request context; SessionService resolves the bearer token                                                                                                      |
 | `admin/types.go`                  | `Channel×3` `Role` `User` `UserWithRole`                                                                                                                        | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | response DTOs only — its GetRoleByID went with the user family                                                                                                                                |
 | `admin/update_handlers.go`        | `DB×3`                                                                                                                                                          | `WriteAudit()`                                                               | `LogAudit`                                                                                                                               | calls     | boundary    | —      | audits the binary swap (OC-0391) with WriteAudit/LogAudit; no other calls                                                                                                                     |
+| `api/appeal_handler.go`           | `ModerationAction` `User×3`                                                                                                                                     | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | db.User from the auth context and db.ModerationAction response type only; AppealService owns every call                                                                                       |
 | `api/channel_handler.go`          | `DB` `MessageAPIResponse×2` `MessageSearchResult×2` `ReactionUser` `User×8`                                                                                     | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | response types only; service owns the calls                                                                                                                                                   |
 | `api/dm_handler.go`               | `DB` `DMChannelInfo` `DMUser×2` `User×8`                                                                                                                        | `NewDMChannelInfo()` `StatusForViewer()`                                     | —                                                                                                                                        | calls     | adapter     | —      | DM response types + pure status helpers                                                                                                                                                       |
 | `api/dm_request_handler.go`       | `MessageRequest×2` `User×2`                                                                                                                                     | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | message-request response types; the service owns the calls                                                                                                                                    |
@@ -245,15 +248,14 @@ handle-backed read seams.
 | `ws/voice_join.go`                | `Channel×3` `ChannelOverride` `VoiceState×5`                                                                                                                    | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes                                                                            |
 | `ws/voice_moderation.go`          | `Role` `VoiceState×2`                                                                                                                                           | —                                                                            | —                                                                                                                                        | type-only | adapter     | —      | Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row                                                                                    |
 
-61 files import `db` outside `db/` and `service/` (. 1, admin 12, api 15, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 7, plugin 1, ws 20); 40 are type-only; 0 unlisted.
-Dispositions: adapter 41, boundary 20. Move targets: .
+62 files import `db` outside `db/` and `service/` (. 1, admin 12, api 16, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 7, plugin 1, ws 20); 41 are type-only; 0 unlisted.
+Dispositions: adapter 42, boundary 20. Move targets: .
 
 <!-- dbinventory:end -->
 
 Reading the table:
 
-- **Type-only rows (40, of which 32 are `adapter`)** mostly need no service:
-  the `db` types they use are the wire and response shapes. Whether those
+- **Type-only rows (41, of which 33 are `adapter`)** mostly need no service: the `db` types they use are the wire and response shapes. Whether those
   types should live outside `db` is a B3-8 question per family, not a
   boundary violation. The count was 14 at B3-0 and rose as families moved
   their calls behind services and left their types behind. No row carries a

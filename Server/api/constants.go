@@ -73,15 +73,14 @@ const (
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
 
 const (
-	// rateLimiterCleanupInterval is how often stale rate-limiter entries are reaped.
+	// rateLimiterCleanupInterval is how often stale rate-limiter entries are
+	// reaped. Cleanup is per-key-window-aware since item 6 (round 3 review;
+	// see auth/ratelimit.go's entry.window doc comment) — a single sweep
+	// correctly retires a short-window key (login attempts, minutes) and a
+	// long one (service/appeal.go's 24h-per-user cap) alike, so there is no
+	// longer a single server-wide horizon constant to keep in sync with the
+	// longest caller.
 	rateLimiterCleanupInterval = 5 * time.Minute
-
-	// rateLimiterCleanupMaxWindow is the maximum window considered when pruning
-	// stale rate-limiter entries. It must cover the LARGEST window any caller
-	// passes to Allow: slow mode (service/message_crud.go) uses windows up to
-	// admin's maxSlowModeSeconds (21600 s = 6 h), and a shorter horizon makes
-	// the reaper silently reset long slow modes after ~15 minutes.
-	rateLimiterCleanupMaxWindow = 6 * time.Hour
 
 	// hstsMaxAgeSeconds is the max-age value for the Strict-Transport-Security header.
 	hstsMaxAgeSeconds = 31536000

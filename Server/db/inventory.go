@@ -74,6 +74,16 @@ var SubjectInventory = []InventoryClass{
 	// same bare-id-plus-token shape as every actor class above.
 	{"23a moderation actions on the subject", `SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?`, inventoryByUID},
 	{"23b moderation actions by the subject", `SELECT COUNT(*) FROM moderation_actions WHERE actor_id = ? OR lifted_by = ?`, inventoryBothIDs},
+	// B5-10 appeal classes: 24a counts ROWS (appellant_id cascades with the
+	// users row — S6-d says an appeal is deleted for the appellant, not
+	// kept), 24b counts the principal COLUMN, the same bare-id-plus-token
+	// shape as every actor class above.
+	{"24a appeals by the subject", `SELECT COUNT(*) FROM appeals WHERE appellant_id = ?`, inventoryByUID},
+	{"24b appeals decided by the subject", `SELECT COUNT(*) FROM appeals WHERE decided_by = ?`, inventoryByUID},
+	// 24c: assignee_id has no token column of its own (mirrors reports'
+	// 22e and moderation_actions.lifted_by) — a bare id, its own class so a
+	// row assigned to but not yet decided by the subject is still caught.
+	{"24c appeals assigned to the subject", `SELECT COUNT(*) FROM appeals WHERE assignee_id = ?`, inventoryByUID},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.

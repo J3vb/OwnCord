@@ -90,6 +90,12 @@
       "ts": "MOD_ACTION",
       "note": "B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed"
     },
+    {
+      "wire": "appeal_status",
+      "go": "MsgTypeAppealStatus",
+      "ts": "APPEAL_STATUS",
+      "note": "B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed"
+    },
     { "wire": "error", "go": "MsgTypeError", "ts": "ERROR" },
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },

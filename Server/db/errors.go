@@ -23,6 +23,14 @@ var (
 	// the only remaining admin/owner and deleting them would leave the server
 	// without an administrator.
 	ErrLastAdmin = errors.New("last admin cannot be deleted")
+
+	// ErrSelfReview indicates the acting moderator took the action under
+	// review and another eligible moderator exists (decision 8's
+	// deciding-moderator rule) — round 4 review: AssignAppealTx and
+	// forceReassignGuarded's appeal path both check this fresh, inside
+	// their own transaction, the same way DecideAppealTx's
+	// AppealWriteSelfReview already does.
+	ErrSelfReview = errors.New("self-review")
 )
 
 // IsUniqueConstraintError reports whether err is a SQLite UNIQUE constraint

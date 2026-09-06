@@ -109,6 +109,43 @@ func TestWireAuth_NilErasureLogsInsteadOfSilentlyDegrading(t *testing.T) {
 	}
 }
 
+// appealFieldWiredForTest reports whether wireAuth reached AppealService's
+// unexported notifier/queue field — there is no exported getter. A rename
+// makes FieldByName return the zero Value, a loud failure rather than a
+// silent pass.
+func appealFieldWiredForTest(t *testing.T, a *service.AppealService, field string) bool {
+	t.Helper()
+	v := reflect.ValueOf(a).Elem().FieldByName(field)
+	if !v.IsValid() {
+		t.Fatalf("AppealService has no field %q (renamed?)", field)
+	}
+	return !v.IsNil()
+}
+
+// TestWireAuth_WiresAppealNotifierAndQueueBroadcaster is round 4's test
+// strengthening: appeal_withdraw_handler_test.go's own handler-level test
+// wires AppealService's notifier/queue broadcaster BY HAND
+// (SetNotifier/SetQueueBroadcaster called directly), which proves the
+// service's own plumbing works but not that the PRODUCTION composition
+// root (wireAuth) actually performs that wiring. This calls the real
+// wireAuth directly and asserts both unexported fields end up non-nil.
+func TestWireAuth_WiresAppealNotifierAndQueueBroadcaster(t *testing.T) {
+	svc := &service.Services{
+		Appeals: service.NewAppealService(nil, nil, nil, auth.NewRateLimiter()),
+	}
+	authSvc := newWireAuthTestAuthSvc(t)
+	hub := &ws.Hub{}
+
+	wireAuth(svc, authSvc, nil, hub)
+
+	if !appealFieldWiredForTest(t, svc.Appeals, "notifier") {
+		t.Fatal("Appeals.SetNotifier was not called by wireAuth")
+	}
+	if !appealFieldWiredForTest(t, svc.Appeals, "queue") {
+		t.Fatal("Appeals.SetQueueBroadcaster was not called by wireAuth")
+	}
+}
+
 // TestWireAuth_NonNilErasureSwapsQuietly is the regression companion: when
 // svc.Erasure is present, wireAuth must swap it in and wire Retention as
 // before, without logging an error.
