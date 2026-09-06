@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // This file is package db (not db_test): its tests need acceptGuardHook and
@@ -42,11 +43,18 @@ func contentionSeedUser(t *testing.T, database *DB, username string) int64 {
 // actually overlap — nothing stops Accept's transaction from committing
 // (via acceptGuardHook's release) before Ignore's goroutine is even
 // scheduled, which would make this pass without ever exercising a race.
-// ignoreAcked is the missing acknowledgment: the test does not release
-// Accept until Ignore's own goroutine confirms it is about to issue its
-// competing write, so Accept's transaction is provably still open at that
-// moment. The single writer connection then guarantees Accept commits
-// first regardless of exactly when Ignore's write actually executes, so the
+// Codex review round 3: acknowledging goroutine start (closing ignoreAcked)
+// is not enough either — that only proves the goroutine function was
+// entered, not that its query ever reached the DB, so Accept could still
+// finish first regardless. The writer pool's MaxOpenConns(1) makes real
+// queueing directly observable: database.writer.Stats().WaitCount only
+// increases once Ignore's TransitionMessageRequest call has actually
+// reached the pool and blocked waiting for the sole connection Accept's
+// open transaction currently holds. Poll for that increase — not just the
+// goroutine's own claim to be about to run — before releasing Accept.
+//
+// The single writer connection then guarantees Accept commits first
+// regardless of exactly when Ignore's write actually executes, so the
 // outcome (Accept wins, Ignore loses) is deterministic — assert the exact
 // final state, trust row and OpenDM effect.
 func TestAcceptMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
@@ -87,15 +95,27 @@ func TestAcceptMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
 	}()
 	<-guardReached // Accept confirmed pending and now holds the sole writer connection, transaction still open
 
-	ignoreAcked := make(chan struct{})
+	waitCountBefore := database.writer.Stats().WaitCount
 	var ignoreOK bool
 	var ignoreErr error
 	go func() {
-		close(ignoreAcked) // acknowledged: about to issue the competing write
 		ignoreOK, ignoreErr = database.TransitionMessageRequest(ctx, req.ID, recipient, "ignored")
 		done <- struct{}{}
 	}()
-	<-ignoreAcked  // do not release Accept until Ignore has committed to racing it
+	// Wait for real queueing: WaitCount only rises once Ignore's query has
+	// actually reached the pool and is blocked on the single, currently-held
+	// writer connection — not just once its goroutine has been scheduled.
+	queued := false
+	for range 1000 {
+		if database.writer.Stats().WaitCount > waitCountBefore {
+			queued = true
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !queued {
+		t.Fatal("Ignore's competing write never queued behind Accept's open transaction — no forced overlap")
+	}
 	close(release) // let Accept finish; Ignore's write cannot execute until it does
 	<-done
 	<-done
@@ -160,4 +180,76 @@ func TestGetOrCreateDMChannelGated_FailureAfterParticipantsLeavesRecipientNeverO
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels`).Scan(&channelCount); err != nil || channelCount != 0 {
 		t.Errorf("channels rows = %d, %v; want 0 (the whole transaction rolled back, not just the open-state write)", channelCount, err)
 	}
+}
+
+// TestGetOrCreateDMChannelGated_UntrustedOpensCallerOnly and
+// TestGetOrCreateDMChannelGated_TrustedOpensBoth exercise
+// decideAndOpenRecipientDM's two success branches directly: the only other
+// caller of GetOrCreateDMChannelGated is service/dm.go's CreateDM, whose own
+// tests live in a different package and so contribute nothing to this
+// package's own coverage.
+func TestGetOrCreateDMChannelGated_UntrustedOpensCallerOnly(t *testing.T) {
+	database := contentionOpenMigrated(t)
+	ctx := context.Background()
+	caller := contentionSeedUser(t, database, "gated-untrusted-caller")
+	recipient := contentionSeedUser(t, database, "gated-untrusted-recipient")
+
+	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+	}
+	if !created || recipientOpened {
+		t.Fatalf("created=%v recipientOpened=%v, want true, false (untrusted pair)", created, recipientOpened)
+	}
+	if n := openStateCount(t, database, caller, ch.ID); n != 1 {
+		t.Errorf("caller's dm_open_state rows = %d, want 1", n)
+	}
+	if n := openStateCount(t, database, recipient, ch.ID); n != 0 {
+		t.Errorf("recipient's dm_open_state rows = %d, want 0", n)
+	}
+}
+
+func TestGetOrCreateDMChannelGated_TrustedOpensBoth(t *testing.T) {
+	database := contentionOpenMigrated(t)
+	ctx := context.Background()
+	caller := contentionSeedUser(t, database, "gated-trusted-caller")
+	recipient := contentionSeedUser(t, database, "gated-trusted-recipient")
+	if err := database.TrustSender(ctx, recipient, caller, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
+
+	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+	}
+	if !created || !recipientOpened {
+		t.Fatalf("created=%v recipientOpened=%v, want true, true (trusted pair)", created, recipientOpened)
+	}
+	if n := openStateCount(t, database, caller, ch.ID); n != 1 {
+		t.Errorf("caller's dm_open_state rows = %d, want 1", n)
+	}
+	if n := openStateCount(t, database, recipient, ch.ID); n != 1 {
+		t.Errorf("recipient's dm_open_state rows = %d, want 1", n)
+	}
+
+	// Existing-channel branch of the same gated path: recipientOpened is
+	// reported true unconditionally (untouched, matching GetOrCreateDMChannel's
+	// own existing-channel branch), created is false.
+	ch2, created2, recipientOpened2, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannelGated (existing): %v", err)
+	}
+	if created2 || !recipientOpened2 || ch2.ID != ch.ID {
+		t.Errorf("second call = channel %d created=%v recipientOpened=%v, want channel %d, false, true", ch2.ID, created2, recipientOpened2, ch.ID)
+	}
+}
+
+func openStateCount(t *testing.T, database *DB, userID, channelID int64) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM dm_open_state WHERE user_id = ? AND channel_id = ?`, userID, channelID).Scan(&n); err != nil {
+		t.Fatalf("dm_open_state count: %v", err)
+	}
+	return n
 }

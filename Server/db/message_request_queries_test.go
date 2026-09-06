@@ -372,3 +372,56 @@ func TestAcceptMessageRequest(t *testing.T) {
 		t.Errorf("AcceptMessageRequest(by the sender) = %v, want ErrNotFound", err)
 	}
 }
+
+// TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound
+// exercises the generic (non sql.ErrNoRows) error branch every read/write in
+// this file wraps: closing the database is the standard, cheap way to force
+// a real driver error (sql.ErrConnDone) without a fault-injection seam, and
+// proves none of these mistake it for ErrNotFound/ErrConflict.
+func TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-closed-sender", "mrq-closed-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
+		t.Fatalf("CreateMessageRequest: %v", err)
+	}
+	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+	if err != nil {
+		t.Fatalf("GetMessageRequestByPair: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	notFoundLike := func(label string, err error) {
+		t.Helper()
+		if err == nil || errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrConflict) {
+			t.Errorf("%s on a closed db = %v, want a generic driver error, not nil/ErrNotFound/ErrConflict", label, err)
+		}
+	}
+
+	if _, err := database.IsTrustedSender(ctx, recipient, sender); err == nil {
+		t.Error("IsTrustedSender on a closed db = nil, want a driver error")
+	}
+	notFoundLike("TrustSender", database.TrustSender(ctx, recipient, sender, "accepted"))
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err == nil {
+		t.Error("CreateMessageRequest on a closed db = nil, want a driver error")
+	}
+	if _, err := database.GetMessageRequest(ctx, req.ID, recipient); err == nil {
+		t.Error("GetMessageRequest on a closed db = nil, want a driver error")
+	} else {
+		notFoundLike("GetMessageRequest", err)
+	}
+	if _, err := database.GetMessageRequestByPair(ctx, sender, recipient); err == nil {
+		t.Error("GetMessageRequestByPair on a closed db = nil, want a driver error")
+	} else {
+		notFoundLike("GetMessageRequestByPair", err)
+	}
+	if _, err := database.ListPendingMessageRequests(ctx, recipient); err == nil {
+		t.Error("ListPendingMessageRequests on a closed db = nil, want a driver error")
+	}
+	if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, "ignored"); err == nil {
+		t.Error("TransitionMessageRequest on a closed db = nil, want a driver error")
+	}
+	notFoundLike("AcceptMessageRequest", func() error { _, err := database.AcceptMessageRequest(ctx, req.ID, recipient); return err }())
+}

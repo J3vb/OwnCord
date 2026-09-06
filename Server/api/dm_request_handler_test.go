@@ -472,27 +472,42 @@ func TestMessageRequest_SenderRESTViewIsByteIdentical(t *testing.T) {
 	}
 }
 
-// dmListCompareFields is a GET /dms entry with everything EXCEPT ids,
-// timestamps and per-recipient fields dropped (Codex review round 2, P2-4:
-// the earlier version whitelisted only three fields instead of dropping the
-// minimum necessary). Dropped, each for a reason that has nothing to do with
-// decision 5:
+// dmRecipientCompareFields is a DM recipient with only its two identifiers —
+// id and username — dropped, the same way channel_id/last_message_id are
+// below: this test deliberately varies WHO the recipient is (bob, carol,
+// dave, eve) to prove decision 5's property holds across different people,
+// not just different decision states, so the one thing that must differ
+// structurally is exactly what an id or a username names. display_name,
+// avatar and status are compared, not just dropped — and already agree
+// across all four: none of dmCreateToken's users is seeded with a display
+// name or avatar, and none holds a live connection, so every one of them
+// presents as status "offline".
+type dmRecipientCompareFields struct {
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar"`
+	Status      string `json:"status"`
+}
+
+// dmListCompareFields is a GET /dms entry with only ids and timestamps
+// dropped (Codex review round 3: the previous version still whitelisted a
+// handful of fields, and dropped the whole recipient/recipients object
+// rather than normalising it). Dropped:
 //   - channel_id, last_message_id: arbitrary per-pair/per-message ids —
 //     structurally different across bob/carol/dave/eve's distinct channels.
 //   - last_message_at: a timestamp — this test does not fake the clock.
-//   - recipient, recipients, name: the OTHER party's identity (and, for a
-//     group, its name) — this test deliberately varies the recipient (bob,
-//     carol, dave, eve) to prove the property holds across different people,
-//     not just different decision states; comparing those fields would fail
-//     for that reason alone and prove nothing about decision 5.
+//   - recipient.id/username, recipients[].id/username: see
+//     dmRecipientCompareFields.
 //
-// Everything else — is_group, last_message (content), unread_count,
-// mention_count — is compared.
+// Everything else — is_group, name, the recipient's remaining fields,
+// last_message (content), unread_count, mention_count — is compared.
 type dmListCompareFields struct {
-	IsGroup      bool   `json:"is_group"`
-	LastMessage  string `json:"last_message"`
-	UnreadCount  int    `json:"unread_count"`
-	MentionCount int    `json:"mention_count"`
+	IsGroup      bool                       `json:"is_group"`
+	Name         string                     `json:"name"`
+	Recipient    dmRecipientCompareFields   `json:"recipient"`
+	Recipients   []dmRecipientCompareFields `json:"recipients"`
+	LastMessage  string                     `json:"last_message"`
+	UnreadCount  int                        `json:"unread_count"`
+	MentionCount int                        `json:"mention_count"`
 }
 
 // normalizeDMListForCompare extracts dmListCompareFields from the one DM
