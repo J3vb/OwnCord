@@ -337,6 +337,9 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	if trusted {
 		return false // today's OpenDM path
 	}
+	if hook := s.afterFirstContactTrustCheck; hook != nil {
+		hook()
+	}
 
 	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
 	if fcErr != nil {
@@ -347,14 +350,30 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	if req != nil {
 		result.RequestCreatedFor = append(result.RequestCreatedFor, req)
 		if result.RequestPreview == nil {
-			result.RequestPreview = &DMRequestPreview{
-				MessageID: result.MessageID,
-				Content:   result.Content,
-				Timestamp: result.Timestamp,
+			if hook := s.beforeRequestPreviewLookup; hook != nil {
+				hook(result.MessageID)
 			}
+			result.RequestPreview = s.canonicalRequestPreview(ctx, result.MessageID)
 		}
 	}
 	return true
+}
+
+// canonicalRequestPreview reads messageID fresh rather than trusting the
+// send's own cached content (Codex review round 2, P1): the WS dm_request
+// frame's preview must never disagree with the REST inbox's
+// (db.DB.ListPendingMessageRequests joins first_message_id with
+// deleted = 0) — building it from cached content let a delete racing the
+// frame leave a stale, since-deleted preview on the wire while REST already
+// reported preview: null for the very same request. nil (no preview on the
+// frame) when the message cannot be read or has since been deleted —
+// exactly ListPendingMessageRequests' own condition.
+func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
+	msg, err := s.st.GetMessage(ctx, messageID)
+	if err != nil || msg == nil || msg.Deleted {
+		return nil
+	}
+	return &DMRequestPreview{MessageID: msg.ID, Content: msg.Content, Timestamp: msg.Timestamp}
 }
 
 // dmAudience is the live-delivery audience for a DM frame senderID's action

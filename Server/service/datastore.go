@@ -244,6 +244,7 @@ type Store interface {
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)

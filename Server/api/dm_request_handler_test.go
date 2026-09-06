@@ -52,6 +52,18 @@ func seedOneToOneDM(t *testing.T, database *db.DB, senderName, recipientName str
 	return senderID, recipientID, ch.ID, senderTok, recipientTok
 }
 
+// dmOpenStateCount reports how many dm_open_state rows userID has for
+// channelID — 0 or 1, since (user_id, channel_id) is the table's key.
+func dmOpenStateCount(t *testing.T, database *db.DB, userID, channelID int64) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM dm_open_state WHERE user_id = ? AND channel_id = ?`, userID, channelID).Scan(&n); err != nil {
+		t.Fatalf("dm_open_state count: %v", err)
+	}
+	return n
+}
+
 func mustUserID(t *testing.T, database *db.DB, username string) int64 {
 	t.Helper()
 	u, err := database.GetUserByUsername(context.Background(), username)
@@ -125,12 +137,35 @@ func TestDMRequestHandler_ListPending_ReturnsShapeWithPreview(t *testing.T) {
 
 // TestDMRequestHandler_Accept_OpensChannelAndNotifies: 200, state accepted,
 // the channel opens for the recipient, and the recipient's other devices get
-// a dm_channel_open plus a dm_request(state=accepted).
+// a dm_channel_open plus a dm_request(state=accepted). Codex review round 2,
+// P1: seedOneToOneDM opens BOTH sides unconditionally (GetOrCreateDMChannel),
+// so it cannot exercise "accept is what opens the recipient's side" — the
+// row would already be there before Accept ever ran. Seed through
+// GetOrCreateDMChannelGated instead: alice and bob start untrusted, so the
+// channel is created with only alice's (the caller's) side open, and the
+// assertion is the row count's actual 0 -> 1 transition, not just whether a
+// broadcast happened to fire.
 func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router, svc := buildDMRequestRouter(database, broadcaster)
-	senderID, recipientID, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
+	_ = dmCreateToken(t, database, "alice", 4)
+	recipientTok := dmCreateToken(t, database, "bob", 4)
+	senderID := mustUserID(t, database, "alice")
+	recipientID := mustUserID(t, database, "bob")
+	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(context.Background(), senderID, recipientID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+	}
+	if !created || recipientOpened {
+		t.Fatalf("GetOrCreateDMChannelGated = created=%v recipientOpened=%v, want true, false (untrusted pair)", created, recipientOpened)
+	}
+	channelID := ch.ID
+
+	openCountBefore := dmOpenStateCount(t, database, recipientID, channelID)
+	if openCountBefore != 0 {
+		t.Fatalf("dm_open_state rows for the recipient before accept = %d, want 0", openCountBefore)
+	}
 
 	sendResult, err := svc.Messages.SendMessage(context.Background(), service.SendMessageParams{
 		ChannelID: channelID, UserID: senderID, Username: "alice", Content: "hi bob",
@@ -153,10 +188,8 @@ func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
 		t.Errorf("response = %+v", resp)
 	}
 
-	var opened int
-	if err := database.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM dm_open_state WHERE user_id = ? AND channel_id = ?`, recipientID, channelID).Scan(&opened); err != nil || opened != 1 {
-		t.Errorf("dm_open_state rows = %d, %v; want 1", opened, err)
+	if opened := dmOpenStateCount(t, database, recipientID, channelID); opened != 1 {
+		t.Errorf("dm_open_state rows for the recipient after accept = %d, want 1 (the 0 -> 1 transition Accept must perform)", opened)
 	}
 
 	var sawOpen, sawRequest bool
@@ -434,27 +467,36 @@ func TestMessageRequest_SenderRESTViewIsByteIdentical(t *testing.T) {
 			t.Errorf("%s messages view differs from pending's:\npending: %s\n%s:  %s", name, pending.messages, name, got.messages)
 		}
 		if !bytes.Equal(got.dms, pending.dms) {
-			t.Errorf("%s dm list content/unread fields differ from pending's:\npending: %s\n%s:  %s", name, pending.dms, name, got.dms)
+			t.Errorf("%s dm list entry differs from pending's:\npending: %s\n%s:  %s", name, pending.dms, name, got.dms)
 		}
 	}
 }
 
-// dmListCompareFields is the sender-neutral slice of a GET /dms entry
-// decision 5 actually makes a claim about (Codex P2-7): last_message
-// (content) and unread/mention counts. Everything else in a db.DMChannelInfo
-// entry — channel_id, recipient, name — is either an arbitrary per-pair id
-// or the OTHER party's identity, which this test deliberately varies (bob,
-// carol, dave, eve) to prove the property holds across different people, not
-// just different states; comparing those fields would fail for that reason
-// alone and prove nothing about decision 5.
+// dmListCompareFields is a GET /dms entry with everything EXCEPT ids,
+// timestamps and per-recipient fields dropped (Codex review round 2, P2-4:
+// the earlier version whitelisted only three fields instead of dropping the
+// minimum necessary). Dropped, each for a reason that has nothing to do with
+// decision 5:
+//   - channel_id, last_message_id: arbitrary per-pair/per-message ids —
+//     structurally different across bob/carol/dave/eve's distinct channels.
+//   - last_message_at: a timestamp — this test does not fake the clock.
+//   - recipient, recipients, name: the OTHER party's identity (and, for a
+//     group, its name) — this test deliberately varies the recipient (bob,
+//     carol, dave, eve) to prove the property holds across different people,
+//     not just different decision states; comparing those fields would fail
+//     for that reason alone and prove nothing about decision 5.
+//
+// Everything else — is_group, last_message (content), unread_count,
+// mention_count — is compared.
 type dmListCompareFields struct {
+	IsGroup      bool   `json:"is_group"`
 	LastMessage  string `json:"last_message"`
 	UnreadCount  int    `json:"unread_count"`
 	MentionCount int    `json:"mention_count"`
 }
 
-// normalizeDMListForCompare extracts the sender-neutral content/unread
-// fields (dmListCompareFields) of the one DM entry naming wantChannelID.
+// normalizeDMListForCompare extracts dmListCompareFields from the one DM
+// entry naming wantChannelID.
 func normalizeDMListForCompare(t *testing.T, body []byte, wantChannelID int64) []byte {
 	t.Helper()
 	var parsed struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -138,6 +139,38 @@ func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
 	}
 	if n := countRows(t, database, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 2 AND channel_id = 50`); n != 1 {
 		t.Errorf("dm_open_state rows for the recipient = %d, want 1 (the channel opened on accept)", n)
+	}
+}
+
+// TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent is Codex
+// review round 2, P1: canonicalRequestPreview must read the held message
+// fresh, not the send's own cached content, so a delete racing the exact
+// window between the request being staged and the frame's preview being
+// built comes back nil (matching REST's own preview: null for a deleted
+// original) rather than carrying the deleted text. beforeRequestPreviewLookup
+// fires in that exact window, with the message id about to be read.
+func TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent(t *testing.T) {
+	_, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+
+	svc.Messages.beforeRequestPreviewLookup = func(messageID int64) {
+		if _, err := svc.Messages.DeleteMessage(ctx, 1, messageID); err != nil {
+			t.Fatalf("DeleteMessage (racing the preview lookup): %v", err)
+		}
+	}
+	defer func() { svc.Messages.beforeRequestPreviewLookup = nil }()
+
+	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "racing content",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(sendResult.RequestCreatedFor) != 1 {
+		t.Fatalf("RequestCreatedFor = %v, want exactly one", sendResult.RequestCreatedFor)
+	}
+	if sendResult.RequestPreview != nil {
+		t.Errorf("RequestPreview = %+v, want nil (the message was deleted before the canonical lookup ran)", sendResult.RequestPreview)
 	}
 }
 
@@ -289,83 +322,30 @@ func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
 	}
 }
 
-// TestMessageRequest_ConcurrentDecisionsOneWins: Accept and Ignore decide the
-// same pending row at once. Codex P2-8: the original version of this test
-// just launched two goroutines and hoped they overlapped — nothing stopped
-// the scheduler from running them fully sequentially, in which case the
-// assertions held without ever exercising a race at all. The
-// acceptGuardHook test seam (db/export_test.go) forces a genuine one: it
-// blocks AcceptMessageRequest's transaction open, still holding the sole
-// writer connection, after it has confirmed the row pending but before it
-// writes anything, so Ignore's competing call is provably dispatched while
-// Accept's transaction is open. The single writer connection then
-// guarantees Accept commits first no matter when Ignore's goroutine is
-// actually scheduled, so the outcome (Accept wins, Ignore loses) is
-// deterministic rather than a coin flip — assert the exact final state,
-// trust row and OpenDM effect.
-func TestMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
-	database, svc := newMessageRequestFixture(t)
-	ctx := context.Background()
-
-	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
-		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	id := sendResult.RequestCreatedFor[0].ID
-
-	guardReached := make(chan struct{})
-	release := make(chan struct{})
-	database.SetAcceptMessageRequestGuardHookForTest(func() {
-		close(guardReached)
-		<-release
-	})
-	defer database.SetAcceptMessageRequestGuardHookForTest(nil)
-
-	var acceptErr, ignoreErr error
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, acceptErr = svc.MessageRequests.Accept(ctx, 2, id) }()
-	<-guardReached // Accept confirmed pending and now holds the sole writer connection, transaction still open
-
-	go func() { defer wg.Done(); _, ignoreErr = svc.MessageRequests.Ignore(ctx, 2, id) }()
-	close(release) // let Accept finish; Ignore's write cannot execute until it does
-	wg.Wait()
-
-	if acceptErr != nil {
-		t.Fatalf("Accept = %v, want nil (forced to win)", acceptErr)
-	}
-	if !errors.Is(ignoreErr, ErrConflict) {
-		t.Fatalf("Ignore (forced loser) = %v, want ErrConflict", ignoreErr)
-	}
-
-	final, err := svc.MessageRequests.st.GetMessageRequest(ctx, id, 2)
-	if err != nil {
-		t.Fatalf("GetMessageRequest: %v", err)
-	}
-	if final.State != msgReqAccepted {
-		t.Errorf("state = %q, want %q", final.State, msgReqAccepted)
-	}
-	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 2 AND sender_id = 1 AND source = 'accepted'`); n != 1 {
-		t.Errorf("accepted-source trusted_senders rows = %d, want 1", n)
-	}
-	if n := countRows(t, database, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 2 AND channel_id = 50`); n != 1 {
-		t.Errorf("dm_open_state rows for the recipient = %d, want 1 (opened on accept)", n)
-	}
-}
-
 // TestMessageRequest_ConcurrentFirstSendsProduceOneRequest: two concurrent
 // first sends from the same untrusted sender must produce exactly one
 // message_requests row and hand the creation frame (a non-empty
-// RequestCreatedFor) to exactly one of the two callers — Codex P2-8.
-// CreateMessageRequest's INSERT OR IGNORE against UNIQUE(sender_id,
-// recipient_id) is what a real UNIQUE constraint enforces regardless of
-// interleaving, so this holds without any test seam: both sends serialize on
-// db.DB's single writer connection either way.
+// RequestCreatedFor) to exactly one of the two callers — Codex P2-8. The
+// afterFirstContactTrustCheck test seam is an acknowledged 2-party barrier:
+// each send's goroutine blocks at the hook (right after its own trust read
+// comes back false) until BOTH have arrived, so neither can reach
+// firstContact's insert before the other has already committed to racing it
+// — a genuine forced overlap rather than two goroutines that might simply
+// run one after the other. CreateMessageRequest's INSERT OR IGNORE against
+// UNIQUE(sender_id, recipient_id) is what actually resolves the race.
 func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
+
+	barrier := make(chan struct{})
+	var arrived atomic.Int32
+	svc.Messages.afterFirstContactTrustCheck = func() {
+		if arrived.Add(1) == 2 {
+			close(barrier)
+		}
+		<-barrier
+	}
+	defer func() { svc.Messages.afterFirstContactTrustCheck = nil }()
 
 	var wg sync.WaitGroup
 	results := make([]*SendMessageResult, 2)

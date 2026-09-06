@@ -92,10 +92,13 @@ type SendMessageResult struct {
 	// resend while a request already exists (decision 5 — there is only ever
 	// one row to create).
 	RequestCreatedFor []*db.MessageRequest
-	// RequestPreview is always this send's own message (MessageID, Content,
-	// Timestamp above) — a request can only ever be created by the pair's
-	// first-ever message, since a resend finds the row already there and
-	// creates nothing.
+	// RequestPreview names this send's own message — a request can only ever
+	// be created by the pair's first-ever message, since a resend finds the
+	// row already there and creates nothing. Read fresh from the DB right
+	// before use (canonicalRequestPreview), not copied from this result's
+	// own Content/Timestamp above, so it agrees with the REST inbox's
+	// deleted = 0 preview even if a delete races the frame; nil if the
+	// message was already gone by the time of that read.
 	RequestPreview *DMRequestPreview
 }
 
@@ -185,6 +188,19 @@ type MessageService struct {
 	// keeps the large existing body of DM tests that construct
 	// *MessageService directly green without themselves wiring it.
 	messageRequests *MessageRequestService
+	// afterFirstContactTrustCheck is a test seam (Codex review round 2,
+	// P2-8): called from dmFirstContactGate right after the trust read comes
+	// back false, before firstContact's insert — same package as its test,
+	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
+	// production.
+	afterFirstContactTrustCheck func()
+	// beforeRequestPreviewLookup is a test seam (Codex review round 2, P1):
+	// called from dmFirstContactGate right before canonicalRequestPreview's
+	// DB read, with the message id about to be looked up, so a test can
+	// delete the held message in that exact window and confirm the frame's
+	// preview comes back nil rather than the deleted content. Nil in
+	// production.
+	beforeRequestPreviewLookup func(messageID int64)
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience

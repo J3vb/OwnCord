@@ -74,9 +74,11 @@ func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64
 // channelID is a one-to-one DM: subjectID (whose voice state this event
 // describes) is always kept, every other member of audience only if they
 // trust subjectID. Non-DM channels and group DMs (decision 4 — untouched)
-// are returned as-is; so is a DM when the group/channel lookup itself
-// fails, matching the fail-open posture requireDMNotBlocked already has for
-// a DM read that cannot be resolved.
+// are returned as-is. Codex review round 2, P2: a channel/group lookup
+// error fails CLOSED to subjectID alone rather than falling back to the
+// full unfiltered audience — the earlier fail-open posture leaked a
+// stranger's voice presence to everyone in the room the moment either
+// lookup errored, exactly the leak this filter exists to prevent.
 func (h *Hub) filterDMAudience(ctx context.Context, channelID, subjectID int64, audience []int64) []int64 {
 	// Bare test hubs with no DB (h.db == nil) have no readers to consult —
 	// same guard channelReadAudienceImpl uses before its own GetChannel call.
@@ -84,11 +86,17 @@ func (h *Hub) filterDMAudience(ctx context.Context, channelID, subjectID int64, 
 		return audience
 	}
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
-	if err != nil || ch == nil || ch.Type != "dm" {
+	if err != nil {
+		return []int64{subjectID}
+	}
+	if ch == nil || ch.Type != "dm" {
 		return audience
 	}
 	isGroup, gErr := h.readers.Visibility.IsGroupDM(ctx, channelID)
-	if gErr != nil || isGroup {
+	if gErr != nil {
+		return []int64{subjectID}
+	}
+	if isGroup {
 		return audience
 	}
 	filtered := make([]int64, 0, len(audience))

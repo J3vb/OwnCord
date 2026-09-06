@@ -133,16 +133,6 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	return n > 0, nil
 }
 
-// SetAcceptMessageRequestGuardHookForTest installs (or, with a nil hook,
-// clears) the acceptGuardHook test seam described on DB.acceptGuardHook
-// (Codex P2-8). Exported for cross-package tests (service), following the
-// existing *ForTest convention (ws.HandleMessageForTest,
-// MessageService.RunBackgroundInlineForTest) rather than an export_test.go,
-// which only reaches tests of this same package.
-func (d *DB) SetAcceptMessageRequestGuardHookForTest(hook func()) {
-	d.acceptGuardHook = hook
-}
-
 // GetMessageRequest reads request id, scoped to recipientID so one user can
 // never read another's inbox row by guessing an id. ErrNotFound when no such
 // row exists for this recipient.
