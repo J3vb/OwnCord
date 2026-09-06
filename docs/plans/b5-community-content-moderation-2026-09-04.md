@@ -2250,7 +2250,7 @@ squashes of what this branch already held, so every shared file arrived
 twice — each resolved as `dev`'s text with this step's additions re-applied,
 and every generated surface regenerated rather than hand-merged). Built
 behind HP-5, which the owner accepted on 2026-09-06 (#1547, signature
-recorded in #1550); PR to `dev` #TBD-B5-9. Commits `670ca7d3` (the feature),
+recorded in #1550); PR to `dev` #1553. Commits `670ca7d3` (the feature),
 `b4757d2e` (the independent review round), `619f8bb9`, `445d97ed`,
 `0af1f39b` (its three verification rounds), the merge, and `118b1f0a` (what
 the merge's own gates surfaced, plus two contention tests). The premises
