@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,6 +194,112 @@ func TestMuteForTimeout_SFUFailureRollsBackDB(t *testing.T) {
 		t.Fatalf("ClearServerMuteOwnedBy cleared=%v err=%v, want false: server_muted_by must already be NULL after the rollback", cleared, err)
 	}
 	_, _, _ = channelID, joinedAt, cleared
+}
+
+// TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU extends the
+// base case above with round 5's remaining named gap: a supersede landing
+// WHILE A's own SFU call is in flight, still holding h.voiceMod's per-user
+// lock. db.TimeoutUser's ledger write is NOT gated by that lock at all —
+// only the voice half is (moderation_action_queries.go's own doc comment) —
+// so B's supersede genuinely completes while A is still parked. A's SFU
+// call then fails; its rollback (Codex 14) is scoped to exactly its own
+// action id and must not disturb anything B's own voice half does
+// afterward — which is what finally mutes and owns it.
+func TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU(t *testing.T) {
+	database, chID := applyTimeoutMuteTestDB(t)
+	ctx := context.Background()
+	actorID, err := database.CreateUser(ctx, "supersede-actor", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser(actor): %v", err)
+	}
+	uid, err := database.CreateUser(ctx, "supersede-target", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(target): %v", err)
+	}
+	h := newTestHub(t, database, nil, nil)
+	if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	state, err := h.voice.State(ctx, uid)
+	if err != nil || state == nil {
+		t.Fatalf("State: %v", err)
+	}
+
+	actionA, _, err := database.TimeoutUser(ctx, uid, actorID, nil, "A", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(A): %v", err)
+	}
+
+	// Parks A's SFU call — still holding h.voiceMod's per-user lock — until
+	// the supersede below has run, then fails it.
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	prevHook := muteParticipantHookForTest
+	muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error {
+		close(parked)
+		<-release
+		return errors.New("sfu failure")
+	}
+	t.Cleanup(func() { muteParticipantHookForTest = prevHook })
+
+	type result struct{ applied, owned bool }
+	aDone := make(chan result, 1)
+	go func() {
+		applied, owned := h.MuteForTimeout(ctx, uid, chID, actionA, state.JoinedAt, nil)
+		aDone <- result{applied, owned}
+	}()
+
+	select {
+	case <-parked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("A's MuteForTimeout never reached its SFU call")
+	}
+
+	// B supersedes A while A's SFU call is still in flight, still holding
+	// the lock — the ledger write is not gated by h.voiceMod at all.
+	actionB, supersededIDs, err := database.TimeoutUser(ctx, uid, actorID, nil, "B", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(B): %v", err)
+	}
+	if len(supersededIDs) != 1 || supersededIDs[0] != actionA {
+		t.Fatalf("supersededIDs = %v, want [%d]", supersededIDs, actionA)
+	}
+
+	close(release)
+	var aResult result
+	select {
+	case aResult = <-aDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("A's MuteForTimeout never completed after being released")
+	}
+	if aResult.applied || aResult.owned {
+		t.Fatalf("A: applied=%v owned=%v, want both false: its SFU call fails", aResult.applied, aResult.owned)
+	}
+
+	// A's rollback must be scoped to exactly its own action id.
+	after, err := h.voice.State(ctx, uid)
+	if err != nil || after == nil || after.ServerMuted {
+		t.Fatal("ServerMuted = true after A's rollback, want false")
+	}
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, uid, []int64{actionA}); err != nil || cleared {
+		t.Fatalf("ClearServerMuteOwnedBy(A) cleared=%v err=%v, want false: A's own rollback must already have cleared it", cleared, err)
+	}
+
+	// B's own voice half now runs (as service.applyTimeoutVoiceHalf would,
+	// passing the supersededIDs TimeoutUser returned) and must mute and own
+	// it, undisturbed by A's failed, already-rolled-back attempt.
+	muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error { return nil }
+	bApplied, bOwned := h.MuteForTimeout(ctx, uid, chID, actionB, state.JoinedAt, supersededIDs)
+	if !bApplied || !bOwned {
+		t.Fatalf("B: applied=%v owned=%v, want both true: B's voice half must mute and own it after A's failure", bApplied, bOwned)
+	}
+	final, err := h.voice.State(ctx, uid)
+	if err != nil || final == nil || !final.ServerMuted {
+		t.Fatal("ServerMuted = false after B's mute, want true")
+	}
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, uid, []int64{actionB}); err != nil || !cleared {
+		t.Fatalf("ClearServerMuteOwnedBy(B) cleared=%v err=%v, want true: B must own the final mute", cleared, err)
+	}
 }
 
 // errorVoiceStore wraps a real VoiceStore and injects failures on State/
@@ -653,6 +760,141 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim(t *testing.T) {
 			}
 			if len(sfuLog) == 0 || sfuLog[len(sfuLog)-1] != "mute" {
 				t.Fatalf("sfuLog = %v, want to end on \"mute\": the SFU must agree with the DB (order=%s)", sfuLog, order)
+			}
+		})
+	}
+}
+
+// TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention
+// promotes the sequential test above to real contention on h.voiceMod, the
+// coordinator's own named gap: TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim
+// runs its two calls one after the other on the SAME goroutine, which proves
+// the ownership model's correctness but nothing about whether the two
+// genuinely serialize on the lock rather than merely happening to be invoked
+// in that order. Using TestMuteForTimeout_ContendsOnTheHubLock's parking
+// pattern, this starts the first call in its own goroutine and parks it mid
+// SFU-call (inside MuteParticipant, still holding h.voiceMod's per-user
+// lock) via muteParticipantHookForTest, starts the second call in a second
+// goroutine, and asserts it is STILL BLOCKED a moment later before releasing
+// the first — real contention, not a doc comment's claim — then checks the
+// same final invariants the sequential test does: muted, owned by Y, and the
+// SFU log ends on "mute" regardless of which call actually ran first.
+func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention(t *testing.T) {
+	for _, order := range []string{"unmute-then-mute", "mute-then-unmute"} {
+		t.Run(order, func(t *testing.T) {
+			database, chID := applyTimeoutMuteTestDB(t)
+			uid, err := database.CreateUser(context.Background(), "race-contend-user-"+order, "hash", 4)
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			h := newTestHub(t, database, nil, nil)
+			ctx := context.Background()
+			if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
+				t.Fatalf("Join: %v", err)
+			}
+			state, err := h.voice.State(ctx, uid)
+			if err != nil || state == nil {
+				t.Fatalf("State: %v", err)
+			}
+
+			prevHook := muteParticipantHookForTest
+			muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error { return nil }
+			t.Cleanup(func() { muteParticipantHookForTest = prevHook })
+
+			actionX := seedTimeoutActionForTest(t, database, uid)
+			if applied, owned := h.MuteForTimeout(ctx, uid, chID, actionX, state.JoinedAt, nil); !applied || !owned {
+				t.Fatalf("seed mute by X: applied=%v owned=%v", applied, owned)
+			}
+			// X is lifted (db.LiftTimeout already ran, ledger-side) before its
+			// voice-muter call is ever made — the same service-layer order the
+			// sequential test pins.
+			if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, actionX); err != nil {
+				t.Fatalf("mark X lifted: %v", err)
+			}
+			actionY := seedTimeoutActionForTest(t, database, uid)
+
+			// From here, the hook parks whichever call reaches MuteParticipant
+			// first — still holding h.voiceMod's per-user lock — until
+			// releaseFirst closes, and logs every SFU call's direction.
+			var sfuMu sync.Mutex
+			var sfuLog []string
+			first := true
+			firstEntered := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			muteParticipantHookForTest = func(_ context.Context, _, _ int64, _ string, muted bool) error {
+				sfuMu.Lock()
+				if muted {
+					sfuLog = append(sfuLog, "mute")
+				} else {
+					sfuLog = append(sfuLog, "unmute")
+				}
+				isFirst := first
+				first = false
+				sfuMu.Unlock()
+				if isFirst {
+					close(firstEntered)
+					<-releaseFirst
+				}
+				return nil
+			}
+
+			var firstCall, secondCall func()
+			if order == "unmute-then-mute" {
+				firstCall = func() { h.UnmuteForTimeout(ctx, uid, []int64{actionX}) }
+				secondCall = func() { h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt, nil) }
+			} else {
+				firstCall = func() { h.MuteForTimeout(ctx, uid, chID, actionY, state.JoinedAt, nil) }
+				secondCall = func() { h.UnmuteForTimeout(ctx, uid, []int64{actionX}) }
+			}
+
+			firstDone := make(chan struct{})
+			go func() {
+				firstCall()
+				close(firstDone)
+			}()
+			select {
+			case <-firstEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the first call never reached its SFU call")
+			}
+
+			secondDone := make(chan struct{})
+			go func() {
+				secondCall()
+				close(secondDone)
+			}()
+			select {
+			case <-secondDone:
+				t.Fatal("the second call completed while the first still held h.voiceMod mid-SFU-call")
+			case <-time.After(100 * time.Millisecond):
+				// Expected: genuinely blocked on the per-user lock.
+			}
+
+			close(releaseFirst)
+			select {
+			case <-firstDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the first call never completed after being released")
+			}
+			select {
+			case <-secondDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the second call never completed after the lock was released")
+			}
+
+			final, err := h.voice.State(ctx, uid)
+			if err != nil || final == nil || !final.ServerMuted {
+				t.Fatalf("final state must be muted (order=%s)", order)
+			}
+			if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, uid, []int64{actionY}); err != nil || !cleared {
+				t.Fatalf("ClearServerMuteOwnedBy(Y) cleared=%v err=%v, want true: Y must own the final mute (order=%s)", cleared, err, order)
+			}
+			sfuMu.Lock()
+			endsOnMute := len(sfuLog) > 0 && sfuLog[len(sfuLog)-1] == "mute"
+			gotLog := append([]string(nil), sfuLog...)
+			sfuMu.Unlock()
+			if !endsOnMute {
+				t.Fatalf("sfuLog = %v, want to end on \"mute\": the SFU must agree with the DB (order=%s)", gotLog, order)
 			}
 		})
 	}

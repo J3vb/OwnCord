@@ -199,15 +199,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountEmojiRoutes(r, database, svc, store, limiter, hub)
 	}
 
-	// Report intake, the reporter's own status view, and the moderation
-	// queue (B5-8) — mounted after hub creation so a filed report, an
-	// assignment or a close can notify connected MODERATE_MEMBERS/
-	// Administrator holders via mod_queue.
+	// Report intake, the moderation queue, and warning/timeout/notice-ack
+	// (B5-8/B5-9) — mounted after hub creation so a filed report, an
+	// assignment, a close or an action can notify connected clients.
 	routerReportRoutes(r, svc, hub)
-	// Warning, timeout and the notice acknowledgement (B5-9) — mounted
-	// alongside the queue since both gate on the same MODERATE_MEMBERS bit
-	// and both can notify a connected target.
-	MountModerationRoutes(r, svc)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -447,11 +442,14 @@ func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, l
 }
 
 // routerReportRoutes mounts report intake, the reporter's own status view,
-// and the moderation queue (B5-8) — the hub is the mod_queue broadcaster for
-// a filed report, an assignment, or a close.
+// the moderation queue (B5-8), and warning/timeout/notice-ack (B5-9) beside
+// it since both gate on the same MODERATE_MEMBERS bit and both can notify a
+// connected client — the hub is the mod_queue/mod_action broadcaster for a
+// filed report, an assignment, a close, or an action.
 func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 	MountReportRoutes(r, svc, hub)
 	MountModerationQueueRoutes(r, svc, hub)
+	MountModerationRoutes(r, svc)
 }
 
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
