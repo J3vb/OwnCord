@@ -15,6 +15,12 @@
 -- stay in effect regardless, because BanUser's ban state lives on the users
 -- table, not here -- this table only ever held the ban's ledger entry,
 -- never the ban itself. Kicked sessions stay revoked for the same reason.
+--
+-- voice_states.server_muted_by (round 4, Codex review Part A) is dropped
+-- FIRST, before the table it references: any live SFU mute ownership
+-- pointer goes with it, same cost as everything else this reversal already
+-- accepts for a timeout's voice half.
+ALTER TABLE voice_states DROP COLUMN server_muted_by;
 DROP INDEX IF EXISTS idx_moderation_actions_report;
 DROP INDEX IF EXISTS idx_moderation_actions_timeouts;
 DROP INDEX IF EXISTS idx_moderation_actions_target;

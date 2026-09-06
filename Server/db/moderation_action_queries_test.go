@@ -79,15 +79,12 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 		t.Fatal("HasActiveTimeout = false right after TimeoutUser")
 	}
 
-	lifted, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("LiftTimeout: %v", err)
 	}
-	if !lifted {
-		t.Fatal("LiftTimeout reported nothing lifted")
-	}
-	if voiceMuted {
-		t.Fatal("voiceMuted = true, want false: this timeout never called SetTimeoutVoiceMuted")
+	if len(liftedIDs) != 1 {
+		t.Fatalf("LiftTimeout reported %d lifted ids, want 1", len(liftedIDs))
 	}
 	active, err = database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
@@ -98,11 +95,11 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 	}
 
 	// Lifting again finds nothing.
-	lifted, _, err = database.LiftTimeout(ctx, memberID, ownerID)
+	liftedIDs, err = database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("second LiftTimeout: %v", err)
 	}
-	if lifted {
+	if len(liftedIDs) != 0 {
 		t.Fatal("second LiftTimeout reported a lift with nothing active")
 	}
 }
@@ -118,9 +115,9 @@ func TestLiftTimeout_NonexistentLifterRefused(t *testing.T) {
 	if _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	lifted, _, err := database.LiftTimeout(ctx, memberID, 999999)
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, 999999)
 	if !errors.Is(err, db.ErrOutranked) {
-		t.Fatalf("LiftTimeout with a nonexistent lifter: want db.ErrOutranked, got (%v, %v)", lifted, err)
+		t.Fatalf("LiftTimeout with a nonexistent lifter: want db.ErrOutranked, got (%v, %v)", liftedIDs, err)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
@@ -147,9 +144,9 @@ func TestLiftTimeout_DemotedActorRefused(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE roles SET position = 40 WHERE id = 1`); err != nil {
 		t.Fatalf("demote owner role: %v", err)
 	}
-	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if !errors.Is(err, db.ErrOutranked) {
-		t.Fatalf("LiftTimeout by a demoted actor: want db.ErrOutranked, got (%v, %v)", lifted, err)
+		t.Fatalf("LiftTimeout by a demoted actor: want db.ErrOutranked, got (%v, %v)", liftedIDs, err)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
@@ -201,12 +198,12 @@ func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
 	}
 
 	// Only the second is active; a single lift call lifts exactly it.
-	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("LiftTimeout: %v", err)
 	}
-	if !lifted {
-		t.Fatal("LiftTimeout found nothing active after supersede left exactly one row")
+	if len(liftedIDs) != 1 || liftedIDs[0] != secondID {
+		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, secondID)
 	}
 }
 
@@ -227,12 +224,12 @@ func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
 		}
 	}
 
-	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("LiftTimeout: %v", err)
 	}
-	if !lifted {
-		t.Fatal("LiftTimeout reported nothing lifted")
+	if len(liftedIDs) != 2 {
+		t.Fatalf("LiftTimeout reported %d lifted ids, want 2", len(liftedIDs))
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
 	if err != nil {
@@ -243,92 +240,126 @@ func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
 	}
 }
 
-// TestLiftTimeout_ReportsVoiceMuted is P1-4's db-level half: LiftTimeout
-// reports voiceMuted=true only when SetTimeoutVoiceMuted was called on the
-// active row, and false otherwise — the caller (ModerationService) decides
-// from that, plus its own live CanModerateVoice check, whether to clear the
-// SFU mute.
-func TestLiftTimeout_ReportsVoiceMuted(t *testing.T) {
+// TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede is round 4's
+// replacement for P2 17 (Codex review round 3): timeout A applies (and
+// owns) a mute through a REAL voice session; timeout B supersedes A with
+// its own voice half skipped entirely (no MuteForTimeoutSession call for
+// B). B must still end up owning the still-live mute in voice_states —
+// superseding never touches the SFU, so A's mute is still live, and only
+// B is left for a later LiftTimeout to act on — proved end to end: lift B,
+// clear whichever row LiftTimeout's own ids now own, and see it unmuted.
+func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
-
-	id, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	chanID, err := database.CreateChannel(ctx, "vc-supersede", "voice", "", "", 0)
 	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
+		t.Fatalf("CreateChannel: %v", err)
 	}
-	if ok, err := database.SetTimeoutVoiceMuted(ctx, id); err != nil || !ok {
-		t.Fatalf("SetTimeoutVoiceMuted: ok=%v err=%v", ok, err)
+	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	_, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
+	state, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if !voiceMuted {
-		t.Fatal("voiceMuted = false, want true: SetTimeoutVoiceMuted was called on the active row")
-	}
-}
-
-// TestSetTimeoutVoiceMuted_RefusesWhenNoLongerActive is P2 16 (Codex review
-// round 3): the flag update is guarded on the row still being active, so a
-// caller that lands here after the row was already lifted (a concurrent
-// LiftTimeout ran in the gap between the SFU mute landing and this call)
-// gets ok=false rather than silently stamping ownership onto a row nothing
-// will ever act on again — the service layer's compensating unmute depends
-// on seeing that false.
-func TestSetTimeoutVoiceMuted_RefusesWhenNoLongerActive(t *testing.T) {
-	database, ownerID, memberID := newModerationActionsTestDB(t)
-	ctx := context.Background()
-
-	id, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
-	lifted, _, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil || !lifted {
-		t.Fatalf("LiftTimeout: lifted=%v err=%v", lifted, err)
-	}
-
-	ok, err := database.SetTimeoutVoiceMuted(ctx, id)
-	if err != nil {
-		t.Fatalf("SetTimeoutVoiceMuted: %v", err)
-	}
-	if ok {
-		t.Fatal("SetTimeoutVoiceMuted = true, want false: the row was already lifted")
-	}
-}
-
-// TestTimeoutUser_InheritsVoiceMutedFromSupersededRow is P2 17 (Codex review
-// round 3): timeout A applies (and owns) a mute; timeout B supersedes A
-// with its own voice half skipped entirely (no SetTimeoutVoiceMuted call for
-// B). B must still inherit ownership, because superseding never touches the
-// SFU — A's mute is still live, and only B is left for LiftTimeout to act
-// on. Observed through the public API: LiftTimeout's own voiceMuted return
-// is the only way this ledger's ownership is ever consumed.
-func TestTimeoutUser_InheritsVoiceMutedFromSupersededRow(t *testing.T) {
-	database, ownerID, memberID := newModerationActionsTestDB(t)
-	ctx := context.Background()
 
 	idA, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "first", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("TimeoutUser(A): %v", err)
 	}
-	if ok, err := database.SetTimeoutVoiceMuted(ctx, idA); err != nil || !ok {
-		t.Fatalf("SetTimeoutVoiceMuted(A): ok=%v err=%v", ok, err)
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, idA, state.JoinedAt); err != nil || !matched || !transitioned {
+		t.Fatalf("MuteForTimeoutSession(A): matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
 
 	// B supersedes A. B's own voice half is skipped this time (no
-	// SetTimeoutVoiceMuted call for B) — exactly the scenario that used to
+	// MuteForTimeoutSession call for B) — exactly the scenario that used to
 	// lose ownership.
-	if _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour)); err != nil {
+	idB, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour))
+	if err != nil {
 		t.Fatalf("TimeoutUser(B): %v", err)
 	}
 
-	_, voiceMuted, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, memberID, []int64{idA}); err != nil || cleared {
+		t.Fatalf("ClearServerMuteOwnedBy(A) cleared=%v err=%v, want false: ownership already transferred to B", cleared, err)
+	}
+	before, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || before == nil || !before.ServerMuted {
+		t.Fatal("the mute must still be in effect after A is superseded")
+	}
+
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
 	if err != nil {
 		t.Fatalf("LiftTimeout: %v", err)
 	}
-	if !voiceMuted {
-		t.Fatal("voiceMuted = false, want true: B must inherit ownership of A's still-live mute")
+	if len(liftedIDs) != 1 || liftedIDs[0] != idB {
+		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, idB)
+	}
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, memberID, liftedIDs); err != nil || !cleared {
+		t.Fatalf("ClearServerMuteOwnedBy(liftedIDs) cleared=%v err=%v, want true: B owns the transferred mute", cleared, err)
+	}
+	final, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || final == nil {
+		t.Fatalf("GetVoiceState (final): %v", err)
+	}
+	if final.ServerMuted {
+		t.Error("ServerMuted = true, want false: lifting B must clear the mute it inherited from A")
+	}
+}
+
+// TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession is round 4's fix for
+// Codex 13: an OLD timeout's lifted id must never clear a mute on a NEW
+// voice session (a leave and rejoin between the mute and the lift) —
+// session-bound ownership, not a ledger flag that could be misread across
+// sessions.
+func TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+	chanID, err := database.CreateChannel(ctx, "vc-rejoin", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel (first): %v", err)
+	}
+	first, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || first == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+
+	id, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, id, first.JoinedAt); err != nil || !matched || !transitioned {
+		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
+	}
+
+	// Leave and rejoin the SAME channel — a brand-new session with no owner.
+	if err := database.LeaveVoiceChannel(ctx, memberID); err != nil {
+		t.Fatalf("LeaveVoiceChannel: %v", err)
+	}
+	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel (rejoin): %v", err)
+	}
+	// The NEW session gets its own manual mute — nothing to do with the old
+	// timeout, and must survive the old timeout's lift below.
+	if matched, err := database.SetVoiceServerMute(ctx, memberID, chanID, true); err != nil || !matched {
+		t.Fatalf("SetVoiceServerMute: matched=%v err=%v", matched, err)
+	}
+
+	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
+	if err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	if len(liftedIDs) != 1 || liftedIDs[0] != id {
+		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, id)
+	}
+	if _, _, cleared, err := database.ClearServerMuteOwnedBy(ctx, memberID, liftedIDs); err != nil || cleared {
+		t.Fatalf("ClearServerMuteOwnedBy cleared=%v err=%v, want false: the old id must not touch the new session", cleared, err)
+	}
+	state, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || state == nil || !state.ServerMuted {
+		t.Fatal("the NEW session's manual mute must survive the OLD timeout's lift")
 	}
 }
 

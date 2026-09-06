@@ -241,12 +241,16 @@ type Store interface {
 	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
 	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
 	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
-	// CompareAndSetServerMute is SetVoiceServerMute scoped to one exact
-	// session (channelID, joinedAt) and reporting the prior server_muted
-	// value read under the same transaction as the write, so a caller can
-	// tell ownership (a genuine unmuted->muted transition) from "already
-	// muted by someone/something else" (P1-3/P1-4 PARTIAL).
-	CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error)
+	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact
+	// session (channelID, joinedAt), stamping actionID as owner
+	// (voice_states.server_muted_by) atomically with the mute, only on a
+	// genuine unmuted->muted transition (round 4, replacing round 3's
+	// CompareAndSetServerMute — see migration 049's comment).
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears server_muted for whichever voice_states
+	// row currently names one of actionIDs as owner and reports its
+	// channel/join token for the paired SFU call (round 4).
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
@@ -332,17 +336,12 @@ type Store interface {
 	// refused (db.ErrOutranked), not sanctioned.
 	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
 	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error)
-	// LiftTimeout reports whether any row was lifted and whether any of the
-	// lifted rows had actually applied the voice half (voice_muted, P1-4) —
-	// the caller decides whether to clear the SFU mute from that and its own
-	// permissions.CanModerateVoice check.
-	LiftTimeout(ctx context.Context, targetID, actorID int64) (lifted bool, voiceMuted bool, err error)
-	// SetTimeoutVoiceMuted records that actionID OWNS an outstanding SFU
-	// mute (P1-4/P3-14), after the fact — Timeout's own write cannot know
-	// the outcome until the voice muter has been called. Guarded on the
-	// row still being active; false means it is not (P2 16) and the
-	// caller must compensate by unmuting immediately.
-	SetTimeoutVoiceMuted(ctx context.Context, actionID int64) (bool, error)
+	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none
+	// lifted). The caller passes them to ClearServerMuteOwnedBy, which
+	// clears whichever voice_states row (if any) is currently owned by one
+	// of them — ownership lives on the session now, not this ledger
+	// (round 4, replacing round 3's voiceMuted bool).
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
 	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
 	// Subject.TimedOut is filled from.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)

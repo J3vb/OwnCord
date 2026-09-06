@@ -132,6 +132,22 @@ func TestCanModerateVoice(t *testing.T) {
 	})
 }
 
+// TestAuthorizeVoiceModerator pins the round-4 canonical authorizer
+// (Codex review Part C): the actor's BASE role must hold MUTE_MEMBERS on
+// its own, a stricter gate than CanModerateVoice's channel-scoped OR
+// alone — a channel override cannot manufacture voice-moderation authority
+// a role never held at all.
+func TestAuthorizeVoiceModerator(t *testing.T) {
+	runPredicate(t, "AuthorizeVoiceModerator", AuthorizeVoiceModerator, []predicateCase{
+		{"moderator with base MUTE_MEMBERS allowed", Subject{RolePerms: modBits, Channel: voice(false)}, nil},
+		{"no MUTE_MEMBERS at all refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
+		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"base bit present but a channel deny still refuses", Subject{RolePerms: modBits, Override: deny(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"base bit present but channel hidden still refuses", Subject{RolePerms: modBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+	})
+}
+
 // TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
 // server-wide, and — unlike every channel predicate above — never moved by a
 // channel override, because moderation authority is not a channel property.

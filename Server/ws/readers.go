@@ -130,11 +130,15 @@ type VoiceStore interface {
 	// Moderator flags and their compensations.
 	SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error)
 	SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error)
-	// CompareAndSetServerMute is the timeout voice half's compare-and-mute
-	// (P1-3/P1-4 PARTIAL): scoped to one exact session (channelID,
-	// joinedAt), reporting whether this call owns the unmuted->muted
-	// transition.
-	CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error)
+	// MuteForTimeoutSession is the timeout voice half's mute (round 4,
+	// replacing round 3's CompareAndSetServerMute): scoped to one exact
+	// session (channelID, joinedAt), stamping actionID as owner atomically
+	// with the mute, only on a genuine unmuted->muted transition.
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears the mute currently owned by any of
+	// actionIDs (round 4) — session-bound: an ended or restarted session
+	// can never be cleared by a stale action id.
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
 	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool) *db.VoiceState
 	RollbackServerDeafen(ctx context.Context, targetID, authorizedChannelID int64, requestedDeafen bool)
 	WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string)

@@ -92,28 +92,78 @@ UPDATE voice_states SET screenshare = ? WHERE user_id = ?;
 UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?;
 
 -- name: ClearVoiceServerMute :execresult
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?;
+-- server_muted_by is cleared unconditionally here too: this is the manual
+-- moderator mute/unmute endpoint (voice_mod_mute), and an unmute through it
+-- always wins regardless of who (if anyone, e.g. an active timeout) owns
+-- the mute (round 4, Codex review, Part A) -- a later timeout lift then has
+-- nothing left to find and does nothing, which is correct: the manual
+-- unmute already spoke for the target's current state.
+UPDATE voice_states SET server_muted = 0, server_muted_by = NULL WHERE user_id = ? AND channel_id = ?;
 
--- The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL, Codex review
--- round 3): scoped to channel_id AND joined_at, the join-instance token
+-- The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL round 3;
+-- reworked round 4, Codex review, to stamp ownership atomically -- see
+-- migration 049's comment on voice_states.server_muted_by for the full
+-- rationale). Scoped to channel_id AND joined_at, the join-instance token
 -- JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
 -- between authorization and this write also fails to match, not only a
 -- channel switch -- one step tighter than ApplyVoiceServerMute/
 -- ClearVoiceServerMute above, which voice_mod_mute has always scoped to
--- channel_id alone. CompareVoiceServerMuteState reads the PRIOR value inside
--- the same transaction as the write that follows (db.CompareAndSetServerMute)
--- so the caller can tell "we made this transition" from "it was already
--- muted by someone/something else" -- ownership, not merely "we called
--- mute".
+-- channel_id alone.
 
--- name: CompareVoiceServerMuteState :one
-SELECT server_muted FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+-- name: MuteForSession :execresult
+-- The WHERE server_muted = 0 makes this ONE statement do what round 3 did
+-- in two (read the prior state, then write): it matches a row only on a
+-- genuine unmuted->muted transition, so RowsAffected alone tells the caller
+-- whether server_muted_by (this action) is now the owner -- no separate
+-- read, and no gap for a concurrent lift to land in between.
+--
+-- The second OR branch reclaims an ORPHANED mute (round 4, Codex review):
+-- TimeoutUser's supersede-transfer (migration 049's comment) can only move
+-- ownership off a row that has ALREADY stamped it -- if this timeout's own
+-- supersede committed before the superseded row's mute had landed at all
+-- (a real interleaving under the per-user lock: the superseded row's
+-- MuteForTimeout call is still queued behind this one when TimeoutUser
+-- transfers), the transfer finds nothing to move and voice_states is left
+-- pointing at an action that is no longer active. Reclaiming here --
+-- server_muted_by set to something NOT NULL and not one of the currently
+-- active timeouts -- lets THIS call still claim ownership instead of
+-- treating someone else's now-defunct mute as untouchable, so LiftTimeout
+-- on THIS row can later clear it. NOT NULL excludes a manual moderator
+-- mute (voice_mod_mute never sets server_muted_by): that ownership is never
+-- reassigned to a timeout just because no timeout currently owns it.
+UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = sqlc.arg(action_id)
+ WHERE user_id = sqlc.arg(user_id) AND channel_id = sqlc.arg(channel_id) AND joined_at = sqlc.arg(joined_at)
+   AND (
+     server_muted = 0
+     OR (server_muted_by IS NOT NULL AND server_muted_by NOT IN (
+       SELECT id FROM moderation_actions
+        WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+     ))
+   );
 
--- name: ApplyVoiceServerMuteForSession :execresult
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+-- name: VoiceSessionExists :one
+-- Disambiguates MuteForSession's zero-rows-affected result: "no session"
+-- (the target left/switched between authorization and this call, P1-3
+-- PARTIAL) from "session exists but was already server-muted by
+-- someone/something else" (not this action's ownership to claim).
+SELECT EXISTS (
+    SELECT 1 FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?
+) AS found;
 
--- name: ClearVoiceServerMuteForSession :execresult
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ? AND joined_at = ?;
+-- name: FindOrphanedVoiceMutes :many
+-- The maintenance-tick (and start-up) reconcile sweep (round 4, B5-10
+-- addendum): every voice_states row whose server_muted_by points at a
+-- timeout that is now lifted or expired -- the crash window between a
+-- lift's ledger commit and its post-commit voice-clear (service.
+-- ModerationService.FinalizeTimeoutLift), and the gap this closes outright:
+-- a timeout that simply EXPIRES, with nobody ever calling LiftTimeout, had
+-- no unmute mechanism at all before this. A manual moderator mute
+-- (server_muted_by NULL) is never a candidate.
+SELECT vs.user_id, vs.server_muted_by AS action_id
+  FROM voice_states vs
+  JOIN moderation_actions ma ON ma.id = vs.server_muted_by
+ WHERE vs.server_muted_by IS NOT NULL
+   AND (ma.lifted_at IS NOT NULL OR ma.expires_at <= datetime('now'));
 
 -- name: ApplyVoiceServerDeafen :execresult
 UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?;

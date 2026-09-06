@@ -36,59 +36,115 @@ func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expir
 	h.SendToUserLow(userID, buildModAction(actionID, kind, reason, expiresAt))
 }
 
-// ApplyTimeoutMute applies or lifts the voice half of a timeout on userID's
-// current voice connection, through the exact mechanism voice_mod_mute uses
-// (VoiceStore.CompareAndSetServerMute plus the SFU mute) rather than a
-// second path to the same effect (decision 6). Satisfies
-// service.TimeoutVoiceMuter. channelID and joinedAt are the EXACT session
-// the caller already authorized against (ModerationService.
-// actorCanModerateVoiceFor, P1-3) — this method binds its write to that
-// session rather than re-resolving the target's current voice state, which
-// could by then be a different (unauthorized) channel or a leave-and-rejoin
-// of the same one (P1-3 PARTIAL, Codex review round 3).
+// MuteForTimeout applies the voice half of a timeout on userID's current
+// voice connection, through the exact mechanism voice_mod_mute uses
+// (VoiceStore.MuteForTimeoutSession plus the SFU mute) rather than a second
+// path to the same effect (decision 6). Satisfies service.TimeoutVoiceMuter.
+// channelID and joinedAt are the EXACT session the caller already authorized
+// against (ModerationService.actorCanModerateVoiceFor, P1-3) — this method
+// binds its write to that session rather than re-resolving the target's
+// current voice state, which could by then be a different (unauthorized)
+// channel or a leave-and-rejoin of the same one (P1-3 PARTIAL).
 //
-// Reports applied (the mute/unmute actually took effect, including at the
-// SFU — an SFU failure is NOT applied, P3-14 PARTIAL: the DB half alone is
-// not enough to call this "applied" when the mechanism the client actually
-// hears is the SFU) and, for muted=true only, owned (this call caused the
+// The DB transition and the SFU call run under the per-user lock
+// (voiceMod, round 4 Part B) shared with UnmuteForTimeout and the manual
+// voice-mod-mute endpoint: whichever of a late unmute (from a lift racing
+// this call) or this mute takes the lock first runs both its own steps
+// before the other can start either (Codex 12). If the SFU call fails after
+// a genuine DB transition, the DB is rolled back under the SAME lock —
+// reusing UnmuteForTimeout's own clear, scoped to just this actionID — so
+// the two never disagree (Codex 14), and applied/owned both report false.
+//
+// Reports applied (the mute is genuinely in effect — already muted counts,
+// nothing new for the SFU to do — or the SFU accepted a fresh one; an SFU
+// failure is NOT applied, P3-14 PARTIAL) and owned (THIS call caused the
 // unmuted->muted transition — false means the target was already
-// server-muted by someone/something else, so the caller must not record
-// ownership of a mute it does not own, P1-4 PARTIAL). owned is meaningless
-// for muted=false and always false there.
-func (h *Hub) ApplyTimeoutMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (applied, owned bool) {
+// server-muted by someone/something else, so the caller must not treat
+// this action as responsible for later clearing it, P1-4 PARTIAL).
+func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (applied, owned bool) {
 	if h.voice == nil {
 		return false, false
 	}
-	matched, transitioned, err := h.voice.CompareAndSetServerMute(ctx, userID, channelID, joinedAt, muted)
+	unlock := h.voiceMod.lock(userID)
+	defer unlock()
+
+	matched, transitioned, err := h.voice.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt)
 	if err != nil {
-		slog.Error("ws ApplyTimeoutMute CompareAndSetServerMute", "err", err, "user_id", userID)
+		slog.Error("ws MuteForTimeout MuteForTimeoutSession", "err", err, "user_id", userID)
 		return false, false
 	}
 	if !matched {
 		// The target already left this exact session (channel or join
 		// instance) between authorization and this call — nothing to mute
-		// there. The compare-and-mute above is the lock: its own atomic
-		// read-then-write, not a separate read here racing the target's own
-		// channel switch.
+		// there.
 		return false, false
 	}
-	if err := h.MuteParticipant(ctx, channelID, userID, joinedAt, muted); err != nil {
+	if !transitioned {
+		// Already muted (by someone/something else, or this action's own
+		// mute reclaimed from an inactive owner already counts as
+		// transitioned=true) — nothing new for the SFU to do, and not this
+		// call's mute to own.
+		return true, false
+	}
+	if err := h.MuteParticipant(ctx, channelID, userID, joinedAt, true); err != nil {
 		// An SFU failure means the client never actually hears the effect,
-		// so this is NOT applied (P3-14 PARTIAL) — unlike voice_mod_mute's
-		// own tolerance of a LiveKit failure (its DB row is the whole of
-		// that feature's contract), the timeout's ledger has a separate
-		// voice_muted column whose entire purpose is "did the mute really
-		// land", and a log line is not enough to answer that truthfully.
-		slog.Warn("ws ApplyTimeoutMute MuteParticipant failed", "err", err, "user_id", userID, "channel_id", channelID)
+		// so this is NOT applied (P3-14 PARTIAL) — roll the DB transition
+		// back under the same lock so the two do not disagree (Codex 14).
+		slog.Warn("ws MuteForTimeout MuteParticipant failed, rolling back", "err", err, "user_id", userID, "channel_id", channelID)
+		if _, _, _, rbErr := h.voice.ClearServerMuteOwnedBy(ctx, userID, []int64{actionID}); rbErr != nil {
+			slog.Error("ws MuteForTimeout rollback failed", "err", rbErr, "user_id", userID, "action_id", actionID)
+		}
 		return false, false
 	}
-	if state, stateErr := h.voice.State(ctx, userID); stateErr == nil && state != nil &&
-		state.ChannelID == channelID && state.JoinedAt == joinedAt {
-		// Only broadcast against the same session the write applied to —
-		// a state read that resolves a channel switch since the write above
-		// would otherwise show a stale mute flag on the wrong room.
-		state.ServerMuted = muted
-		h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
+	h.broadcastVoiceMuteState(ctx, userID, channelID, joinedAt, true)
+	return true, true
+}
+
+// UnmuteForTimeout clears the mute currently owned by any of actionIDs (a
+// lift's own action id, or its whole supersede chain) — session-bound for
+// free (round 4, fixing Codex 13): an ended session has no row to match, and
+// a rejoin starts a fresh row with server_muted_by NULL, so an old action id
+// can never clear an unrelated NEW mute. Satisfies service.TimeoutVoiceMuter.
+// Runs under the same per-user lock as MuteForTimeout and the manual
+// voice-mod-mute endpoint.
+func (h *Hub) UnmuteForTimeout(ctx context.Context, userID int64, actionIDs []int64) bool {
+	if h.voice == nil || len(actionIDs) == 0 {
+		return false
 	}
-	return true, muted && transitioned
+	unlock := h.voiceMod.lock(userID)
+	defer unlock()
+
+	channelID, joinedAt, matched, err := h.voice.ClearServerMuteOwnedBy(ctx, userID, actionIDs)
+	if err != nil {
+		slog.Error("ws UnmuteForTimeout ClearServerMuteOwnedBy", "err", err, "user_id", userID)
+		return false
+	}
+	if !matched {
+		// Nothing currently owned by any of actionIDs — an ended/restarted
+		// session, a manual mute that has since taken over, or a mute that
+		// was already cleared. Correctly a no-op either way.
+		return false
+	}
+	if err := h.MuteParticipant(ctx, channelID, userID, joinedAt, false); err != nil {
+		// The DB already reflects "unmuted" -- best-effort at the SFU, the
+		// same tolerance voice_mod_mute's own unmute has always had for its
+		// DB row being the whole of that feature's contract.
+		slog.Warn("ws UnmuteForTimeout MuteParticipant failed", "err", err, "user_id", userID, "channel_id", channelID)
+	}
+	h.broadcastVoiceMuteState(ctx, userID, channelID, joinedAt, false)
+	return true
+}
+
+// broadcastVoiceMuteState re-reads userID's current voice state and, if it
+// still matches the exact session (channelID, joinedAt) this write applied
+// to, broadcasts it with ServerMuted set to muted — a state read that
+// resolves a channel switch racing this write would otherwise show a stale
+// mute flag on the wrong room.
+func (h *Hub) broadcastVoiceMuteState(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) {
+	state, err := h.voice.State(ctx, userID)
+	if err != nil || state == nil || state.ChannelID != channelID || state.JoinedAt != joinedAt {
+		return
+	}
+	state.ServerMuted = muted
+	h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
 }

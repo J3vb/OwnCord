@@ -43,20 +43,6 @@ func (q *Queries) ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServer
 	return q.db.ExecContext(ctx, applyVoiceServerMute, arg.UserID, arg.ChannelID)
 }
 
-const applyVoiceServerMuteForSession = `-- name: ApplyVoiceServerMuteForSession :execresult
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ? AND joined_at = ?
-`
-
-type ApplyVoiceServerMuteForSessionParams struct {
-	UserID    int64  `json:"userId"`
-	ChannelID int64  `json:"channelId"`
-	JoinedAt  string `json:"joinedAt"`
-}
-
-func (q *Queries) ApplyVoiceServerMuteForSession(ctx context.Context, arg ApplyVoiceServerMuteForSessionParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, applyVoiceServerMuteForSession, arg.UserID, arg.ChannelID, arg.JoinedAt)
-}
-
 const clearAllVoiceStates = `-- name: ClearAllVoiceStates :exec
 DELETE FROM voice_states
 `
@@ -80,7 +66,7 @@ func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServ
 }
 
 const clearVoiceServerMute = `-- name: ClearVoiceServerMute :execresult
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?
+UPDATE voice_states SET server_muted = 0, server_muted_by = NULL WHERE user_id = ? AND channel_id = ?
 `
 
 type ClearVoiceServerMuteParams struct {
@@ -88,22 +74,14 @@ type ClearVoiceServerMuteParams struct {
 	ChannelID int64 `json:"channelId"`
 }
 
+// server_muted_by is cleared unconditionally here too: this is the manual
+// moderator mute/unmute endpoint (voice_mod_mute), and an unmute through it
+// always wins regardless of who (if anyone, e.g. an active timeout) owns
+// the mute (round 4, Codex review, Part A) -- a later timeout lift then has
+// nothing left to find and does nothing, which is correct: the manual
+// unmute already spoke for the target's current state.
 func (q *Queries) ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, clearVoiceServerMute, arg.UserID, arg.ChannelID)
-}
-
-const clearVoiceServerMuteForSession = `-- name: ClearVoiceServerMuteForSession :execresult
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ? AND joined_at = ?
-`
-
-type ClearVoiceServerMuteForSessionParams struct {
-	UserID    int64  `json:"userId"`
-	ChannelID int64  `json:"channelId"`
-	JoinedAt  string `json:"joinedAt"`
-}
-
-func (q *Queries) ClearVoiceServerMuteForSession(ctx context.Context, arg ClearVoiceServerMuteForSessionParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, clearVoiceServerMuteForSession, arg.UserID, arg.ChannelID, arg.JoinedAt)
 }
 
 const clearVoiceState = `-- name: ClearVoiceState :exec
@@ -113,35 +91,6 @@ DELETE FROM voice_states WHERE user_id = ?
 func (q *Queries) ClearVoiceState(ctx context.Context, userID int64) error {
 	_, err := q.db.ExecContext(ctx, clearVoiceState, userID)
 	return err
-}
-
-const compareVoiceServerMuteState = `-- name: CompareVoiceServerMuteState :one
-
-SELECT server_muted FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?
-`
-
-type CompareVoiceServerMuteStateParams struct {
-	UserID    int64  `json:"userId"`
-	ChannelID int64  `json:"channelId"`
-	JoinedAt  string `json:"joinedAt"`
-}
-
-// The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL, Codex review
-// round 3): scoped to channel_id AND joined_at, the join-instance token
-// JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
-// between authorization and this write also fails to match, not only a
-// channel switch -- one step tighter than ApplyVoiceServerMute/
-// ClearVoiceServerMute above, which voice_mod_mute has always scoped to
-// channel_id alone. CompareVoiceServerMuteState reads the PRIOR value inside
-// the same transaction as the write that follows (db.CompareAndSetServerMute)
-// so the caller can tell "we made this transition" from "it was already
-// muted by someone/something else" -- ownership, not merely "we called
-// mute".
-func (q *Queries) CompareVoiceServerMuteState(ctx context.Context, arg CompareVoiceServerMuteStateParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, compareVoiceServerMuteState, arg.UserID, arg.ChannelID, arg.JoinedAt)
-	var server_muted int64
-	err := row.Scan(&server_muted)
-	return server_muted, err
 }
 
 const countActiveCameras = `-- name: CountActiveCameras :one
@@ -215,6 +164,50 @@ func (q *Queries) EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableS
 		arg.ChannelID_2,
 		arg.MaxVideo,
 	)
+}
+
+const findOrphanedVoiceMutes = `-- name: FindOrphanedVoiceMutes :many
+SELECT vs.user_id, vs.server_muted_by AS action_id
+  FROM voice_states vs
+  JOIN moderation_actions ma ON ma.id = vs.server_muted_by
+ WHERE vs.server_muted_by IS NOT NULL
+   AND (ma.lifted_at IS NOT NULL OR ma.expires_at <= datetime('now'))
+`
+
+type FindOrphanedVoiceMutesRow struct {
+	UserID   int64  `json:"userId"`
+	ActionID *int64 `json:"actionId"`
+}
+
+// The maintenance-tick (and start-up) reconcile sweep (round 4, B5-10
+// addendum): every voice_states row whose server_muted_by points at a
+// timeout that is now lifted or expired -- the crash window between a
+// lift's ledger commit and its post-commit voice-clear (service.
+// ModerationService.FinalizeTimeoutLift), and the gap this closes outright:
+// a timeout that simply EXPIRES, with nobody ever calling LiftTimeout, had
+// no unmute mechanism at all before this. A manual moderator mute
+// (server_muted_by NULL) is never a candidate.
+func (q *Queries) FindOrphanedVoiceMutes(ctx context.Context) ([]FindOrphanedVoiceMutesRow, error) {
+	rows, err := q.db.QueryContext(ctx, findOrphanedVoiceMutes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindOrphanedVoiceMutesRow{}
+	for rows.Next() {
+		var i FindOrphanedVoiceMutesRow
+		if err := rows.Scan(&i.UserID, &i.ActionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAllVoiceStates = `-- name: GetAllVoiceStates :many
@@ -472,6 +465,64 @@ func (q *Queries) LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceCh
 	return q.db.ExecContext(ctx, leaveVoiceChannelIfMatch, arg.UserID, arg.ChannelID, arg.JoinedAt)
 }
 
+const muteForSession = `-- name: MuteForSession :execresult
+
+UPDATE voice_states SET server_muted = 1, muted = 1, server_muted_by = ?1
+ WHERE user_id = ?2 AND channel_id = ?3 AND joined_at = ?4
+   AND (
+     server_muted = 0
+     OR (server_muted_by IS NOT NULL AND server_muted_by NOT IN (
+       SELECT id FROM moderation_actions
+        WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+     ))
+   )
+`
+
+type MuteForSessionParams struct {
+	ActionID  *int64 `json:"actionId"`
+	UserID    int64  `json:"userId"`
+	ChannelID int64  `json:"channelId"`
+	JoinedAt  string `json:"joinedAt"`
+}
+
+// The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL round 3;
+// reworked round 4, Codex review, to stamp ownership atomically -- see
+// migration 049's comment on voice_states.server_muted_by for the full
+// rationale). Scoped to channel_id AND joined_at, the join-instance token
+// JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
+// between authorization and this write also fails to match, not only a
+// channel switch -- one step tighter than ApplyVoiceServerMute/
+// ClearVoiceServerMute above, which voice_mod_mute has always scoped to
+// channel_id alone.
+// The WHERE server_muted = 0 makes this ONE statement do what round 3 did
+// in two (read the prior state, then write): it matches a row only on a
+// genuine unmuted->muted transition, so RowsAffected alone tells the caller
+// whether server_muted_by (this action) is now the owner -- no separate
+// read, and no gap for a concurrent lift to land in between.
+//
+// The second OR branch reclaims an ORPHANED mute (round 4, Codex review):
+// TimeoutUser's supersede-transfer (migration 049's comment) can only move
+// ownership off a row that has ALREADY stamped it -- if this timeout's own
+// supersede committed before the superseded row's mute had landed at all
+// (a real interleaving under the per-user lock: the superseded row's
+// MuteForTimeout call is still queued behind this one when TimeoutUser
+// transfers), the transfer finds nothing to move and voice_states is left
+// pointing at an action that is no longer active. Reclaiming here --
+// server_muted_by set to something NOT NULL and not one of the currently
+// active timeouts -- lets THIS call still claim ownership instead of
+// treating someone else's now-defunct mute as untouchable, so LiftTimeout
+// on THIS row can later clear it. NOT NULL excludes a manual moderator
+// mute (voice_mod_mute never sets server_muted_by): that ownership is never
+// reassigned to a timeout just because no timeout currently owns it.
+func (q *Queries) MuteForSession(ctx context.Context, arg MuteForSessionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, muteForSession,
+		arg.ActionID,
+		arg.UserID,
+		arg.ChannelID,
+		arg.JoinedAt,
+	)
+}
+
 const updateVoiceCamera = `-- name: UpdateVoiceCamera :exec
 UPDATE voice_states SET camera = ? WHERE user_id = ?
 `
@@ -526,4 +577,27 @@ type UpdateVoiceScreenshareParams struct {
 func (q *Queries) UpdateVoiceScreenshare(ctx context.Context, arg UpdateVoiceScreenshareParams) error {
 	_, err := q.db.ExecContext(ctx, updateVoiceScreenshare, arg.Screenshare, arg.UserID)
 	return err
+}
+
+const voiceSessionExists = `-- name: VoiceSessionExists :one
+SELECT EXISTS (
+    SELECT 1 FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?
+) AS found
+`
+
+type VoiceSessionExistsParams struct {
+	UserID    int64  `json:"userId"`
+	ChannelID int64  `json:"channelId"`
+	JoinedAt  string `json:"joinedAt"`
+}
+
+// Disambiguates MuteForSession's zero-rows-affected result: "no session"
+// (the target left/switched between authorization and this call, P1-3
+// PARTIAL) from "session exists but was already server-muted by
+// someone/something else" (not this action's ownership to claim).
+func (q *Queries) VoiceSessionExists(ctx context.Context, arg VoiceSessionExistsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, voiceSessionExists, arg.UserID, arg.ChannelID, arg.JoinedAt)
+	var found int64
+	err := row.Scan(&found)
+	return found, err
 }

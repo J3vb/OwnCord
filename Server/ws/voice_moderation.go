@@ -51,8 +51,7 @@ func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, boo
 }
 
 // voiceModTarget runs the shared gate and returns the target's live voice
-// state. Authorization is checked before the voice-state lookup so an actor
-// without authority always sees FORBIDDEN and never learns who is in voice.
+// state.
 func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (*db.VoiceState, *Result) {
 	if actorID == targetID {
 		return nil, &Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "cannot moderate yourself"}}
@@ -61,9 +60,6 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 	actorRole, ok := voiceModRole(ctx, d, actorID)
 	if !ok {
 		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "failed to load actor role"}}
-	}
-	if !permissions.HasServerPerm(actorRole.Permissions, permissions.MuteMembers) {
-		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing MUTE_MEMBERS permission"}}
 	}
 	targetRole, ok := voiceModRole(ctx, d, targetID)
 	if !ok {
@@ -86,18 +82,19 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	}
 
-	// The decision is permissions.CanModerateVoice over the actor's subject in
-	// the TARGET's channel: effective MUTE_MEMBERS there, so a role-layer or
-	// user-layer deny on that channel holds (SEC-02), READ_MESSAGES so a room
-	// hidden from the actor cannot be moderated, and for a DM call the actor's
-	// own membership — voice_mod_kick and friends carry no channel id from
-	// the client, so without that a moderator could reach into any two users'
-	// DM call by targeting a user id alone. The DM refusal keeps the exact
-	// shape of "target not in voice" so the actor learns nothing about a call
-	// they are not in. The base-bit check above is only an early rejection
-	// (it never admits): it keeps FORBIDDEN ahead of the voice-state lookup
-	// for actors with no MUTE_MEMBERS at all, which also means a channel
-	// allow cannot grant the bit to a role whose base lacks it.
+	// The decision is permissions.AuthorizeVoiceModerator over the actor's
+	// subject in the TARGET's channel (round 4, Codex review Part C — one
+	// canonical authorizer, replacing this function's own duplicate of the
+	// timeout voice half's base-bit-plus-CanModerateVoice pair): the actor's
+	// BASE role must hold MUTE_MEMBERS on its own, and effective MUTE_MEMBERS
+	// in the target's channel too, so a role-layer or user-layer deny on that
+	// channel holds (SEC-02), READ_MESSAGES so a room hidden from the actor
+	// cannot be moderated, and for a DM call the actor's own membership —
+	// voice_mod_kick and friends carry no channel id from the client, so
+	// without that a moderator could reach into any two users' DM call by
+	// targeting a user id alone. The DM refusal keeps the exact shape of
+	// "target not in voice" so the actor learns nothing about a call they are
+	// not in.
 	ch, err := d.Reader.GetChannel(ctx, state.ChannelID)
 	if err != nil {
 		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", state.ChannelID)
@@ -111,7 +108,7 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 		slog.Error("ws voiceModTarget channelSubject", "err", subErr, "channel_id", state.ChannelID)
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify channel access"}}
 	}
-	switch modErr := permissions.CanModerateVoice(sub); {
+	switch modErr := permissions.AuthorizeVoiceModerator(sub); {
 	case errors.Is(modErr, permissions.ErrNotDMParticipant):
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	case modErr != nil:
@@ -158,6 +155,16 @@ func requireTargetInChannel(state *db.VoiceState, channelID int64) *Result {
 // falling back to the unscoped method for any other implementation.
 type voiceChannelDisconnector interface {
 	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool
+}
+
+// voiceServerMuteLocker is the manual voice_mod_mute command's route onto
+// the same per-user lock the timeout voice half uses (round 4, Codex review
+// Part B). Widening VoiceModerator itself lives in deps.go; until then
+// *Hub also satisfies this optional extension, mirroring
+// voiceChannelDisconnector — a Mod without it (only ever a hand-built test
+// double) falls back to handleVoiceModMuteV2's pre-round-4, unlocked write.
+type voiceServerMuteLocker interface {
+	SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error)
 }
 
 // disconnectFromVoiceIn evicts targetID from channelID, reporting false when
@@ -232,7 +239,17 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return *r
 	}
 
-	matched, err := d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
+	// The DB write and its paired SFU call run under the timeout path's same
+	// per-user lock when a locking Mod is wired (round 4, Codex review Part
+	// B) -- production always wires one (NewHub's Mod: h); a Mod-less test
+	// deps falls back to the unlocked, SFU-less write it always had.
+	var matched bool
+	var err error
+	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
+		matched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID(), state.ChannelID, c.Muted())
+	} else {
+		matched, err = d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
+	}
 	if err != nil {
 		slog.Error("ws handleVoiceModMuteV2 SetServerMute", "err", err, "target_id", c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server mute"}}
@@ -243,12 +260,6 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		// itself gives for the non-racing case, so the write never follows the
 		// target onto a channel (including a DM call) nobody authorized it against.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
-	}
-	if d.Mod != nil {
-		if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, c.Muted()); err != nil {
-			slog.Warn("ws handleVoiceModMuteV2 MuteParticipant failed",
-				"err", err, "target_id", c.TargetID(), "channel_id", state.ChannelID)
-		}
 	}
 
 	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID(),
@@ -492,14 +503,57 @@ func onOff(v bool) string {
 
 // ── Hub-side effects ────────────────────────────────────────────────────────
 
+// muteParticipantHookForTest, when non-nil, replaces the real LiveKit call
+// entirely. Test-only (nil in production): the per-user voice-mod lock's
+// concurrency tests (round 4, Codex 12) need a working "SFU" to prove a
+// real mute survives a racing unmute, and h.livekit is nil (or points at no
+// real server) in every other ws unit test — MuteParticipant would
+// otherwise fail unconditionally, making "muted" an unreachable end state
+// to assert against.
+var muteParticipantHookForTest func(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error
+
 // MuteParticipant mutes or unmutes the target's published audio at the SFU.
 // Satisfies VoiceModerator; reads h.livekit at call time so SetLiveKit's late
 // wiring is picked up (same reason as GenerateToken).
 func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
+	if muteParticipantHookForTest != nil {
+		return muteParticipantHookForTest(ctx, channelID, userID, voiceJoinToken, muted)
+	}
 	if h.livekit == nil {
 		return fmt.Errorf("voice not configured")
 	}
 	return h.livekit.MuteParticipantAudio(ctx, channelID, userID, voiceJoinToken, muted)
+}
+
+// SetServerMuteLocked applies or clears the manual moderator mute
+// (voice_mod_mute), running the DB write and its paired LiveKit call under
+// the SAME per-user lock the timeout voice half uses (MuteForTimeout /
+// UnmuteForTimeout, round 4, Codex review Part B) — a lock only one of the
+// two paths took would serialize nothing. Reports matched, with the same
+// meaning as VoiceStore.SetServerMute's own result (false: the target's row
+// moved off channelID between authorization and this call, OC-0005), and
+// the session's join token for the caller's SFU/broadcast use.
+//
+// An SFU failure here is logged and does not fail the action, matching this
+// handler's existing tolerance (unlike the timeout path's P3-14, the manual
+// mute's persisted server_muted row IS the whole of this feature's
+// contract) — so it is not rolled back the way MuteForTimeout's fresh
+// ownership is.
+func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error) {
+	unlock := h.voiceMod.lock(userID)
+	defer unlock()
+
+	matched, err = h.voice.SetServerMute(ctx, userID, channelID, muted)
+	if err != nil || !matched {
+		return matched, "", err
+	}
+	if state, stateErr := h.voice.State(ctx, userID); stateErr == nil && state != nil {
+		joinedAt = state.JoinedAt
+	}
+	if mpErr := h.MuteParticipant(ctx, channelID, userID, joinedAt, muted); mpErr != nil {
+		slog.Warn("ws SetServerMuteLocked MuteParticipant failed", "err", mpErr, "user_id", userID, "channel_id", channelID)
+	}
+	return matched, joinedAt, nil
 }
 
 // DisconnectFromVoice runs the hub's voice-leave routine for another user's

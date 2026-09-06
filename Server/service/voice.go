@@ -156,14 +156,21 @@ func (s *VoiceService) SetServerMute(ctx context.Context, userID, channelID int6
 	return s.st.SetVoiceServerMute(ctx, userID, channelID, muted)
 }
 
-// CompareAndSetServerMute is SetServerMute scoped to one exact voice session
-// (channelID, joinedAt) instead of channelID alone, reporting whether THIS
-// call caused the unmuted->muted transition (P1-3/P1-4 PARTIAL): the
-// timeout voice half's authorization and its SFU mute must bind to the
-// SAME session, not a channel a separate, later read could resolve
-// differently if the target moved on in between.
-func (s *VoiceService) CompareAndSetServerMute(ctx context.Context, userID, channelID int64, joinedAt string, muted bool) (matched, transitioned bool, err error) {
-	return s.st.CompareAndSetServerMute(ctx, userID, channelID, joinedAt, muted)
+// MuteForTimeoutSession is SetServerMute scoped to one exact voice session
+// (channelID, joinedAt) instead of channelID alone, stamping actionID as
+// owner atomically with the mute (round 4): the timeout voice half's
+// authorization and its SFU mute must bind to the SAME session, not a
+// channel a separate, later read could resolve differently if the target
+// moved on in between.
+func (s *VoiceService) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string) (matched, transitioned bool, err error) {
+	return s.st.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt)
+}
+
+// ClearServerMuteOwnedBy clears the mute currently owned by any of
+// actionIDs and reports its channel/join token for the paired SFU call
+// (round 4) — see db.DB.ClearServerMuteOwnedBy.
+func (s *VoiceService) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
+	return s.st.ClearServerMuteOwnedBy(ctx, userID, actionIDs)
 }
 
 // SetServerDeafen is SetServerMute for the server_deafened column, with the

@@ -19,14 +19,15 @@ import (
 // new sweep is a method plus one row in steps() — B5-4 and B5-11 add theirs
 // there rather than growing tick.
 type maintenance struct {
-	log       *slog.Logger
-	database  *db.DB
-	files     *storage.Storage
-	settings  *service.SettingsService
-	erasure   *service.ErasureService
-	retention *service.RetentionService
-	uploads   *service.UploadService
-	reports   *service.ReportService
+	log        *slog.Logger
+	database   *db.DB
+	files      *storage.Storage
+	settings   *service.SettingsService
+	erasure    *service.ErasureService
+	retention  *service.RetentionService
+	uploads    *service.UploadService
+	reports    *service.ReportService
+	moderation *service.ModerationService
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
@@ -51,6 +52,7 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	if svc != nil {
 		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
 		m.reports = svc.Reports
+		m.moderation = svc.Moderation
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -102,6 +104,13 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	if err := m.resumeErasure(bgCtx); err != nil {
 		m.log.Warn("erasure jobs still pending", "error", err)
 	}
+	// A crash between a lift's ledger commit and its own post-commit voice
+	// finalize (or a timeout that simply expired with nobody ever lifting
+	// it) is repaired now, not fifteen minutes from now (round 4, B5-10
+	// addendum).
+	if err := m.reconcileOrphanedVoiceMutes(bgCtx); err != nil {
+		m.log.Warn("orphaned voice mute reconciliation failed", "error", err)
+	}
 	// Storage counters charged by a process that died between the charge
 	// and the write are settled now, so a restart is a repair point rather
 	// than fifteen minutes of a user seeing a phantom charge (B5-2).
@@ -146,6 +155,7 @@ func (m *maintenance) steps() []maintenanceStep {
 		{"retention sweep failed", m.sweepRetention},
 		{"report content retention failed", m.pruneReportContent},
 		{"moderation action retention failed", m.retireModerationActions},
+		{"orphaned voice mute reconciliation failed", m.reconcileOrphanedVoiceMutes},
 		{"erasure jobs still pending", m.resumeErasure},
 		{"storage reconciliation failed", m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
@@ -255,6 +265,33 @@ func (m *maintenance) retireModerationActions(ctx context.Context) error {
 	}
 	_, err := m.database.RetireModerationActions(ctx, m.actionRetentionDays)
 	return err
+}
+
+// reconcileOrphanedVoiceMutes is the round-4 (B5-10 addendum) reconcile
+// sweep: every voice_states row whose server_muted_by now points at a
+// lifted or expired timeout gets the SAME post-commit finalize
+// (ModerationService.FinalizeTimeoutLift) a normal lift runs, with actor 0
+// (system-initiated, mirroring backup_maintenance.go's scheduled-backup
+// audit rows) — repairing a crash between a lift's ledger commit and its
+// own finalize call, and closing the gap that otherwise left a naturally
+// EXPIRED timeout's voice mute in effect forever (nothing else ever calls
+// UnmuteForTimeout for an expiry). Runs at loop start (a crash-shaped gap
+// is repaired on restart, not fifteen minutes later) and again every tick.
+func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
+	if m.moderation == nil {
+		return nil
+	}
+	orphans, err := m.database.FindOrphanedVoiceMutes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range orphans {
+		m.moderation.FinalizeTimeoutLift(ctx, o.UserID, []int64{o.ActionID}, 0)
+	}
+	if len(orphans) > 0 {
+		m.log.Info("reconciled orphaned voice mutes", "count", len(orphans))
+	}
+	return nil
 }
 
 // resumeErasure runs every unfinished erasure job once (no runner is a

@@ -54,26 +54,6 @@
 -- 90, 0 = never) unless an appeal references them. Ban, kick and removal
 -- rows stay until the account itself goes -- they are not on this clock.
 --
--- voice_muted (Codex review, added on this same branch before release --
--- a 049 deviation from the HP-5 draft, not a new migration): means
--- OWNERSHIP of an outstanding SFU mute, never merely "we called mute". 1
--- only for a genuine unmuted->muted transition THIS row caused (the target
--- was in a voice channel the actor's channel-level authorization covered,
--- P1-3, and the SFU accepted the write, P3-14) -- 0 when the target was
--- already server-muted by someone/something else (P1-4 PARTIAL: applying a
--- mute that was already in effect is not this row's mute to later clear),
--- when the row is not a timeout at all, or when ownership could not be
--- recorded before a concurrent lift won the race (compensated by an
--- immediate unmute instead, P2 16). LiftTimeout reads it to decide whether
--- clearing the SFU mute on lift is this row's business at all:
--- unconditionally clearing on every lift would undo a mute a DIFFERENT
--- moderator applied (voice_mod_mute) or one this timeout never actually
--- set. Superseding an active row transfers its voice_muted onto the new
--- row (P2 17): superseding never touches the SFU, so a mute an earlier
--- timeout owns is still live regardless, and ownership of eventually
--- clearing it must follow whichever row LiftTimeout will act on next, or a
--- later lift would see only the replacement's own (possibly 0) value and
--- strand it.
 CREATE TABLE IF NOT EXISTS moderation_actions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
@@ -86,10 +66,54 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     acknowledged_at TEXT,
     lifted_at       TEXT,
     lifted_by       INTEGER NOT NULL DEFAULT 0,
-    voice_muted     INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_actions_target ON moderation_actions(target_id, kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_moderation_actions_timeouts
     ON moderation_actions(target_id, expires_at) WHERE kind = 'timeout' AND lifted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_moderation_actions_report ON moderation_actions(report_id);
+
+-- voice_states.server_muted_by (Codex review round 4, added on this same
+-- branch before release -- a SECOND 049 deviation from the HP-5 draft, not
+-- a new migration, this time touching migration 002's table instead of
+-- adding a column to this one): OWNERSHIP of an outstanding SFU mute moved
+-- from a ledger column (moderation_actions.voice_muted, round 3's design,
+-- now REMOVED -- see the HP-5 drafts README) onto the voice SESSION itself,
+-- because that is the thing actually owned. A nullable FK to the
+-- moderation_actions row responsible: NULL means nobody (or a manual
+-- moderator mute via the existing voice-mute endpoint, which never sets
+-- it), non-NULL means a timeout row.
+--
+-- This single relocation is what makes Codex round 3's remaining races
+-- structural non-issues rather than three separate patches:
+--   - inheritance from an ended session (round-3 Codex 13): a session that
+--     ends (voice_states row deleted) or restarts (a fresh row, joined_at
+--     changes, server_muted_by starts NULL) can never be confused with a
+--     later, unrelated one -- ownership is scoped to the exact row, not
+--     copied forward through a ledger column a NEW row could inherit from
+--     a STALE one.
+--   - the ledger write racing a concurrent lift (round-3 Codex 16): there
+--     is no longer a separate "record ownership" write after the mute
+--     lands -- db.MuteForTimeoutSession's single UPDATE sets server_muted=1
+--     AND server_muted_by=<action id> together, only on the unmuted->muted
+--     transition (WHERE server_muted = 0), so ownership can never be
+--     half-applied for a concurrent lift to race.
+--   - a lift needing to know which rows it may safely clear: it now runs
+--     ONE statement, `UPDATE voice_states SET server_muted = 0,
+--     server_muted_by = NULL WHERE user_id = ? AND server_muted_by IN
+--     (<the ids just lifted>)` -- session-bound for free, and correct
+--     against any supersede chain because TimeoutUser transfers ownership
+--     (`UPDATE voice_states SET server_muted_by = <new id> WHERE
+--     server_muted_by IN (<superseded ids>)`) in the same transaction that
+--     supersedes them, so the CURRENT owner is always the row LiftTimeout
+--     will actually act on.
+--
+-- What remains a Go-level, not schema-level, guarantee (round 4, Codex
+-- 12/14): the DB transition and the paired LiveKit call are not
+-- serialized by SQLite alone -- ws.Hub takes a per-target-user lock around
+-- both, for the timeout path AND the manual voice-mute endpoint, so a late
+-- unmute from one path cannot interleave with a fresh mute from the other,
+-- and an SFU failure after a successful DB transition rolls the DB back
+-- under the same lock (db.ClearServerMuteOwnedBy, the same statement the
+-- lift path uses) so the two never disagree.
+ALTER TABLE voice_states ADD COLUMN server_muted_by INTEGER REFERENCES moderation_actions(id) ON DELETE SET NULL;

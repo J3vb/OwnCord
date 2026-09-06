@@ -223,3 +223,21 @@ func CanModerateVoice(s Subject) error {
 	}
 	return nil
 }
+
+// AuthorizeVoiceModerator is the base-bit gate every voice-moderation call
+// site needs ahead of CanModerateVoice, combined with the predicate itself
+// into one canonical check (round 4, Codex review Part C — the pair was
+// duplicated between ws.voiceModTarget and the timeout voice half's own
+// authorization, each with its own raw HasServerPerm call). The actor's
+// BASE role must hold MUTE_MEMBERS (or Administrator) on its own:
+// CanModerateVoice's s.Has(MuteMembers) is a channel-scoped OR that a
+// channel override CAN satisfy even when the base role lacks the bit
+// (deliberate — B2-5, matching CanSendMessage's announcement-channel
+// precedent) — but a channel-scoped allow must never be able to manufacture
+// voice-moderation authority the actor's base role never held at all.
+func AuthorizeVoiceModerator(s Subject) error {
+	if !HasServerPerm(s.RolePerms, MuteMembers) {
+		return missing(MuteMembers)
+	}
+	return CanModerateVoice(s)
+}

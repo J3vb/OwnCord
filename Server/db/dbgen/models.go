@@ -180,7 +180,6 @@ type ModerationAction struct {
 	AcknowledgedAt *string `json:"acknowledgedAt"`
 	LiftedAt       *string `json:"liftedAt"`
 	LiftedBy       int64   `json:"liftedBy"`
-	VoiceMuted     int64   `json:"voiceMuted"`
 	CreatedAt      string  `json:"createdAt"`
 }
 
@@ -393,4 +392,5 @@ type VoiceState struct {
 	Screenshare    int64  `json:"screenshare"`
 	ServerMuted    int64  `json:"serverMuted"`
 	ServerDeafened int64  `json:"serverDeafened"`
+	ServerMutedBy  *int64 `json:"serverMutedBy"`
 }
