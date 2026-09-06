@@ -478,6 +478,7 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"FIRST-frame"}}`))
 	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"SECOND-frame"}}`))
 	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"THIRD-frame"}}`))
+	rb.Push(101, chID, []byte(`{"seq":101,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"FOURTH-frame"}}`))
 
 	t.Cleanup(func() { reconnectFrameReadableRaceHook = nil })
 	frameChecks := 0
@@ -486,18 +487,27 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 			return
 		}
 		frameChecks++
-		// Revoke strictly BETWEEN the first frame's check (already passed,
-		// written) and the second's (about to be checked) — after the
-		// snapshot/first frame, before a later frame, exactly as required.
-		if frameChecks == 2 {
+		switch frameChecks {
+		case 2:
+			// Revoke strictly BETWEEN the first frame's check (already passed,
+			// written) and the second's (about to be checked) — after the
+			// snapshot/first frame, before a later frame, exactly as required.
 			if err := database.RevokeNSFW(context.Background(), userID, chID); err != nil {
 				t.Errorf("RevokeNSFW (in race hook): %v", err)
+			}
+		case 4:
+			// Codex round 4, item C: the channel is gone entirely by the time
+			// the fourth frame's check runs — frameReadableNow's GetChannel
+			// returns (nil, nil), which must be treated exactly like a
+			// lookup error (deny), not like "not labelled" (allow).
+			if _, err := database.ExecContext(context.Background(), `DELETE FROM channels WHERE id = ?`, chID); err != nil {
+				t.Errorf("delete channel (in race hook): %v", err)
 			}
 		}
 	}
 
 	events := dialAndResume(t, hub, token, 97)
-	var sawFirst, sawSecond, sawThird bool
+	var sawFirst, sawSecond, sawThird, sawFourth bool
 	for _, evt := range events {
 		switch {
 		case strings.Contains(string(evt), "FIRST-frame"):
@@ -506,6 +516,8 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 			sawSecond = true
 		case strings.Contains(string(evt), "THIRD-frame"):
 			sawThird = true
+		case strings.Contains(string(evt), "FOURTH-frame"):
+			sawFourth = true
 		}
 	}
 	if !sawFirst {
@@ -515,8 +527,11 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 		t.Fatalf("a revoke landing between two frames of the SAME replay batch still let a later frame "+
 			"(second=%v, third=%v) through — the recheck is not truly per-frame", sawSecond, sawThird)
 	}
-	if frameChecks < 3 {
-		t.Fatalf("race hook fired %d times, want 3 (one per content-bearing frame) — the test didn't exercise what it claims", frameChecks)
+	if sawFourth {
+		t.Fatal("a frame for a channel that no longer exists was still delivered — a nil channel from frameReadableNow's GetChannel must deny, not allow")
+	}
+	if frameChecks < 4 {
+		t.Fatalf("race hook fired %d times, want 4 (one per content-bearing frame) — the test didn't exercise what it claims", frameChecks)
 	}
 }
 

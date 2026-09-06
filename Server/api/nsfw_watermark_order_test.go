@@ -30,11 +30,19 @@ func nsfwWatermarkOrderPath(channelID int64) string {
 	return "/api/v1/channels/" + strconv.FormatInt(channelID, 10) + "/nsfw-acknowledgement"
 }
 
-// orderRecordingNSFWBroadcaster records the order SendToUser is called in
-// relative to nsfwPostBumpPreNotifyHook firing (which runs immediately after
-// the visibility watermark bump — see handleNSFWAcknowledge/handleNSFWRevoke).
+// orderRecordingNSFWBroadcaster records the order its methods are called in.
+// MarkVisibilityChanged records the REAL bump (Codex round 4: a broadcaster
+// without this method makes markDMVisibilityChanged's type assertion fail
+// silently, so a test that only recorded from nsfwPostBumpPreNotifyHook —
+// which fires unconditionally, right where the source calls
+// markDMVisibilityChanged, whether or not that call actually reached
+// anything — would keep passing even if the real bump call were deleted).
 type orderRecordingNSFWBroadcaster struct {
 	calls []string
+}
+
+func (b *orderRecordingNSFWBroadcaster) MarkVisibilityChanged() {
+	b.calls = append(b.calls, "bump")
 }
 
 func (b *orderRecordingNSFWBroadcaster) SendToUser(int64, []byte) bool {
@@ -42,12 +50,13 @@ func (b *orderRecordingNSFWBroadcaster) SendToUser(int64, []byte) bool {
 	return true
 }
 
-// TestNSFW_WatermarkBumpsBeforeTheNotifySend is Codex round 2, P2: a socket
-// that registers between the watermark bump and the notify send must still
-// land on the post-bump state — which only holds if the bump always
-// completes before the notify runs, not after. nsfwPostBumpPreNotifyHook
-// fires in that exact gap; recording it before the SendToUser call proves
-// the ordering, for both acknowledge and revoke.
+// TestNSFW_WatermarkBumpsBeforeTheNotifySend is Codex round 2, P2 / round 4,
+// item A: a socket that registers between the watermark bump and the notify
+// send must still land on the post-bump state — which only holds if the
+// bump always completes before the notify runs, not after.
+// nsfwPostBumpPreNotifyHook fires in the gap between them and marks it too,
+// but "bump" itself comes from the broadcaster's real MarkVisibilityChanged
+// method, not from the hook.
 func TestNSFW_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -84,24 +93,24 @@ func TestNSFW_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
 	MountNSFWRoutes(r, svc, bc)
 
 	t.Cleanup(func() { nsfwPostBumpPreNotifyHook = nil })
-	// Both events append to the SAME slice, in real time, so the recorded
-	// order actually reflects call order rather than being reconstructed
-	// afterwards (which would prove nothing).
-	nsfwPostBumpPreNotifyHook = func() { bc.calls = append(bc.calls, "bump") }
+	// The hook still marks the gap, appending to the SAME slice in real
+	// time so order is observed, not reconstructed — but "bump" itself now
+	// comes from the broadcaster's real MarkVisibilityChanged, above.
+	nsfwPostBumpPreNotifyHook = func() { bc.calls = append(bc.calls, "gap") }
 
 	if rr := nsfwWatermarkOrderDo(t, r, "PUT", nsfwWatermarkOrderPath(chID), token); rr.Code != 204 {
 		t.Fatalf("PUT = %d, want 204; body %s", rr.Code, rr.Body.String())
 	}
-	if got := bc.calls; len(got) != 2 || got[0] != "bump" || got[1] != "notify" {
-		t.Fatalf("acknowledge order = %v, want [bump notify] — a socket registering between "+
-			"them must already observe the bumped watermark", got)
+	if got := bc.calls; len(got) != 3 || got[0] != "bump" || got[1] != "gap" || got[2] != "notify" {
+		t.Fatalf("acknowledge order = %v, want [bump gap notify] — a socket registering between "+
+			"the real bump and the notify must already observe the bumped watermark", got)
 	}
 
 	bc.calls = nil
 	if rr := nsfwWatermarkOrderDo(t, r, "DELETE", nsfwWatermarkOrderPath(chID), token); rr.Code != 204 {
 		t.Fatalf("DELETE = %d, want 204; body %s", rr.Code, rr.Body.String())
 	}
-	if got := bc.calls; len(got) != 2 || got[0] != "bump" || got[1] != "notify" {
-		t.Fatalf("revoke order = %v, want [bump notify]", got)
+	if got := bc.calls; len(got) != 3 || got[0] != "bump" || got[1] != "gap" || got[2] != "notify" {
+		t.Fatalf("revoke order = %v, want [bump gap notify]", got)
 	}
 }

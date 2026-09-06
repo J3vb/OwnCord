@@ -122,7 +122,15 @@ func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) boo
 			"channel_id", channelID, "err", err)
 		return false
 	}
-	if ch == nil || !ch.NSFW {
+	if ch == nil {
+		// A missing channel is UNKNOWN, not "not labelled" — same posture as
+		// a lookup error (round 2 P1's channelNSFWFilter fix): fail closed
+		// rather than trust a frame whose channel this read cannot even
+		// confirm exists any more.
+		slog.Warn("ws: frameReadableNow found no such channel, dropping frame", "channel_id", channelID)
+		return false
+	}
+	if !ch.NSFW {
 		return true
 	}
 	ok, ackErr := h.readers.Visibility.HasNSFWAcknowledgement(ctx, userID, channelID)

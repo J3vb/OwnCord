@@ -448,6 +448,9 @@ func (h *Hub) reconnectRegister(
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, false
 	}
+	if handleReconnectPostCheckPreRegisterRaceHook != nil {
+		handleReconnectPostCheckPreRegisterRaceHook()
+	}
 	h.registerNow(c, allowedChannelIDs)
 	h.seqMu.Unlock()
 	return events, true

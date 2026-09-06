@@ -9,6 +9,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
+// AcknowledgeNSFWTxRaceHook runs once per AcknowledgeNSFW call when non-nil,
+// inside the writer transaction, immediately after the label check
+// and before the insert (Codex round 4, item B). Test-only (always nil in
+// production; exported because service's tests exercise this race through
+// NSFWService.Acknowledge, not db.AcknowledgeNSFW directly): the writer
+// connection is capped at one (d.writer.SetMaxOpenConns(1) in db.go), so
+// anything this hook does that also needs the writer — a concurrent
+// RevokeNSFW, say — can only block, never interleave. Lets a test prove
+// that deterministically instead of a sleep that merely favours one
+// ordering.
+var AcknowledgeNSFWTxRaceHook func()
+
 // AcknowledgeNSFW records that userID has consented to see channelID's
 // labelled content (migration 047, B5-7). The label check and the insert run
 // inside ONE writer transaction (Codex round 2, P3) — SQLite serializes
@@ -50,6 +62,10 @@ func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labe
 		return false, fmt.Errorf("AcknowledgeNSFW label check: %w", scanErr)
 	case nsfw == 0:
 		return false, nil
+	}
+
+	if AcknowledgeNSFWTxRaceHook != nil {
+		AcknowledgeNSFWTxRaceHook()
 	}
 
 	if _, err := tx.ExecContext(ctx,

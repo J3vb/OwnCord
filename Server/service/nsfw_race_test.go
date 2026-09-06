@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -81,17 +80,23 @@ func TestNSFWAcknowledge_UnlabelBetweenCheckAndInsertIsNotTrusted(t *testing.T) 
 }
 
 // TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled is
-// Codex round 2, P3: the old code answered "not labelled" from a SEPARATE
-// read taken after an idempotent (rows-affected 0) insert, racing a
-// concurrent revoke of the SAME row — a duplicate PUT could get ErrNotNSFW
-// (409 NOT_NSFW at the API) while the channel was still, at that very
-// moment, labelled. db.AcknowledgeNSFW now folds the label check and the
-// insert into ONE writer transaction, and SQLite's single writer connection
-// (writer.SetMaxOpenConns(1)) serializes a concurrent Revoke wholly before
-// or wholly after it — never inside it. Runs a real concurrent Revoke via a
-// goroutine so the two genuinely race; the invariant under test —
-// "Acknowledge never returns ErrNotNSFW while the channel is still
-// labelled" — holds under EITHER interleaving.
+// Codex round 2, P3 / round 4, item B: the old code answered "not labelled"
+// from a SEPARATE read taken after an idempotent (rows-affected 0) insert,
+// racing a concurrent revoke of the SAME row — a duplicate PUT could get
+// ErrNotNSFW (409 NOT_NSFW at the API) while the channel was still, at that
+// very moment, labelled. db.AcknowledgeNSFW now folds the label check and
+// the insert into ONE writer transaction.
+//
+// Deterministic, no sleep: db.SetAcknowledgeNSFWTxRaceHookForTest fires
+// INSIDE that transaction, between the label check and the insert, while
+// the duplicate PUT holds the sole writer connection
+// (writer.SetMaxOpenConns(1) in db.go). A concurrent RevokeNSFW attempted
+// from there, on a short deadline, can only time out waiting for that
+// connection — never interleave with the read+write it's racing. This is
+// what an OLD, two-statement AcknowledgeNSFW cannot do: nothing holds the
+// writer across its separate check and insert, so the SAME concurrent
+// revoke would complete inside that gap instead of timing out (proved by
+// temporarily reverting to the pre-round-2 shape; see the PR description).
 func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *testing.T) {
 	ctx, database, nsfw, _ := newNSFWRaceFixture(t)
 	labelChannel(t, database, 10, true)
@@ -99,26 +104,31 @@ func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *tes
 		t.Fatalf("first Acknowledge: %v", err)
 	}
 
-	t.Cleanup(func() { nsfwAcknowledgeRaceHook = nil })
-	var wg sync.WaitGroup
-	nsfwAcknowledgeRaceHook = func() {
-		wg.Go(func() {
-			if err := database.RevokeNSFW(context.Background(), 1, 10); err != nil {
-				t.Errorf("concurrent RevokeNSFW: %v", err)
-			}
-		})
-		// Give the concurrent revoke a chance to reach the writer before
-		// this duplicate PUT's own transaction does — the single writer
-		// connection then forces whichever loses the race to wait, not
-		// interleave with the other's read+write.
-		time.Sleep(10 * time.Millisecond)
+	t.Cleanup(func() { db.AcknowledgeNSFWTxRaceHook = nil })
+	var hookRan bool
+	db.AcknowledgeNSFWTxRaceHook = func() {
+		hookRan = true
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		if err := database.RevokeNSFW(timeoutCtx, 1, 10); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("concurrent RevokeNSFW while the writer transaction is open = %v, want context.DeadlineExceeded — "+
+				"it must block behind the single writer connection, never interleave with the open transaction", err)
+		}
 	}
 
 	if err := nsfw.Acknowledge(ctx, 1, 10); err != nil {
 		t.Fatalf("duplicate Acknowledge racing a concurrent revoke = %v, want nil — "+
 			"the channel is still labelled throughout, so this must never answer ErrNotNSFW", err)
 	}
-	wg.Wait()
+	if !hookRan {
+		t.Fatal("acknowledgeNSFWTxRaceHook never fired — the test exercised nothing")
+	}
+
+	// The transaction committed and released the writer — the identical
+	// call, without a deadline, must now succeed.
+	if err := database.RevokeNSFW(ctx, 1, 10); err != nil {
+		t.Fatalf("RevokeNSFW after the transaction released the writer: %v", err)
+	}
 }
 
 // TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead is

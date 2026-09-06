@@ -538,6 +538,25 @@ func (h *Hub) bumpVisibilityWatermark() {
 // guarantee for an unsequenced, targeted DM event that the WS-side emitter of
 // the same event (emit.go DMChannelOpenEvent) already gets via
 // bumpVisibilityWatermark directly.
+//
+// Codex round 4, item A: takes h.seqMu — the SAME lock reconnectRegister
+// (replay.go) holds across its own check-then-register — rather than
+// bumping via the internal, lock-free bumpVisibilityWatermark other callers
+// use (RefreshChannelVisibility, revokeUnreadableChannels, emit.go's
+// DMChannelOpenEvent branch already have their own, separately-tested
+// timing guarantees; this entry point is the one api/nsfw_handler.go and
+// api/dm_handler.go's broadcastDMOpen reach, and it is the one that raced
+// reconnectRegister's window). A call landing strictly between
+// reconnectRegister's watermark re-check and its registerNow can no longer
+// happen: it either completes, and is visible to that check, before
+// reconnectRegister's critical section starts, or it blocks until that
+// section ends — by which point the socket is already registered, so
+// whatever the caller sends right after this call (notifyNSFWAck,
+// broadcastDMOpen's SendToUser loop) reaches it directly instead of missing
+// a not-yet-registered client. Do not call this while already holding
+// seqMu — nothing in the hub's own broadcast/purge/reconnect paths does.
 func (h *Hub) MarkVisibilityChanged() {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
 	h.bumpVisibilityWatermark()
 }
