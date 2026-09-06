@@ -51,3 +51,20 @@ DELETE FROM push_subscriptions
 
 -- name: CountPushSubscriptions :one
 SELECT COUNT(*) FROM push_subscriptions;
+
+-- name: ListPushSubscriptionsForDispatch :many
+-- Dispatch-only (B5-11): unlike ListPushSubscriptions this returns the push
+-- credential (p256dh, auth) for a caller-chosen set of candidate users --
+-- never exposed to a listing endpoint. Scoped to the running VAPID key for
+-- the same reason ListPushSubscriptions is: a row under a different key is
+-- one the server can no longer sign for.
+SELECT user_id, id, endpoint, p256dh, auth
+  FROM push_subscriptions
+ WHERE user_id IN (sqlc.slice('user_ids')) AND vapid_key_id = ?;
+
+-- name: DeletePushSubscriptionByID :execrows
+-- Dispatch-only (B5-11), unscoped by user_id on purpose: a push service's
+-- 404/410 names a subscription by id, not by the user who owns it, and
+-- dispatch already resolved the id from a row it is allowed to read. Do not
+-- widen the user-scoped DeletePushSubscription to double as this.
+DELETE FROM push_subscriptions WHERE id = ?;

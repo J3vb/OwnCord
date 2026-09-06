@@ -1345,14 +1345,36 @@ Same auth, rate limit, response shape, and error codes as
 
 ## Web Push
 
-Server-side **storage** of Web Push subscriptions only. **Nothing is
-dispatched in this release** — no outbound HTTP of any kind. See
-[Server Configuration](server-configuration.md#web-push-push) for
-`push.enabled` and the staleness window, and the rotation procedure below.
+Server-side storage of Web Push subscriptions, plus dispatch behind its own,
+second opt-in: `push.dispatch_enabled` (default **off**, independent of
+`push.enabled`). See [Server Configuration](server-configuration.md#web-push-push)
+for both keys, the staleness window, and the rotation procedure below.
 
 **Default-off contract:** with `push.enabled` false, every endpoint below
 answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
-server writes nothing.
+server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
+false — the state an install upgraded from an earlier release starts in —
+subscriptions are stored but nothing is ever sent to one.
+
+**What dispatch sends, and to whom.** With both keys true, a new message
+sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
+name, sender or count — to: the message's direct `@mentions` in a guild
+channel, or every other participant of a one-to-one DM who trusts the
+author (the same `trusted_senders` row Message Requests gates on — see
+"Message Requests" below; a first-contact message from someone not yet
+trusted rings no one's phone). Within that set, only offline subscribers
+are pushed to (a connected client already has the message), permission is
+re-checked at dispatch time (`CanViewChannel`, not whatever it was when the
+subscription was created), and a channel labelled `nsfw` gets no push at
+all. At most one push per user per channel per 60
+seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
+(or a network error) gets two retries — three attempts total — before being
+dropped, and any other failure status drops immediately. Nothing is written
+per attempt, and a restart drops anything in flight. Turning dispatch on
+makes the server
+open outbound HTTPS connections to the push service named in each stored
+subscription's endpoint — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table.
 
 **Refresh-by-re-POST:** a subscription is kept alive by POSTing the same
 `endpoint` again — the server upserts the row (same id, `last_seen_at`

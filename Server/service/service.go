@@ -52,6 +52,12 @@ type Services struct {
 	// four content read paths (REST, search, socket, attachments) resolve it
 	// through permissions.CanReadContent.
 	NSFW *NSFWService
+	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
+	// the composition root constructed it — which it does only when both
+	// push.enabled and push.dispatch_enabled are true. Exists on Services
+	// so the metrics route can read its counters; MessageService gets it
+	// separately, through SetPushNotifier.
+	PushDispatch *PushDispatcher
 }
 
 // New creates all domain services wired together.

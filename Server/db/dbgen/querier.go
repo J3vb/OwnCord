@@ -123,6 +123,11 @@ type Querier interface {
 	DeletePartialAuthChallenge(ctx context.Context, tokenHash string) (sql.Result, error)
 	DeletePendingTOTPEnrollment(ctx context.Context, userID int64) error
 	DeletePushSubscription(ctx context.Context, arg DeletePushSubscriptionParams) (int64, error)
+	// Dispatch-only (B5-11), unscoped by user_id on purpose: a push service's
+	// 404/410 names a subscription by id, not by the user who owns it, and
+	// dispatch already resolved the id from a row it is allowed to read. Do not
+	// widen the user-scoped DeletePushSubscription to double as this.
+	DeletePushSubscriptionByID(ctx context.Context, id int64) (int64, error)
 	DeleteRecoveryAssist(ctx context.Context, userID int64) error
 	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 	DeleteRecoveryKit(ctx context.Context, userID int64) error
@@ -326,6 +331,12 @@ type Querier interface {
 	// p256dh and auth are never selected -- they are a push credential, not
 	// something the owning user's own listing needs back.
 	ListPushSubscriptions(ctx context.Context, arg ListPushSubscriptionsParams) ([]ListPushSubscriptionsRow, error)
+	// Dispatch-only (B5-11): unlike ListPushSubscriptions this returns the push
+	// credential (p256dh, auth) for a caller-chosen set of candidate users --
+	// never exposed to a listing endpoint. Scoped to the running VAPID key for
+	// the same reason ListPushSubscriptions is: a row under a different key is
+	// one the server can no longer sign for.
+	ListPushSubscriptionsForDispatch(ctx context.Context, arg ListPushSubscriptionsForDispatchParams) ([]ListPushSubscriptionsForDispatchRow, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes
 	// them, but creating a role inserts just below the actor and may tie with an
 	// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
