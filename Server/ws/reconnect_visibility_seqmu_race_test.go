@@ -24,6 +24,7 @@ package ws
 import (
 	"context"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,9 +69,10 @@ func TestHandleReconnect_ConcurrentVisibilityBumpBlocksUntilRegistered(t *testin
 
 	notifyResult := make(chan bool, 1)
 	entering := make(chan struct{})
-	returned := make(chan struct{})
+	var racedPastTheLock atomic.Bool
 	t.Cleanup(func() { handleReconnectPostCheckPreRegisterRaceHook = nil })
 	handleReconnectPostCheckPreRegisterRaceHook = func() {
+		hookFinished := make(chan struct{})
 		go func() {
 			// Signalled the instant this goroutine runs, BEFORE the locked
 			// call — proof it was actually scheduled, so waiting for it
@@ -80,43 +82,46 @@ func TestHandleReconnect_ConcurrentVisibilityBumpBlocksUntilRegistered(t *testin
 			// and broadcastDMOpen's bump + SendToUser loop.
 			close(entering)
 			hub.MarkVisibilityChanged()
+			// The observation that matters, made the instant it matters, so
+			// it cannot tie: a SELECT racing two channels that both happen
+			// to be ready by the time it runs is decided at random (that
+			// was the bug — a fast runner had already closed hookFinished
+			// AND fired this same signal before the watcher ever looked).
+			// A non-blocking check right here has no such window: with the
+			// real lock, hookFinished is unconditionally already closed at
+			// this instant (the hook closes it before reconnectRegister can
+			// release h.seqMu, and this call cannot return before that
+			// release); with a lock-free MarkVisibilityChanged, this
+			// returns while the hook is still parked in the Gosched loop
+			// below, hookFinished is still open, and the default branch
+			// fires every time.
+			select {
+			case <-hookFinished:
+			default:
+				racedPastTheLock.Store(true)
+			}
 			delivered := hub.SendToUser(uid, []byte(`{"type":"nsfw_ack"}`))
 			notifyResult <- delivered
-			close(returned)
 		}()
 		<-entering
 
 		// Give the now-confirmed-scheduled goroutine every chance to
 		// actually run — pure CPU yielding, no wall-clock wait — before we
-		// check it hasn't finished. This only matters for making a
-		// regression's false negative rare; it changes nothing about the
-		// guarantee below, which holds unconditionally for the fixed code.
+		// close hookFinished. This only matters for making a regression's
+		// false negative rare; it changes nothing about the guarantee
+		// above, which holds unconditionally for the fixed code.
 		for range 1000 {
 			runtime.Gosched()
 		}
-
-		// The correctness check instruments the lock, not the clock:
-		// hookFinished closes the instant this function returns, with
-		// nothing else after the loop above, so for a genuinely serialized
-		// MarkVisibilityChanged "returned" cannot win this select no matter
-		// how the scheduler behaves — the concurrent goroutine is blocked on
-		// h.seqMu.Lock(), which this very function is holding, so it cannot
-		// even reach SendToUser (let alone close "returned") until AFTER
-		// reconnectRegister releases the lock, which happens strictly after
-		// this hook itself returns.
-		hookFinished := make(chan struct{})
-		go func() {
-			select {
-			case <-returned:
-				t.Error("concurrent MarkVisibilityChanged (+SendToUser) completed while reconnectRegister still held h.seqMu — it must block until this critical section releases the lock")
-			case <-hookFinished:
-			}
-		}()
 		close(hookFinished)
 	}
 
 	events := dialAndResume(t, hub, token, lastSeq)
 	_ = events
+
+	if racedPastTheLock.Load() {
+		t.Fatal("concurrent MarkVisibilityChanged (+SendToUser) returned while reconnectRegister still held h.seqMu — it must block until this critical section releases the lock")
+	}
 
 	// dialAndResume's own connection-close teardown races the client's
 	// unregistration against this check, so the meaningful assertion is
