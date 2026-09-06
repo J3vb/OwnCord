@@ -1904,18 +1904,25 @@ PR — not silently into a later one.
   closure text records B5-2 (#1543, `123b07d8`) as closing the server half and
   flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`.
 - **BG-18 / BG-19.** Before: Phase `B5/B9`, plain exit evidence. Now: each row
-  prepends its own decision-14 split sentence — BG-18 names B5-7 as its server
-  half and exit condition 3; BG-19 names B5-1 + B5-5 (#1541, #1544) and exit
-  condition 2 — both keeping B9 as the client half and the owner's HP-5
-  acceptance.
-- **S-03.** Before: State `confirmed`. Now: State `resolved`; closure text
-  names B3-8's shared rune contract and the group-DM writer B5-5 pins
-  (`#1544`, open, `TestS03_GroupDMNameCountsRunesNotBytes`).
+  prepends its own decision-14 split sentence. BG-18 names B5-7 as its server
+  half and exit condition 3, B9 the client half. BG-19's client remainder
+  is not B9 alone — decision 14 splits exit condition 2 into the desktop
+  broker's bounded retrieval (C-09, B7) and the journeys (BPR-061, B9) — so
+  BG-19's Phase becomes `B5/B7/B9` and its sentence names B5-1 + B5-5 (#1541,
+  #1544) for the server half, B7 for bounded retrieval, and B9 for the
+  journeys, exit condition 2.
+- **S-03.** Before: State `confirmed`. Now: State `resolved/superseded` — the
+  file's defined values have no bare `resolved`, and `resolved/superseded` is
+  the value SEC-02 already uses for the same shape (server half landed,
+  remainder tracked elsewhere); closure text names B3-8's shared rune
+  contract and the group-DM writer B5-5 pins, merged as `1311fee9` (#1544,
+  `TestS03_GroupDMNameCountsRunesNotBytes`).
 - **BG-01.** Before: only the generic exit-evidence cell. Now: prepends B5-3's
   landed posture (#1542, `5c7a0f4a`) and leaves the B8 build/smoke half named.
-- **BG-05.** Before: only the generic exit-evidence cell. Now: prepends the
-  planned B5-4 storage landing; its PR number is written `#1545`, filled
-  when B5-4's PR number exists.
+- **BG-05.** Before: only the generic exit-evidence cell, and "beside `data/`"
+  overstated the VAPID key's location. Now: prepends B5-4's storage landing,
+  merged as `a504d61e` (#1545), and corrects the key path to
+  `<server.data_dir>/push_vapid.key` (`Server/auth/push_vapid_key.go:14`).
 - **Roadmap amendments.** Workstream 2 reworded to point at a new item 12
   (inventory plus the server path — `rich-content-inventory.md`, B5-5; the GIF
   proxy, B5-1); item 11 gets an amendment pointing at the one place the

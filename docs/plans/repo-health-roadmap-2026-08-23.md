@@ -718,11 +718,11 @@ before exposing the endpoints.
   rules.
 - External retrieval **on server-side fetch paths** passes address, redirect,
   streaming-size, timeout, concurrency, media-type, and offline adversarial
-  tests _(narrowed 2026-09-05 by B5-12, decision 14: the desktop preview path
+  tests _(amended 2026-09-05 by B5-12, decision 14: the desktop preview path
   is C-09/B7; the owner's written acceptance is carried by the HP-5
   scorecard)_.
 - NSFW content and third-party fetches remain unavailable before consent **on
-  every server path** _(narrowed 2026-09-05 by B5-12, decision 14: the client
+  every server path** _(amended 2026-09-05 by B5-12, decision 14: the client
   render gate is B9; owner acceptance at HP-5)_.
 - Report, moderation, and appeal state machines enforce least privilege and
   immutable safe audit.
