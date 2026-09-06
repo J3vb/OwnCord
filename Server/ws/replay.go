@@ -113,24 +113,14 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// P1-1: nsfwReadableChannelIDs was snapshotted back in reconnectPrecheck,
-	// several DB round trips and a seqMu section ago. An acknowledge, revoke
-	// or re-label landing in that window must still be honoured — re-check
-	// live, right before the events actually go out, and drop any
-	// content-bearing frame the fresh read no longer allows. One query
-	// (computeReadableChannels), not one per frame; a failure fails closed
-	// (nothing content-bearing survives) rather than trusting the stale set.
-	if reconnectReadableRecheckRaceHook != nil {
-		reconnectReadableRecheckRaceHook(c.userID)
-	}
-	freshReadable, rerr := h.computeReadableChannels(ctx, h.readers.Visibility, c.user, allowedChannelIDs)
-	if rerr != nil {
-		slog.Warn("ws handleReconnect: readable-set recheck failed, dropping content-bearing frames",
-			"user_id", c.userID, "err", rerr)
-		freshReadable = map[int64]bool{}
-	}
-	events = filterContentReadable(events, freshReadable)
-
+	// P1 (Codex round 2): nsfwReadableChannelIDs was snapshotted back in
+	// reconnectPrecheck, several DB round trips and a seqMu section ago — a
+	// batch-wide recheck taken once more right here would still trust that
+	// single moment for every frame that follows, so an acknowledge, revoke
+	// or re-label landing between two frames of THIS SAME replay would still
+	// leak everything after it. reconnectWriteReplay's write loop re-checks
+	// each content-bearing frame live, immediately before writing it
+	// (frameReadableNow) — no snapshot survives past the one frame it gates.
 	switch replaySource {
 	case "buffer":
 		h.reconnectTierBuf.Add(1)
@@ -481,15 +471,33 @@ func (h *Hub) reconnectWriteReplay(
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return false
 	}
+	written := 0
 	for _, evt := range events {
+		// P1 (Codex round 2): re-check a content-bearing frame's readability
+		// live, right here, immediately before it goes out — not from a
+		// snapshot taken once for the whole batch (see the comment above
+		// this call site in handleReconnect). Every earlier frame in this
+		// loop has already been written by the time this one is checked, so
+		// a revoke/unlabel landing between two frames of the SAME reconnect
+		// is honoured starting with the very next frame it affects.
+		if contentBearingKinds[extractEventType(evt)] {
+			chID := payloadChannelID(evt)
+			if reconnectFrameReadableRaceHook != nil {
+				reconnectFrameReadableRaceHook(c.userID, chID)
+			}
+			if !h.frameReadableNow(ctx, c.user.ID, chID) {
+				continue
+			}
+		}
 		if err := handshakeWrite(ctx, conn, evt); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return false
 		}
+		written++
 	}
-	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
+	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", written, "from_seq", lastSeq, "source", replaySource)
 	return true
 }
 

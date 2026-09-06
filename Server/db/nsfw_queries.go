@@ -2,46 +2,66 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// acknowledgeNSFWIfLabelledSQL is hand-rolled rather than a sqlc query
-// (P2-2): sqlc's SQLite engine mis-slices the generated query text for an
-// INSERT ... SELECT ... FROM statement in this codebase's pinned version —
-// it silently drops the final token of the statement (reproduced against
-// v1.30.0; corrupts the NEXT query in the same file too), so the generated
-// constant would run a truncated, syntactically invalid statement. This is
-// plain database/sql, exactly like the ExecContext/QueryRowContext escape
-// hatch db.go already exposes for hand-rolled SQL.
-//
-// The label check and the insert are ONE statement: a concurrent unlabel
-// landing between a separate check and a separate insert can no longer make
-// a stale "yes" land after the flag (and any acknowledgement rows a
-// clearing update deleted) turns off. The SELECT only produces a row, and
-// so the INSERT only fires, when channels.id = ? currently has nsfw = 1.
-const acknowledgeNSFWIfLabelledSQL = `
-INSERT OR IGNORE INTO nsfw_acknowledgements (user_id, channel_id)
-SELECT ?, ? FROM channels WHERE channels.id = ? AND channels.nsfw = 1`
-
 // AcknowledgeNSFW records that userID has consented to see channelID's
-// labelled content (migration 047, B5-7), atomically gated on the channel
-// being labelled at the moment the statement runs (see
-// acknowledgeNSFWIfLabelledSQL). Reports whether a row was actually
-// inserted; rows affected 0 means either "already acknowledged" (INSERT OR
-// IGNORE, idempotent) or "not labelled" — the caller (service.NSFWService)
-// tells the two apart with a HasNSFWAcknowledgement read.
-func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error) {
-	res, err := d.ExecContext(ctx, acknowledgeNSFWIfLabelledSQL, userID, channelID, channelID)
+// labelled content (migration 047, B5-7). The label check and the insert run
+// inside ONE writer transaction (Codex round 2, P3) — SQLite serializes
+// writers, so a concurrent Revoke or relabel (both writes) cannot land
+// between this transaction's read and its write, nor between the insert and
+// answering whether there was anything to acknowledge. That closes the
+// window a rows-affected-only answer couldn't: rows affected 0 means either
+// "already acknowledged" (fine, idempotent) or "not labelled" (refuse), and
+// resolving that with a SEPARATE post-insert read let a duplicate PUT racing
+// a revoke of someone ELSE's row answer NOT_NSFW for a channel that is, at
+// that very moment, still labelled.
+//
+// Hand-rolled rather than a sqlc query: sqlc's SQLite engine mis-slices the
+// generated text for an INSERT ... SELECT ... FROM statement in this
+// codebase's pinned version (v1.30.0) — it silently drops the final token of
+// the statement and corrupts the NEXT query in the same file. Plain
+// database/sql on the writer connection, like AdminUpdateChannelClearingNSFW
+// below.
+//
+// labelled=false means channelID does not exist or is not labelled right
+// now — ErrNotNSFW's case, whether or not a row already existed.
+func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labelled bool, err error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("AcknowledgeNSFW: %w", err)
+		return false, fmt.Errorf("AcknowledgeNSFW begin: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("AcknowledgeNSFW rows affected: %w", err)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var nsfw int64
+	switch scanErr := tx.QueryRowContext(ctx, `SELECT nsfw FROM channels WHERE id = ?`, channelID).Scan(&nsfw); {
+	case errors.Is(scanErr, sql.ErrNoRows):
+		return false, nil
+	case scanErr != nil:
+		return false, fmt.Errorf("AcknowledgeNSFW label check: %w", scanErr)
+	case nsfw == 0:
+		return false, nil
 	}
-	return n > 0, nil
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`,
+		userID, channelID); err != nil {
+		return false, fmt.Errorf("AcknowledgeNSFW insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("AcknowledgeNSFW commit: %w", err)
+	}
+	committed = true
+	return true, nil
 }
 
 // RevokeNSFW deletes userID's acknowledgement of channelID, taking effect on

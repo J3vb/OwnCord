@@ -426,15 +426,16 @@ func TestReconnect_ReplaySkipsUnacknowledgedLabelledContent(t *testing.T) {
 	})
 }
 
-// TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent is P1-1: the
-// readable set reconnectPrecheck snapshots is several DB round trips and a
-// seqMu section old by the time events actually go out. A revoke landing in
-// that exact window — after reconnectRegister has already selected/queued
-// replay frames using the STALE snapshot, but before the fresh per-reconnect
-// recheck runs — must still be honoured: the fresh recheck drops the
-// content-bearing frames the stale snapshot would have let through.
-// reconnectReadableRecheckRaceHook pins the interleaving deterministically.
-func TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent(t *testing.T) {
+// TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes is
+// Codex round 2, P1: a single snapshot — whether taken once per reconnect
+// (the original P1-1 fix) or once per channel within a batch — still trusts
+// that one moment for every later frame of the SAME replay. A revoke landing
+// AFTER the first content-bearing frame's readability check but BEFORE a
+// later one's must drop everything from that point on, while the frame
+// already written before the revoke stays delivered — proving the check is
+// live per frame, not a batch-wide recheck with a wider window than before.
+// reconnectFrameReadableRaceHook pins the interleaving deterministically.
+func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
@@ -449,9 +450,8 @@ func TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent(t *testing.T) 
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
 		t.Fatalf("label channel: %v", err)
 	}
-	// Starts ACKNOWLEDGED: reconnectPrecheck's snapshot (taken before the
-	// hook fires) must see this channel as readable, or the test would prove
-	// nothing about the recheck.
+	// Starts ACKNOWLEDGED: every frame's live check must pass until the hook
+	// revokes mid-batch, or the test would prove nothing about the recheck.
 	if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
@@ -468,26 +468,55 @@ func TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent(t *testing.T) 
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
+	// Three content-bearing frames for the SAME channel, all in one replay
+	// batch (last_seq below anchors the resume before all three). seq 96 is
+	// an older entry purely so the ring buffer's oldest-seq guard doesn't
+	// read last_seq=97 as "too old to trust" (EventsSince requires afterSeq
+	// to be strictly newer than the buffer's oldest entry).
 	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"pre-existing"}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"anchor"}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"THE-SECRET-CONTENT"}}`))
+	rb.Push(96, chID, []byte(`{"seq":96,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"pre-existing"}}`))
+	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"FIRST-frame"}}`))
+	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"SECOND-frame"}}`))
+	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"THIRD-frame"}}`))
 
-	t.Cleanup(func() { reconnectReadableRecheckRaceHook = nil })
-	reconnectReadableRecheckRaceHook = func(uid int64) {
-		if uid != userID {
+	t.Cleanup(func() { reconnectFrameReadableRaceHook = nil })
+	frameChecks := 0
+	reconnectFrameReadableRaceHook = func(uid, cid int64) {
+		if uid != userID || cid != chID {
 			return
 		}
-		if err := database.RevokeNSFW(context.Background(), userID, chID); err != nil {
-			t.Errorf("RevokeNSFW (in race hook): %v", err)
+		frameChecks++
+		// Revoke strictly BETWEEN the first frame's check (already passed,
+		// written) and the second's (about to be checked) — after the
+		// snapshot/first frame, before a later frame, exactly as required.
+		if frameChecks == 2 {
+			if err := database.RevokeNSFW(context.Background(), userID, chID); err != nil {
+				t.Errorf("RevokeNSFW (in race hook): %v", err)
+			}
 		}
 	}
 
-	for _, evt := range dialAndResume(t, hub, token, 99) {
-		if strings.Contains(string(evt), "THE-SECRET-CONTENT") {
-			t.Fatalf("a revoke landing between the stale snapshot and the fresh recheck still let "+
-				"labelled content through the reconnect replay: %s", evt)
+	events := dialAndResume(t, hub, token, 97)
+	var sawFirst, sawSecond, sawThird bool
+	for _, evt := range events {
+		switch {
+		case strings.Contains(string(evt), "FIRST-frame"):
+			sawFirst = true
+		case strings.Contains(string(evt), "SECOND-frame"):
+			sawSecond = true
+		case strings.Contains(string(evt), "THIRD-frame"):
+			sawThird = true
 		}
+	}
+	if !sawFirst {
+		t.Error("the first frame, checked and written before the revoke, was dropped — the per-frame check must not be more aggressive than live")
+	}
+	if sawSecond || sawThird {
+		t.Fatalf("a revoke landing between two frames of the SAME replay batch still let a later frame "+
+			"(second=%v, third=%v) through — the recheck is not truly per-frame", sawSecond, sawThird)
+	}
+	if frameChecks < 3 {
+		t.Fatalf("race hook fired %d times, want 3 (one per content-bearing frame) — the test didn't exercise what it claims", frameChecks)
 	}
 }
 
@@ -500,6 +529,76 @@ type erroringNSFWVisibilityReader struct {
 
 func (r *erroringNSFWVisibilityReader) HasNSFWAcknowledgement(context.Context, int64, int64) (bool, error) {
 	return false, errors.New("simulated transient lookup failure")
+}
+
+// erroringGetChannelReader wraps a real VisibilityReader and makes every
+// GetChannel call fail — standing in for a transient DB hiccup on
+// channelNSFWFilter's own lookup (Codex round 2, P1). Every other method
+// passes through.
+type erroringGetChannelReader struct {
+	VisibilityReader
+}
+
+func (r *erroringGetChannelReader) GetChannel(context.Context, int64) (*db.Channel, error) {
+	return nil, errors.New("simulated transient lookup failure")
+}
+
+// TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient is Codex round 2,
+// P1: when channelNSFWFilter cannot even confirm the label (a failed
+// GetChannel), the label is UNKNOWN — not "not labelled". A nil filter means
+// "deliver unfiltered" to deliverBroadcast, which would leak the frame to
+// every topic subscriber regardless of acknowledgement, the exact disclosure
+// decision 13 exists to prevent. This proves the socket path fails closed
+// (deny-all), not just the plugin sink (already covered by
+// TestNSFW_PluginSinkGetsNoLabelledContent).
+func TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient(t *testing.T) {
+	database := newTeardownTestDB(t)
+	ctx := context.Background()
+
+	subscriberID, err := database.CreateUser(ctx, "lookup-fail-subscriber", "hash", 4) // Member, unacknowledged
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	chID, err := database.CreateChannel(ctx, "lookup-fail-channel", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	hub := newTestHubWith(t, HubOptions{
+		DB:      database,
+		Limiter: auth.NewRateLimiter(),
+		Readers: HubReaders{
+			Visibility: &erroringGetChannelReader{VisibilityReader: database},
+			Ready:      database,
+			Members:    database,
+			Dispatch:   database,
+		},
+	})
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+	waitUntilRunning(t, hub)
+
+	send := make(chan []byte, 8)
+	c := NewTestClient(hub, subscriberID, send)
+	hub.mu.Lock()
+	hub.clients[subscriberID] = c
+	hub.mu.Unlock()
+	hub.pubsub.Subscribe(c, ChannelTopic(chID))
+
+	payload, _ := json.Marshal(map[string]any{
+		"type":    MsgTypeChatMessage,
+		"payload": map[string]any{"channel_id": chID, "content": "should never arrive"},
+	})
+	hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: chID, payload: payload}})
+	if err := hub.awaitDispatch(ctx); err != nil {
+		t.Fatalf("awaitDispatch: %v", err)
+	}
+
+	select {
+	case msg := <-send:
+		t.Fatalf("subscriber received a frame despite the label lookup failing: %s", msg)
+	default:
+	}
 }
 
 // TestReconnectPrecheck_ComputeReadableChannelsErrorFallsBackToFullReady pins

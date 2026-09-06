@@ -97,30 +97,41 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 }
 
-// reconnectReadableRecheckRaceHook, when non-nil, runs once per reconnect
-// immediately before handleReconnect's fresh readable-set recheck (P1-1).
-// Test-only (always nil in production): lets a test revoke/relabel exactly
-// between the stale snapshot reconnectPrecheck took and the live re-read,
-// reproducing the interleaving deterministically instead of chasing a real
-// goroutine race.
-var reconnectReadableRecheckRaceHook func(userID int64)
+// reconnectFrameReadableRaceHook, when non-nil, runs once per content-bearing
+// frame in reconnectWriteReplay's write loop, immediately before checking
+// that frame's live readability (Codex round 2, P1). Test-only (always nil
+// in production): a single snapshot taken once per reconnect — or even once
+// per channel within a batch — still lets a revoke land between two frames
+// of the same replay and leak everything after it, so this hook lets a test
+// pin that exact interleaving (revoke between frame N and frame N+1 of the
+// SAME channel) deterministically instead of chasing a real goroutine race.
+var reconnectFrameReadableRaceHook func(userID, channelID int64)
 
-// filterContentReadable drops any content-bearing frame (contentBearingKinds)
-// in events whose channel is not in readable — P1-1's per-frame re-check,
-// applied once, right before a reconnect's replay actually goes out. Global
-// frames (channel_id 0, e.g. presence) and every metadata kind pass through
-// unconditionally; content-bearing frames always carry channel_id at the
-// payload's top level (chat_message, chat_edited, reaction_update,
-// plugin_broadcast all do — see messages.go/handlers_command.go).
-func filterContentReadable(events [][]byte, readable map[int64]bool) [][]byte {
-	out := events[:0]
-	for _, e := range events {
-		if contentBearingKinds[extractEventType(e)] && !readable[payloadChannelID(e)] {
-			continue
-		}
-		out = append(out, e)
+// frameReadableNow answers B5-7's content gate live, for exactly the one
+// frame about to be written — never a batch snapshot, and never reused for
+// another frame even of the same channel: reconnectWriteReplay calls this
+// immediately before each content-bearing frame's handshakeWrite, so a
+// revoke or unlabel landing between two frames of one replay is honoured by
+// the very next frame it affects, not just the next reconnect. A lookup
+// failure fails closed (not readable) — the whole point of re-checking live
+// is to distrust a stale "yes", so an error must not fall back to one.
+func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) bool {
+	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+	if err != nil {
+		slog.Warn("ws: frameReadableNow GetChannel failed, dropping frame",
+			"channel_id", channelID, "err", err)
+		return false
 	}
-	return out
+	if ch == nil || !ch.NSFW {
+		return true
+	}
+	ok, ackErr := h.readers.Visibility.HasNSFWAcknowledgement(ctx, userID, channelID)
+	if ackErr != nil {
+		slog.Warn("ws: frameReadableNow HasNSFWAcknowledgement failed, dropping frame",
+			"channel_id", channelID, "err", ackErr)
+		return false
+	}
+	return ok
 }
 
 // payloadChannelID extracts payload.channel_id from a wrapped wire frame, or

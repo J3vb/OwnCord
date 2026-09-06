@@ -25,6 +25,14 @@ func MountNSFWRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcas
 	})
 }
 
+// nsfwPostBumpPreNotifyHook, when non-nil, runs once per acknowledge/revoke
+// immediately after the visibility watermark bumps and before the
+// best-effort notify send (Codex round 2, P2). Test-only (always nil in
+// production): lets a test observe the exact point at which a concurrently
+// registering socket is already guaranteed to see the fresh state,
+// regardless of whether the notify frame itself ever arrives.
+var nsfwPostBumpPreNotifyHook func()
+
 func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, channelID, ok := nsfwRequestParams(w, r)
@@ -35,13 +43,18 @@ func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) htt
 			writeNSFWError(r.Context(), w, err)
 			return
 		}
-		notifyNSFWAck(broadcaster, user.ID, channelID, true)
-		// P2-8: nsfw_ack is unsequenced and not replayed (protocol/schema.json's
-		// own note) — a warm resume that misses it has no other way to learn the
-		// caller's state changed. Bumping the visibility watermark forces the
-		// same full resync dm_channel_open uses, so the next `ready` carries the
-		// authoritative nsfw_acknowledged field even if this frame never arrived.
+		// P2-8 / Codex round 2 P2: bump BEFORE the notify send, same ordering
+		// broadcastDMOpen uses relative to its SendToUser calls. nsfw_ack is
+		// unsequenced and not replayed (protocol/schema.json's own note), so
+		// the bump — not the frame — is what makes a resume safe; a socket
+		// that registers in the gap between these two calls must still land
+		// on the full-ready path, not fall through a window where neither
+		// the frame nor a forced resync can reach it.
 		markDMVisibilityChanged(broadcaster)
+		if nsfwPostBumpPreNotifyHook != nil {
+			nsfwPostBumpPreNotifyHook()
+		}
+		notifyNSFWAck(broadcaster, user.ID, channelID, true)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -56,9 +69,12 @@ func handleNSFWRevoke(svc *service.Services, broadcaster DMBroadcaster) http.Han
 			writeNSFWError(r.Context(), w, err)
 			return
 		}
-		notifyNSFWAck(broadcaster, user.ID, channelID, false)
-		// P2-8: see the matching comment in handleNSFWAcknowledge.
+		// P2-8 / Codex round 2 P2: see the matching comment in handleNSFWAcknowledge.
 		markDMVisibilityChanged(broadcaster)
+		if nsfwPostBumpPreNotifyHook != nil {
+			nsfwPostBumpPreNotifyHook()
+		}
+		notifyNSFWAck(broadcaster, user.ID, channelID, false)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

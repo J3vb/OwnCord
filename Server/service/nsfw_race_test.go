@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -76,6 +78,47 @@ func TestNSFWAcknowledge_UnlabelBetweenCheckAndInsertIsNotTrusted(t *testing.T) 
 	if ok {
 		t.Fatal("an acknowledgement row was inserted despite the channel being unlabelled by the time the insert ran")
 	}
+}
+
+// TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled is
+// Codex round 2, P3: the old code answered "not labelled" from a SEPARATE
+// read taken after an idempotent (rows-affected 0) insert, racing a
+// concurrent revoke of the SAME row — a duplicate PUT could get ErrNotNSFW
+// (409 NOT_NSFW at the API) while the channel was still, at that very
+// moment, labelled. db.AcknowledgeNSFW now folds the label check and the
+// insert into ONE writer transaction, and SQLite's single writer connection
+// (writer.SetMaxOpenConns(1)) serializes a concurrent Revoke wholly before
+// or wholly after it — never inside it. Runs a real concurrent Revoke via a
+// goroutine so the two genuinely race; the invariant under test —
+// "Acknowledge never returns ErrNotNSFW while the channel is still
+// labelled" — holds under EITHER interleaving.
+func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *testing.T) {
+	ctx, database, nsfw, _ := newNSFWRaceFixture(t)
+	labelChannel(t, database, 10, true)
+	if err := nsfw.Acknowledge(ctx, 1, 10); err != nil {
+		t.Fatalf("first Acknowledge: %v", err)
+	}
+
+	t.Cleanup(func() { nsfwAcknowledgeRaceHook = nil })
+	var wg sync.WaitGroup
+	nsfwAcknowledgeRaceHook = func() {
+		wg.Go(func() {
+			if err := database.RevokeNSFW(context.Background(), 1, 10); err != nil {
+				t.Errorf("concurrent RevokeNSFW: %v", err)
+			}
+		})
+		// Give the concurrent revoke a chance to reach the writer before
+		// this duplicate PUT's own transaction does — the single writer
+		// connection then forces whichever loses the race to wait, not
+		// interleave with the other's read+write.
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := nsfw.Acknowledge(ctx, 1, 10); err != nil {
+		t.Fatalf("duplicate Acknowledge racing a concurrent revoke = %v, want nil — "+
+			"the channel is still labelled throughout, so this must never answer ErrNotNSFW", err)
+	}
+	wg.Wait()
 }
 
 // TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead is

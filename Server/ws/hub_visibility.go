@@ -131,10 +131,12 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // a precomputed recipient list evaluated before that lock would go stale
 // exactly in the reconnect window, and would skip the limiter entirely).
 //
-// allow is nil for an unlabelled channel (Publish, unfiltered — unlabelled
-// channels pay nothing beyond this one GetChannel read); otherwise it checks
-// membership in ONE batch ListNSFWAcknowledgedUserIDs query, taken only
-// because the channel is actually labelled. labelled also gates the plugin
+// allow is nil for a CONFIRMED unlabelled channel (Publish, unfiltered —
+// unlabelled channels pay nothing beyond this one GetChannel read);
+// otherwise it checks membership in ONE batch ListNSFWAcknowledgedUserIDs
+// query, taken only because the channel is actually labelled — or, on a
+// lookup failure that leaves the label unconfirmed, denies every recipient
+// rather than defaulting to nil/unfiltered. labelled also gates the plugin
 // sink (decision 13: a plugin has no acknowledgement, so it never receives a
 // labelled channel's content).
 func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow func(userID int64) bool, labelled bool) {
@@ -143,16 +145,18 @@ func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow fun
 	}
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
-		// P2-7: the label is UNKNOWN, not "not labelled" — the socket side
-		// stays unfiltered (unchanged from before this lookup existed; a
-		// resolvable-channel invariant a broadcast already depends on
-		// elsewhere), but the plugin sink fails closed: a plugin never gets
-		// content whose label this hub cannot currently confirm is off.
+		// P2-7 / Codex round 2 P1: the label is UNKNOWN, not "not labelled".
+		// A nil allow means "unfiltered" to deliverBroadcast — that would
+		// leak the frame to every topic subscriber, unacknowledged or not,
+		// which is exactly the disclosure decision 13 exists to prevent when
+		// the label itself cannot even be confirmed off. Fail closed for
+		// BOTH the socket path (deny-all filter, not nil) and the plugin
+		// sink (labelled=true).
 		if err != nil {
-			slog.Error("ws: channelNSFWFilter GetChannel failed, denying the plugin sink",
+			slog.Error("ws: channelNSFWFilter GetChannel failed, denying all recipients",
 				"channel_id", channelID, "err", err)
 		}
-		return nil, true
+		return func(int64) bool { return false }, true
 	}
 	if !ch.NSFW {
 		return nil, false

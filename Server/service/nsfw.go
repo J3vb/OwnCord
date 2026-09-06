@@ -62,12 +62,13 @@ var nsfwAcknowledgeRaceHook func()
 // silently. Refuses ErrNotFound on an invisible channel and ErrNotNSFW on
 // one that is not labelled — there is nothing to acknowledge.
 //
-// P2-2: the label check and the insert are ONE statement
-// (db.AcknowledgeNSFW), so a relabel or unlabel landing between a separate
-// check and a separate insert can no longer make this trust stale consent.
-// Rows-affected 0 means either "already acknowledged" or "not labelled" —
-// db.AcknowledgeNSFW can't tell those apart from its own return value, so a
-// live HasNSFWAcknowledgement read disambiguates.
+// P2-2 / Codex round 2 P3: the label check and the insert are ONE writer
+// transaction (db.AcknowledgeNSFW), so a relabel or unlabel landing between
+// a separate check and a separate insert can no longer make this trust
+// stale consent — and, unlike a rows-affected-only answer, "already
+// acknowledged" and "not labelled" can no longer be confused by a SEPARATE
+// disambiguating read racing a concurrent revoke: db.AcknowledgeNSFW answers
+// both questions from inside the one transaction that did the insert.
 func (s *NSFWService) Acknowledge(ctx context.Context, userID, channelID int64) error {
 	if err := s.checkVisible(ctx, userID, channelID); err != nil {
 		return err
@@ -75,18 +76,11 @@ func (s *NSFWService) Acknowledge(ctx context.Context, userID, channelID int64) 
 	if nsfwAcknowledgeRaceHook != nil {
 		nsfwAcknowledgeRaceHook()
 	}
-	inserted, err := s.st.AcknowledgeNSFW(ctx, userID, channelID)
+	labelled, err := s.st.AcknowledgeNSFW(ctx, userID, channelID)
 	if err != nil {
 		return fmt.Errorf("%w: failed to record acknowledgement", ErrInternal)
 	}
-	if inserted {
-		return nil
-	}
-	ok, err := s.st.HasNSFWAcknowledgement(ctx, userID, channelID)
-	if err != nil {
-		return fmt.Errorf("%w: failed to verify acknowledgement", ErrInternal)
-	}
-	if !ok {
+	if !labelled {
 		return ErrNotNSFW
 	}
 	return nil
