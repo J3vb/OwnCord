@@ -159,6 +159,7 @@ read seams (`ws/readers.go`) are deliberately that shape: the consumer rows
 name their seam, `DBReaders` wires the handle behind them at the composition
 root, and the seam interfaces are the authoritative list of what those files
 may read. 41 of the 62 rows are type-only, 33 of them `adapter`.
+
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
 `move`, because what had to leave it was a decision it took on an
@@ -254,8 +255,7 @@ Dispositions: adapter 42, boundary 20. Move targets: .
 
 Reading the table:
 
-- **Type-only rows (41, of which 33 are `adapter`)** mostly need no service:
-  the `db` types they use are the wire and response shapes. Whether those
+- **Type-only rows (41, of which 33 are `adapter`)** mostly need no service: the `db` types they use are the wire and response shapes. Whether those
   types should live outside `db` is a B3-8 question per family, not a
   boundary violation. The count was 14 at B3-0 and rose as families moved
   their calls behind services and left their types behind. No row carries a
