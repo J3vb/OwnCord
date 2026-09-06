@@ -2046,6 +2046,164 @@ report existed. Write both, and write the negative control for (b).
 fails any new wire name matching `(?i)federat|directory|discover|listing`. A
 "report **listing**" frame or config key trips it — name it `queue`.
 
+**Evidence, 2026-09-06** — branch `feature/b5-8-reports` from `dev`
+`1311fee9`, then B5-7's final `9016707a` merged in (carrying `dev` through
+the B5-6 squash and the signed scorecard) so the stack reads
+B5-6 → B5-7 → B5-8: built behind HP-5, which the owner accepted on
+2026-09-06 (#1547, signature recorded in #1550); PR to `dev` #TBD-B5-8,
+after B5-7's #1551; commits `120bfaab` (the
+feature), `83602340` (the independent review round), `f8722464` (its
+verification round), `36b812a0` (the S5-d rows of `community-services.md`
+brought in line with what shipped), `d6e98d5a` (the merge of B5-7's tip,
+fifteen conflicts resolved by keeping both sides and regenerating every
+generated surface; `mod_queue` classified as metadata in B5-7's frame-kind
+table) and `d6497c0e` (the router's report and DM mounts split into helpers
+after the merge pushed `NewRouter` past the function-length lint). Greenfield, as the plan said: no table, no service, no
+route. Built in parallel with B5-6/B5-7 from `dev` because the hot-file table
+showed no overlap, and stacked at PR time.
+
+- **The tables.** Migration `048_reports.sql` is the HP-5 draft plus what
+  two reviews earned: `reports` (now with an opaque `public_id`, sixteen
+  random bytes, the only id any response, route parameter or frame carries,
+  resolved at the API and socket boundary only, so a subject cannot count
+  filings from a sequence), `report_evidence` (rows by **reference** —
+  message ids, an attachment's id, never `stored_as`;
+  `TestReport_FileAttachmentByReference`), `report_notes`, and
+  `report_events`, the report's own history — `created`, `assigned`,
+  `noted`, `closed` — exposed nowhere but inside one report's queue detail,
+  so `VIEW_AUDIT_LOG` alone reads none of it and a subject holding that bit
+  cannot even count reports (`TestReportEvents_EveryMutationWritesOne`
+  asserts the four rows in order and zero `audit_log` rows naming a report).
+  `idx_reports_active_unique` is a partial unique index over the reporter,
+  target and the open/assigned states — the race-proof half of "duplicate is
+  `409`", with the `SELECT` pre-check kept as a fast path
+  (`TestReportQueries_FileReportUniqueConstraintIsConflict`,
+  `TestReport_ConcurrentFilingExactlyOneSucceeds`). Reversal first in
+  `rollback.Order` with its cost row; six classes join `erasureStatements`
+  and `SubjectInventory` (`22a`–`22f`).
+- **The bit.** `MODERATE_MEMBERS` is bit 22, landed here rather than in B5-9
+  because the queue is the first gate that needs it; `CanModerate` is the one
+  predicate, outside the administrator perimeter
+  (`TestModerateMembersIsOutsideTheAdminPerimeter`), and the four surfaces
+  that enumerate bits — the admin grid, the client enum, `docs/schema.md`,
+  the epoch-1 `fresh-connect` fixture — each gained a guard or a
+  re-recording (`TestSchemaDocBitMapCoversEveryPermissionBit`,
+  `TestClientPermissionEnumHasModerateMembers`). Migration `048` grants it
+  to the seeded Moderator role only when that role is untouched
+  (`id = 3 AND name = 'Moderator' AND permissions = 3145727` — the seed
+  value after migration `022`'s own grant, not `001`'s); a customised role
+  gets the bit by hand, and `docs/api.md` says so.
+- **Intake.** `POST /api/v1/reports` for a message, a user or an attachment;
+  the subject is derived from the target, never supplied
+  (`TestReport_SubjectIsDerivedNeverSupplied`); the target must be visible to
+  the reporter, and a missing target and an invisible one return
+  byte-identical errors (`TestReport_TargetMustBeVisibleToReporter`,
+  `TestReport_MessageTargetErrorsAreIndistinguishable`); five filings per
+  reporter per ten minutes (`TestReport_RateLimited`). A message report
+  snapshots the surrounding context — five either side, eleven rows — by
+  reference, in **one writer transaction** that re-validates both principals
+  and every context author at write time, so an erasure racing the filing
+  leaves nothing half-written
+  (`TestReportQueries_FileReportRollsBackOnEvidenceFailure`,
+  `TestReportQueries_FileReportRefusesAGoneReporterOrSubject`,
+  `TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor`). The snapshot
+  survives the original's edit and deletion
+  (`TestReport_SnapshotSurvivesEditAndDelete`); a report about a user
+  carries no evidence at all (`TestReport_FileUserHasNoEvidence`).
+- **The queue.** `GET /api/v1/moderation/queue`, `/{id}`, `/{id}/assign`,
+  `/{id}/notes`, `/{id}/close`, every one behind `CanModerate` **before** the
+  public id is resolved, so a non-holder gets the same `403` for an unknown
+  id and a real one (`TestModerationQueue_AuthorizationBeforeExistence`,
+  one subtest per route). States `open → assigned → resolved | dismissed`,
+  transitions guarded (`TestModerationQueue_StateMachine`,
+  `TestModerationQueue_ConcurrentCloseOneWins`); assignment is an
+  optimistic update on the observed assignee, and a forced re-assignment
+  reads the current assignee's rank **inside the write's transaction**
+  (`TestModerationQueue_ConcurrentUnforcedAssignOneWins`,
+  `TestReportQueries_AssignReportForced`); a note on a closed report is
+  refused at the row (`TestReportQueries_InsertReportNoteRefusesOnClosedReport`).
+  The reporter's own view is `GET /api/v1/reports/mine`: state and outcome,
+  never a note, never a moderator's name
+  (`TestReport_ReporterSeesOnlyTheirOwnStatus`,
+  `TestModerationQueue_NotesNeverReachEitherParty`); a moderator who is a
+  report's reporter or subject can neither read nor act on it
+  (`TestReport_SubjectSeesNothing`,
+  `TestReport_ModeratorReporterCannotActOnOwnReport`).
+- **Protocol.** One new server→client type, `mod_queue`, unsequenced and not
+  replayed, sent to connected holders of the bit minus the report's two
+  principals even when they hold it, failing closed when the report cannot be
+  read (`TestModerationAudience_OnlyBitHoldersOrAdmin`,
+  `TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit`). No
+  client→server command. It is named `queue`, not `listing`, and the
+  absence-contract regex stays green; B5-7's frame-kind table classifies it
+  as metadata (a public id and a state, never message content), so its
+  completeness guard stays green too.
+- **Absence proof, BPR-070.** The router is walked: every route under
+  `/api/v1/reports` and `/api/v1/moderation` is one of the seven above and
+  none matches a relay, store or federation name; no `moderation.*` config
+  key is string-shaped, so no URL can arrive through configuration; and the
+  egress inventory carries no row for any report or moderation file, so a
+  dial placed in one fails the invariant scanner
+  (`TestAbsenceContract_NoCentralOrCrossServerReportDelivery`,
+  `TestServerInvariants`). There is no delivery target to configure.
+- **Decision 7, both halves.** Erasing the subject hard-deletes every
+  evidence row and note about them and every filing's free text, and closes
+  each open report as `subject_erased`; the outcome row stands — action,
+  time, order, marker token, no content, no identity
+  (`TestReport_SubjectErasureKeepsTheOutcomeRow`, with the negative control
+  that a `DELETE FROM reports` fails it, and an unrelated report's evidence as
+  the positive control). Erasing the reporter keeps the report and clears
+  their `detail` (`TestReport_ReporterErasureKeepsTheReport`); erasing a
+  moderator unlinks their notes, assignment and events
+  (`TestReport_ModeratorErasureUnlinksNotesAndAssignment`);
+  `TestEraseAccount_EveryInventoryClassIsZero` reads zero across all six
+  classes. A restore of an older backup loses the outcome row: documented in
+  `community-services.md`'s S5-d rows, not defended — the plan's own call.
+- **Retention.** `moderation.report_retention_days` (default 180, bounded
+  0..3650, 0 means never) prunes evidence, notes and detail of closed reports
+  on the maintenance tick and leaves the row
+  (`TestMaintenance_ReportRetentionPrunesOnlyAgedContent`,
+  `TestMaintenance_ReportRetentionZeroDaysNeverPrunes`, both through the real
+  tick; `TestMaintenance_StepOrderIsPinned` re-pinned).
+- **Two independent reviews**, briefed on S5's abuse table. The first found
+  four P1s and seven P2s, fixed in `83602340`: the queue frame reaching a
+  report's own principals when they held the bit; `report_create` audited
+  under the reporter's id; the Moderator grant firing on a customised role;
+  intake as two autocommits; distinguishable not-found errors; a moderator
+  acting on their own report; a dedupe that lost the race; an unguarded
+  re-assignment; sequential ids on the wire; a thin erasure fixture; two
+  vacuous retention tests. Its verification round found one new P1 and three
+  partials, fixed in `f8722464`: authorization after id resolution on every
+  `{id}` route; report history still in `audit_log`; principals validated
+  outside the intake transaction; the forced-assign rank check outside the
+  write's transaction.
+- **Revert-proof, fourteen mutations**: the visibility check, the raw
+  permission bit in place of the predicate (caught by the chokepoint
+  invariant), the confidentiality guard, `DELETE` in place of the erasure
+  `UPDATE`, `stored_as` in the evidence, the audience widened, the bit
+  inside the admin perimeter, the principals back in the audience, the
+  partial index dropped, the observed-assignee guard dropped, intake split
+  into autocommits, authorization after resolution, events back into
+  `audit_log`, the unconditional insert. Each red for its named test, each
+  green restored.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (`048` extends `047` in order once stacked), prettier from the
+  worktree root, the coverage floor (`db` lifted by direct wrapper tests
+  twice; `ws` reads under floor on Windows by the documented gap).
+
+**What B5-9 and B5-10 inherit.** `CanModerate` and bit 22 exist; the queue's
+`close` takes an `outcome` and B5-9's actions link to a report through
+`report_events` and their own `report_id`. `public_id` is the shape every
+later moderation surface follows. The reporter and the subject are excluded
+from every moderation frame by `moderationAudience`; reuse it.
+
+**Not included, deliberately.** The Moderation Center UI (B9); a defence
+against restoring a backup older than an erasure (documented, not defended,
+as the plan directed); any delivery, relay or escalation target; a
+findings-ledger row.
+
 ## B5-9 — Narrowly permissioned moderator actions
 
 **Closes:** BPR-072; roadmap workstream 10's testable half. **Blocked by:** B5-8. **Decisions:** decision 6 — settled. **Size:** 4 days. **Protocol effects:** **yes** — a
