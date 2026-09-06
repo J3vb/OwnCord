@@ -82,6 +82,29 @@ type SendMessageResult struct {
 	// this bit to tell that case apart from a plain @everyone, which reaches
 	// every reader regardless (OC-0271).
 	MentionsHere bool
+
+	// RequestCreatedFor lists the message_requests rows freshly created by
+	// this send (B5-6 decision 4's first-contact gate,
+	// service/message_request.go): one entry per untrusted one-to-one
+	// recipient who had no existing request in any state. The ws layer sends
+	// one dm_request frame per entry; RequestPreview is what every one of
+	// those frames carries. Empty for a group DM, a trusted recipient, or a
+	// resend while a request already exists (decision 5 — there is only ever
+	// one row to create).
+	RequestCreatedFor []*db.MessageRequest
+	// RequestPreview is always this send's own message (MessageID, Content,
+	// Timestamp above) — a request can only ever be created by the pair's
+	// first-ever message, since a resend finds the row already there and
+	// creates nothing.
+	RequestPreview *DMRequestPreview
+}
+
+// DMRequestPreview is the message preview a dm_request frame carries on
+// creation (docs/protocol.md's dm_request section).
+type DMRequestPreview struct {
+	MessageID int64
+	Content   string
+	Timestamp string
 }
 
 // EditMessageResult contains the output of a successful message edit.
@@ -154,6 +177,21 @@ type MessageService struct {
 	// means "no live-connection information available" and applies no extra
 	// narrowing, preserving prior behavior.
 	online func(userID int64) bool
+	// messageRequests is B5-6's first-contact gate and delivery-audience
+	// filter (service/message_request.go), wired by service.New(). nil (the
+	// zero value — every test and any caller built via NewMessageService
+	// directly instead of service.New()) disables the gate entirely: every
+	// one-to-one DM behaves exactly as it did before B5-6, which is what
+	// keeps the large existing body of DM tests that construct
+	// *MessageService directly green without themselves wiring it.
+	messageRequests *MessageRequestService
+}
+
+// SetMessageRequests wires the first-contact gate and delivery-audience
+// filter (service.New() calls this once at startup). See messageRequests'
+// doc comment for what leaving it nil means.
+func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
+	s.messageRequests = mr
 }
 
 // SetOnlineChecker wires the live-connection predicate @here's offline

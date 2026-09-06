@@ -47,6 +47,7 @@ export const ServerMessageType = {
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  DM_REQUEST: "dm_request",
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)

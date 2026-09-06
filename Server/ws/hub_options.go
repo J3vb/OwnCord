@@ -180,6 +180,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if svc != nil {
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels
+		presenceDeps.MessageSvc = svc.Messages
 		reactionDeps.MessageSvc = svc.Messages
 		callDeps.DMSvc = svc.DMs
 		h.messageSvc = svc.Messages

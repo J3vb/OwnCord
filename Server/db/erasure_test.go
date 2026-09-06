@@ -21,6 +21,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	ctx := context.Background()
 	other := seedUser(t, database, "other-user")
 	setRole(t, database, other, 2)
+	third := seedUser(t, database, "third-user")
 	uid := seedUser(t, database, "Subject_User")
 	chID := seedChannel(t, database, "general-erase")
 	exec := func(query string, args ...any) {
@@ -70,6 +71,13 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
 	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
+	// Message requests and trusted senders (migration 046, B5-6, classes 14c
+	// and 14d): one row of each naming the subject, plus one of each between
+	// two OTHER users that must survive the subject's erasure untouched.
+	exec(`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'pending')`, uid, other, chID)
+	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, other, uid)
+	exec(`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'pending')`, other, third, chID)
+	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, third, other)
 	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
@@ -164,6 +172,12 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, sub.other); n != 1 {
 		t.Errorf("other user's push subscription left = %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM message_requests`); n != 1 {
+		t.Errorf("message requests left = %d, want 1 (the one between two other users)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM trusted_senders`); n != 1 {
+		t.Errorf("trusted senders left = %d, want 1 (the one between two other users)", n)
 	}
 }
 

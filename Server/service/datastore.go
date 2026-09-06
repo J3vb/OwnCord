@@ -259,6 +259,16 @@ type Store interface {
 	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
+	// ── Message requests (migration 046, B5-6) ──
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID int64) (bool, error)
+	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
+	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)
+	TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error)
+	AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
 	UnblockUser(ctx context.Context, blockerID, blockedID int64) error

@@ -185,6 +185,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, svc, hub)
 
+	// Message request inbox (B5-6) — mounted beside MountDMRoutes for the
+	// same reason: transitions send real-time dm_channel_open/dm_request
+	// events through the hub.
+	MountDMRequestRoutes(r, svc, hub)
+
 	// Channel and message REST routes — mounted after hub creation so a
 	// message purge can broadcast chat_bulk_deleted to the channel.
 	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)

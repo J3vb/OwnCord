@@ -198,6 +198,8 @@ type Querier interface {
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
 	GetMaxEventSeq(ctx context.Context) (int64, error)
 	GetMessage(ctx context.Context, id int64) (Message, error)
+	GetMessageRequestByPair(ctx context.Context, arg GetMessageRequestByPairParams) (MessageRequest, error)
+	GetMessageRequestForRecipient(ctx context.Context, arg GetMessageRequestForRecipientParams) (MessageRequest, error)
 	GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIParams) ([]GetMessagesForAPIRow, error)
 	// The highest-privilege account (role with the greatest position), used as the
 	// default identity for `token create`. FROM is users-only (role position is a
@@ -255,6 +257,7 @@ type Querier interface {
 	// after commit and marks the job done, retrying from startup and the
 	// maintenance tick until it is.
 	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
+	InsertMessageRequest(ctx context.Context, arg InsertMessageRequestParams) (int64, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
@@ -263,6 +266,10 @@ type Querier interface {
 	IsDMParticipant(ctx context.Context, arg IsDMParticipantParams) (int64, error)
 	IsEitherBlocked(ctx context.Context, arg IsEitherBlockedParams) (int64, error)
 	IsGroupDM(ctx context.Context, id int64) (int64, error)
+	// Message requests and trusted senders (migration 046, B5-6). See the
+	// migration's own comment for the shape and the service layer
+	// (service/message_request.go) for the gate these back.
+	IsTrustedSender(ctx context.Context, arg IsTrustedSenderParams) (int64, error)
 	// server_muted / server_deafened are deliberately absent from both upserts'
 	// reset lists: a moderator-imposed mute must survive a channel switch, which
 	// reaches the ON CONFLICT branch. It is scoped to the voice session:
@@ -293,6 +300,7 @@ type Querier interface {
 	// signal, leaving those users unrenderable and unmentionable on the client
 	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
+	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]ListPendingMessageRequestsRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	// Backs the per-user device cap (service.maxPushSubscriptionsPerUser),
@@ -389,6 +397,8 @@ type Querier interface {
 	TotalAttachmentBytes(ctx context.Context) (int64, error)
 	TouchAPIToken(ctx context.Context, tokenHash string) error
 	TouchSession(ctx context.Context, token string) error
+	TransitionMessageRequest(ctx context.Context, arg TransitionMessageRequestParams) (int64, error)
+	TrustSender(ctx context.Context, arg TrustSenderParams) error
 	UnbanUser(ctx context.Context, id int64) error
 	UnblockUser(ctx context.Context, arg UnblockUserParams) error
 	UninstallPlugin(ctx context.Context, id int64) error

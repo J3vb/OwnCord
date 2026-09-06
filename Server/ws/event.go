@@ -398,6 +398,24 @@ func (e DMChannelOpenEvent) EventType() string   { return MsgTypeDMChannelOpen }
 func (e DMChannelOpenEvent) TargetUserID() int64 { return e.targetUserID }
 func (e DMChannelOpenEvent) Payload() []byte     { return e.payload }
 
+// DMRequestEvent announces a message request to its recipient (B5-6): sent
+// once on creation, by the sender's chat_send handler
+// (handlers_chat.go, for every id in SendMessageResult.RequestCreatedFor),
+// and again with a new state on every recipient transition
+// (api/dm_request_handler.go). Unsequenced and NOT replayed, like
+// DMChannelOpenEvent — a client that misses it recovers from
+// GET /api/v1/dm-requests, the persisted source of truth, not the ring
+// buffer, so unlike DMChannelOpenEvent this does not need to bump the
+// hub's visibility watermark.
+type DMRequestEvent struct {
+	targetUserID int64
+	payload      []byte
+}
+
+func (e DMRequestEvent) EventType() string   { return MsgTypeDMRequest }
+func (e DMRequestEvent) TargetUserID() int64 { return e.targetUserID }
+func (e DMRequestEvent) Payload() []byte     { return e.payload }
+
 // CallSignalEvent delivers a DM call signal (call_incoming / call_declined) to
 // one participant. Satisfies UserTargetedEvent, so an offline addressee is a
 // no-op — which is the correct behaviour for ringing: a ring that arrives
