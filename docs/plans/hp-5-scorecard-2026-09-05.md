@@ -15,10 +15,11 @@ cases, data ownership and lifecycle for every B5 service, and its HP-5 topic
 index); the plan's B5-0..B5-5 evidence blocks; the adversarial suites named
 per topic below; the schema drafts in [hp-5-drafts/](hp-5-drafts/README.md)
 
-**Decision: DRAFT — awaiting the owner's signature.** Nothing in B5-6
-through B5-11 is routed before this scorecard is merged with the signature
-lines below filled in. The steps behind it may be _built_ on draft pull
-requests marked `[behind HP-5]`; none may merge.
+**Decision: ACCEPTED 2026-09-06** — the owner merged this scorecard as #1547
+(`0013de70`) and, the same morning, B5-11's PR #1548, with every decision in
+Question 9 standing; the signature lines below were filled in by a follow-up
+docs PR at the owner's instruction. Acceptance authorises B5-6 → B5-7,
+B5-8 → B5-9 → B5-10, and B5-11; it claims nothing about beta readiness.
 
 The roadmap names twelve topics to review "before exposing the endpoints".
 Six are reviewed **against shipped code and real adversarial tests** (the
@@ -286,8 +287,8 @@ B5-12 records the re-tags of BG-18 and BG-19 that mark where those halves
 live, narrowing the roadmap's wording to match under one standard; B5-12
 (#1546) merged to `dev` as `2b187b64`.
 
-**Owner's acceptance of the narrowed exit condition 2:** \_\_\_\_\_\_\_\_\_\_
-**Owner's acceptance of the narrowed exit condition 3:** \_\_\_\_\_\_\_\_\_\_
+**Owner's acceptance of the narrowed exit condition 2:** Accepted 2026-09-06, at the owner's instruction, with the scorecard's merge as #1547.
+**Owner's acceptance of the narrowed exit condition 3:** Accepted 2026-09-06, at the owner's instruction, with the scorecard's merge as #1547.
 
 ## Question 9 — decisions this scorecard records
 
@@ -319,6 +320,8 @@ B5-4, B5-5 and B5-12 land:
 | B5-5  | `feature/b5-5-rich-content-inventory` | `212ce942` → squash `1311fee9`; Codex round fixed in `00a2398b`, verification round in `212ce942` | #1544 |
 | B5-12 | `docs/b5-12-register-roadmap`         | `2cf163c3` → squash `2b187b64`; Codex round fixed in `2cf163c3`                                   | #1546 |
 
-**Signed:** \_\_\_\_\_\_\_\_\_\_ (owner, date) — acceptance authorises B5-6 →
-B5-7, B5-8 → B5-9 → B5-10, and B5-11, and claims nothing about beta
+**Signed:** Accepted 2026-09-06 — the owner merged this scorecard as #1547
+(`0013de70`) and instructed that the signature be recorded; recorded by a
+follow-up docs PR, not signed in the owner's name. Acceptance authorises
+B5-6 → B5-7, B5-8 → B5-9 → B5-10, and B5-11, and claims nothing about beta
 readiness.
