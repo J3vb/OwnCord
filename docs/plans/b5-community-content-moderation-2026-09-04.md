@@ -1649,7 +1649,11 @@ the fixture as evidence.
 **Evidence, 2026-09-06** — branch `feature/b5-6-message-requests` from `dev`
 `a504d61e`, **behind HP-5**: draft PR to `dev` #1549, never merged before
 the owner signs the scorecard; commits `4b7635b8` (the feature), `be48ff25`
-(the independent review round) and `61d9696c` (its verification round). The premise the plan corrected held at the
+(the independent review round), `61d9696c` (its verification round) and
+`edce6567` (B5-11's marked follow-up, wired once `dev`'s B5-11 was merged
+in: a one-to-one DM push reaches only participants who trust the author,
+checked before the coalescing window is reserved and again before every
+attempt). The premise the plan corrected held at the
 base: first contact happens at `sendMessageDMSideEffects`' `OpenDM`
 accumulation in `message_crud.go`, not in `CreateDM` — and the review found
 that `CreateDM` itself was a second door (below). The two gates already there,
