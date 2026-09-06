@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"strings"
 )
 
 const countPushSubscriptions = `-- name: CountPushSubscriptions :one
@@ -31,6 +32,22 @@ type DeletePushSubscriptionParams struct {
 
 func (q *Queries) DeletePushSubscription(ctx context.Context, arg DeletePushSubscriptionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deletePushSubscription, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deletePushSubscriptionByID = `-- name: DeletePushSubscriptionByID :execrows
+DELETE FROM push_subscriptions WHERE id = ?
+`
+
+// Dispatch-only (B5-11), unscoped by user_id on purpose: a push service's
+// 404/410 names a subscription by id, not by the user who owns it, and
+// dispatch already resolved the id from a row it is allowed to read. Do not
+// widen the user-scoped DeletePushSubscription to double as this.
+func (q *Queries) DeletePushSubscriptionByID(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePushSubscriptionByID, id)
 	if err != nil {
 		return 0, err
 	}
@@ -110,6 +127,70 @@ func (q *Queries) ListPushSubscriptions(ctx context.Context, arg ListPushSubscri
 			&i.DeviceName,
 			&i.CreatedAt,
 			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPushSubscriptionsForDispatch = `-- name: ListPushSubscriptionsForDispatch :many
+SELECT user_id, id, endpoint, p256dh, auth
+  FROM push_subscriptions
+ WHERE user_id IN (/*SLICE:user_ids*/?) AND vapid_key_id = ?
+`
+
+type ListPushSubscriptionsForDispatchParams struct {
+	UserIds    []int64 `json:"userIds"`
+	VapidKeyID string  `json:"vapidKeyId"`
+}
+
+type ListPushSubscriptionsForDispatchRow struct {
+	UserID   int64  `json:"userId"`
+	ID       int64  `json:"id"`
+	Endpoint string `json:"endpoint"`
+	P256dh   string `json:"p256dh"`
+	Auth     string `json:"auth"`
+}
+
+// Dispatch-only (B5-11): unlike ListPushSubscriptions this returns the push
+// credential (p256dh, auth) for a caller-chosen set of candidate users --
+// never exposed to a listing endpoint. Scoped to the running VAPID key for
+// the same reason ListPushSubscriptions is: a row under a different key is
+// one the server can no longer sign for.
+func (q *Queries) ListPushSubscriptionsForDispatch(ctx context.Context, arg ListPushSubscriptionsForDispatchParams) ([]ListPushSubscriptionsForDispatchRow, error) {
+	query := listPushSubscriptionsForDispatch
+	var queryParams []interface{}
+	if len(arg.UserIds) > 0 {
+		for _, v := range arg.UserIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", strings.Repeat(",?", len(arg.UserIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.VapidKeyID)
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPushSubscriptionsForDispatchRow{}
+	for rows.Next() {
+		var i ListPushSubscriptionsForDispatchRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.ID,
+			&i.Endpoint,
+			&i.P256dh,
+			&i.Auth,
 		); err != nil {
 			return nil, err
 		}

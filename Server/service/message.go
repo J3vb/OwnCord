@@ -201,6 +201,12 @@ type MessageService struct {
 	// preview comes back nil rather than the deleted content. Nil in
 	// production.
 	beforeRequestPreviewLookup func(messageID int64)
+	// pushNotifier is the Web Push dispatch hook (B5-11, behind HP-5). nil
+	// (the zero value) means dispatch is off — either push.enabled or
+	// push.dispatch_enabled is false — and SendMessage's hook call is
+	// skipped entirely. The composition root installs a *PushDispatcher
+	// here only when both keys are true.
+	pushNotifier PushNotifier
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -216,6 +222,14 @@ func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
 // the Services) or from a test.
 func (s *MessageService) SetOnlineChecker(online func(userID int64) bool) {
 	s.online = online
+}
+
+// SetPushNotifier installs the Web Push dispatch hook. The composition root
+// calls this once, only when both push.enabled and push.dispatch_enabled
+// are true; passing nil (or never calling it) leaves dispatch off, which is
+// the compiled default (TestPushDispatch_OffByDefaultSendsNothing).
+func (s *MessageService) SetPushNotifier(n PushNotifier) {
+	s.pushNotifier = n
 }
 
 // NewMessageService creates a MessageService.

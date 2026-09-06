@@ -102,7 +102,20 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// resurrecting it — the badge does not reappear.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	s.bg(func() {
-		s.applyMentionCounts(context.WithoutCancel(ctx), channelID, msgID, authorID, mentions, isDM, participantIDs)
+		bgCtx := context.WithoutCancel(ctx)
+		s.applyMentionCounts(bgCtx, channelID, msgID, authorID, mentions, isDM, participantIDs)
+		// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off.
+		// The candidate audience is the message's direct @mentions for a
+		// guild channel, or the DM's participants for a DM -- Notify applies
+		// every remaining filter (author, online, permission, coalescing)
+		// itself.
+		if s.pushNotifier != nil {
+			candidates := mentions.UserIDs
+			if isDM {
+				candidates = participantIDs
+			}
+			s.pushNotifier.Notify(bgCtx, channelID, authorID, candidates)
+		}
 	})
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)

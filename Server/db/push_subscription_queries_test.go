@@ -474,4 +474,94 @@ func TestPushSubscriptionWrappers_ReportClosedDatabaseErrors(t *testing.T) {
 	if _, err := database.CountPushSubscriptions(ctx); err == nil {
 		t.Error("CountPushSubscriptions on a closed database: want an error")
 	}
+	if _, err := database.ListPushSubscriptionsForDispatch(ctx, []int64{1}, "k"); err == nil {
+		t.Error("ListPushSubscriptionsForDispatch on a closed database: want an error")
+	}
+	if _, err := database.DeletePushSubscriptionByID(ctx, 1); err == nil {
+		t.Error("DeletePushSubscriptionByID on a closed database: want an error")
+	}
+}
+
+// ─── ListPushSubscriptionsForDispatch (B5-11) ───────────────────────────────
+
+// TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey proves the
+// three axes dispatch relies on: only the caller-named users come back
+// (someone else's subscription is invisible even though it exists), the
+// credential fields are present (unlike ListPushSubscriptions), and a row
+// under a different VAPID key is excluded.
+func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	seedPushUser(t, database, 1)
+	seedPushUser(t, database, 2)
+	seedPushUser(t, database, 3)
+
+	idA, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-a", "auth-a", "d1", "key1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpsertPushSubscription(ctx, 2, "https://push.example/b", "p256-b", "auth-b", "d2", "key1", 10); err != nil {
+		t.Fatal(err)
+	}
+	// user 3 is under the OLD key -- must not come back even though 3 is in
+	// the requested set.
+	if _, err := database.UpsertPushSubscription(ctx, 3, "https://push.example/c", "p256-c", "auth-c", "d3", "old-key", 10); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := database.ListPushSubscriptionsForDispatch(ctx, []int64{1, 3}, "key1")
+	if err != nil {
+		t.Fatalf("ListPushSubscriptionsForDispatch: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1 (user 2 was not requested, user 3 is under a stale key)", len(rows))
+	}
+	if rows[0].ID != idA || rows[0].UserID != 1 || rows[0].Endpoint != "https://push.example/a" ||
+		rows[0].P256dh != "p256-a" || rows[0].Auth != "auth-a" {
+		t.Errorf("row = %+v, want user 1's credential", rows[0])
+	}
+}
+
+// TestListPushSubscriptionsForDispatch_EmptyUserIDsReturnsNothing proves the
+// short-circuit: no query round-trip, no rows, no error.
+func TestListPushSubscriptionsForDispatch_EmptyUserIDsReturnsNothing(t *testing.T) {
+	database := openMigratedMemory(t)
+	rows, err := database.ListPushSubscriptionsForDispatch(context.Background(), nil, "key1")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows = %v, err = %v; want no rows and no error", rows, err)
+	}
+}
+
+// ─── DeletePushSubscriptionByID (B5-11) ─────────────────────────────────────
+
+// TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner proves the
+// deliberate difference from the user-scoped DeletePushSubscription: an id
+// alone is enough, because a push service's 404/410 never names the owner.
+func TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	seedPushUser(t, database, 1)
+	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := database.DeletePushSubscriptionByID(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("DeletePushSubscriptionByID(%d) = %v, %v; want true, nil", id, ok, err)
+	}
+	rows, err := database.ListPushSubscriptionsForDispatch(ctx, []int64{1}, "k")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("row still present after DeletePushSubscriptionByID: rows=%v err=%v", rows, err)
+	}
+}
+
+// TestDeletePushSubscriptionByID_UnknownIDIsAFalseNotAnError mirrors
+// DeletePushSubscription's contract for an id that does not exist.
+func TestDeletePushSubscriptionByID_UnknownIDIsAFalseNotAnError(t *testing.T) {
+	database := openMigratedMemory(t)
+	ok, err := database.DeletePushSubscriptionByID(context.Background(), 999)
+	if err != nil || ok {
+		t.Fatalf("DeletePushSubscriptionByID(999) = %v, %v; want false, nil", ok, err)
+	}
 }

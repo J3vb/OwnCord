@@ -3,16 +3,24 @@ package service
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -60,11 +68,12 @@ type PushSubscribeInput struct {
 type PushService struct {
 	st Store
 
-	mu     syncutil.Mutex
-	priv   *ecdh.PrivateKey
-	pubB64 string
-	keyID  string
-	ttl    time.Duration
+	mu      syncutil.Mutex
+	priv    *ecdh.PrivateKey
+	pubB64  string
+	keyID   string
+	ttl     time.Duration
+	contact string
 }
 
 // NewPushService constructs a PushService with no key installed yet
@@ -102,6 +111,16 @@ func (s *PushService) SetSubscriptionTTL(d time.Duration) {
 		d = pushDefaultTTL
 	}
 	s.ttl = d
+}
+
+// SetContact installs push.contact (B5-11), the mailto address VAPID JWTs
+// carry as their "sub" claim. Empty (the default) means the claim is
+// omitted entirely, not sent as "mailto:" — an empty sub is not a valid
+// contact and a push service is entitled to reject it.
+func (s *PushService) SetContact(contact string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contact = contact
 }
 
 // PublicKey returns the running key's public bytes — base64url, no padding,
@@ -177,6 +196,142 @@ func (s *PushService) Sweep(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return n, nil
+}
+
+// ErrPushNotConfigured is returned by vapidAuthorization before any VAPID
+// key has been installed — SetVAPIDKey runs unconditionally at start-up
+// (B5-4), so in production this only fires in the instant before that stage
+// runs.
+var ErrPushNotConfigured = errors.New("push: no VAPID key installed")
+
+// vapidTokenTTL is the RFC 8292 JWT lifetime (plan decision 9: 12h). RFC
+// 8292 recommends staying well under 24h so a leaked token cannot be
+// replayed indefinitely.
+const vapidTokenTTL = 12 * time.Hour
+
+// vapidClaims is the RFC 8292 JWT claim set. Sub is omitted (not sent as an
+// empty "mailto:") when push.contact is unset — encoding/json's omitempty
+// on a string drops it precisely then.
+type vapidClaims struct {
+	Aud string `json:"aud"`
+	Exp int64  `json:"exp"`
+	Sub string `json:"sub,omitempty"`
+}
+
+// webOrigin serialises u's origin per RFC 6454 SS4: lowercase scheme,
+// lowercase host, and the port omitted when it is the scheme's default —
+// "https://PUSH.EXAMPLE.NET:443/x" and "https://push.example.net/x" name
+// the same origin, and a push service comparing the VAPID "aud" claim
+// byte-for-byte against its own origin string must see the same bytes
+// either way.
+func webOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	host := normaliseOriginHost(u.Hostname())
+	if port := normalisePort(u.Port()); port != "" && port != defaultPortFor(scheme) {
+		host = host + ":" + port
+	}
+	return scheme + "://" + host
+}
+
+// normaliseOriginHost is the host component of webOrigin's result:
+//   - an IP literal (v4 or v6) is re-bracketed if it is v6 -- url.Hostname()
+//     strips the brackets a URI writes an IPv6 host with, and "aud" needs
+//     them back or the value parses as a hostname full of colons;
+//   - anything else is folded to its canonical ASCII (Punycode) form with
+//     golang.org/x/net/idna's Lookup profile (RFC 5891 SS5), which also
+//     case-folds -- an uppercase Unicode label and its lowercase spelling
+//     must produce the same origin string. idna is already in go.mod
+//     (pulled in transitively); this is the first direct import of it.
+//     A host idna refuses is lowercased instead, ASCII-only, same as
+//     before this fix.
+func normaliseOriginHost(host string) string {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.Is6() {
+			return "[" + ip.String() + "]"
+		}
+		return ip.String()
+	}
+	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		return ascii
+	}
+	return strings.ToLower(host)
+}
+
+// normalisePort returns port's canonical decimal form ("0443" -> "443"),
+// so a numerically-default port in a non-canonical spelling is still
+// recognised as default by webOrigin. A non-numeric port (never valid in a
+// URL, but url.URL does not itself refuse one) passes through unchanged.
+func normalisePort(port string) string {
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return port
+	}
+	return strconv.Itoa(n)
+}
+
+// defaultPortFor is the scheme's default port per RFC 6454; "" for any
+// other scheme, which webOrigin then never treats as default.
+func defaultPortFor(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+// vapidAuthorization builds the RFC 8292 VAPID Authorization header value
+// for a push to endpoint: an ES256-signed JWT with header
+// {"typ":"JWT","alg":"ES256"}, claims aud (the endpoint's scheme://host),
+// exp (now+12h) and sub ("mailto:"+push.contact, omitted when empty), and
+// the header value "vapid t=<jwt>, k=<public key>". The private scalar
+// never leaves this method — every caller gets a finished header value, not
+// a key or a raw signature.
+//
+// The signature is raw r||s (64 octets, RFC 8292's JWS encoding), not
+// ASN.1: a JOSE ES256 signature is defined that way (RFC 7518 SS3.4), and a
+// push service validates it as such.
+func (s *PushService) vapidAuthorization(endpoint string) (string, error) {
+	s.mu.Lock()
+	priv, pubB64, contact := s.priv, s.pubB64, s.contact
+	s.mu.Unlock()
+	if priv == nil {
+		return "", ErrPushNotConfigured
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("%w: endpoint has no origin", ErrInvalidSubscription)
+	}
+
+	claims := vapidClaims{Aud: webOrigin(u), Exp: time.Now().Add(vapidTokenTTL).Unix()}
+	if contact != "" {
+		claims.Sub = "mailto:" + contact
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("%w: encoding VAPID claims: %w", ErrInternal, err)
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256"}`)) +
+		"." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+
+	ecdsaPriv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), priv.Bytes())
+	if err != nil {
+		return "", fmt.Errorf("%w: converting VAPID key: %w", ErrInternal, err)
+	}
+	digest := sha256.Sum256([]byte(signingInput))
+	r, sig, err := ecdsa.Sign(rand.Reader, ecdsaPriv, digest[:])
+	if err != nil {
+		return "", fmt.Errorf("%w: signing VAPID JWT: %w", ErrInternal, err)
+	}
+	rawSig := make([]byte, 64)
+	r.FillBytes(rawSig[:32])
+	sig.FillBytes(rawSig[32:])
+	jwt := signingInput + "." + base64.RawURLEncoding.EncodeToString(rawSig)
+
+	return fmt.Sprintf("vapid t=%s, k=%s", jwt, pubB64), nil
 }
 
 // validatePushSubscription checks in and returns the canonical (decoded and
