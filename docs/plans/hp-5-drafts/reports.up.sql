@@ -27,6 +27,11 @@
 --       OR author_id = ?
 --   -- content gone, including the subject's own messages appearing as
 --   -- context in someone else's report
+--   DELETE FROM report_notes
+--    WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)
+--   -- a moderator's internal note about the subject is content about them
+--   -- too, so decision 7's "the surviving row carries no content" reaches
+--   -- report_notes exactly as it reaches report_evidence
 --   UPDATE reports
 --      SET subject_id = 0,
 --          subject_token = ?,
@@ -37,10 +42,20 @@
 --          closed_at = COALESCE(closed_at, datetime('now'))
 --    WHERE subject_id = ?
 -- The row that survives carries action, time, order and the marker token,
--- and nothing else. On the REPORTER's erasure only reporter_id /
--- reporter_token change -- the report and its outcome are not the
--- reporter's content. Notes and assignments made by an erased moderator go
--- to 0 plus that moderator's own token.
+-- and nothing else.
+--
+-- On the REPORTER's erasure: reporter_id / reporter_token change, AND
+-- detail is cleared to '' -- detail is the reporter's own free text at
+-- filing time, so it is their content and goes with them like any other
+-- authored field. The report and its outcome (state, outcome, closed_at)
+-- are not the reporter's content and are untouched.
+--
+-- Notes made by an erased moderator go to 0 plus that moderator's own
+-- token (author_id/author_token on report_notes). Assignments do not:
+-- assignee_id has no matching token column, so an erased assignee's
+-- assignment clears to 0 with no token to keep (S5-e) -- there is nothing
+-- for a later reader to unlink, because there was never anything linking
+-- the assignment to a person beyond the bare id.
 --
 -- (5) report_evidence.seq: 0 is the reported item itself, -N..-1 are the
 -- messages immediately before it, 1..N are the messages immediately after,

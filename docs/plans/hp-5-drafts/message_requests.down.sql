@@ -5,8 +5,9 @@
 -- the door, or who was told no. Accepted pairs survive a round trip only
 -- because they are indistinguishable from any other live one-to-one DM: if
 -- 046 is re-applied later, its grandfathering backfill re-derives
--- 'grandfathered' trust for every one-to-one DM pair that still has
--- messages, including ones that were originally 'accepted' -- the source
+-- 'grandfathered' trust for every one-to-one DM pair the join finds --
+-- dm_participants and channels only, with no messages join -- including
+-- ones that were originally 'accepted' -- the source
 -- column's finer distinction (accepted vs. sent_first vs. grandfathered) is
 -- not recoverable, only the fact of trust is.
 DROP INDEX IF EXISTS idx_message_requests_recipient_state;

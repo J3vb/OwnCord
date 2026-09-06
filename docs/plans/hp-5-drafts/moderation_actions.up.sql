@@ -27,10 +27,14 @@
 -- moderator's identity must not be lost from the ledger just because they
 -- later erase their own account.
 --
--- report_id is a bare integer with no foreign key, so a report pruned by
--- its own 180-day evidence retention (migration 048) leaves a plain number
--- here rather than a dangling foreign key or a cascade that would delete
--- the action along with the report.
+-- report_id is a bare integer with no foreign key. The reports draft
+-- (migration 048) keeps the report row itself indefinitely and prunes only
+-- its content -- evidence, notes and detail -- 180 days after closed_at, so
+-- this column is never actually left dangling by that clock. The bare id
+-- is still deliberate, for the mirror-image reason reports.up.sql gives for
+-- its own bare ids: a foreign key here would make any future change to how
+-- reports rows are kept a constraint this ledger has to satisfy too, rather
+-- than a plain number that tolerates one either way.
 --
 -- reason is shown to the target for warning and timeout, so it must pass
 -- the audit detail denylist like every other free-text audit field --

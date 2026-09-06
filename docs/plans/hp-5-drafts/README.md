@@ -24,9 +24,8 @@ The decisions each shape encodes are settled in "Decisions -- settled
 2026-09-04" in the B5 plan; the abuse cases and data-ownership tables that
 motivate them are `docs/architecture/community-services.md` sections S1
 (message requests), S4 (NSFW), S5 (reports), S6 (moderator actions and
-appeals) and S7 (push). The scorecard,
-[hp-5-scorecard-2026-09-05.md](../hp-5-scorecard-2026-09-05.md), is written
-with this directory and does not exist as of this commit.
+appeals) and S7 (push). The scorecard is
+[hp-5-scorecard-2026-09-05.md](../hp-5-scorecard-2026-09-05.md).
 
 ## Notes on the shapes
 
@@ -42,15 +41,18 @@ requires to survive the subject's erasure. `target_id` on
 and do cascade, because those two classes are the ones B5 has decided to
 delete outright rather than unlink.
 
-## Deviations recorded as the steps are built
+## Changes the steps apply on top of the drafts
 
 - **048 (B5-8)** carries one statement the draft did not: the new permission bit
   `MODERATE_MEMBERS` (bit 22, `0x400000`) granted to the default Moderator role,
   because the report queue is the first consumer of the bit and B5-8 lands
   before B5-9. The bit's four-file edit (permissions, admin panel grid, client
   enum, schema bit map) lands in B5-8 as well.
-- **049 (B5-9)** adds `CHECK (actor_id > 0)` on `moderation_actions`, so a row
-  with no human actor cannot be written — half of workstream 10's absence proof.
+- **049 (B5-9)** adds no `CHECK` on `actor_id` -- a constraint requiring
+  `actor_id > 0` would forbid the erasure transition that sets it to 0.
+  Instead B5-9 refuses a non-human actor (a plugin, a system job with no
+  moderator behind it) at the service boundary, and tests that refusal --
+  half of workstream 10's absence proof lives in code, not in the schema.
 
 ## When each `down` file moves
 

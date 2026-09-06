@@ -6,8 +6,8 @@
 [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md), B5)
 **Commits reviewed:** the six steps in front of HP-5, squash-merged on `dev`
 (table below)
-**Measured at:** `dev` `123b07d8` (#1543, B5-2), branch `docs/hp-5-scorecard`
-**Measured:** 2026-09-05 (drafted overnight; the B5-4, B5-5 and B5-12 rows
+**Measured at:** `dev` `a504d61e` (#1545, B5-4), branch `docs/hp-5-scorecard`
+**Measured:** 2026-09-06 (drafted overnight; the B5-4, B5-5 and B5-12 rows
 carry their PR numbers)
 **Evidence base:**
 [community-services.md](../architecture/community-services.md) (the abuse
@@ -33,16 +33,16 @@ below names the command or test that produces the evidence, in the shape of
 `dev` is squash-merge only; each step's pre-squash commits survive on its
 pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 
-| PR         | Step                                                                                     | On `dev`   | Pre-squash head |
-| ---------- | ---------------------------------------------------------------------------------------- | ---------- | --------------- |
-| #1540      | B5-0 — abuse cases, data ownership and lifecycle for every B5 service                    | `a60c6ca9` | `a5948f00`      |
-| #1541      | B5-1 — `Server/safefetch`, adopted by the GIF proxy and the plugin `http` capability     | `af473ff4` | `1f7b6be0`      |
-| #1542      | B5-3 — browser-client hosting off by default, proved by a route walk and a wire probe    | `5c7a0f4a` | `81cb6402`      |
-| #1543      | B5-2 — per-user upload quotas, one reserved-headroom floor, tick reconciliation (SEC-04) | `123b07d8` | `8a1594a2`      |
-| #1545      | B5-4 — Web Push subscription storage, nothing dispatched                                 | `a504d61e` | `2de7c3a0`      |
-| #1544      | B5-5 — rich-content inventory, GIF result-URL hygiene, S-03 pinned                       | `1311fee9` | `212ce942`      |
-| #TBD-B5-12 | B5-12 — register and roadmap reconciliation                                              | pending    | pending         |
-| this       | HP-5 — this scorecard and the schema drafts                                              | —          | —               |
+| PR    | Step                                                                                     | On `dev`   | Pre-squash head |
+| ----- | ---------------------------------------------------------------------------------------- | ---------- | --------------- |
+| #1540 | B5-0 — abuse cases, data ownership and lifecycle for every B5 service                    | `a60c6ca9` | `a5948f00`      |
+| #1541 | B5-1 — `Server/safefetch`, adopted by the GIF proxy and the plugin `http` capability     | `af473ff4` | `1f7b6be0`      |
+| #1542 | B5-3 — browser-client hosting off by default, proved by a route walk and a wire probe    | `5c7a0f4a` | `81cb6402`      |
+| #1543 | B5-2 — per-user upload quotas, one reserved-headroom floor, tick reconciliation (SEC-04) | `123b07d8` | `8a1594a2`      |
+| #1545 | B5-4 — Web Push subscription storage, nothing dispatched                                 | `a504d61e` | `2de7c3a0`      |
+| #1544 | B5-5 — rich-content inventory, GIF result-URL hygiene, S-03 pinned                       | `1311fee9` | `212ce942`      |
+| #1546 | B5-12 — register and roadmap reconciliation                                              | pending    | `2cf163c3`      |
+| this  | HP-5 — this scorecard and the schema drafts                                              | —          | —               |
 
 B5-2's two-commit structure (the `maintenanceTick` extraction `f3f7c6f5`,
 then the feature `63250a15`) is the one this review depends on: the
@@ -59,8 +59,8 @@ client's own fetches are C-09/B7 and are inventoried, not claimed
 | Topic                          | Verdict                                 | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Private-address resolution** | **Closed, server**                      | `Server/safefetch/classify_test.go`: `TestClassifyAddr_RejectsEveryNonGlobalClass`, `_UnwrapsNAT64`, `_RejectsZonedAddresses`; `destination_test.go`: `TestFetch_BlockedResolutionNeverDials`, `_MixedAnswerSetRefusesEverything`, `_CNAMEChainJudgedOnFinalAddresses`, `_AddressChangeBetweenValidationAndConnect`, `_DialBindingRejectsAnUnvettedAddress`; both call sites: `TestGIFProductionPolicyRefusesLoopback`, `TestHTTPDo_AllowlistedHostResolvingPrivateIsDenied`                                     |
-| **Redirects**                  | **Closed, server**                      | `Server/safefetch/response_test.go`: `TestFetch_RedirectToPrivateTarget`, `_RedirectSchemeDowngrade` (a real TLS chain), `_RedirectLoop`, `_AuthorizationDroppedCrossHost`, `_AllowHostAppliesToEveryHop`, `_ZeroRedirectBudgetRefusesImmediately`; `TestGIFUpstreamRedirectIsRefused`                                                                                                                                                                                                                           |
-| **Decompression**              | **Closed, server**                      | `TestFetch_DecompressionBomb`, `_GzipUnderCeilingSucceeds`, `_UnexpectedContentEncodingIsRefused`, `_IdentityContentEncodingIsPlain` — two ceilings, before and after inflation, boundary cases at ceiling−1..ceiling+2                                                                                                                                                                                                                                                                                          |
+| **Redirects**                  | **Closed, server**                      | `Server/safefetch/response_test.go`: `TestFetch_RedirectToPrivateTarget`, `_RedirectSchemeDowngrade`, `_RedirectSchemeDowngradeEndToEnd` (the real TLS chain — the plain `_RedirectSchemeDowngrade` uses a stub), `_RedirectLoop`, `_AuthorizationDroppedCrossHost`, `_AllowHostAppliesToEveryHop`, `_ZeroRedirectBudgetRefusesImmediately`; `TestGIFUpstreamRedirectIsRefused`                                                                                                                                  |
+| **Decompression**              | **Closed, server**                      | `TestFetch_DecompressionBomb`, `_GzipUnderCeilingSucceeds`, `_UnexpectedContentEncodingIsRefused`, `_IdentityContentEncodingIsPlain`, `_ByteCeilingIsExact`, `_DecompressedCeilingIsExact` — two ceilings, before and after inflation; the wire ceiling's boundary cases run ceiling−1..ceiling+2, the inflated ceiling's start at the ceiling itself, not ceiling−1                                                                                                                                             |
 | **Oversized streams**          | **Closed, server**                      | `TestFetch_LyingContentLength`, `_CeilingBeatsHonestContentLength`, `_EndlessBodyIsCutOffEarly`, `_SlowLorisBodyHitsTheDeadline`, `_SlowLorisHeadersHitTheDeadline`, `_ConcurrencyCap`, `_ProcessGateBoundsEveryFetcher`; `TestGIFOversizedUpstreamBecomesBadGateway`                                                                                                                                                                                                                                            |
 | **Malicious previews**         | **Closed, server; inventoried, client** | Server: the GIF proxy is the only server-side preview-shaped fetch, and its upstream is a constant (`TestGIFWrongContentTypeBecomesBadGateway`, `TestGIFResultURLsAreHTTPSWithoutCredentials`, `TestGIFOfflineUpstreamIsBadGatewayWithoutLeak`). Client: every renderer fetch is a row in the inventory with its bounds and its owning phase (B7 for the broker, B9 for the render gate); decision 3 keeps previews client-fetched, and this scorecard records that as accepted (Question 8)                     |
 | **Storage exhaustion**         | **Closed, server**                      | Uploads (B5-2): `TestUploadQuota_ConcurrentRacersThroughTheHandler`, `_LowDiskIs507BeforeTheBodyIsSpooled`, `_ChargeReleasedWhenTheWriteFails`, `_ChargeReleasedOnPanicAfterTheWrite`, `TestEveryFileStoreSaveIsReserved`, `TestChargeUserStorage_GuardIsExactAtTheBoundary`, `TestEmojiUpload_IsFloorGatedButNotCharged`. Subscriptions (B5-4): `TestPushSubscriptions_DeviceCapEvictsOldest`, `TestPushSweep_UsesTheConfiguredWindow`. Report evidence (B5-8): by reference only, never bytes — see Question 3 |
@@ -74,7 +74,7 @@ the allowlist defaults empty), so its rows are a proof about code that cannot
 yet run.
 
 ```bash
-go test -C Server -count=1 -race ./safefetch/ ./api/ -run 'TestClassifyAddr|TestFetch_|TestGIF|TestUploadQuota|TestPushSub|TestPushSweep'
+go test -C Server -count=1 -race ./safefetch/ ./api/ ./plugin/ ./db/ ./service/ -run 'TestClassifyAddr|TestFetch_|TestGIF|TestUploadQuota|TestPushSub|TestPushSweep|TestHTTPDo_|TestEveryFileStoreSaveIsReserved|TestChargeUserStorage_|TestEmojiUpload_'
 ```
 
 ## Question 2 — the six topics against designs
@@ -146,10 +146,14 @@ B5-8 owes as a test:
    difference on the subject's own requests — proved decision 5's way, by
    comparing responses across states rather than asserting an absence.
 3. **No leak through the action.** A moderation action taken on a report
-   carries `report_id` as a bare integer in the ledger and a `reason` the
-   moderator wrote, which passes the audit detail denylist
-   (`audittest.AssertSafeDetails`); the action payload the target sees carries
-   the reason and never the reporter.
+   carries `report_id` as a bare integer in the ledger. The target-facing
+   `reason` is bounded at runtime — at most 500 runes, no control characters
+   — and the `audit_log` row for the action gets a fixed phrase, never the
+   `reason` text itself; B5-9 implements and tests both bounds.
+   `audittest.AssertSafeDetails` is a test helper, not a runtime control — it
+   runs after the fact, over the recorded corpus, and proves the audit rows
+   stay clean once the runtime bound and the fixed phrase are in place. The
+   action payload the target sees carries the reason and never the reporter.
 4. **No leak through erasure.** The reporter's own erasure sets
    `reporter_id = 0` and fills `reporter_token`; the subject's erasure clears
    the report's content (Question 3). Neither path exposes the other principal.
@@ -181,17 +185,17 @@ which re-checks nothing by design.
 
 **Adversarial cases B5-9 owes, each as a test:**
 
-| Case                                      | Expected                                                                                                                                                                                  |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Self                                      | Every action on oneself is refused (`BanUser`'s existing self-ban refusal, extended to warning and timeout)                                                                               |
-| Peer (same top role)                      | Refused by `requireOutranks`, before existence                                                                                                                                            |
-| Superior                                  | Refused the same way                                                                                                                                                                      |
-| The owner as target                       | Refused: the owner outranks everyone                                                                                                                                                      |
-| Concurrent role change                    | The rank comparison runs inside the same transaction as the write; a target promoted between the check and the write is refused, not sanctioned — the property test drives both orderings |
-| A moderator deciding their own appeal     | Refused where another eligible moderator exists; allowed on a one-moderator install, and the audit row says so                                                                            |
-| A plugin capability taking an action      | Impossible: workstream 10's absence proof — no host import reaches the moderation service, and every moderation audit row carries a human actor token                                     |
-| A moderator quoting content into `reason` | Refused by the audit detail denylist                                                                                                                                                      |
-| The four-file bit                         | `TestAdminPanelPermGridCoversEveryPermissionBit` fails the build until `permissions.go`, `admin/static/index.html`, `Client/src/lib/types.ts` and `docs/schema.md` all carry bit 22       |
+| Case                                      | Expected                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Self                                      | Every action on oneself is refused (`BanUser`'s existing self-ban refusal, extended to warning and timeout)                                                                                                                                                                                                                                                                                                                                     |
+| Peer (same top role)                      | Refused by `requireOutranks`, before existence                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Superior                                  | Refused the same way                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| The owner as target                       | Refused: the owner outranks everyone                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Concurrent role change                    | The rank comparison runs inside the same transaction as the write; a target promoted between the check and the write is refused, not sanctioned — the property test drives both orderings                                                                                                                                                                                                                                                       |
+| A moderator deciding their own appeal     | Refused where another eligible moderator exists; allowed on a one-moderator install, and the audit row says so                                                                                                                                                                                                                                                                                                                                  |
+| A plugin capability taking an action      | Impossible: workstream 10's absence proof — no host import reaches the moderation service, and B5-9 refuses a non-human actor at the service boundary (there is no schema `CHECK` on `actor_id` — one would forbid the erasure transition to 0), so every moderation audit row carries a human actor token by construction, tested directly                                                                                                     |
+| A moderator quoting content into `reason` | Refused by the audit detail denylist                                                                                                                                                                                                                                                                                                                                                                                                            |
+| The four-file bit                         | `TestAdminPanelPermGridCoversEveryPermissionBit` checks only two of the four files — it ORs `admin/static/index.html`'s grid against `permissions.AllPerms` (`permissions.go`) and fails if they disagree. `docs/schema.md`'s bit map and `Client/src/lib/types.ts`'s enum have no such gate; B5-8 owes one, since the four-file edit lands with the bit grant in 048 (the same doc-gate is owed by B5-8's own plan entry, not duplicated here) |
 
 ## Question 6 — the notification-leakage defaults for B5-11
 
@@ -259,10 +263,14 @@ regenerated, never edited.
 
 ## Question 8 — the two narrowed exit conditions (decision 14)
 
-Exit conditions 2 and 3 are met at the server only. The client halves are
+Exit condition 2 is met at the server only (B5-1, already on `dev`). Exit
+condition 3 **will be met at the server by B5-7 once this scorecard is
+signed** — B5-7 is one of the steps behind this hold and has not been built
+yet, so condition 3 is not met today. Both conditions' client halves are
 B7's (the native broker, C-09) and B9's (the render gate and consent UI).
-B5-12 re-tagged BG-18 and BG-19 to record where those halves live and
-narrowed the roadmap's wording to match, under one standard.
+B5-12 records the re-tags of BG-18 and BG-19 that mark where those halves
+live, narrowing the roadmap's wording to match under one standard; B5-12
+(#1546) is itself unmerged as of this measurement.
 
 **Owner's acceptance of the narrowed exit condition 2:** \_\_\_\_\_\_\_\_\_\_
 **Owner's acceptance of the narrowed exit condition 3:** \_\_\_\_\_\_\_\_\_\_
@@ -291,11 +299,11 @@ Made under the owner's 2026-09-04 delegation, open to reversal at signature:
 The already-merged steps' PR refs are in the chain table above. Recorded as
 B5-4, B5-5 and B5-12 land:
 
-| Step  | Branch                                | Pre-squash head                                                                                   | PR         |
-| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------- |
-| B5-4  | `feature/b5-4-push-subscriptions`     | pending                                                                                           | #1545      |
-| B5-5  | `feature/b5-5-rich-content-inventory` | `212ce942` → squash `1311fee9`; Codex round fixed in `00a2398b`, verification round in `212ce942` | #1544      |
-| B5-12 | `docs/b5-12-register-roadmap`         | pending                                                                                           | #TBD-B5-12 |
+| Step  | Branch                                | Pre-squash head                                                                                   | PR    |
+| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------- | ----- |
+| B5-4  | `feature/b5-4-push-subscriptions`     | `2de7c3a0` → squash `a504d61e`; Codex round in `3ef5bfc6`, floor tests in `2de7c3a0`              | #1545 |
+| B5-5  | `feature/b5-5-rich-content-inventory` | `212ce942` → squash `1311fee9`; Codex round fixed in `00a2398b`, verification round in `212ce942` | #1544 |
+| B5-12 | `docs/b5-12-register-roadmap`         | `2cf163c3`                                                                                        | #1546 |
 
 **Signed:** \_\_\_\_\_\_\_\_\_\_ (owner, date) — acceptance authorises B5-6 →
 B5-7, B5-8 → B5-9 → B5-10, and B5-11, and claims nothing about beta
