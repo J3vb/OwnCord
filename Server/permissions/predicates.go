@@ -33,6 +33,12 @@ var ErrNotVoiceChannel = errors.New("not a voice channel")
 // surfaces; the socket and search simply withhold the content).
 var ErrNSFWUnacknowledged = errors.New("nsfw content not acknowledged")
 
+// ErrTimedOut is returned by CanSendMessage, CanAddReaction and CanJoinVoice
+// for a subject with an active timeout row (B5-9, decision 6): a time-boxed
+// restriction distinct from a ban, checked through the predicates like every
+// other property rather than a scattered per-handler check.
+var ErrTimedOut = errors.New("user is timed out")
+
 // Subject is everything a channel predicate consults: the actor's role bits,
 // both override layers for the one channel in question, the channel's flags,
 // and — for a DM — the membership and block state the caller looked up. The
@@ -52,6 +58,14 @@ type Subject struct {
 	// caller resolves it live, never from a cache — CanReadContent's whole
 	// point is that a revocation takes effect on the very next read.
 	NSFWAcknowledged bool
+	// TimedOut is filled from a live, uncached lookup ("an active timeout
+	// row exists for this subject") by permissions.Checker.Subject and
+	// service.PermissionService.Subject — never from the 30s permission
+	// cache, and never for an Administrator (B5-9, decision 6). It gates
+	// CanSendMessage, CanAddReaction and CanJoinVoice independent of every
+	// channel-scoped bit: a timeout is a restriction on the subject, not a
+	// property of any one channel.
+	TimedOut bool
 }
 
 // Has reports whether the subject's effective permission in the channel holds
@@ -107,6 +121,9 @@ func CanAdmitSession(s Subject) error { return CanViewChannel(s) }
 // and no block in either direction. SendMessage, EditMessage, CanPost, the
 // ready payload's can_send, the composer refresh and typing all delegate here.
 func CanSendMessage(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
 			return err
@@ -132,6 +149,31 @@ func CanSendMessage(s Subject) error {
 // member who cannot post cannot announce one.
 func CanType(s Subject) error { return CanSendMessage(s) }
 
+// CanAddReaction is ADD_REACTIONS in the channel (with READ_MESSAGES), never
+// while timed out; for a DM, membership and no block. AddReaction/
+// RemoveReaction route through this instead of a bare HasChannelPerm bitmask
+// check (B5-9), so reacting gets the same timeout restriction a send does —
+// today's survey found the reaction handler resolved this bit inside
+// effective perms with no predicate of its own.
+func CanAddReaction(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
+	if s.Channel.Type == "dm" {
+		if err := dmMember(s); err != nil {
+			return err
+		}
+		if s.DMBlocked {
+			return ErrBlocked
+		}
+		return nil
+	}
+	if !s.Has(ReadMessages | AddReactions) {
+		return missing(AddReactions)
+	}
+	return nil
+}
+
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
 // membership, so this can only ever narrow), a channel that has a room, for
@@ -140,6 +182,9 @@ func CanType(s Subject) error { return CanSendMessage(s) }
 // must not rejoin the archived room. Applies at join, at token refresh, to
 // the target of a moderator move, and in the stale-voice sweep.
 func CanJoinVoice(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
 	if !s.Has(ConnectVoice) {
 		return missing(ConnectVoice)
 	}
@@ -190,6 +235,24 @@ func CanModerateVoice(s Subject) error {
 		return missing(MuteMembers)
 	}
 	return nil
+}
+
+// AuthorizeVoiceModerator is the base-bit gate every voice-moderation call
+// site needs ahead of CanModerateVoice, combined with the predicate itself
+// into one canonical check (round 4, Codex review Part C — the pair was
+// duplicated between ws.voiceModTarget and the timeout voice half's own
+// authorization, each with its own raw HasServerPerm call). The actor's
+// BASE role must hold MUTE_MEMBERS (or Administrator) on its own:
+// CanModerateVoice's s.Has(MuteMembers) is a channel-scoped OR that a
+// channel override CAN satisfy even when the base role lacks the bit
+// (deliberate — B2-5, matching CanSendMessage's announcement-channel
+// precedent) — but a channel-scoped allow must never be able to manufacture
+// voice-moderation authority the actor's base role never held at all.
+func AuthorizeVoiceModerator(s Subject) error {
+	if !HasServerPerm(s.RolePerms, MuteMembers) {
+		return missing(MuteMembers)
+	}
+	return CanModerateVoice(s)
 }
 
 // CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled

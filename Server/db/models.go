@@ -251,6 +251,14 @@ type VoiceState struct {
 	ServerMuted    bool   `json:"server_muted"`
 	ServerDeafened bool   `json:"server_deafened"`
 	JoinedAt       string `json:"-"`
+	// ServerMutedBy is the owning moderation_actions id when ServerMuted was
+	// set by a timeout (round 5, Codex review P2) — nil for a manual
+	// moderator mute or when unmuted. Server-side only: never marshaled
+	// into a client-facing payload (GetVoiceState/GetUserVoiceState is the
+	// one read that populates it, for RestoreModFlags' own use; the bulk
+	// reads behind voice_state/ready leave it unset). No json tag needed
+	// since ChannelVoiceStates/AllVoiceStates never populate it.
+	ServerMutedBy *int64
 }
 
 // ChannelUnread holds per-user unread data for a single channel.

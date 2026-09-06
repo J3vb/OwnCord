@@ -15,6 +15,11 @@ type Querier interface {
 	// migration's own comment for the shape and Server/permissions/predicates.go
 	// (CanReadContent) for the gate these back.
 	AcknowledgeNSFW(ctx context.Context, arg AcknowledgeNSFWParams) error
+	// Own rows only: userID must be the target. Zero rows affected means the
+	// id does not exist, belongs to someone else, or is already acknowledged --
+	// the caller answers the same NOT_FOUND either way, so this can never be
+	// used to probe another user's warning ids.
+	AcknowledgeWarning(ctx context.Context, arg AcknowledgeWarningParams) (int64, error)
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
 	ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error)
@@ -24,6 +29,11 @@ type Querier interface {
 	// whatever channel their row points at by then -- including a DM call the
 	// moderator was never authorized against (OC-0005). :execresult so the
 	// caller can tell a real no-op (target moved) from a normal apply.
+	// server_muted_by = NULL unconditionally (round 5, Codex review P1): a
+	// manual mute or re-mute must never leave a stale timeout id as owner --
+	// otherwise that timeout's later lift would clear THIS independent manual
+	// mute, which it does not own. A manual mute owns nothing (NULL), same as
+	// ClearVoiceServerMute's own unmute.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
 	// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
@@ -49,6 +59,12 @@ type Querier interface {
 	CleanupExpiredUsedTOTPCodes(ctx context.Context, expiresAt string) error
 	ClearAllVoiceStates(ctx context.Context) error
 	ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error)
+	// server_muted_by is cleared unconditionally here too: this is the manual
+	// moderator mute/unmute endpoint (voice_mod_mute), and an unmute through it
+	// always wins regardless of who (if anyone, e.g. an active timeout) owns
+	// the mute (round 4, Codex review, Part A) -- a later timeout lift then has
+	// nothing left to find and does nothing, which is correct: the manual
+	// unmute already spoke for the target's current state.
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
@@ -190,6 +206,15 @@ type Querier interface {
 	// idx_reports_active_unique (migration 048) is what actually enforces the
 	// rule under concurrency; this query has no such guarantee alone.
 	FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAssignedReportParams) (int64, error)
+	// The maintenance-tick (and start-up) reconcile sweep (round 4, B5-10
+	// addendum): every voice_states row whose server_muted_by points at a
+	// timeout that is now lifted or expired -- the crash window between a
+	// lift's ledger commit and its post-commit voice-clear (service.
+	// ModerationService.FinalizeTimeoutLift), and the gap this closes outright:
+	// a timeout that simply EXPIRES, with nobody ever calling LiftTimeout, had
+	// no unmute mechanism at all before this. A manual moderator mute
+	// (server_muted_by NULL) is never a candidate.
+	FindOrphanedVoiceMutes(ctx context.Context) ([]FindOrphanedVoiceMutesRow, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
 	// so a resolved row is always usable. Matches the sessions never-expiring
@@ -282,8 +307,17 @@ type Querier interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserStorage(ctx context.Context, userID int64) (int64, error)
+	// server_muted_by rides along here ONLY -- the single-user read RestoreModFlags
+	// uses to carry a timeout's ownership across a channel switch (round 5,
+	// Codex review P2) -- never on GetChannelVoiceStates/GetAllVoiceStates
+	// below, which feed the client-facing voice_state/ready payloads: the
+	// column is server-side-only (migration 049's comment) and must not leak
+	// into the wire protocol.
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
+	// The one indexed lookup permissions.Checker / service.PermissionService.Subject
+	// run, uncached, to fill Subject.TimedOut.
+	HasActiveTimeout(ctx context.Context, targetID int64) (int64, error)
 	HasNSFWAcknowledgement(ctx context.Context, arg HasNSFWAcknowledgementParams) (int64, error)
 	// Erasure jobs (migration 037, B4-9): the durable file half of an account
 	// erasure. The row is written inside the erasure transaction with the
@@ -292,6 +326,15 @@ type Querier interface {
 	// maintenance tick until it is.
 	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
 	InsertMessageRequest(ctx context.Context, arg InsertMessageRequestParams) (int64, error)
+	// moderation_actions is the B5-9 moderator-action ledger (migration 049):
+	// every warning, timeout, kick, ban and removal writes a row here. Keep
+	// this file ASCII-only: sqlc v1.30 truncates the next query by the
+	// byte/rune difference of any multi-byte character.
+	// The rank guard (actor strictly outranks target, re-read live) runs in Go
+	// immediately before this insert, inside the same transaction as the
+	// caller's effect (Server/db/moderation_action_queries.go,
+	// recordModerationAction) -- not here, so this statement is a plain insert.
+	InsertModerationAction(ctx context.Context, arg InsertModerationActionParams) (int64, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	// reports is the B5-8 report intake, queue and evidence snapshot (migration
 	// 048). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
@@ -356,6 +399,16 @@ type Querier interface {
 	// Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
 	// token shown at creation is usable).
 	ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
+	// Every currently-active timeout row id for target_id -- normally at most
+	// one after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts
+	// on all of them defensively (P2-9). LiftTimeout passes these ids to
+	// db.LiftTimeoutActionsByID (round 4, B5-10 addendum -- replacing
+	// LiftAllActiveTimeouts's own WHERE target_id=... shape with the by-id
+	// primitive an appeal overturn can also call inside its own transaction),
+	// then to db.ClearServerMuteOwnedBy, which clears whichever voice_states
+	// row's server_muted_by currently matches one of them -- ownership lives on
+	// the session now, not a column read here (see migration 049's comment).
+	ListActiveTimeouts(ctx context.Context, targetID int64) ([]int64, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error)
@@ -368,6 +421,11 @@ type Querier interface {
 	// signal, leaving those users unrenderable and unmentionable on the client
 	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
+	// The queue detail's "actions taken" list.
+	ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ModerationAction, error)
+	// GET /api/v1/moderation/users/{id}/actions: the full ledger for one user,
+	// newest first.
+	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ModerationAction, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
 	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]ListPendingMessageRequestsRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
@@ -411,6 +469,9 @@ type Querier interface {
 	// offsets when stripping them, so a non-ASCII character here truncates the
 	// generated SQL of THIS and every following query by the byte/rune delta.
 	ListRoles(ctx context.Context) ([]Role, error)
+	// ready's notices slot: every warning issued to userID that has not yet
+	// been acknowledged.
+	ListUnacknowledgedWarnings(ctx context.Context, targetID int64) ([]ListUnacknowledgedWarningsRow, error)
 	ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinishedErasureJobsRow, error)
 	ListUnusedRecoveryCodes(ctx context.Context, userID int64) ([]ListUnusedRecoveryCodesRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
@@ -440,6 +501,45 @@ type Querier interface {
 	// (db.ConnectStatus). A stale choice never renders as "present" because the
 	// read path treats a member with no live connection as offline regardless.
 	MarkUserDisconnected(ctx context.Context, id int64) error
+	// The timeout voice half's compare-and-mute (P1-3/P1-4 PARTIAL round 3;
+	// reworked round 4, Codex review, to stamp ownership atomically -- see
+	// migration 049's comment on voice_states.server_muted_by for the full
+	// rationale). Scoped to channel_id AND joined_at, the join-instance token
+	// JoinVoiceChannel already mints, so a leave-and-rejoin of the SAME channel
+	// between authorization and this write also fails to match, not only a
+	// channel switch -- one step tighter than ApplyVoiceServerMute/
+	// ClearVoiceServerMute above, which voice_mod_mute has always scoped to
+	// channel_id alone.
+	// The WHERE server_muted = 0 makes this ONE statement do what round 3 did
+	// in two (read the prior state, then write): it matches a row only on a
+	// genuine unmuted->muted transition, so RowsAffected alone tells the caller
+	// whether server_muted_by (this action) is now the owner -- no separate
+	// read, and no gap for a concurrent lift to land in between.
+	//
+	// The second OR branch reclaims an ORPHANED mute (round 4, Codex review):
+	// TimeoutUser's supersede-transfer (migration 049's comment) can only move
+	// ownership off a row that has ALREADY stamped it -- if this timeout's own
+	// supersede committed before the superseded row's mute had landed at all
+	// (a real interleaving under the per-user lock: the superseded row's
+	// MuteForTimeout call is still queued behind this one when TimeoutUser
+	// transfers), the transfer finds nothing to move and voice_states is left
+	// pointing at an action that is no longer active. Reclaiming here --
+	// server_muted_by set to something NOT NULL and not one of the currently
+	// active timeouts -- lets THIS call still claim ownership instead of
+	// treating someone else's now-defunct mute as untouchable, so LiftTimeout
+	// on THIS row can later clear it. NOT NULL excludes a manual moderator
+	// mute (voice_mod_mute never sets server_muted_by): that ownership is never
+	// reassigned to a timeout just because no timeout currently owns it.
+	//
+	// The trailing EXISTS (round 5, Codex review P2) requires the INCOMING
+	// action_id itself to still be an active timeout on THIS target: a mute
+	// attempt that is only reaching the SFU/DB now because its own goroutine
+	// was delayed, after its row was already lifted (and possibly a lift's
+	// own finalize already ran), must not claim -- or re-claim -- a mute a
+	// lift already correctly decided to clear. Without this a delayed A could
+	// mute (or reclaim from B) under an owner the ledger no longer recognizes,
+	// stranding the SFU muted until the reconcile sweep next runs.
+	MuteForSession(ctx context.Context, arg MuteForSessionParams) (sql.Result, error)
 	OpenDM(ctx context.Context, arg OpenDMParams) (int64, error)
 	// seq is supplied by the hub so the row seq matches the wrapped-payload seq.
 	PersistEvent(ctx context.Context, arg PersistEventParams) error
@@ -465,6 +565,14 @@ type Querier interface {
 	// from the previous process. Chosen statuses survive for the same reason they
 	// survive a disconnect.
 	ResetAllUserStatuses(ctx context.Context) error
+	// The maintenance-tick retention sweep, run only when no appeals table
+	// exists yet (B5-9; B5-10's migration 050 adds appeals and this query is
+	// replaced by one that excludes referenced ids -- see the // B5-10: comment
+	// in Server/db/moderation_action_queries.go). Warnings retire
+	// moderation.action_retention_days after acknowledged_at; timeouts the same
+	// number of days after expires_at, or after lifted_at when lifted early.
+	// Ban, kick and removal rows are never touched here.
+	RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error)
 	RevokeAPIToken(ctx context.Context, id int64) (sql.Result, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error)
 	RevokeInvite(ctx context.Context, code string) error
@@ -476,11 +584,29 @@ type Querier interface {
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
+	// On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
+	// still-active timeout row for the same target, in the same transaction as
+	// the new row's insert, so a repeated timeout never leaves two overlapping
+	// active rows for LiftTimeout to pick between -- the single-row
+	// GetActiveTimeout this replaced used to silently orphan every row but the
+	// newest. id excludes the row this same transaction just inserted, which
+	// must stay active. RETURNING id (round 4, Codex review): the caller
+	// transfers voice-mute ownership from these ids onto the new row
+	// (voice_states.server_muted_by) in the same transaction, so a mute an
+	// earlier timeout owns is not stranded when its row stops being the active
+	// one LiftTimeout will act on.
+	SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) ([]int64, error)
 	// The staleness sweep (decision 5) and the rotation sweep (decision 2) in
 	// one statement: a row older than cutoff goes, and so does a row whose key
 	// id no longer matches the running key. key_id = '' means "no key installed
 	// yet" -- time-only, since there is nothing to compare against.
 	SweepPushSubscriptions(ctx context.Context, arg SweepPushSubscriptionsParams) (int64, error)
+	// Disambiguates MuteForSession's own no-match result (round 5, Codex review
+	// P2): whether the INCOMING action_id is still a live timeout on this
+	// target, so a delayed mute call (its own row already lifted, or expired,
+	// by the time it finally reaches the SFU/DB) is told matched=false rather
+	// than mistaken for "already muted by someone else".
+	TimeoutActionIsActiveForTarget(ctx context.Context, arg TimeoutActionIsActiveForTargetParams) (int64, error)
 	// The operator's storage figure on the metrics surface: every attachments
 	// row, legacy rows with a NULL uploader_id included, so it is a total and
 	// not a sum of counters.
@@ -492,6 +618,14 @@ type Querier interface {
 	UnbanUser(ctx context.Context, id int64) error
 	UnblockUser(ctx context.Context, arg UnblockUserParams) error
 	UninstallPlugin(ctx context.Context, id int64) error
+	// Erasure's actor-token unlink (mirrors erasureUnlinkReports): an erased
+	// moderator's actions keep their row, action, time and order, but the
+	// actor id goes to 0 and the token takes its place.
+	UnlinkModerationActionsByActor(ctx context.Context, arg UnlinkModerationActionsByActorParams) error
+	// Same, for the lifted_by column: no token column of its own (mirrors the
+	// reports assignee_id and audit_log's other bare actor columns), so an
+	// erased lifter's id simply goes to 0.
+	UnlinkModerationActionsByLifter(ctx context.Context, liftedBy int64) error
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
 	// Marking a channel read also clears its mention badge: channel_focus is the
 	// only caller, and a focused channel has no outstanding mentions by definition.
@@ -536,6 +670,11 @@ type Querier interface {
 	UpsertRecoveryKit(ctx context.Context, arg UpsertRecoveryKitParams) error
 	UseInviteAtomic(ctx context.Context, code string) (sql.Result, error)
 	UserCount(ctx context.Context) (int64, error)
+	// Disambiguates MuteForSession's zero-rows-affected result: "no session"
+	// (the target left/switched between authorization and this call, P1-3
+	// PARTIAL) from "session exists but was already server-muted by
+	// someone/something else" (not this action's ownership to claim).
+	VoiceSessionExists(ctx context.Context, arg VoiceSessionExistsParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

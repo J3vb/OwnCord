@@ -96,6 +96,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeCommandReply:        false, // ephemeral, direct to the invoking client
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
+	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
 }
 
 // reconnectFrameReadableRaceHook, when non-nil, runs once per content-bearing

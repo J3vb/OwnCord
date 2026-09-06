@@ -2243,6 +2243,175 @@ the constant alone turns the build red — and without that test it would
 silently strip the bit on every role save, because `collectRolePerms` rebuilds
 the mask from rendered checkboxes. Budget four edits, not one.
 
+**Evidence, 2026-09-06** — branch `feature/b5-9-moderator-actions`, built on
+B5-8 before it was squashed onto `dev`, then merged with `dev` at `ae6b9c04`
+(`56b4c58d`, thirty conflicts: `dev` carries B5-6, B5-7, B5-8 and B5-11 as
+squashes of what this branch already held, so every shared file arrived
+twice — each resolved as `dev`'s text with this step's additions re-applied,
+and every generated surface regenerated rather than hand-merged). Built
+behind HP-5, which the owner accepted on 2026-09-06 (#1547, signature
+recorded in #1550); PR to `dev` #1553. Commits `670ca7d3` (the feature),
+`b4757d2e` (the independent review round), `619f8bb9`, `445d97ed`,
+`0af1f39b` (its three verification rounds), the merge, and `118b1f0a` (what
+the merge's own gates surfaced, plus two contention tests). The premises
+held at the base: ban, content removal
+and kick-as-force-logout existed and were well-shaped; warning and timeout
+had no implementation; bit 22 was reserved and unused. One correction: the
+bit itself landed in B5-8, which needed it first; this step is its second
+consumer.
+
+- **The ledger.** Migration `049_moderation_actions.sql`, the HP-5 draft
+  plus two columns earned in review: `voice_muted` (whether the timeout's
+  voice half **owns** the server mute — never claimed for a mute that
+  already existed, inherited by the row that supersedes it, and the only
+  thing a lift may clear) and an index for report-linked lookups. One row
+  per warning, timeout, removal, kick and ban, with the human actor's id and
+  token, the reason, an optional `report_id`, expiry, acknowledgement and
+  lift. Reversal first in `rollback.Order` with its cost row; classes `23a`
+  and `23b` join `erasureStatements` and `SubjectInventory`. There is no
+  `CHECK (actor_id > 0)`: erasure sets it to 0, so the refusal of a non-human
+  actor lives in the service and is tested there
+  (`TestModerationService_RefusesNonHumanActor`, five kinds × two values).
+- **Two ledger writers, deliberately.** Warning, timeout, kick and ban go
+  through the rank-guarded writer — the actor must outrank the target, read
+  **inside the write's transaction**, so a role change racing the decision
+  cannot be pre-empted (`TestModeration_ConcurrentRoleChange`,
+  `TestBanUserWithAction_ConcurrentRoleChangeCannotPreemptAnInFlightDecision`
+  with two goroutines contending for the single writer connection, and
+  `TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx`).
+  Content removal and purge keep today's `MANAGE_MESSAGES` semantics with no
+  rank check — BPR-072 assigns that bit its meaning, and a channel moderator
+  who could remove an owner's message yesterday still can; a purge's row
+  targets the actor, since a bulk purge has no single author. The
+  independent review called the asymmetry a P1; it is ruled a documented
+  exception (`docs/api.md`, the HP-5 matrix), open to reversal.
+- **Warning and timeout.** `POST /api/v1/moderation/users/{id}/warn`,
+  `/timeout`, `/untimeout`, `GET .../actions`, and the target's own
+  `POST /api/v1/users/me/notices/{id}/ack` (own rows only —
+  `TestWarning_AckIsOwnRowsOnly`). A timeout bites on the next send, edit
+  (guild and DM — `TestTimeout_BlocksMessageEdit`, `_DM`), reaction and voice
+  join **without a reconnect**: `Subject.TimedOut` is resolved live by the
+  checker, Administrators exempt, and `CanSendMessage`, `CanAddReaction` (a
+  new predicate — the reaction path used a bare bit before) and
+  `CanJoinVoice` check it first; a lookup failure fails closed
+  (`TestTimeout_BitesOnNextSendWithoutReconnect`,
+  `TestTimeout_BlocksReactionsAndVoiceJoin`,
+  `TestChannelSubject_TimeoutLookupErrorFailsClosedForDM`). One active
+  timeout per target: a new one supersedes the old in the same transaction,
+  a lift clears every active row and re-checks the lifter's rank inside its
+  own transaction (`TestTimeoutUser_SupersedesEarlierActiveTimeout`,
+  `TestLiftTimeout_LiftsEveryActiveRow`, `TestLiftTimeout_DemotedActorRefused`).
+  Expiry lifts automatically (`TestTimeout_ExpiryLiftsAutomatically`) — and
+  found a real bug on the way: a Go RFC 3339 timestamp compared lexically
+  against SQLite's `datetime('now')` is always "later" because `'T' > ' '`;
+  one shared format constant now serves every such comparison.
+- **The voice half — decision 6.** The timeout's voice half runs the one
+  voice-moderator authorizer the mute endpoint itself uses
+  (`permissions.AuthorizeVoiceModerator`: base `MUTE_MEMBERS` plus the
+  effective channel authorization; the two raw-bit residue rows it replaced
+  left `authz_chokepoint`), bound to the target's join instance. Ownership
+  of the mute lives **on the voice session**, not on the ledger row:
+  `voice_states.server_muted_by` names the action that muted, set only on
+  an unmuted→muted transition keyed on user, channel and join time, so a
+  target who moves channel between the check and the mute is not muted and
+  the row says so, a mute another moderator set is never claimed, a new
+  session starts unowned, and superseding a timeout transfers ownership to
+  the row that replaces it. The DB change and the SFU call run under one
+  per-target lock, shared with the manual mute endpoint, so a late unmute
+  cannot clear a fresh mute, and an SFU failure rolls the DB transition
+  back rather than reporting "applied"
+  (`TestTimeout_VoiceHalf_ChannelScopedAuthorization`,
+  `TestTimeout_VoiceHalf_TargetMovesBetweenCheckAndMute`,
+  `TestLiftTimeout_DoesNotClearAnAlreadyMutedTarget`,
+  `TestLiftTimeout_DoesNotClearAnotherModeratorsAuthority`,
+  `TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim`, and the
+  supersede-transfer and leave-and-rejoin tests through a real session). A
+  lift is two halves: the ledger rows marked lifted inside whoever's
+  transaction, then one post-commit reconcile — unmute what those actions
+  own, audit, the `lifted` frame — that `LiftTimeout` wraps and an appeal
+  overturn (B5-10) calls after its own commit; a sweep at start-up and on
+  every tick runs the same reconcile for any session whose owner is lifted
+  or expired, which also closes a pre-existing gap: an expired timeout
+  never unmuted (`TestMaintenance_*` expiry, manual-mute-untouched and
+  crash-shaped commit-then-sweep tests).
+- **Acting on a report.** `POST /api/v1/moderation/queue/{id}/act` links
+  the action to the report and its `report_events` row; self-review is
+  refused through this door too; the transport outcomes (ban broadcast,
+  bulk-delete broadcast, the voice result) are returned and sent only when
+  the write succeeded (`TestModerationQueueAct_SelfReviewRefused`,
+  `_BanBroadcastsMemberBan`, `_RemovalBroadcastsChatBulkDeleted`,
+  `_TimeoutExposesVoiceOutcome`, `_NoBroadcastWhenActionFails`). Every kind
+  validates and stores its reason; the ledger a target reads hides any
+  report id the confidentiality guard would hide
+  (`TestModerationLedger_ReportIDHiddenForConfidentialSubject`).
+- **Protocol.** One new server→client type, `mod_action`, targeted at the
+  subject of a warning or timeout, unsequenced and not replayed; `ready`
+  gains `notices` — unacknowledged warnings, actor-free
+  (`TestWarning_ReadyCarriesUnacknowledgedNotices`,
+  `TestTimeout_LiveTargetGetsModActionFrame`). The kind table B5-7 requires
+  classifies it as metadata. No client→server command.
+- **BPR-072's other half.** TLS, backups and updates stay owner-only, proven
+  by walking the admin router: the ten owner-only routes are a literal list
+  compared against what registered through the one `ownerOnly` call site,
+  each refused to a narrow role and admitted to the Owner
+  (`TestOwnerOnlyControlsStayOwnerOnly`).
+- **Workstream 10's absence proof.** No plugin capability can take a
+  moderation action (`TestAbsenceContract_NoPluginModerationCapability`),
+  every ledger row carries a human actor
+  (`TestModeration_EveryActionWritesALedgerRow`,
+  `TestModerationService_RefusesNonHumanActor`), and the audit detail is a
+  fixed phrase, never the free text (`TestModeration_AuditDetailsSafe` —
+  which found `BanUser` copying the raw reason into the audit log, a
+  pre-existing gap now closed; the reason stays on `users.ban_reason`).
+- **Retention.** `moderation.action_retention_days` (default 90) retires
+  warning and timeout rows on the maintenance tick, never a ban or a removal
+  (`TestModerationRetention_RetiresWarningsAndTimeoutsOnly`); while an
+  `appeals` table exists the sweep refuses to run until B5-10 wires the join
+  (`TestRetireModerationActions_RefusesWhenAppealsTableExists`).
+- **Four independent review rounds**, briefed on S6's abuse table. The first
+  found four P1s, nine P2s and a P3, fixed in `b4757d2e`: DM edits bypassing
+  the timeout; the voice half authorised by a bare server-wide bit; a lift
+  clearing a mute it never applied; the target's ledger leaking confidential
+  report ids; self-review through `act`; transport outcomes dropped; no rank
+  re-check on lift; overlapping active timeouts; unvalidated and discarded
+  reasons; a lookup failure failing open; a sequential "concurrency" test; a
+  hard-coded owner-only route count; and the docs. The second found one new
+  P1 and two P2s (`619f8bb9`): a channel-level allow granting the mute
+  without the base bit; ownership lost under a racing lift and under
+  supersede. Those two kept arriving because a boolean on the ledger row
+  cannot track a voice session's lifetime, so the third round
+  (`445d97ed`) moved ownership onto the session and put one lock around the
+  DB change and the SFU call — after which the fourth (`0af1f39b`) found
+  only edges of the same shape, each closed: a manual re-mute inheriting the
+  timeout's ownership, an already-lifted action still able to mute, the
+  supersede transfer outside the lock, deafen's implied mute bypassing it, a
+  stale finalize announcing a lift that no longer applied, a channel-switch
+  restore dropping ownership, an unbounded lock map, and an
+  authorization-before-existence gap the redesign had reintroduced.
+- **Revert-proof, sixteen mutations**: `TimedOut` ignored, the rank check
+  outside the transaction, the ban ledger write dropped, the non-human
+  refusal removed, the voice half without `MUTE_MEMBERS`, the sweep retiring
+  a ban, the ack accepting another user's row, the DM edit gate (alone), the
+  bare-bit voice check, the unconditional mute clear, the report-id guard,
+  the lookup error swallowed, the base-bit prerequisite, the ownership check,
+  the guarded flag write, the kick reason hard-coded. Each red for its named
+  test, each green restored.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (`049` extends `dev`'s `048` in order), prettier from the
+  worktree root, the coverage floor (`permissions` held at 100 by a new
+  error-path case; `ws` reads under floor on Windows by the documented gap,
+  and the Linux leg is the authority).
+
+**What B5-10 inherits.** The ledger id is what an appeal names; `voice_muted`
+and the supersede chain are what an overturn must respect when it lifts a
+timeout by action id; `retireModerationActions` waits for the join.
+
+**Not included, deliberately.** A rank check on content removal (ruled
+above, open to reversal); a public id on ledger rows (the target reads only
+their own); the Moderation Center UI (B9); a findings-ledger row.
+
 ## B5-10 — Rate-limited appeals
 
 **Closes:** BPR-073. **Blocked by:** B5-9. **Decisions:** decision 8 — settled. **Size:** 2–3

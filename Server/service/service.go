@@ -71,6 +71,10 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	moderation.erasure = erasure
 	blocks := NewBlockService(st)
 	messages := NewMessageService(st, permSvc, limiter)
+	// The report-linked removal entry point (ActOnReport, kind="removal")
+	// needs MessageService's own authorization and effect — never a second
+	// copy of DeleteMessage's checks (B5-9).
+	moderation.messages = messages
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)

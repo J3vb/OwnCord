@@ -55,9 +55,14 @@ type Client struct {
 	// setPendingModFlags/takePendingModFlags.
 	pendingModServerMuted    bool
 	pendingModServerDeafened bool
-	roleName                 string // cached role name for chat_message broadcasts
-	tokenHash                string // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq                  uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// pendingModServerMutedBy is the stashed mute's owner (round 5, Codex
+	// review P2) — nil for a manual mute; carried the same way as the two
+	// booleans above so the re-join's restore can tell a timeout-owned mute
+	// from a manual one.
+	pendingModServerMutedBy *int64
+	roleName                string // cached role name for chat_message broadcasts
+	tokenHash               string // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq                 uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -231,23 +236,25 @@ func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
 // interleave with it. Paired with takePendingModFlags, which the client's own
 // subsequent voice_join consults when there is no live row left to read the
 // flags back from (currentChID == 0).
-func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool) {
+func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.pendingModServerMuted = serverMuted
 	c.pendingModServerDeafened = serverDeafened
+	c.pendingModServerMutedBy = serverMutedBy
 }
 
 // takePendingModFlags reads and clears the flags stashed by
 // setPendingModFlags. Take-and-clear so an ordinary later join — one not
 // preceded by a moderator move — is unaffected by a stash nobody consumed.
-func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool) {
+func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
-	serverMuted, serverDeafened = c.pendingModServerMuted, c.pendingModServerDeafened
+	serverMuted, serverDeafened, serverMutedBy = c.pendingModServerMuted, c.pendingModServerDeafened, c.pendingModServerMutedBy
 	c.pendingModServerMuted = false
 	c.pendingModServerDeafened = false
-	return serverMuted, serverDeafened
+	c.pendingModServerMutedBy = nil
+	return serverMuted, serverDeafened, serverMutedBy
 }
 
 // setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,

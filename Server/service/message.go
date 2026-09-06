@@ -28,6 +28,9 @@ var (
 	ErrConflict       = errors.New("conflict")
 	ErrBlocked        = errors.New("blocked")
 	ErrDeletedMessage = errors.New("message is deleted")
+	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
+	// timeout row (B5-9) and cannot send, react or join voice.
+	ErrTimedOut = errors.New("timed out")
 )
 
 // SendMessageParams contains validated input for sending a message.

@@ -59,7 +59,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
-	wasServerMuted, wasServerDeafened, ok := h.voiceJoinLeaveCurrent(ctx, c, channelID)
+	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, c, channelID)
 	if !ok {
 		return
 	}
@@ -69,7 +69,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
-	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened)
+	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 
 	if !h.voiceJoinGrantToken(ctx, c, channelID, state) {
 		return
@@ -189,13 +189,13 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 // and verifies the old row is really gone. The two booleans are the
 // snapshotted flags for voiceJoinRestoreModFlags; false in the third position
 // means the join must not proceed (the error frame has already been sent).
-func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID int64) (bool, bool, bool) {
+func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID int64) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
 	currentChID := c.getVoiceChID()
 
 	// If user is already in the same voice channel, no-op.
 	if currentChID == channelID {
 		c.sendMsg(buildErrorMsg(ErrCodeAlreadyJoined, "already in this voice channel"))
-		return false, false, false
+		return false, false, nil, false
 	}
 
 	// A moderator-imposed mute/deafen must survive a channel switch.
@@ -214,14 +214,14 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 	// voicePendingModFlagsSetter in voice_moderation.go) and are taken back
 	// out here instead. Take-and-clear so an ordinary first join, unrelated to
 	// any move, is unaffected by a stash nobody consumed.
-	var wasServerMuted, wasServerDeafened bool
 	if currentChID > 0 {
 		if prevState, prevErr := h.voice.State(ctx, c.userID); prevErr == nil && prevState != nil {
 			wasServerMuted = prevState.ServerMuted
 			wasServerDeafened = prevState.ServerDeafened
+			wasServerMutedBy = prevState.ServerMutedBy
 		}
 	} else {
-		wasServerMuted, wasServerDeafened = c.takePendingModFlags()
+		wasServerMuted, wasServerDeafened, wasServerMutedBy = c.takePendingModFlags()
 	}
 
 	// If user is already in a different voice channel, leave it first.
@@ -238,7 +238,7 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
-			return false, false, false
+			return false, false, nil, false
 		}
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
@@ -258,11 +258,11 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 			// (re-broadcasting voice_leave, harmlessly) within one tick, and
 			// the user_id-PK upsert lets the user rejoin immediately.
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
-			return false, false, false
+			return false, false, nil, false
 		}
 	}
 
-	return wasServerMuted, wasServerDeafened, true
+	return wasServerMuted, wasServerDeafened, wasServerMutedBy, true
 }
 
 // voiceJoinPersist commits the join to the DB under the channel's capacity
@@ -318,8 +318,8 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, c *Client, ch *db.Channel, c
 // everywhere else in the voice moderation path the persisted server_muted is
 // the authority: it blocks the target's own unmute and is re-applied at the
 // SFU whenever the moderator next acts.
-func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, wasServerMuted, wasServerDeafened bool) *db.VoiceState {
-	if refreshed := h.voice.RestoreModFlags(ctx, c.userID, channelID, wasServerMuted, wasServerDeafened); refreshed != nil {
+func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64) *db.VoiceState {
+	if refreshed := h.voice.RestoreModFlags(ctx, c.userID, channelID, wasServerMuted, wasServerDeafened, wasServerMutedBy); refreshed != nil {
 		return refreshed
 	}
 	return state

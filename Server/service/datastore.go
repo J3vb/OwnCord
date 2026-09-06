@@ -241,6 +241,21 @@ type Store interface {
 	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
 	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
 	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
+	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact
+	// session (channelID, joinedAt), stamping actionID as owner
+	// (voice_states.server_muted_by) atomically with the mute, only on a
+	// genuine unmuted->muted transition (round 4, replacing round 3's
+	// CompareAndSetServerMute — see migration 049's comment).
+	// supersededIDs transfers ownership from those just-superseded ledger
+	// ids onto actionID, inside the same transaction as the mute (round 5,
+	// Codex review P2) — the caller (ws.Hub, under its per-user lock) is
+	// the only place this transfer may happen; see moderation.go's
+	// TimeoutVoiceMuter.MuteForTimeout doc comment.
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears server_muted for whichever voice_states
+	// row currently names one of actionIDs as owner and reports its
+	// channel/join token for the paired SFU call (round 4).
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
@@ -337,6 +352,47 @@ type Store interface {
 	InsertReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) error
 	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
+
+	// ── Moderation actions (migration 049, B5-9) ──
+	// WarnUser/TimeoutUser write their entire effect as one ledger row, in
+	// one transaction with the live rank guard (recordModerationAction):
+	// a target promoted between the caller's check and this write is
+	// refused (db.ErrOutranked), not sanctioned.
+	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
+	// TimeoutUser also returns the ids it just superseded (round 5, Codex
+	// review P2): the caller passes them to the voice half's mute call so
+	// the ownership transfer runs under ITS per-user lock, not here.
+	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error)
+	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none
+	// lifted). The caller passes them to ClearServerMuteOwnedBy, which
+	// clears whichever voice_states row (if any) is currently owned by one
+	// of them — ownership lives on the session now, not this ledger
+	// (round 4, replacing round 3's voiceMuted bool).
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
+	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
+	// Subject.TimedOut is filled from.
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
+	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
+	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
+	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
+	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
+	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport
+	// shape the plan asks for, so the existing BanUser/ForceLogoutUser
+	// signatures on this interface are untouched.
+	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
+	// ForceLogoutWithAction's reason is the ledger row's text; empty falls
+	// back to the fixed phrase every direct caller used before P2-10 (Codex
+	// review) let ActOnReport store a caller-submitted one instead.
+	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
+	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are
+	// DeleteMessage/PurgeChannelMessages plus a removal ledger row, in the
+	// same transaction, when the deleter is not the author.
+	// DeleteMessageWithRemoval's reason is the ledger row's text; empty
+	// falls back to the fixed phrase "message removed" (P2-10).
+	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
+	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
+	RetireModerationActions(ctx context.Context, days int) (int64, error)
 
 	// ── Push (migration 045, B5-4) ──
 	// UpsertPushSubscription's keep is the per-user device cap; the upsert,

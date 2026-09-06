@@ -156,6 +156,23 @@ func (s *VoiceService) SetServerMute(ctx context.Context, userID, channelID int6
 	return s.st.SetVoiceServerMute(ctx, userID, channelID, muted)
 }
 
+// MuteForTimeoutSession is SetServerMute scoped to one exact voice session
+// (channelID, joinedAt) instead of channelID alone, stamping actionID as
+// owner atomically with the mute (round 4): the timeout voice half's
+// authorization and its SFU mute must bind to the SAME session, not a
+// channel a separate, later read could resolve differently if the target
+// moved on in between.
+func (s *VoiceService) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error) {
+	return s.st.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
+}
+
+// ClearServerMuteOwnedBy clears the mute currently owned by any of
+// actionIDs and reports its channel/join token for the paired SFU call
+// (round 4) — see db.DB.ClearServerMuteOwnedBy.
+func (s *VoiceService) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
+	return s.st.ClearServerMuteOwnedBy(ctx, userID, actionIDs)
+}
+
 // SetServerDeafen is SetServerMute for the server_deafened column, with the
 // same channel scoping and the same meaning for a false result.
 func (s *VoiceService) SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error) {
@@ -173,12 +190,28 @@ func (s *VoiceService) SetServerDeafen(ctx context.Context, userID, channelID in
 // Every write here is best-effort by design: a failure must not fail the join
 // the member has already been admitted to. Nothing is written when neither
 // flag is set, so an ordinary first join costs no round trips.
-func (s *VoiceService) RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool) *db.VoiceState {
+//
+// serverMutedBy is the PRIOR session's owner (round 5, Codex review P2): a
+// mute owned by a timeout must carry that SAME ownership onto the fresh
+// session, through the exact conditional write a timeout's own mute uses
+// (MuteForTimeoutSession) — which also refuses, leaving the fresh session
+// unmuted, when that owner is no longer active (lifted, or expired in the
+// gap between the switch and this restore, before the reconcile sweep next
+// runs): resurrecting a sanction with no owner left to ever clear it is
+// worse than dropping it early. nil means a manual moderator mute (or none
+// at all), restored the old, ownerless way.
+func (s *VoiceService) RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool, serverMutedBy *int64) *db.VoiceState {
 	if !muted && !deafened {
 		return nil
 	}
 	if muted {
-		if _, err := s.SetServerMute(ctx, userID, channelID, true); err != nil {
+		if serverMutedBy != nil {
+			if fresh, err := s.st.GetVoiceState(ctx, userID); err != nil || fresh == nil {
+				slog.Error("voice: restoring an owned server mute after a channel switch", "err", err, "user_id", userID)
+			} else if _, _, err := s.st.MuteForTimeoutSession(ctx, userID, channelID, *serverMutedBy, fresh.JoinedAt, nil); err != nil {
+				slog.Error("voice: restoring an owned server mute after a channel switch", "err", err, "user_id", userID)
+			}
+		} else if _, err := s.SetServerMute(ctx, userID, channelID, true); err != nil {
 			slog.Error("voice: restoring server mute after a channel switch", "err", err, "user_id", userID)
 		}
 	}

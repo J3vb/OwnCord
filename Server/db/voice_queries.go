@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -109,6 +110,7 @@ func (d *DB) GetVoiceState(ctx context.Context, userID int64) (*VoiceState, erro
 		ServerMuted:    r.ServerMuted != 0,
 		ServerDeafened: r.ServerDeafened != 0,
 		JoinedAt:       r.JoinedAt,
+		ServerMutedBy:  r.ServerMutedBy,
 	}
 	return &vs, nil
 }
@@ -212,6 +214,152 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// MuteForTimeoutSession is the timeout voice half's mute (P1-3/P1-4 PARTIAL
+// round 3; reworked round 4, Codex review, onto the session-ownership model
+// — see migration 049's comment on voice_states.server_muted_by). Matched
+// against the EXACT session — channelID and joinedAt, the join-instance
+// token JoinVoiceChannel mints — the caller already authorized. A single
+// conditional UPDATE (WHERE server_muted = 0) both applies the mute AND
+// stamps actionID as owner, only on a genuine unmuted->muted transition, so
+// there is no gap between "mute lands" and "ownership recorded" for a
+// concurrent lift to race (round 3's Codex 16 is now structurally
+// impossible, not merely guarded against).
+//
+// matched=false covers "no such session" (the target left/switched between
+// authorization and this call, P1-3 PARTIAL) and "the incoming actionID is
+// no longer an active timeout on this target" (round 5, Codex review P2: a
+// delayed call, reaching the SFU/DB after its own row was already lifted or
+// expired, must be refused, not treated as a fresh or reclaimed mute) —
+// disambiguated from "already muted by someone/something else" (matched=
+// true, transitioned=false, not this call's ownership to claim) only when
+// the conditional UPDATE itself affects zero rows.
+//
+// supersededIDs, when non-empty, transfers ownership from those (just-
+// superseded, round 4 Codex review) ledger ids onto actionID FIRST, inside
+// this SAME transaction (round 5, Codex review P2): TimeoutUser no longer
+// does this transfer itself, because it must happen under the ws-layer
+// per-target lock the caller (ws.Hub.MuteForTimeout) already holds for the
+// paired SFU call, not as a bare DB write racing that lock from outside it
+// — a transfer landing between the lock's DB write and its SFU call is
+// exactly the gap that let a failed caller's rollback miss the row a
+// concurrent supersede had already re-pointed elsewhere.
+func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	q := dbgen.New(tx)
+
+	if len(supersededIDs) > 0 {
+		if err := transferVoiceMuteOwnership(ctx, tx, supersededIDs, actionID); err != nil {
+			return false, false, fmt.Errorf("MuteForTimeoutSession transfer: %w", err)
+		}
+	}
+
+	res, err := q.MuteForSession(ctx, dbgen.MuteForSessionParams{
+		ActionID: &actionID, UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
+	})
+	if err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		if err := tx.Commit(); err != nil {
+			return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
+		}
+		return true, true, nil
+	}
+	found, err := q.VoiceSessionExists(ctx, dbgen.VoiceSessionExistsParams{
+		UserID: userID, ChannelID: channelID, JoinedAt: joinedAt,
+	})
+	if err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession exists check: %w", err)
+	}
+	if found == 0 {
+		if err := tx.Commit(); err != nil {
+			return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
+		}
+		return false, false, nil
+	}
+	active, err := q.TimeoutActionIsActiveForTarget(ctx, dbgen.TimeoutActionIsActiveForTargetParams{ID: actionID, TargetID: userID})
+	if err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession active check: %w", err)
+	}
+	// Nothing was written either way — no ownership to commit, but a plain
+	// read inside this tx costs nothing to finish cleanly.
+	if err := tx.Commit(); err != nil {
+		return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
+	}
+	if active == 0 {
+		// The incoming action is no longer live (lifted or expired) — not
+		// this call's mute to claim, regardless of the session's own state.
+		return false, false, nil
+	}
+	return true, false, nil
+}
+
+// ClearServerMuteOwnedBy clears server_muted for whichever voice_states row
+// (at most one — user_id is the table's primary key) currently names one of
+// actionIDs as server_muted_by, and reports that row's channel/join-instance
+// token for the caller's paired SFU call. Session-bound for free (round 4,
+// Codex review, fixing round 3's Codex 13): an ended session has no row to
+// match, and a rejoin starts a fresh row with server_muted_by NULL, so an
+// old action id (a lift's own id, or its whole supersede chain) can never
+// clear an unrelated NEW mute on a later session. Also LiftTimeout's
+// rollback path for an SFU failure on mute (round 4, Codex 14) — same
+// statement, called with only the one action id that just failed.
+func (d *DB) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
+	if len(actionIDs) == 0 {
+		return 0, "", false, nil
+	}
+	placeholders := make([]string, len(actionIDs))
+	args := make([]any, 0, len(actionIDs)+1)
+	args = append(args, userID)
+	for i, id := range actionIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	row := d.writer.QueryRowContext(ctx,
+		"UPDATE voice_states SET server_muted = 0, server_muted_by = NULL"+ //nolint:gosec // placeholders are "?" repeated, not user input
+			" WHERE user_id = ? AND server_muted_by IN ("+strings.Join(placeholders, ",")+")"+
+			" RETURNING channel_id, joined_at",
+		args...,
+	)
+	if err := row.Scan(&channelID, &joinedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, "", false, nil
+		}
+		return 0, "", false, fmt.Errorf("ClearServerMuteOwnedBy: %w", err)
+	}
+	return channelID, joinedAt, true, nil
+}
+
+// OrphanedVoiceMute is one voice_states row FindOrphanedVoiceMutes found:
+// UserID's session still names ActionID as server_muted_by, but that action
+// is now lifted or expired.
+type OrphanedVoiceMute struct {
+	UserID   int64
+	ActionID int64
+}
+
+// FindOrphanedVoiceMutes lists every voice_states row whose server_muted_by
+// points at a timeout that is now lifted or expired (round 4, B5-10
+// addendum) — the maintenance-tick (and start-up) reconcile sweep's input.
+func (d *DB) FindOrphanedVoiceMutes(ctx context.Context) ([]OrphanedVoiceMute, error) {
+	rows, err := d.q.FindOrphanedVoiceMutes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("FindOrphanedVoiceMutes: %w", err)
+	}
+	out := make([]OrphanedVoiceMute, 0, len(rows))
+	for _, r := range rows {
+		if r.ActionID == nil {
+			continue // WHERE server_muted_by IS NOT NULL guarantees this in practice.
+		}
+		out = append(out, OrphanedVoiceMute{UserID: r.UserID, ActionID: *r.ActionID})
+	}
+	return out, nil
 }
 
 // SetVoiceServerDeafen applies or clears the moderator-imposed deafen, scoped

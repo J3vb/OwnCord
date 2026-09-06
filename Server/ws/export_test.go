@@ -250,6 +250,7 @@ func NewHubForTest() *Hub {
 		clients:      make(map[int64]*Client),
 		pubsub:       NewPubSub(),
 		topicLimiter: NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
+		voiceMod:     newVoiceModLocks(),
 	}
 }
 

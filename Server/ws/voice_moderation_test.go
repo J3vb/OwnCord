@@ -138,6 +138,104 @@ func auditActions(t *testing.T, database *db.DB) []string {
 
 // ─── authorization ────────────────────────────────────────────────────────────
 
+// voiceModErrorFrame is an error frame's code+message, comparable for
+// equality — the whole of what a client-visible refusal reveals.
+type voiceModErrorFrame struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// receiveErrorFrame is receiveErrorCode's sibling: the full code+message,
+// not just the code, for tests that need to prove two refusals are
+// indistinguishable, not merely the same code family.
+func receiveErrorFrame(ch <-chan []byte, deadline time.Duration) (voiceModErrorFrame, bool) {
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-ch:
+			var env struct {
+				Type    string             `json:"type"`
+				Payload voiceModErrorFrame `json:"payload"`
+			}
+			if err := json.Unmarshal(msg, &env); err != nil {
+				continue
+			}
+			if env.Type == "error" {
+				return env.Payload, true
+			}
+		case <-timer.C:
+			return voiceModErrorFrame{}, false
+		}
+	}
+}
+
+// TestVoiceMod_Mute_WithoutMutePermission_CannotProbeVoicePresence is the
+// authorization-before-existence follow-up (Codex review): voiceModTarget's
+// early base-bit rejection was removed when it moved onto
+// permissions.AuthorizeVoiceModerator (round 4, Part C), which runs only
+// once a channel Subject exists — reopening a presence probe, since an
+// actor without MUTE_MEMBERS would then see FORBIDDEN for a target in voice
+// but VOICE_ERROR ("not in a voice channel") for one who is not. Restored
+// without a second authorizer: the SAME AuthorizeVoiceModerator call runs on
+// a zero-channel Subject when there is no session, so an actor without the
+// base bit gets the byte-identical refusal either way, and only a holder
+// ever reaches the "not in voice" answer.
+func TestVoiceMod_Mute_WithoutMutePermission_CannotProbeVoicePresence(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-probe")
+	actor := seedVoiceUserWithRole(t, database, "mod-noperm-probe", 3) // Moderator: no MUTE_MEMBERS
+	inVoice := seedVoiceUserWithRole(t, database, "target-in-voice-probe", 4)
+	notInVoice := seedVoiceUserWithRole(t, database, "target-not-in-voice-probe", 4)
+	joinVoice(t, hub, inVoice, chanID)
+
+	send1 := make(chan []byte, 16)
+	c1 := ws.NewTestClientWithUser(hub, actor, chanID, send1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
+	hub.HandleMessageForTest(c1, voiceModMuteMsg(chanID, inVoice.ID, true))
+	gotInVoice, ok := receiveErrorFrame(send1, waitTimeout)
+	if !ok {
+		t.Fatal("no error frame for a target in voice")
+	}
+
+	send2 := make(chan []byte, 16)
+	c2 := ws.NewTestClientWithUser(hub, actor, chanID, send2)
+	hub.Register(c2)
+	waitRegistered(t, hub, c2)
+	hub.HandleMessageForTest(c2, voiceModMuteMsg(chanID, notInVoice.ID, true))
+	gotNotInVoice, ok := receiveErrorFrame(send2, waitTimeout)
+	if !ok {
+		t.Fatal("no error frame for a target not in voice")
+	}
+
+	if gotInVoice != gotNotInVoice {
+		t.Fatalf("responses differ: in-voice=%+v not-in-voice=%+v — an actor without MUTE_MEMBERS must not be able to tell the two apart", gotInVoice, gotNotInVoice)
+	}
+	if gotInVoice.Code != "FORBIDDEN" {
+		t.Fatalf("code = %q, want FORBIDDEN", gotInVoice.Code)
+	}
+
+	// Contrast: a holder (has MUTE_MEMBERS, outranks the target) DOES learn
+	// "not in voice" — the probe is closed only for a non-holder.
+	holder := seedVoiceUserWithRole(t, database, "admin-holder-probe", 2)
+	send3 := make(chan []byte, 16)
+	c3 := ws.NewTestClientWithUser(hub, holder, chanID, send3)
+	hub.Register(c3)
+	waitRegistered(t, hub, c3)
+	hub.HandleMessageForTest(c3, voiceModMuteMsg(chanID, notInVoice.ID, true))
+	gotHolder, ok := receiveErrorFrame(send3, waitTimeout)
+	if !ok {
+		t.Fatal("no error frame for the holder")
+	}
+	if gotHolder.Code != "VOICE_ERROR" {
+		t.Fatalf("holder code = %q, want VOICE_ERROR: a holder must still learn the target is not in voice", gotHolder.Code)
+	}
+	if gotHolder == gotInVoice {
+		t.Fatal("the holder's answer must differ from the non-holder's FORBIDDEN refusal")
+	}
+}
+
 func TestVoiceMod_Mute_WithoutMutePermission_Forbidden(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	chanID := seedVoiceChan(t, database, "vc-perm")

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -462,8 +461,4 @@ func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
 	if !ok || resp.KeyID != wantKeyID {
 		t.Fatalf("key_id = %q, want the service's %q (ok=%v)", resp.KeyID, wantKeyID, ok)
 	}
-}
-
-func itoa(n int64) string {
-	return strconv.FormatInt(n, 10)
 }

@@ -13,9 +13,11 @@ type mockDB struct {
 	channelPerms   map[chanRoleKey]chanPerm
 	userPerms      map[chanUserKey]chanPerm
 	dmParticipants map[dmKey]bool
+	timedOutUsers  map[int64]bool
 	chanErr        error
 	userErr        error
 	dmErr          error
+	timedOutErr    error
 }
 
 type (
@@ -61,6 +63,13 @@ func (m *mockDB) IsDMParticipant(_ context.Context, userID, channelID int64) (bo
 		return false, m.dmErr
 	}
 	return m.dmParticipants[dmKey{userID, channelID}], nil
+}
+
+func (m *mockDB) HasActiveTimeout(_ context.Context, userID int64) (bool, error) {
+	if m.timedOutErr != nil {
+		return false, m.timedOutErr
+	}
+	return m.timedOutUsers[userID], nil
 }
 
 // ─── HasChannelPerm tests ───────────────────────────────────────────────────
@@ -145,6 +154,58 @@ func TestHasChannelPerm(t *testing.T) {
 				t.Errorf("HasChannelPerm() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestChecker_Subject_TimedOut pins B5-9's wiring: the live, uncached
+// HasActiveTimeout lookup fills Subject.TimedOut for a real (non-zero)
+// userID, is skipped for the role-only form (userID == 0, no member in
+// hand), is skipped for an Administrator (mirroring the existing HasAdmin
+// short-circuit), and a lookup failure is returned rather than swallowed.
+func TestChecker_Subject_TimedOut(t *testing.T) {
+	db := newMockDB()
+	db.timedOutUsers = map[int64]bool{7: true}
+	ck := NewChecker(db)
+
+	sub, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10)
+	if err != nil {
+		t.Fatalf("Subject: %v", err)
+	}
+	if !sub.TimedOut {
+		t.Fatal("TimedOut = false, want true for a user with an active timeout")
+	}
+
+	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 8, 10)
+	if err != nil {
+		t.Fatalf("Subject: %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for a user with no active timeout")
+	}
+
+	// userID == 0 (role-only, no member in hand): skipped entirely.
+	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 0, 10)
+	if err != nil {
+		t.Fatalf("Subject(userID=0): %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for a role-only Subject (userID 0)")
+	}
+
+	// Administrator short-circuits before the lookup, mirroring HasAdmin.
+	db.timedOutUsers[7] = true
+	sub, err = ck.Subject(context.Background(), Administrator, 1, 7, 10)
+	if err != nil {
+		t.Fatalf("Subject(admin): %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for an Administrator")
+	}
+
+	// A lookup failure is returned, not collapsed to false.
+	db.timedOutErr = errors.New("db error")
+	if _, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10); err == nil {
+		t.Fatal("Subject: want an error when HasActiveTimeout fails")
 	}
 }
 

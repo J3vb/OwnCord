@@ -144,6 +144,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		settings:        settingsReader,
 		readers:         opts.Readers,
 		voice:           opts.Voice,
+		voiceMod:        newVoiceModLocks(),
 		presence:        opts.Presence,
 		authn:           opts.Auth,
 		broadcast:       make(chan broadcastMsg, 1024),

@@ -135,6 +135,22 @@ func TestCanModerateVoice(t *testing.T) {
 	})
 }
 
+// TestAuthorizeVoiceModerator pins the round-4 canonical authorizer
+// (Codex review Part C): the actor's BASE role must hold MUTE_MEMBERS on
+// its own, a stricter gate than CanModerateVoice's channel-scoped OR
+// alone — a channel override cannot manufacture voice-moderation authority
+// a role never held at all.
+func TestAuthorizeVoiceModerator(t *testing.T) {
+	runPredicate(t, "AuthorizeVoiceModerator", AuthorizeVoiceModerator, []predicateCase{
+		{"moderator with base MUTE_MEMBERS allowed", Subject{RolePerms: modBits, Channel: voice(false)}, nil},
+		{"no MUTE_MEMBERS at all refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
+		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"base bit present but a channel deny still refuses", Subject{RolePerms: modBits, Override: deny(MuteMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"base bit present but channel hidden still refuses", Subject{RolePerms: modBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+	})
+}
+
 // TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
 // server-wide, and — unlike every channel predicate above — never moved by a
 // channel override, because moderation authority is not a channel property.
@@ -145,6 +161,41 @@ func TestCanModerate(t *testing.T) {
 		{"admin without the bit allowed", Subject{RolePerms: Administrator}, nil},
 		{"channel override cannot grant it", Subject{RolePerms: memberBits, Override: allow(ModerateMembers), Channel: text(false)}, ErrPermissionDenied},
 		{"channel override cannot strip it", Subject{RolePerms: ModerateMembers, Override: deny(ModerateMembers), Channel: text(false)}, nil},
+	})
+}
+
+// TestCanAddReaction pins the reaction gate (B5-9): ADD_REACTIONS with
+// READ_MESSAGES, timed out refused unconditionally, and the same DM
+// membership/block rule every other channel predicate applies.
+func TestCanAddReaction(t *testing.T) {
+	const reactBits = ReadMessages | AddReactions
+	runPredicate(t, "CanAddReaction", CanAddReaction, []predicateCase{
+		{"member reacts in text", Subject{RolePerms: reactBits, Channel: text(false)}, nil},
+		{"reader without ADD_REACTIONS refused", Subject{RolePerms: ReadMessages, Channel: text(false)}, ErrPermissionDenied},
+		{"ADD_REACTIONS without READ refused", Subject{RolePerms: AddReactions, Channel: text(false)}, ErrPermissionDenied},
+		{"role deny ADD_REACTIONS refused", Subject{RolePerms: reactBits, Override: deny(AddReactions), Channel: text(false)}, ErrPermissionDenied},
+		{"user deny ADD_REACTIONS refused", Subject{RolePerms: reactBits, Override: userDeny(AddReactions), Channel: text(false)}, ErrPermissionDenied},
+		{"admin bypasses deny", Subject{RolePerms: Administrator, Override: deny(AddReactions), Channel: text(false)}, nil},
+		{"dm participant reacts without role bits", Subject{Channel: dm(), DMParticipant: true}, nil},
+		{"dm non-participant refused", Subject{RolePerms: Administrator, Channel: dm()}, ErrNotDMParticipant},
+		{"dm blocked refused", Subject{Channel: dm(), DMParticipant: true, DMBlocked: true}, ErrBlocked},
+		{"timed out refused in a channel", Subject{RolePerms: reactBits, Channel: text(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in a dm", Subject{Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+		{"timed out beats admin", Subject{RolePerms: Administrator, Channel: text(false), TimedOut: true}, ErrTimedOut},
+	})
+}
+
+// TestTimedOutSubject pins the TimedOut property on the two other predicates
+// it gates: a blanket refusal ahead of every other check (B5-9, decision 6).
+func TestTimedOutSubject(t *testing.T) {
+	runPredicate(t, "CanSendMessage/timedOut", CanSendMessage, []predicateCase{
+		{"timed out refused in text", Subject{RolePerms: memberBits, Channel: text(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in dm", Subject{Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+		{"not timed out unaffected", Subject{RolePerms: memberBits, Channel: text(false)}, nil},
+	})
+	runPredicate(t, "CanJoinVoice/timedOut", CanJoinVoice, []predicateCase{
+		{"timed out refused before CONNECT_VOICE is even checked", Subject{Channel: voice(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in a dm call", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
 	})
 }
 

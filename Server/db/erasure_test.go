@@ -108,6 +108,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// 22f (second Codex review): a report_events row where the subject was
 	// the ACTOR (they moderated report 900 at some point before erasure).
 	exec(`INSERT INTO report_events (report_id, actor_id, action, detail) VALUES (900, ?, 'noted', '')`, uid)
+	// B5-9 moderation-action classes (migration 049): a warning ABOUT the
+	// subject (23a, target_id) and a timeout BY the subject that they also
+	// lifted (23b, actor_id and lifted_by both).
+	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, reason) VALUES ('warning', ?, ?, 'seed warning about subject')`, uid, other)
+	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, lifted_by, lifted_at, expires_at, reason) VALUES ('timeout', ?, ?, ?, datetime('now'), datetime('now', '+1 hour'), 'seed timeout by subject')`, other, uid, uid)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 

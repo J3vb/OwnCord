@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 153 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 159 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -148,9 +148,14 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/metrics`                                                    |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
+| POST    | `/api/v1/moderation/queue/{id}/act`                                  |
 | POST    | `/api/v1/moderation/queue/{id}/assign`                               |
 | POST    | `/api/v1/moderation/queue/{id}/close`                                |
 | POST    | `/api/v1/moderation/queue/{id}/notes`                                |
+| GET     | `/api/v1/moderation/users/{id}/actions`                              |
+| POST    | `/api/v1/moderation/users/{id}/timeout`                              |
+| POST    | `/api/v1/moderation/users/{id}/untimeout`                            |
+| POST    | `/api/v1/moderation/users/{id}/warn`                                 |
 | GET     | `/api/v1/push/subscriptions`                                         |
 | POST    | `/api/v1/push/subscriptions`                                         |
 | DELETE  | `/api/v1/push/subscriptions/{id}`                                    |
@@ -161,6 +166,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
 | POST    | `/api/v1/users/me/recovery-kit`                                      |

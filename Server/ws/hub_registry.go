@@ -49,8 +49,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 		// voiceJoinCompleted supersession concerns, so it is not gated on
 		// c.lastSeq > 0: take-and-clear leaves nothing behind for old to
 		// double-serve, and a stash nobody set is always (false, false).
-		if pendingMuted, pendingDeafened := old.takePendingModFlags(); pendingMuted || pendingDeafened {
-			c.setPendingModFlags(pendingMuted, pendingDeafened)
+		if pendingMuted, pendingDeafened, pendingMutedBy := old.takePendingModFlags(); pendingMuted || pendingDeafened {
+			c.setPendingModFlags(pendingMuted, pendingDeafened, pendingMutedBy)
 		}
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays

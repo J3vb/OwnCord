@@ -228,15 +228,16 @@ The report queue's content retention window (B5-8). The `reports` row itself
 — the outcome, kept for `VIEW_AUDIT_LOG` holders and B4-10's marker
 unlinking — is never pruned; only its content is bounded.
 
-| Key                                | Type | Default | Description                                                                                                                                                                                                                                                     |
-| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning. |
+| Key                                | Type | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.                                                                                                                                                                                                                                                      |
+| `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires. `0` = never retire. Ban, kick and removal rows are never touched. As of this release the sweep refuses to run at all once an appeals table exists — B5-10 has not yet landed the exclusion query a per-row appeal reference would need, so today ANY appeals table stops retirement entirely, not merely the specific rows an appeal references. A negative value falls back to the default with a warning. |
 
 ## Key index (generated)
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 65 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 66 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -256,6 +257,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `github.repo`                               | GitHub / Updates (`github`)             |
 | `github.token`                              | GitHub / Updates (`github`)             |
 | `logging.level`                             | Logging (`logging`)                     |
+| `moderation.action_retention_days`          | Moderation (`moderation`)               |
 | `moderation.report_retention_days`          | Moderation (`moderation`)               |
 | `plugins.cpu_budget_ms`                     | Plugins (`plugins`)                     |
 | `plugins.directory`                         | Plugins (`plugins`)                     |

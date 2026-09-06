@@ -234,6 +234,25 @@ CREATE TABLE IF NOT EXISTS message_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
     ON message_requests(recipient_id, state);
+
+-- Moderation actions (migration 049, B5-9): permissions.Checker.Subject
+-- resolves TimedOut from this table for every CanSendMessage check, so it
+-- is required by every DM send through MessageService too, not just
+-- moderation's own tests.
+CREATE TABLE IF NOT EXISTS moderation_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
+    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id        INTEGER NOT NULL DEFAULT 0,
+    actor_token     TEXT,
+    report_id       INTEGER,
+    reason          TEXT    NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    acknowledged_at TEXT,
+    lifted_at       TEXT,
+    lifted_by       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 `)
 
 // ─── helpers ────────────────────────────────────────────────────────────────

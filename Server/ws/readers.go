@@ -53,6 +53,10 @@ type ReadySnapshotReader interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
+	// ListUnacknowledgedWarnings is B5-9's per-user notices slot: every
+	// warning issued to the connecting user that they have not yet
+	// acknowledged.
+	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 }
 
 // MemberPayloadReader is what member broadcast payloads (hub_broadcast.go)
@@ -139,7 +143,22 @@ type VoiceStore interface {
 	// Moderator flags and their compensations.
 	SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error)
 	SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error)
-	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool) *db.VoiceState
+	// MuteForTimeoutSession is the timeout voice half's mute (round 4,
+	// replacing round 3's CompareAndSetServerMute): scoped to one exact
+	// session (channelID, joinedAt), stamping actionID as owner atomically
+	// with the mute, only on a genuine unmuted->muted transition.
+	// supersededIDs transfers ownership onto actionID inside the same
+	// transaction as the mute (round 5, Codex review P2) — see
+	// service.TimeoutVoiceMuter.MuteForTimeout's doc comment.
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears the mute currently owned by any of
+	// actionIDs (round 4) — session-bound: an ended or restarted session
+	// can never be cleared by a stale action id.
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
+	// serverMutedBy (round 5, Codex review P2) carries a timeout's ownership
+	// onto the fresh session; nil restores the old, ownerless (manual mute)
+	// way.
+	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool, serverMutedBy *int64) *db.VoiceState
 	RollbackServerDeafen(ctx context.Context, targetID, authorizedChannelID int64, requestedDeafen bool)
 	WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string)
 }

@@ -114,7 +114,15 @@ type AuthzResidueEntry struct {
 // family behind a service. Raising a count is a reviewable edit here, never a
 // side effect of editing the function.
 //
-// 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4.
+// 17 symbols, 19 bound calls (was 19/21 at dev 75d64dd4, HP-2 question 5);
+// B5-9 added service.(*PermissionService).Subject for the TimedOut admin
+// short-circuit, and (briefly) service.(*ModerationService).Timeout for a
+// bare MUTE_MEMBERS check — P1-3 (Codex review) replaced that check with
+// permissions.CanModerateVoice over a real Subject, so Timeout's own row is
+// gone again; only Subject's remains. Round 4 (Codex review Part C) removed
+// the two classBaseBitRejection rows (ws.voiceModTarget and
+// service.(*ModerationService).actorCanModerateVoiceFor) once both moved
+// onto permissions.AuthorizeVoiceModerator.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -122,7 +130,12 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
-	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
+	// service.(*ModerationService).Timeout's own row is GONE (P1-3, Codex
+	// review): the voice half used to defer to a bare, server-wide
+	// MUTE_MEMBERS bit with no channel to resolve a Subject for (decision 6);
+	// it now builds a Subject for the target's CURRENT voice channel and asks
+	// permissions.CanModerateVoice — the canonical predicate, not a residue.
+	"service.(*RoleService).actorRole": {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
 	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
@@ -132,6 +145,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.(*ChannelService).resolveOverrideUser":     {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).Subject":              {classAdminShortCircuit, "skips the live, uncached TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},
 	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},
@@ -147,8 +161,14 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// read test.
 	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
-	// ── base-bit early rejection ahead of CanModerateVoice ─────────────────
-	"ws.voiceModTarget": {classBaseBitRejection, "rejects on MUTE_MEMBERS before the voice-state lookup; never admits", calls{"HasServerPerm": 1}},
+	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
+	// own base-bit-rejection rows are GONE (round 4, Codex review Part C):
+	// both used to duplicate a base-bit HasServerPerm(MUTE_MEMBERS) check
+	// ahead of CanModerateVoice (NEW P1, Codex review round 3); they now
+	// call permissions.AuthorizeVoiceModerator, the canonical combined
+	// predicate, not a residue. classBaseBitRejection is unused as a result
+	// but stays defined — a future call site with the same shape reuses it
+	// rather than inventing a new class.
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions

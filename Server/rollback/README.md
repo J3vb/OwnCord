@@ -3,8 +3,9 @@
 The hand-run reversal of every migration the B4 phase added, and every one
 since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
 
-`045_push_subscriptions` is B5-4's, `046_message_requests` is B5-6's and
-`047_nsfw_acknowledgements` is B5-7's — see the cost table below.
+`045_push_subscriptions` is B5-4's, `046_message_requests` is B5-6's,
+`047_nsfw_acknowledgements` is B5-7's, `048_reports` is B5-8's and
+`049_moderation_actions` is B5-9's — see the cost table below.
 
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
@@ -67,6 +68,7 @@ knowing before you start:
 
 | Reversal                     | What it costs                                                                                                                                                                                                                                                                                                                            |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `049_moderation_actions`     | Every warning, timeout, and the ledger rows ban/kick/removal recorded alongside their existing mechanisms are gone. Active timeouts stop being enforced immediately (nowhere left to read `expires_at` from); unacknowledged warnings are lost outright. Bans and kicked-out sessions are unaffected — their state lives elsewhere.      |
 | `048_reports`                | The report queue and every outcome row are gone — including the unlinkable ones decision 7 keeps after a subject erases. A report about an account that has since erased carries the last durable trace that the report ever happened; dropping the table drops that trace too. Also revokes `MODERATE_MEMBERS` from the Moderator role. |
 | `047_nsfw_acknowledgements`  | Every stored acknowledgement is gone. Nobody's consent history is reconstructable, so every member re-acknowledges every labelled channel on their next read — a one-time annoyance, not data loss of anything the product treats as durable content.                                                                                    |
 | `046_message_requests`       | Every pending request and every ignored/deleted/blocked decision the recipient made is lost, and a later re-apply's grandfathering backfill collapses the `sent_first`/`accepted`/`grandfathered` distinction on standing trust to just "trust exists" — see the reversal's own comment.                                                 |
