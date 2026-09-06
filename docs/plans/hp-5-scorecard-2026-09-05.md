@@ -49,6 +49,20 @@ then the feature `63250a15`) is the one this review depends on: the
 step-order test and the sweep seam B5-4 reused were introduced by the first
 commit, not the second.
 
+## The steps behind the hold
+
+None of these may merge before this scorecard is signed; they may be built
+on draft pull requests marked `[behind HP-5]`, on the branches below.
+
+| Step  | Branch                              | PR         |
+| ----- | ----------------------------------- | ---------- |
+| B5-6  | `feature/b5-6-message-requests`     | #1549      |
+| B5-7  | `feature/b5-7-nsfw-acknowledgement` | PR pending |
+| B5-8  | `feature/b5-8-reports`              | PR pending |
+| B5-9  | `feature/b5-9-moderator-actions`    | PR pending |
+| B5-10 | `feature/b5-10-appeals`             | PR pending |
+| B5-11 | `feature/b5-11-push-dispatch`       | #1548      |
+
 ## Question 1 — the six topics against shipped code
 
 Each verdict cites the test that would go red if the control were removed.
@@ -270,7 +284,7 @@ yet, so condition 3 is not met today. Both conditions' client halves are
 B7's (the native broker, C-09) and B9's (the render gate and consent UI).
 B5-12 records the re-tags of BG-18 and BG-19 that mark where those halves
 live, narrowing the roadmap's wording to match under one standard; B5-12
-(#1546) is itself unmerged as of this measurement.
+(#1546) merged to `dev` as `2b187b64`.
 
 **Owner's acceptance of the narrowed exit condition 2:** \_\_\_\_\_\_\_\_\_\_
 **Owner's acceptance of the narrowed exit condition 3:** \_\_\_\_\_\_\_\_\_\_

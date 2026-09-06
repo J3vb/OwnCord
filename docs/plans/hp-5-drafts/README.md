@@ -43,11 +43,44 @@ delete outright rather than unlink.
 
 ## Changes the steps apply on top of the drafts
 
-- **048 (B5-8)** carries one statement the draft did not: the new permission bit
-  `MODERATE_MEMBERS` (bit 22, `0x400000`) granted to the default Moderator role,
-  because the report queue is the first consumer of the bit and B5-8 lands
-  before B5-9. The bit's four-file edit (permissions, admin panel grid, client
-  enum, schema bit map) lands in B5-8 as well.
+- **046 (B5-6)** added `message_requests.first_message_id` (nullable,
+  `ON DELETE SET NULL`), so the socket frame and the REST inbox preview the
+  same message under concurrent first sends -- without it, two racing first
+  messages could leave the two surfaces pointing at different rows.
+- **047 (B5-7)** shipped verbatim -- no deviation from the draft.
+- **048 (B5-8)** carries one statement the draft did not: the new permission
+  bit `MODERATE_MEMBERS` (bit 22, `0x400000`) granted to the default
+  Moderator role, because the report queue is the first consumer of the bit
+  and B5-8 lands before B5-9. The grant is guarded
+  `WHERE id = 3 AND name = 'Moderator' AND permissions = 3145727` -- not
+  `id = 3 OR name = 'Moderator'` -- so it touches only the untouched seed row
+  (whose value already includes migration 022's bit 21), never a role an
+  operator renamed or repurposed. The bit's four-file edit (permissions,
+  admin panel grid, client enum, schema bit map) lands in B5-8 as well.
+- **048 (B5-8)** added `reports.public_id`, 16 random bytes as hex: it is the
+  only id a response, route or frame ever names, closing the sequential-id
+  inference the bare `reports.id` would otherwise leak.
+- **048 (B5-8)** added `idx_reports_active_unique`, a partial unique index
+  over (reporter, target) for `open`/`assigned` reports -- the race-proof
+  half of the duplicate-report `409`; a check at write time alone cannot
+  close the race two concurrent inserts create.
+- **048 (B5-8)** added a fourth table, `report_events` (`id`, `report_id`
+  cascading, `actor_id`, `actor_token`, `action`, `detail`, `created_at`,
+  indexed on `report_id`): a report's history lives there, never in
+  `audit_log`, so a `VIEW_AUDIT_LOG` holder cannot count filings by reading
+  the audit trail. `report_create` writes no `audit_log` row at all.
+- **048 (B5-8)** guarded `InsertReport` and `InsertReportEvidence` as
+  `INSERT ... SELECT ... WHERE EXISTS (...)` against `users`, re-validating
+  both principals inside the intake transaction rather than trusting a check
+  made before it opened.
+- **048 (B5-8)** made `InsertReportNote` re-check that the report is still
+  `open`/`assigned` at write time, and made forced re-assignment
+  (`AssignReportForced`) read the current assignee's rank inside the same
+  transaction as the write -- both close a race between the read that
+  justified the write and the write itself.
+- **049 (B5-9)** added `moderation_actions.voice_muted`, recording whether
+  the timeout action itself applied the server mute, so lifting that timeout
+  cannot undo a mute a different moderator set independently.
 - **049 (B5-9)** adds no `CHECK` on `actor_id` -- a constraint requiring
   `actor_id > 0` would forbid the erasure transition that sets it to 0.
   Instead B5-9 refuses a non-human actor (a plugin, a system job with no
