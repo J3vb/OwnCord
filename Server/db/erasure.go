@@ -283,6 +283,14 @@ var erasureStatements = []struct {
 	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
+	// Message requests and trusted senders (migration 046, B5-6, classes 14c
+	// and 14d): both tables name a sender and a recipient, so an erasure of
+	// either party needs both columns — the users delete below would cascade
+	// these too, but a surviving row across the cascade boundary is exactly
+	// the silent-pass shape TestEraseAccount_EveryInventoryClassIsZero exists
+	// to catch, so they get their own explicit statements before it runs.
+	{"message_requests", `DELETE FROM message_requests WHERE sender_id = ?1 OR recipient_id = ?1`},
+	{"trusted_senders", `DELETE FROM trusted_senders WHERE recipient_id = ?1 OR sender_id = ?1`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},

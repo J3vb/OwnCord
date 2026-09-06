@@ -28,6 +28,12 @@ type VisibilityReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
+	// IsGroupDM and IsTrustedSender back the B5-6 sender-aware DM voice
+	// audience (voice_broadcast.go's filterDMAudience): a one-to-one DM's
+	// voice_state/voice_leave fan-out must not reach a recipient who does
+	// not yet trust the event's subject, same as chat/typing/reaction.
+	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
 // ReadySnapshotReader is what the ready payload (serve_ready.go) may read on

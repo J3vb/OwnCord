@@ -45,6 +45,8 @@ var SubjectInventory = []InventoryClass{
 	{"12a upload byte counter", `SELECT COUNT(*) FROM user_storage WHERE user_id = ?`, inventoryByUID},
 	{"14a dm participation", `SELECT COUNT(*) FROM dm_participants WHERE user_id = ?`, inventoryByUID},
 	{"14b dm open state", `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ?`, inventoryByUID},
+	{"14c message requests", `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? OR recipient_id = ?`, inventoryBothIDs},
+	{"14d trusted senders", `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? OR sender_id = ?`, inventoryBothIDs},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
 	{"17 blocks", `SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?`, inventoryBothIDs},

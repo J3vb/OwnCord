@@ -89,6 +89,19 @@ type CreateDMResult struct {
 	Channel   *db.Channel
 	Created   bool
 	Recipient *db.User
+	// RecipientOpened reports whether the recipient's side is actually open
+	// and safe to announce (dm_channel_open, ready.dm_channels, GET /dms).
+	// Only meaningful when Created is true — GetOrCreateDMChannelGated's
+	// existing-channel branch never touches the other party's dm_open_state,
+	// so an existing channel's visibility is whatever it already was. B5-6:
+	// a brand-new one-to-one channel opens only the recipient's side too
+	// when the recipient already trusts the caller, decided atomically
+	// inside GetOrCreateDMChannelGated's own transaction — otherwise only
+	// the caller's side opens, and the recipient's opens at acceptance
+	// instead (MessageRequestService.Accept / AcceptMessageRequest).
+	// RecipientOpened tells the caller (api/dm_handler.go) whether to
+	// broadcast dm_channel_open.
+	RecipientOpened bool
 }
 
 // CreateDM creates or retrieves a DM channel between two users.
@@ -135,16 +148,23 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
 	}
 
-	ch, created, err := s.st.GetOrCreateDMChannel(ctx, userID, recipientID)
+	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
+	// INSIDE GetOrCreateDMChannelGated's own transaction (does the recipient
+	// already trust the caller?) and written once, atomically, with the
+	// channel and participants — no separate post-hoc CloseDM call for a
+	// cancellation, a CloseDM failure, or a stale read racing an
+	// in-flight accept to land in.
+	ch, created, recipientOpened, err := s.st.GetOrCreateDMChannelGated(ctx, userID, recipientID)
 	if err != nil {
 		slog.Error("DMService.CreateDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create DM channel", ErrInternal)
 	}
 
 	return &CreateDMResult{
-		Channel:   ch,
-		Created:   created,
-		Recipient: recipient,
+		Channel:         ch,
+		Created:         created,
+		Recipient:       recipient,
+		RecipientOpened: recipientOpened,
 	}, nil
 }
 
@@ -486,11 +506,31 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
+
+	// B5-6 (Codex P1-2): call_incoming/call_declined is a DM interaction
+	// like chat, typing and reactions — an untrusted recipient of a pending
+	// request must not learn the sender is present in voice either. Group
+	// DMs are untouched (decision 4), matching the block check above.
+	//
+	// Codex review round 2, P2: a failed IsGroupDM lookup used to skip the
+	// trust filter entirely and ring every participant — fail closed
+	// instead: no ring targets at all rather than an unfiltered ring.
+	isGroup, gErr := s.st.IsGroupDM(ctx, channelID)
+	if gErr != nil {
+		return nil, nil //nolint:nilerr // fail closed to no targets, not an error — the ringer's own call_ring must still succeed
+	}
+
 	targets := make([]int64, 0, len(ids))
 	for _, pid := range ids {
-		if pid != userID {
-			targets = append(targets, pid)
+		if pid == userID {
+			continue
 		}
+		if !isGroup {
+			if trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID); tErr != nil || !trusted {
+				continue
+			}
+		}
+		targets = append(targets, pid)
 	}
 	return targets, nil
 }

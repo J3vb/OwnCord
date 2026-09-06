@@ -427,7 +427,9 @@ func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 // TestPushDispatch_DMOnlyParticipants proves the DM audience is exactly the
 // participant set: a non-participant candidate (however it ended up in the
 // caller's candidate list) gets nothing, because CanViewChannel for a DM is
-// participation, not a role bit.
+// participation, not a role bit. User 2 also trusts user 1 (B5-6): without
+// it this push would now be excluded by trustsAuthor instead, which is a
+// different property, covered by the Untrusted/Trusted tests below.
 func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
@@ -436,6 +438,9 @@ func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 	seedUserRole(t, f.database, 3, 4)
 	seedDMParticipant(t, f.database, 20, 1)
 	seedDMParticipant(t, f.database, 20, 2)
+	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
 	// user 3 is NOT a participant of this DM.
 	f.subscribe(t, 2, "https://push.example.net/participant")
 	f.subscribe(t, 3, "https://push.example.net/outsider")
@@ -447,6 +452,91 @@ func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 	urls := fetch.urls()
 	if len(urls) != 1 || urls[0] != "https://push.example.net/participant" {
 		t.Errorf("fetch calls = %v, want exactly the participant's endpoint", urls)
+	}
+}
+
+// TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept is
+// Codex (the B5-11/B5-6 merge follow-up): a one-to-one DM push must go only
+// to a recipient who trusts the author, the same rule DMAudience /
+// MessageRequestService.DMDeliveryAudience apply to chat_message delivery —
+// a first-contact message from an untrusted sender must not ring a
+// stranger's phone before they decide to accept it. Once the recipient
+// accepts (TrustSender source "accepted", exactly what
+// MessageRequestService.Accept writes), the next message pushes normally.
+func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedDMParticipant(t, f.database, 20, 1)
+	seedDMParticipant(t, f.database, 20, 2)
+	f.subscribe(t, 2, "https://push.example.net/untrusted-then-trusted")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+
+	// First message: 2 does not yet trust 1 (the pending-request state) — no push.
+	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Errorf("fetch calls before accept = %v, want none (recipient does not yet trust the author)", urls)
+	}
+
+	// 2 accepts the request — the same write MessageRequestService.Accept makes.
+	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
+
+	// Next message: now pushes.
+	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
+	urls := fetch.urls()
+	if len(urls) != 1 || urls[0] != "https://push.example.net/untrusted-then-trusted" {
+		t.Errorf("fetch calls after accept = %v, want exactly the recipient's endpoint", urls)
+	}
+}
+
+// TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked is the trust half
+// of TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess: a recipient who
+// stops trusting the author between the first (transiently failing) attempt
+// and the retry — blocked, or their acceptance somehow undone — gets no
+// retry.
+func TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedDMParticipant(t, f.database, 20, 1)
+	seedDMParticipant(t, f.database, 20, 2)
+	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
+	f.subscribe(t, 2, "https://push.example.net/trust-revoked")
+
+	fetch := newRecordingPushFetcher()
+	var calls atomic.Int32
+	fetch.onFetch("https://push.example.net/trust-revoked", func(ctx context.Context) (*safefetch.Response, error) {
+		n := calls.Add(1)
+		if n > 1 {
+			t.Error("a second attempt reached the fetcher after trust was revoked")
+			return &safefetch.Response{StatusCode: 201}, nil
+		}
+		// Revoke between the first attempt and the retry.
+		if _, err := f.database.ExecContext(ctx,
+			`DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`, int64(2), int64(1)); err != nil {
+			t.Fatal(err)
+		}
+		return &safefetch.Response{StatusCode: 503}, nil
+	})
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
+	}
+	d, fl, p := dispatcher.Counters()
+	if d != 0 || fl != 0 || p != 0 {
+		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
 	}
 }
 

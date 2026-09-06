@@ -252,14 +252,14 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		if attempt > 1 {
 			d.sleep(ctx, pushRetryBackoffs[attempt-2])
 		}
-		items = d.runRound(ctx, channelID, items, attempt)
+		items = d.runRound(ctx, channelID, authorID, items, attempt)
 	}
 }
 
 // runRound performs attempt (1-based) for every item in items, bounded by
 // pushMaxConcurrentSends concurrent sends, and returns the subset that
 // should be retried in a later round.
-func (d *PushDispatcher) runRound(ctx context.Context, channelID int64, items []pushRoundItem, attempt int) []pushRoundItem {
+func (d *PushDispatcher) runRound(ctx context.Context, channelID, authorID int64, items []pushRoundItem, attempt int) []pushRoundItem {
 	sem := make(chan struct{}, pushMaxConcurrentSends)
 	var wg sync.WaitGroup
 	var mu syncutil.Mutex
@@ -271,7 +271,7 @@ func (d *PushDispatcher) runRound(ctx context.Context, channelID int64, items []
 		go func(item *pushRoundItem) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if d.attemptOne(ctx, channelID, *item, attempt) {
+			if d.attemptOne(ctx, channelID, authorID, *item, attempt) {
 				mu.Lock()
 				retry = append(retry, *item)
 				mu.Unlock()
@@ -327,8 +327,8 @@ func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (saf
 // item should be retried in a later round; every terminal outcome (success,
 // prune, non-retryable failure, or the retry budget running out) lands in
 // exactly one counter before returning false.
-func (d *PushDispatcher) attemptOne(ctx context.Context, channelID int64, item pushRoundItem, attempt int) bool {
-	if !d.stillEligible(ctx, channelID, item.sub.UserID) {
+func (d *PushDispatcher) attemptOne(ctx context.Context, channelID, authorID int64, item pushRoundItem, attempt int) bool {
+	if !d.stillEligible(ctx, channelID, authorID, item.sub.UserID) {
 		return false
 	}
 	resp, err := d.fetch.Fetch(ctx, item.req)
@@ -357,7 +357,8 @@ func (d *PushDispatcher) attemptOne(ctx context.Context, channelID int64, item p
 // coalesceAudience narrows candidateIDs to the users a push is actually
 // sent to: distinct, not the author, not blocked by (a blocker of) the
 // author, currently eligible (offline and permitted -- see eligibleFor),
-// and not inside their coalescing window for ch.
+// trusting the author if this is a one-to-one DM (see below), and not
+// inside their coalescing window for ch.
 //
 // Eligibility is checked BEFORE coalescing, not after: an online or
 // unauthorized candidate must not reserve the 60s window for a channel they
@@ -370,12 +371,15 @@ func (d *PushDispatcher) attemptOne(ctx context.Context, channelID int64, item p
 // direction.
 //
 // For a DM, permission IS participation (permissions.CanViewChannel checks
-// only DMParticipant for a "dm" channel). B5-6: trusted_senders does not
-// exist on this branch (B5-6 is behind HP-5 too and may not have merged
-// yet). Once it does, a DM push should also require that the recipient
-// trusts the sender -- the same row Message Requests gates on -- so a
-// first-contact message from an unknown sender cannot ring a stranger's
-// phone before they have decided to accept it.
+// only DMParticipant for a "dm" channel). Notify already refused a group DM
+// before this is ever called (ch.Type == "dm" here always means one-to-one),
+// so a DM push additionally requires that the candidate trusts the author --
+// the same trusted_senders row Message Requests gates on and DMAudience /
+// MessageRequestService.DMDeliveryAudience apply to chat_message delivery
+// (service/message_crud.go, service/message_request.go) -- so a first-contact
+// message from an unknown sender cannot ring a stranger's phone before they
+// have decided to accept it. Fail closed: a lookup error is treated as
+// untrusted, same as every other fail-closed check in this file.
 func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, candidateIDs []int64, authorID int64, blockedByAuthor map[int64]bool) []int64 {
 	seen := make(map[int64]bool, len(candidateIDs))
 	out := make([]int64, 0, len(candidateIDs))
@@ -388,12 +392,28 @@ func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, c
 		if !d.eligibleFor(ctx, ch, uid) {
 			continue
 		}
+		if !d.trustsAuthor(ctx, ch, uid, authorID) {
+			continue
+		}
 		if d.coalesced(uid, ch.ID, now) {
 			continue
 		}
 		out = append(out, uid)
 	}
 	return out
+}
+
+// trustsAuthor reports whether a one-to-one DM push to uid may proceed:
+// always true outside a "dm" channel (ch.Type != "dm" -- guild channels have
+// no trust rule), otherwise the same trusted_senders lookup DMAudience /
+// MessageRequestService.DMDeliveryAudience use for chat_message delivery.
+// Fail closed on a lookup error: no push.
+func (d *PushDispatcher) trustsAuthor(ctx context.Context, ch *db.Channel, uid, authorID int64) bool {
+	if ch.Type != "dm" {
+		return true
+	}
+	trusted, err := d.st.IsTrustedSender(ctx, uid, authorID)
+	return err == nil && trusted
 }
 
 // eligibleFor reports whether userID may be pushed to for ch right now:
@@ -413,12 +433,19 @@ func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID
 }
 
 // stillEligible re-resolves, immediately before one delivery attempt, the
-// three things that can change while a bounded dispatch is in flight: the
-// recipient came online, the channel was labelled nsfw, or the recipient
-// lost CanViewChannel. Called before every attempt, first and retry alike.
-func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, userID int64) bool {
+// things that can change while a bounded dispatch is in flight: the
+// recipient came online, the channel was labelled nsfw, the recipient lost
+// CanViewChannel, or -- for a one-to-one DM -- the recipient no longer
+// trusts the author (they blocked them, or ignored/deleted the pending
+// request between attempts: see trustsAuthor). Called before every attempt,
+// first and retry alike, so a revoke mid-dispatch drops the remaining
+// retries rather than delivering one anyway.
+func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID, userID int64) bool {
 	ch, err := d.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil || ch.NSFW {
+		return false
+	}
+	if !d.trustsAuthor(ctx, ch, userID, authorID) {
 		return false
 	}
 	return d.eligibleFor(ctx, ch, userID)

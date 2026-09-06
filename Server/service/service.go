@@ -43,6 +43,11 @@ type Services struct {
 	// so Services stays comparable (admin/services_bundle_test.go compares
 	// two *Services with `!=`).
 	Push *PushService
+	// MessageRequests is B5-6's first-contact gate and trusted-sender
+	// bookkeeping; Messages holds a pointer to it too
+	// (MessageService.SetMessageRequests), which is where the gate actually
+	// runs (service/message_crud.go's OpenDM accumulation).
+	MessageRequests *MessageRequestService
 	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
 	// the composition root constructed it — which it does only when both
 	// push.enabled and push.dispatch_enabled are true. Exists on Services
@@ -58,25 +63,30 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	erasure := NewErasureService(st)
 	moderation := NewModerationService(st, permSvc)
 	moderation.erasure = erasure
+	blocks := NewBlockService(st)
+	messages := NewMessageService(st, permSvc, limiter)
+	messageRequests := NewMessageRequestService(st, blocks)
+	messages.SetMessageRequests(messageRequests)
 	return &Services{
-		Erasure:     erasure,
-		Retention:   NewRetentionService(st),
-		Messages:    NewMessageService(st, permSvc, limiter),
-		Channels:    NewChannelService(st, permSvc),
-		Permissions: permSvc,
-		Users:       NewUserService(st),
-		DMs:         NewDMService(st),
-		Invites:     NewInviteService(st),
-		Blocks:      NewBlockService(st),
-		Moderation:  moderation,
-		Roles:       NewRoleService(st, permSvc),
-		Emoji:       NewEmojiService(st, permSvc),
-		Settings:    NewSettingsService(st),
-		Uploads:     NewUploadService(st, permSvc),
-		Voice:       NewVoiceService(st),
-		Tokens:      NewTokenService(st),
-		Sessions:    NewSessionService(st),
-		Setup:       NewSetupService(st),
-		Push:        NewPushService(st),
+		Erasure:         erasure,
+		Retention:       NewRetentionService(st),
+		Messages:        messages,
+		Channels:        NewChannelService(st, permSvc),
+		Permissions:     permSvc,
+		Users:           NewUserService(st),
+		DMs:             NewDMService(st),
+		Invites:         NewInviteService(st),
+		Blocks:          blocks,
+		Moderation:      moderation,
+		Roles:           NewRoleService(st, permSvc),
+		Emoji:           NewEmojiService(st, permSvc),
+		Settings:        NewSettingsService(st),
+		Uploads:         NewUploadService(st, permSvc),
+		Voice:           NewVoiceService(st),
+		Tokens:          NewTokenService(st),
+		Sessions:        NewSessionService(st),
+		Setup:           NewSetupService(st),
+		Push:            NewPushService(st),
+		MessageRequests: messageRequests,
 	}
 }

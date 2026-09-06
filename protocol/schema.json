@@ -82,6 +82,7 @@
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },
     { "wire": "dm_channel_close", "go": "MsgTypeDMChannelClose", "ts": "DM_CHANNEL_CLOSE" },
+    { "wire": "dm_request", "go": "MsgTypeDMRequest", "ts": "DM_REQUEST" },
     { "wire": "call_incoming", "go": "MsgTypeCallIncoming", "ts": "CALL_INCOMING" },
     { "wire": "call_declined", "go": "MsgTypeCallDeclined", "ts": "CALL_DECLINED" },
     {
