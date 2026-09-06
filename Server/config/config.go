@@ -47,6 +47,12 @@ type ModerationConfig struct {
 	// content is bounded). 0 means never prune content. Open reports
 	// (closed_at IS NULL) are never touched by this window.
 	ReportRetentionDays int `koanf:"report_retention_days"`
+	// ActionRetentionDays retires warning rows this many days after
+	// acknowledged_at and timeout rows the same number of days after
+	// expires_at/lifted_at (B5-9, scorecard decision 5), unless an appeal
+	// references them. Ban, kick and removal rows stay with the account —
+	// they are not on this clock. 0 means never retire.
+	ActionRetentionDays int `koanf:"action_retention_days"`
 }
 
 // LoggingConfig controls server log verbosity. Level gates both stdout and
@@ -421,6 +427,7 @@ func defaults() Config {
 		},
 		Moderation: ModerationConfig{
 			ReportRetentionDays: 180,
+			ActionRetentionDays: 90,
 		},
 	}
 }
@@ -541,12 +548,15 @@ voice:
 # logging:
 #   level: "info"             # debug | info | warn | error
 
-# Moderation: the report queue's content retention window (B5-8). The row
-# itself is kept indefinitely either way; this bounds only the evidence
-# snapshot, internal notes and free-text detail.
+# Moderation: the report queue's content retention window (B5-8), and the
+# moderator-action ledger's own window (B5-9). Report rows and ban/kick/
+# removal ledger rows are kept indefinitely either way; these bound only
+# the report's evidence/notes/detail and the warning/timeout rows.
 # moderation:
 #   report_retention_days: 180  # days after a report closes before its content
 #                                # is pruned; 0 = never. Open reports are never touched.
+#   action_retention_days: 90   # days after acknowledgement (warning) or expiry/lift
+#                                # (timeout) before the row retires; 0 = never.
 `
 
 // Load reads configuration from the given YAML file path, merging with
@@ -768,6 +778,7 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
+		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows"},
 	}
 }
 

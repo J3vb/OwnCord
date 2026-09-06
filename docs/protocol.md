@@ -96,7 +96,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`                                                                                                                                         |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`                                                                                                                            |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                                          |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
@@ -988,6 +988,54 @@ position relative to reports they cannot see). `state` is one of `open`,
 
 ---
 
+## Moderator Actions
+
+### mod_action (Server -> Client)
+
+B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
+ONLY to the live target — targeted and unsequenced, never replayed. A
+disconnected target simply sees the warning in `ready`'s `notices` on next
+connect, or feels the timeout on their next attempted send.
+
+```json
+{
+  "type": "mod_action",
+  "payload": {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "at most 500 runes, no control characters",
+    "expires_at": "2026-09-06T12:00:00Z"
+  }
+}
+```
+
+`kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
+for a lifted timeout; present for an active timeout.
+
+### ready's notices
+
+`ready`'s payload carries a `notices` array: every warning issued to the
+connecting user that they have not yet acknowledged.
+
+```json
+{
+  "notices": [
+    {
+      "id": 42,
+      "kind": "warning",
+      "reason": "at most 500 runes, no control characters",
+      "created_at": "2026-09-05T10:00:00Z"
+    }
+  ]
+}
+```
+
+Acknowledge one with `POST /api/v1/users/me/notices/{id}/ack` (see
+[api.md](api.md)) — own rows only. An acknowledged warning never reappears
+here.
+
+---
+
 ## Voice Signaling
 
 Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/state) while the actual audio/video flows through LiveKit's own WebSocket connection.
@@ -1624,7 +1672,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (39 types)
+### Server -> Client (40 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -1662,6 +1710,7 @@ tables below add per-type behavioral notes.
 | `voice_e2ee_offer`    | No       | Direct to target participant                                            |
 | `server_restart`      | Yes      | All clients                                                             |
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
+| `mod_action`          | No       | Direct to the live target only                                          |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

@@ -61,6 +61,12 @@ var SubjectInventory = []InventoryClass{
 	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
 	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
 	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
+	// B5-9 moderation-action classes: 23a counts ROWS (they cascade-delete
+	// with the users row, unlike a report's outcome — S6 says a warning or
+	// timeout is deleted, not kept), 23b counts the principal COLUMN, the
+	// same bare-id-plus-token shape as every actor class above.
+	{"23a moderation actions on the subject", `SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?`, inventoryByUID},
+	{"23b moderation actions by the subject", `SELECT COUNT(*) FROM moderation_actions WHERE actor_id = ? OR lifted_by = ?`, inventoryBothIDs},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.

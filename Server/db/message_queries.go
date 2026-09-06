@@ -279,6 +279,58 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages commit: %w", err)
+	}
+	return ids, nil
+}
+
+// PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal
+// ledger row per purge — not one per message (B5-9, plan item 6) — in the
+// same transaction: a failure recording the row rolls the purge back too.
+// reportID links a report-linked removal.
+func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error) {
+	if limit < 1 {
+		return []int64{}, nil
+	}
+
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessagesWithAction begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		// The ledger row's target is the acting moderator: a purge is a
+		// bulk, channel-scoped action that can span many authors, and
+		// moderation_actions.target_id must reference exactly one user
+		// (schema FK) — see the B5-9 report's "deviation from the draft"
+		// note for the fuller rationale.
+		reason := fmt.Sprintf("%d messages purged", len(ids))
+		if err := recordLedgerRow(ctx, tx, "removal", actorID, actorID, reportID, reason); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessagesWithAction commit: %w", err)
+	}
+	return ids, nil
+}
+
+// purgeChannelMessagesTx is PurgeChannelMessages' body, taking an
+// already-open tx so callers can extend the same transaction (the ledger
+// row PurgeChannelMessagesWithAction adds).
+func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
 	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}
 	if before > 0 {
@@ -320,11 +372,40 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	); err != nil {
 		return nil, fmt.Errorf("PurgeChannelMessages update: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("PurgeChannelMessages commit: %w", err)
-	}
 	return ids, nil
+}
+
+// DeleteMessageWithRemoval is DeleteMessage plus a removal ledger row, in
+// one transaction, when the deleter is not the message's author (B5-9,
+// plan item 6): a self-delete or a non-moderator delete writes no row,
+// exactly as DeleteMessage always has. authorID is the message's author,
+// already resolved by the caller. reportID links a report-linked removal.
+func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64) error {
+	if !isMod || deleterID == authorID {
+		return d.DeleteMessage(ctx, msgID, deleterID, isMod)
+	}
+
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := dbgen.New(tx)
+	res, err := q.SoftDeleteMessage(ctx, msgID)
+	if err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("DeleteMessageWithRemoval: message %d: %w", msgID, ErrNotFound)
+	}
+	if err := recordLedgerRow(ctx, tx, "removal", authorID, deleterID, reportID, "message removed"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval commit: %w", err)
+	}
+	return nil
 }
 
 // AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).

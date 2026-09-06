@@ -19,11 +19,56 @@ type ModerationService struct {
 	// erasure runs the administrator's account erasure (B4-9); nil fails
 	// EraseUser closed.
 	erasure *ErasureService
+	// messages is used only by the report-linked removal entry point
+	// (ActOnReport, kind="removal") — package-private, same package, not a
+	// second copy of DeleteMessage's authorization.
+	messages *MessageService
+	// notifier delivers a live mod_action frame to a connected target
+	// (B5-9): warning issued, timeout applied, or timeout lifted. *ws.Hub
+	// implements it; wired via SetNotifier from the composition root,
+	// mirroring ErasureService.SetHub. Nil is a normal no-op — a
+	// disconnected target still gets the ledger row and sees a warning on
+	// next connect (ready's notices) or a timeout on their next attempted
+	// send (the predicates).
+	notifier ModActionNotifier
+	// voiceMuter applies or lifts the voice half of a timeout on a
+	// currently-connected target, through the exact SFU mechanism
+	// voice_mod_mute uses (decision 6: timeout's voice half defers to
+	// MUTE_MEMBERS rather than adding a second path to the same effect).
+	// Nil is a normal no-op — Timeout still lands for text and reactions.
+	voiceMuter TimeoutVoiceMuter
+}
+
+// ModActionNotifier delivers a live mod_action frame to a connected target.
+// *ws.Hub implements it.
+type ModActionNotifier interface {
+	NotifyModAction(userID, actionID int64, kind, reason string, expiresAt *time.Time)
+}
+
+// TimeoutVoiceMuter is the minimal voice-hub surface Timeout/LiftTimeout use
+// to apply or lift the voice half of a timeout, reusing voice_mod_mute's own
+// SFU mechanism rather than reimplementing it. Muted with no live voice
+// connection is a silent no-op. *ws.Hub implements it.
+type TimeoutVoiceMuter interface {
+	ApplyTimeoutMute(ctx context.Context, userID int64, muted bool)
 }
 
 // NewModerationService creates a ModerationService.
 func NewModerationService(st Store, perms *PermissionService) *ModerationService {
 	return &ModerationService{st: st, perms: perms}
+}
+
+// SetNotifier installs the live mod_action notifier.
+func (s *ModerationService) SetNotifier(n ModActionNotifier) { s.notifier = n }
+
+// SetVoiceMuter installs the voice-mute hook Timeout/LiftTimeout use.
+func (s *ModerationService) SetVoiceMuter(v TimeoutVoiceMuter) { s.voiceMuter = v }
+
+// notifyModAction is a nil-safe call to the installed notifier.
+func (s *ModerationService) notifyModAction(userID, actionID int64, kind, reason string, expiresAt *time.Time) {
+	if s.notifier != nil {
+		s.notifier.NotifyModAction(userID, actionID, kind, reason, expiresAt)
+	}
 }
 
 // ErasureBroadcastsMemberBan reports whether the erasure runner sends the
@@ -152,9 +197,268 @@ func (s *ModerationService) requireOutranksRole(ctx context.Context, actorRole *
 	return nil
 }
 
+// reasonMaxRunes bounds the moderator-action ledger's free-text reason (S6
+// storage exhaustion, and the same shape the audit detail denylist expects
+// of every free-text field): 500 runes, no control characters. Applies to
+// warning and timeout, whose reason is shown to the TARGET — the audit row
+// itself never carries it (a fixed phrase instead; see Warn).
+const reasonMaxRunes = 500
+
+// validateActionReason is warning/timeout's shared reason-shape rule.
+func validateActionReason(reason string) error {
+	if len([]rune(reason)) > reasonMaxRunes {
+		return fmt.Errorf("%w: reason is too long", ErrBadRequest)
+	}
+	if hasControlChar(reason) {
+		return fmt.Errorf("%w: reason contains control characters", ErrBadRequest)
+	}
+	return nil
+}
+
+// minTimeoutDuration and maxTimeoutDuration bound Timeout's duration
+// (decision 6): 1 minute to 28 days.
+const (
+	minTimeoutDuration = time.Minute
+	maxTimeoutDuration = 28 * 24 * time.Hour
+)
+
+// requireHumanActor is workstream 10's absence-proof guard, repeated at the
+// top of every ModerationService action method before any other check: no
+// plugin capability or automated caller can pass a non-positive actor id and
+// have it land on the ledger (Server/db's recordModerationAction/
+// recordLedgerRow repeat the same guard at the transaction, since that is
+// the one place every kind funnels through — this is the service-boundary
+// half). Deliberately NOT a schema CHECK (docs: erasure sets actor_id to 0
+// for an erased moderator, and a constraint would forbid that transition).
+func requireHumanActor(actorID int64) error {
+	if actorID <= 0 {
+		return fmt.Errorf("%w: a moderation action requires a human actor", ErrForbidden)
+	}
+	return nil
+}
+
+// Warn issues a warning (decision 6): MODERATE_MEMBERS, target exists, not
+// self, requireOutranks, then the ledger row — its entire effect — then the
+// audit row. The audit detail is a fixed phrase, never the reason text: the
+// reason is shown to the target (ready's notices), the audit log is a
+// different, operator-facing surface. reportID links a report-linked
+// warning (ActOnReport). A live target gets a mod_action frame.
+func (s *ModerationService) Warn(ctx context.Context, actorID, targetID int64, reason string, reportID *int64) (int64, error) {
+	if err := requireHumanActor(actorID); err != nil {
+		return 0, err
+	}
+	if targetID <= 0 {
+		return 0, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return 0, fmt.Errorf("%w: cannot warn yourself", ErrBadRequest)
+	}
+	if err := validateActionReason(reason); err != nil {
+		return 0, err
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers)
+	if err != nil {
+		return 0, err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return 0, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return 0, err
+	}
+
+	id, err := s.st.WarnUser(ctx, targetID, actorID, reportID, reason)
+	if err != nil {
+		if errors.Is(err, db.ErrOutranked) {
+			// The concurrent-role-change case: refused, not sanctioned.
+			return 0, fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+		}
+		return 0, fmt.Errorf("%w: failed to warn user: %w", ErrInternal, err)
+	}
+
+	// Audit rows must survive a request canceled after the warning committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_warn", "user", targetID, "warning issued")
+	s.notifyModAction(targetID, id, "warning", reason, nil)
+
+	slog.Info("user warned", "actor_id", actorID, "target_id", targetID)
+	return id, nil
+}
+
+// TimeoutResult is Timeout's outcome: the ledger row id, and whether the
+// voice half was skipped because the actor lacked MUTE_MEMBERS (decision 6
+// — timeout defers to it rather than granting a mute a MUTE_MEMBERS-less
+// moderator could not perform on their own).
+type TimeoutResult struct {
+	ID           int64
+	VoiceSkipped bool
+}
+
+// Timeout time-boxes a restriction on targetID (decision 6): same order as
+// Warn, duration bounded 1 minute..28 days, the ledger row with expires_at
+// — its effect, read back through the predicates (Subject.TimedOut) rather
+// than a scattered per-handler check. The voice half applies the existing
+// server-mute mechanism through voiceMuter ONLY when the actor holds
+// MUTE_MEMBERS; otherwise text and reactions are still restricted and
+// VoiceSkipped is true. A live target gets a mod_action frame.
+func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64, reason string, duration time.Duration, reportID *int64) (*TimeoutResult, error) {
+	if err := requireHumanActor(actorID); err != nil {
+		return nil, err
+	}
+	if targetID <= 0 {
+		return nil, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return nil, fmt.Errorf("%w: cannot time out yourself", ErrBadRequest)
+	}
+	if duration < minTimeoutDuration || duration > maxTimeoutDuration {
+		return nil, fmt.Errorf("%w: duration must be between 1 minute and 28 days", ErrBadRequest)
+	}
+	if err := validateActionReason(reason); err != nil {
+		return nil, err
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return nil, err
+	}
+
+	expires := time.Now().Add(duration)
+	id, err := s.st.TimeoutUser(ctx, targetID, actorID, reportID, reason, expires)
+	if err != nil {
+		if errors.Is(err, db.ErrOutranked) {
+			return nil, fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+		}
+		return nil, fmt.Errorf("%w: failed to time out user: %w", ErrInternal, err)
+	}
+
+	// Audit rows must survive a request canceled after the timeout committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_timeout", "user", targetID,
+		fmt.Sprintf("timeout issued, expires %s", expires.UTC().Format(time.RFC3339)))
+
+	// The voice half defers to MUTE_MEMBERS (decision 6): a server-scoped
+	// check with no channel to resolve a Subject for, mirroring
+	// requirePerm's own residue row.
+	voiceSkipped := !permissions.HasServerPerm(actorRole.Permissions, permissions.MuteMembers)
+	if !voiceSkipped && s.voiceMuter != nil {
+		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, true)
+	}
+
+	s.notifyModAction(targetID, id, "timeout", reason, &expires)
+
+	slog.Info("user timed out", "actor_id", actorID, "target_id", targetID, "expires_at", expires, "voice_skipped", voiceSkipped)
+	return &TimeoutResult{ID: id, VoiceSkipped: voiceSkipped}, nil
+}
+
+// LiftTimeout ends targetID's active timeout early (decision 6): same
+// permission and hierarchy as Timeout, then the guarded UPDATE, then the
+// voice half (if ever applied) is lifted through the same mechanism. A
+// live target gets a mod_action frame with a nil expires_at. ErrNotFound
+// when there is no active timeout to lift.
+func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID int64) error {
+	if err := requireHumanActor(actorID); err != nil {
+		return err
+	}
+	if targetID <= 0 {
+		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers)
+	if err != nil {
+		return err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return err
+	}
+
+	lifted, err := s.st.LiftTimeout(ctx, targetID, actorID)
+	if err != nil {
+		return fmt.Errorf("%w: failed to lift timeout: %w", ErrInternal, err)
+	}
+	if !lifted {
+		return fmt.Errorf("%w: no active timeout", ErrNotFound)
+	}
+
+	if s.voiceMuter != nil {
+		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, false)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_untimeout", "user", targetID, "timeout lifted")
+	s.notifyModAction(targetID, 0, "timeout", "", nil)
+
+	slog.Info("timeout lifted", "actor_id", actorID, "target_id", targetID)
+	return nil
+}
+
+// ActOnReportParams is the report-linked queue action's input (plan item 7,
+// POST /api/v1/moderation/queue/{public_id}/act). TargetID and MessageID
+// are resolved by the caller (the handler, through ReportService) from the
+// report's subject and target: ModerationService itself needs no
+// ReportService dependency to dispatch across the five kinds.
+type ActOnReportParams struct {
+	ActorID         int64
+	Kind            string // "warning" | "timeout" | "kick" | "ban" | "removal"
+	Reason          string
+	DurationSeconds int64 // timeout only
+	TargetID        int64 // warning/timeout/kick/ban: the report's subject
+	MessageID       int64 // removal: the reported message
+	ReportID        int64
+}
+
+// ActOnReport dispatches a report-linked moderator action across all five
+// kinds through one call, so the queue's act route carries no per-kind
+// branching of its own. Every branch sets report_id on the ledger row.
+func (s *ModerationService) ActOnReport(ctx context.Context, p ActOnReportParams) error {
+	reportID := p.ReportID
+	switch p.Kind {
+	case "warning":
+		_, err := s.Warn(ctx, p.ActorID, p.TargetID, p.Reason, &reportID)
+		return err
+	case "timeout":
+		_, err := s.Timeout(ctx, p.ActorID, p.TargetID, p.Reason, time.Duration(p.DurationSeconds)*time.Second, &reportID)
+		return err
+	case "kick":
+		return s.forceLogout(ctx, p.ActorID, p.TargetID, &reportID)
+	case "ban":
+		return s.banUser(ctx, p.ActorID, p.TargetID, p.Reason, nil, &reportID)
+	case "removal":
+		if s.messages == nil {
+			return fmt.Errorf("%w: message removal unavailable", ErrInternal)
+		}
+		_, err := s.messages.DeleteMessageForReport(ctx, p.ActorID, p.MessageID, p.ReportID)
+		return err
+	default:
+		return fmt.Errorf("%w: invalid kind", ErrBadRequest)
+	}
+}
+
 // BanUser bans a target user. Validates the target exists and
 // prevents self-banning.
 func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time) error {
+	return s.banUser(ctx, actorID, targetID, reason, expires, nil)
+}
+
+// BanUserWithReport is BanUser with a report link (plan item 2's
+// "...WithReport variant" — BanUser's own signature is untouched, so
+// admin/api.go and every other existing caller is unaffected).
+func (s *ModerationService) BanUserWithReport(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time, reportID int64) error {
+	return s.banUser(ctx, actorID, targetID, reason, expires, &reportID)
+}
+
+func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time, reportID *int64) error {
 	ctx, span := telemetry.GlobalTracer("service/moderation").Start(ctx, "ModerationService.BanUser",
 		telemetry.Int64("actor_id", actorID),
 		telemetry.Int64("target_id", targetID),
@@ -166,6 +470,9 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 		span.End()
 	}()
 
+	if err := requireHumanActor(actorID); err != nil {
+		return err
+	}
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
@@ -186,12 +493,19 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 		return err
 	}
 
-	if err := s.st.BanUser(ctx, targetID, reason, expires); err != nil {
+	if _, err := s.st.BanUserWithAction(ctx, targetID, reason, expires, actorID, reportID); err != nil {
+		if errors.Is(err, db.ErrOutranked) {
+			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+		}
 		return fmt.Errorf("%w: failed to ban user: %w", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the ban committed.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, reason)
+	// The detail is a fixed phrase, never the reason text (B5-9 review):
+	// the reason is already durable on users.ban_reason for any
+	// AdminPerimeter holder to read, so the audit trail does not need a
+	// second, unbounded copy of free text that could quote a message.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, "user banned")
 
 	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
 	return nil
@@ -275,10 +589,25 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 	return newRole, nil
 }
 
-// ForceLogout revokes every session of the target user (the client's "Kick").
-// Gated on KICK_MEMBERS plus the same hierarchy rule as ban, so a moderator
-// cannot log out an admin or the owner.
+// ForceLogout revokes every session of the target user (the client's "Kick"
+// — OwnCord is single-server, so "remove from guild" has no referent; this
+// is the real meaning of kick). Gated on KICK_MEMBERS plus the same
+// hierarchy rule as ban, so a moderator cannot log out an admin or the
+// owner.
 func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID int64) error {
+	return s.forceLogout(ctx, actorID, targetID, nil)
+}
+
+// ForceLogoutWithReport is ForceLogout with a report link (plan item 2's
+// "...WithReport variant"; ForceLogout's own signature is unchanged).
+func (s *ModerationService) ForceLogoutWithReport(ctx context.Context, actorID, targetID int64, reportID int64) error {
+	return s.forceLogout(ctx, actorID, targetID, &reportID)
+}
+
+func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID int64, reportID *int64) error {
+	if err := requireHumanActor(actorID); err != nil {
+		return err
+	}
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
@@ -299,7 +628,10 @@ func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID i
 		return err
 	}
 
-	if err := s.st.ForceLogoutUser(ctx, targetID); err != nil {
+	if _, err := s.st.ForceLogoutWithAction(ctx, targetID, actorID, reportID); err != nil {
+		if errors.Is(err, db.ErrOutranked) {
+			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+		}
 		return fmt.Errorf("%w: failed to log out user: %w", ErrInternal, err)
 	}
 
@@ -337,5 +669,49 @@ func (s *ModerationService) UnbanUser(ctx context.Context, actorID, targetID int
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_unban", "user", targetID, "")
 
 	slog.Info("user unbanned", "actor_id", actorID, "target_id", targetID)
+	return nil
+}
+
+// ListActionsForTarget is GET /api/v1/moderation/users/{id}/actions:
+// MODERATE_MEMBERS gates the read, the same bit as the report queue.
+func (s *ModerationService) ListActionsForTarget(ctx context.Context, actorID, targetID int64) ([]db.ModerationAction, error) {
+	if _, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers); err != nil {
+		return nil, err
+	}
+	rows, err := s.st.ListModerationActionsForTarget(ctx, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	return rows, nil
+}
+
+// ListActionsForReport is the queue detail's "actions taken" list (plan
+// item 7). No permission check of its own — the caller
+// (ReportService.Get) has already gated the read with requireModerate,
+// guardConfidentiality and guardSelfReview.
+func (s *ModerationService) ListActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error) {
+	rows, err := s.st.ListModerationActionsForReport(ctx, reportID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	return rows, nil
+}
+
+// AcknowledgeWarning marks actionID acknowledged for userID — own rows
+// only (POST /api/v1/users/me/notices/{id}/ack, session auth). ErrNotFound
+// covers a foreign id, an already-acknowledged one, and a non-warning id
+// alike, so this route can never be used to probe another user's warning
+// ids.
+func (s *ModerationService) AcknowledgeWarning(ctx context.Context, userID, actionID int64) error {
+	if actionID <= 0 {
+		return fmt.Errorf("%w: id must be positive", ErrBadRequest)
+	}
+	ok, err := s.st.AcknowledgeWarning(ctx, userID, actionID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: notice not found", ErrNotFound)
+	}
 	return nil
 }

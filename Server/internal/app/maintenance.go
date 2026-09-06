@@ -29,6 +29,8 @@ type maintenance struct {
 	reports   *service.ReportService
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
+	// actionRetentionDays is moderation.action_retention_days (0 = never).
+	actionRetentionDays int
 }
 
 // maintenanceStep is one sweep: name is the warning logged when run fails.
@@ -41,7 +43,11 @@ type maintenanceStep struct {
 // may be nil (a partial wiring in tests), which leaves every service-backed
 // step skipped.
 func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
-	m := &maintenance{log: log, database: database, reportRetentionDays: cfg.Moderation.ReportRetentionDays}
+	m := &maintenance{
+		log: log, database: database,
+		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
+		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
+	}
 	if svc != nil {
 		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
 		m.reports = svc.Reports
@@ -139,6 +145,7 @@ func (m *maintenance) steps() []maintenanceStep {
 		{"failed to delete orphaned attachments", m.sweepOrphans},
 		{"retention sweep failed", m.sweepRetention},
 		{"report content retention failed", m.pruneReportContent},
+		{"moderation action retention failed", m.retireModerationActions},
 		{"erasure jobs still pending", m.resumeErasure},
 		{"storage reconciliation failed", m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
@@ -235,6 +242,19 @@ func (m *maintenance) pruneReportContent(ctx context.Context) error {
 		return nil
 	}
 	return m.reports.PruneClosedContent(ctx, time.Duration(m.reportRetentionDays)*24*time.Hour)
+}
+
+// retireModerationActions is B5-9's retention step (moderation.
+// action_retention_days, default 90, 0 = never), run right after report
+// content retention (TestMaintenance_StepOrderIsPinned): warning rows retire
+// after acknowledged_at, timeout rows after expires_at/lifted_at. Ban, kick
+// and removal rows are never touched — they stay with the account.
+func (m *maintenance) retireModerationActions(ctx context.Context) error {
+	if m.actionRetentionDays <= 0 {
+		return nil
+	}
+	_, err := m.database.RetireModerationActions(ctx, m.actionRetentionDays)
+	return err
 }
 
 // resumeErasure runs every unfinished erasure job once (no runner is a

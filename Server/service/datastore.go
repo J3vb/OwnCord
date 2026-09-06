@@ -308,6 +308,34 @@ type Store interface {
 	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
 
+	// ── Moderation actions (migration 049, B5-9) ──
+	// WarnUser/TimeoutUser write their entire effect as one ledger row, in
+	// one transaction with the live rank guard (recordModerationAction):
+	// a target promoted between the caller's check and this write is
+	// refused (db.ErrOutranked), not sanctioned.
+	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
+	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (int64, error)
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (bool, error)
+	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
+	// Subject.TimedOut is filled from.
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
+	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
+	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
+	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
+	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
+	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport
+	// shape the plan asks for, so the existing BanUser/ForceLogoutUser
+	// signatures on this interface are untouched.
+	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
+	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64) (int64, error)
+	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are
+	// DeleteMessage/PurgeChannelMessages plus a removal ledger row, in the
+	// same transaction, when the deleter is not the author.
+	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64) error
+	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
+	RetireModerationActions(ctx context.Context, days int) (int64, error)
+
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)

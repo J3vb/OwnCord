@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -65,6 +66,9 @@ type moderationReportDetailResponse struct {
 	ClosedAt   *string                      `json:"closed_at,omitempty"`
 	Evidence   []moderationEvidenceResponse `json:"evidence"`
 	Notes      []moderationNoteResponse     `json:"notes"`
+	// Actions is the immutable history of moderator actions taken against
+	// this report (plan item 7).
+	Actions []moderationActionResponse `json:"actions"`
 }
 
 type addNoteRequest struct {
@@ -73,6 +77,16 @@ type addNoteRequest struct {
 
 type closeReportRequest struct {
 	Outcome string `json:"outcome"`
+}
+
+// actOnReportRequest is POST /api/v1/moderation/queue/{id}/act's body (plan
+// item 7). MessageID is required for kind="removal" unless the report's own
+// target is a message, in which case it defaults to that message.
+type actOnReportRequest struct {
+	Kind            string `json:"kind"`
+	Reason          string `json:"reason"`
+	DurationSeconds int64  `json:"duration_seconds,omitempty"`
+	MessageID       string `json:"message_id,omitempty"`
 }
 
 // MountModerationQueueRoutes registers the moderator queue: read, assign,
@@ -89,6 +103,7 @@ func MountModerationQueueRoutes(r chi.Router, svc *service.Services, hub ModQueu
 		r.Post("/{id}/assign", handleModerationQueueAssign(svc, hub))
 		r.Post("/{id}/notes", handleModerationQueueNote(svc))
 		r.Post("/{id}/close", handleModerationQueueClose(svc, hub))
+		r.Post("/{id}/act", handleModerationQueueAct(svc))
 	})
 }
 
@@ -166,14 +181,70 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 		for _, n := range detail.Notes {
 			notes = append(notes, moderationNoteResponse{ID: n.ID, AuthorID: n.AuthorID, Body: n.Body, CreatedAt: n.CreatedAt})
 		}
+		actionRows, err := svc.Moderation.ListActionsForReport(r.Context(), id)
+		if err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, moderationReportDetailResponse{
 			ID: detail.Report.PublicID, ReporterID: detail.Report.ReporterID, SubjectID: detail.Report.SubjectID,
 			TargetType: detail.Report.TargetType, TargetRef: detail.Report.TargetRef, ChannelID: detail.Report.ChannelID,
 			Reason: detail.Report.Reason, Detail: detail.Report.Detail, State: detail.Report.State,
 			AssigneeID: detail.Report.AssigneeID, Outcome: detail.Report.Outcome,
 			CreatedAt: detail.Report.CreatedAt, UpdatedAt: detail.Report.UpdatedAt, ClosedAt: detail.Report.ClosedAt,
-			Evidence: evidence, Notes: notes,
+			Evidence: evidence, Notes: notes, Actions: moderationActionResponses(r.Context(), svc, actionRows),
 		})
+	}
+}
+
+// handleModerationQueueAct performs a moderator action against a report's
+// subject (or its reported message, for removal), with report_id set (plan
+// item 7). svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
+// confidentiality, self-review) and resolves the subject/target this
+// dispatches against.
+func handleModerationQueueAct(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := currentUserID(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			return
+		}
+		id, ok := resolveReportIDParam(w, r, svc)
+		if !ok {
+			return
+		}
+		var req actOnReportRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+			return
+		}
+		detail, err := svc.Reports.Get(r.Context(), actorID, id)
+		if err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
+		params := service.ActOnReportParams{
+			ActorID: actorID, Kind: req.Kind, Reason: req.Reason,
+			DurationSeconds: req.DurationSeconds, TargetID: detail.Report.SubjectID, ReportID: id,
+		}
+		if req.Kind == "removal" {
+			msgIDStr := req.MessageID
+			if msgIDStr == "" && detail.Report.TargetType == service.TargetMessage {
+				msgIDStr = detail.Report.TargetRef
+			}
+			msgID, perr := strconv.ParseInt(msgIDStr, 10, 64)
+			if perr != nil || msgID <= 0 {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "message_id is required for removal"})
+				return
+			}
+			params.MessageID = msgID
+		}
+		if err := svc.Moderation.ActOnReport(r.Context(), params); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

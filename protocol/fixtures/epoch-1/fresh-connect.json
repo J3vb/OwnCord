@@ -92,6 +92,7 @@
               }
             ],
             "motd": "Welcome!",
+            "notices": [],
             "roles": [
               {
                 "color": "#E74C3C",
@@ -295,6 +296,7 @@
               }
             ],
             "motd": "Welcome!",
+            "notices": [],
             "roles": [
               {
                 "color": "#E74C3C",

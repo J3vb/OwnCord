@@ -218,10 +218,7 @@ func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTo
 	if err := deleteAccountCloseDMChannels(ctx, tx, userID, dmChannelIDs); err != nil {
 		return nil, err
 	}
-	if err := erasureUnlinkAudit(ctx, tx, userID, subjectToken); err != nil {
-		return nil, err
-	}
-	if err := erasureUnlinkReports(ctx, tx, userID, subjectToken); err != nil {
+	if err := erasureUnlinkPrincipalRows(ctx, tx, userID, subjectToken); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
@@ -317,6 +314,21 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 		return 0, fmt.Errorf("DeleteEventsForUser RowsAffected: %w", err)
 	}
 	return n, nil
+}
+
+// erasureUnlinkPrincipalRows runs every "an erased user acted here" unlink in
+// one call — audit_log, reports, and moderation_actions — so eraseAccountTx
+// carries one branch for the group instead of one per table (kept under the
+// cyclop budget; the three are independent and each already reports its own
+// wrapped error).
+func erasureUnlinkPrincipalRows(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
+	if err := erasureUnlinkAudit(ctx, tx, userID, subjectToken); err != nil {
+		return err
+	}
+	if err := erasureUnlinkReports(ctx, tx, userID, subjectToken); err != nil {
+		return err
+	}
+	return erasureUnlinkModerationActions(ctx, tx, userID, subjectToken)
 }
 
 // erasureUnlinkAudit is the unlinkable integrity history (B4-10, BPR-053):
@@ -425,6 +437,33 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE reports SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink report assignment: %w", err)
+	}
+	return nil
+}
+
+// erasureUnlinkModerationActions is B5-9's half of erasure, beside
+// erasureUnlinkReports: the SUBJECT's own rows cascade with the users DELETE
+// below (moderation_actions.target_id is ON DELETE CASCADE — S6 says a
+// warning or timeout row is deleted, not kept, unlike a report's outcome),
+// so there is nothing for this function to do on that side. What it unlinks
+// is the erased user acting as a MODERATOR elsewhere: actor_id/actor_token
+// (the bare-id-plus-token pattern erasureUnlinkAudit and erasureUnlinkReports
+// both use) and lifted_by (a bare id with no token column, mirroring
+// reports.assignee_id — inventory classes 23a and 23b, SubjectInventory).
+func erasureUnlinkModerationActions(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
+	var token any
+	if subjectToken != "" {
+		token = subjectToken
+	}
+	// 23b: actions taken BY the subject as a moderator.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE moderation_actions SET actor_id = 0, actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink moderation action actor: %w", err)
+	}
+	// A timeout lifted by the erased moderator.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE moderation_actions SET lifted_by = 0 WHERE lifted_by = ?`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink moderation action lifter: %w", err)
 	}
 	return nil
 }

@@ -21,4 +21,7 @@ const (
 	// Returned when a user tries to lift a moderator-imposed voice state.
 	ErrCodeServerMuted    = "SERVER_MUTED"
 	ErrCodeServerDeafened = "SERVER_DEAFENED"
+	// ErrCodeTimedOut is returned for a send, reaction or voice join refused
+	// by an active moderator timeout (B5-9).
+	ErrCodeTimedOut = "TIMED_OUT"
 )

@@ -212,6 +212,39 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 	}
 }
 
+// TestOwnerOnlyControlsStayOwnerOnly extends TestOwnerOnlyRoutes_ModeratorForbidden
+// with a narrower role than moderatorMask: a user holding ONLY
+// MODERATE_MEMBERS|KICK_MEMBERS|BAN_MEMBERS|MUTE_MEMBERS (B5-9's new bit
+// plus the pre-existing voice/ban/kick moderation bits, nothing else) is
+// still refused on every TLS, backup and update route the admin panel
+// gates owner-only — proven by test, not merely asserted alongside the
+// permission ladder documentation (BPR-072). This role passes the
+// perimeter (it holds KICK_MEMBERS/BAN_MEMBERS/MUTE_MEMBERS, all AdminPerimeter
+// bits) but must still hit ownerOnlyMiddleware's refusal on every one of
+// these routes.
+func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
+	_, token := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/tokens"},
+		{http.MethodPost, "/tokens"},
+		{http.MethodGet, "/backups"},
+		{http.MethodPost, "/backup"},
+		{http.MethodGet, "/updates"},
+		{http.MethodPost, "/updates/apply"},
+	} {
+		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
+			t.Errorf("%s %s = %d, want 403; body: %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
 // ─── KICK_MEMBERS (force logout) ─────────────────────────────────────────────
 
 func TestForceLogout_RequiresKickMembers(t *testing.T) {

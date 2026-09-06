@@ -124,6 +124,8 @@ func denial(err error) error {
 		return nil
 	case errors.Is(err, permissions.ErrBlocked):
 		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+	case errors.Is(err, permissions.ErrTimedOut):
+		return fmt.Errorf("%w: user is timed out", ErrTimedOut)
 	default:
 		return fmt.Errorf("%w: %w", ErrForbidden, err)
 	}

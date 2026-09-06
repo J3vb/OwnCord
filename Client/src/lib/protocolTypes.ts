@@ -44,6 +44,7 @@ export const ServerMessageType = {
   EMOJI_UPDATE: "emoji_update",
   SERVER_RESTART: "server_restart",
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+  MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",

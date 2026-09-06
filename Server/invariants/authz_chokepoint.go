@@ -114,7 +114,9 @@ type AuthzResidueEntry struct {
 // family behind a service. Raising a count is a reviewable edit here, never a
 // side effect of editing the function.
 //
-// 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4.
+// 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4; B5-9
+// added a 20th (service.(*PermissionService).Subject, 22 bound calls) for
+// the TimedOut admin short-circuit.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -122,6 +124,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
+	"service.(*ModerationService).Timeout":     {classServerScoped, "the voice half defers to MUTE_MEMBERS, server-wide, no channel to resolve a Subject for (decision 6)", calls{"HasServerPerm": 1}},
 	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
@@ -132,6 +135,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.(*ChannelService).resolveOverrideUser":     {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).Subject":              {classAdminShortCircuit, "skips the live, uncached TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},
 	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},

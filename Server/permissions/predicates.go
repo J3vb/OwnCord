@@ -25,6 +25,12 @@ var ErrBlocked = errors.New("user is blocked")
 // no voice room (text, announcement).
 var ErrNotVoiceChannel = errors.New("not a voice channel")
 
+// ErrTimedOut is returned by CanSendMessage, CanAddReaction and CanJoinVoice
+// for a subject with an active timeout row (B5-9, decision 6): a time-boxed
+// restriction distinct from a ban, checked through the predicates like every
+// other property rather than a scattered per-handler check.
+var ErrTimedOut = errors.New("user is timed out")
+
 // Subject is everything a channel predicate consults: the actor's role bits,
 // both override layers for the one channel in question, the channel's flags,
 // and — for a DM — the membership and block state the caller looked up. The
@@ -39,6 +45,14 @@ type Subject struct {
 	// creation, not per message (service.requireDMNotBlocked).
 	DMParticipant bool
 	DMBlocked     bool
+	// TimedOut is filled from a live, uncached lookup ("an active timeout
+	// row exists for this subject") by permissions.Checker.Subject and
+	// service.PermissionService.Subject — never from the 30s permission
+	// cache, and never for an Administrator (B5-9, decision 6). It gates
+	// CanSendMessage, CanAddReaction and CanJoinVoice independent of every
+	// channel-scoped bit: a timeout is a restriction on the subject, not a
+	// property of any one channel.
+	TimedOut bool
 }
 
 // Has reports whether the subject's effective permission in the channel holds
@@ -94,6 +108,9 @@ func CanAdmitSession(s Subject) error { return CanViewChannel(s) }
 // and no block in either direction. SendMessage, EditMessage, CanPost, the
 // ready payload's can_send, the composer refresh and typing all delegate here.
 func CanSendMessage(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
 			return err
@@ -119,6 +136,31 @@ func CanSendMessage(s Subject) error {
 // member who cannot post cannot announce one.
 func CanType(s Subject) error { return CanSendMessage(s) }
 
+// CanAddReaction is ADD_REACTIONS in the channel (with READ_MESSAGES), never
+// while timed out; for a DM, membership and no block. AddReaction/
+// RemoveReaction route through this instead of a bare HasChannelPerm bitmask
+// check (B5-9), so reacting gets the same timeout restriction a send does —
+// today's survey found the reaction handler resolved this bit inside
+// effective perms with no predicate of its own.
+func CanAddReaction(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
+	if s.Channel.Type == "dm" {
+		if err := dmMember(s); err != nil {
+			return err
+		}
+		if s.DMBlocked {
+			return ErrBlocked
+		}
+		return nil
+	}
+	if !s.Has(ReadMessages | AddReactions) {
+		return missing(AddReactions)
+	}
+	return nil
+}
+
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
 // membership, so this can only ever narrow), a channel that has a room, for
@@ -127,6 +169,9 @@ func CanType(s Subject) error { return CanSendMessage(s) }
 // must not rejoin the archived room. Applies at join, at token refresh, to
 // the target of a moderator move, and in the stale-voice sweep.
 func CanJoinVoice(s Subject) error {
+	if s.TimedOut {
+		return ErrTimedOut
+	}
 	if !s.Has(ConnectVoice) {
 		return missing(ConnectVoice)
 	}

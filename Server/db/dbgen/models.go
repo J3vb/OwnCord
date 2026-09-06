@@ -168,6 +168,21 @@ type MessagesFt struct {
 	Content string `json:"content"`
 }
 
+type ModerationAction struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	TargetID       int64   `json:"targetId"`
+	ActorID        int64   `json:"actorId"`
+	ActorToken     *string `json:"actorToken"`
+	ReportID       *int64  `json:"reportId"`
+	Reason         string  `json:"reason"`
+	ExpiresAt      *string `json:"expiresAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	LiftedBy       int64   `json:"liftedBy"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
 type PartialAuthChallenge struct {
 	TokenHash string `json:"tokenHash"`
 	UserID    int64  `json:"userId"`

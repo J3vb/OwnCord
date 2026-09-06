@@ -218,6 +218,24 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, channel_id)
 );
+
+-- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
+-- transaction as their effect (PurgeChannelMessagesWithAction/
+-- DeleteMessageWithRemoval).
+CREATE TABLE IF NOT EXISTS moderation_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
+    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id        INTEGER NOT NULL DEFAULT 0,
+    actor_token     TEXT,
+    report_id       INTEGER,
+    reason          TEXT    NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    acknowledged_at TEXT,
+    lifted_at       TEXT,
+    lifted_by       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 `)
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

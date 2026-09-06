@@ -56,6 +56,33 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, nil
 		}},
+		{"warning", "user_warn", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			rec := audittest.Install(t, f.database)
+			if _, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil); err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			return rec, nil
+		}},
+		{"timeout", "user_timeout", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			rec := audittest.Install(t, f.database)
+			if _, err := f.mod.Timeout(context.Background(), fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
+				t.Fatalf("Timeout: %v", err)
+			}
+			return rec, nil
+		}},
+		{"untimeout", "user_untimeout", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			if _, err := f.mod.Timeout(context.Background(), fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
+				t.Fatalf("Timeout: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := f.mod.LiftTimeout(context.Background(), fixtureMod, fixtureMember); err != nil {
+				t.Fatalf("LiftTimeout: %v", err)
+			}
+			return rec, nil
+		}},
 		{"unban", "user_unban", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
 			if err := svc.BanUser(context.Background(), 1, 4, "spam", nil); err != nil {

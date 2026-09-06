@@ -145,6 +145,41 @@ func TestCanModerate(t *testing.T) {
 	})
 }
 
+// TestCanAddReaction pins the reaction gate (B5-9): ADD_REACTIONS with
+// READ_MESSAGES, timed out refused unconditionally, and the same DM
+// membership/block rule every other channel predicate applies.
+func TestCanAddReaction(t *testing.T) {
+	const reactBits = ReadMessages | AddReactions
+	runPredicate(t, "CanAddReaction", CanAddReaction, []predicateCase{
+		{"member reacts in text", Subject{RolePerms: reactBits, Channel: text(false)}, nil},
+		{"reader without ADD_REACTIONS refused", Subject{RolePerms: ReadMessages, Channel: text(false)}, ErrPermissionDenied},
+		{"ADD_REACTIONS without READ refused", Subject{RolePerms: AddReactions, Channel: text(false)}, ErrPermissionDenied},
+		{"role deny ADD_REACTIONS refused", Subject{RolePerms: reactBits, Override: deny(AddReactions), Channel: text(false)}, ErrPermissionDenied},
+		{"user deny ADD_REACTIONS refused", Subject{RolePerms: reactBits, Override: userDeny(AddReactions), Channel: text(false)}, ErrPermissionDenied},
+		{"admin bypasses deny", Subject{RolePerms: Administrator, Override: deny(AddReactions), Channel: text(false)}, nil},
+		{"dm participant reacts without role bits", Subject{Channel: dm(), DMParticipant: true}, nil},
+		{"dm non-participant refused", Subject{RolePerms: Administrator, Channel: dm()}, ErrNotDMParticipant},
+		{"dm blocked refused", Subject{Channel: dm(), DMParticipant: true, DMBlocked: true}, ErrBlocked},
+		{"timed out refused in a channel", Subject{RolePerms: reactBits, Channel: text(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in a dm", Subject{Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+		{"timed out beats admin", Subject{RolePerms: Administrator, Channel: text(false), TimedOut: true}, ErrTimedOut},
+	})
+}
+
+// TestTimedOutSubject pins the TimedOut property on the two other predicates
+// it gates: a blanket refusal ahead of every other check (B5-9, decision 6).
+func TestTimedOutSubject(t *testing.T) {
+	runPredicate(t, "CanSendMessage/timedOut", CanSendMessage, []predicateCase{
+		{"timed out refused in text", Subject{RolePerms: memberBits, Channel: text(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in dm", Subject{Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+		{"not timed out unaffected", Subject{RolePerms: memberBits, Channel: text(false)}, nil},
+	})
+	runPredicate(t, "CanJoinVoice/timedOut", CanJoinVoice, []predicateCase{
+		{"timed out refused before CONNECT_VOICE is even checked", Subject{Channel: voice(false), TimedOut: true}, ErrTimedOut},
+		{"timed out refused in a dm call", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+	})
+}
+
 // TestSubjectHas pins the one generic predicate every other one is built on:
 // Administrator bypasses overrides, everything else is the resolved two-layer
 // mask, and a zero perm is never held (matching HasPerm).

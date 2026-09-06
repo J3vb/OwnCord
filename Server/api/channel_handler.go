@@ -411,6 +411,8 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: err.Error()})
 	case errors.Is(err, service.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "NOT_FOUND", Message: err.Error()})
+	case errors.Is(err, service.ErrTimedOut):
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "TIMED_OUT", Message: err.Error()})
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "FORBIDDEN", Message: err.Error()})
 	case errors.Is(err, service.ErrConflict):

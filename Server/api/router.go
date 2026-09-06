@@ -198,6 +198,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Administrator holders via mod_queue.
 	MountReportRoutes(r, svc, hub)
 	MountModerationQueueRoutes(r, svc, hub)
+	// Warning, timeout and the notice acknowledgement (B5-9) — mounted
+	// alongside the queue since both gate on the same MODERATE_MEMBERS bit
+	// and both can notify a connected target.
+	MountModerationRoutes(r, svc)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -375,6 +379,13 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 		}
 		if svc.Retention != nil {
 			svc.Retention.SetHub(hub)
+		}
+		if svc.Moderation != nil {
+			// B5-9: a live target gets the mod_action frame, and a timeout's
+			// voice half applies through the same mechanism voice_mod_mute
+			// uses.
+			svc.Moderation.SetNotifier(hub)
+			svc.Moderation.SetVoiceMuter(hub)
 		}
 	}
 	if svc.Erasure != nil {

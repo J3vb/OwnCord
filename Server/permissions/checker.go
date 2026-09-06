@@ -43,6 +43,9 @@ type DB interface {
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	// HasActiveTimeout is B5-9's live, uncached lookup: Subject.TimedOut is
+	// filled from it on every Subject call, never from a cache.
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
 }
 
 // ─── Checker ────────────────────────────────────────────────────────────────
@@ -85,6 +88,13 @@ func (ck *Checker) Subject(ctx context.Context, rolePerms int64, roleID, userID,
 	s := Subject{RolePerms: rolePerms}
 	if HasAdmin(rolePerms) {
 		return s, nil
+	}
+	if userID != 0 {
+		timedOut, err := ck.db.HasActiveTimeout(ctx, userID)
+		if err != nil {
+			return Subject{}, err
+		}
+		s.TimedOut = timedOut
 	}
 	allow, deny, err := ck.db.GetChannelPermissions(ctx, channelID, roleID)
 	if err != nil {

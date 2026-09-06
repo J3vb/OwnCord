@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 142 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 148 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -141,15 +141,21 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/metrics`                                                    |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
+| POST    | `/api/v1/moderation/queue/{id}/act`                                  |
 | POST    | `/api/v1/moderation/queue/{id}/assign`                               |
 | POST    | `/api/v1/moderation/queue/{id}/close`                                |
 | POST    | `/api/v1/moderation/queue/{id}/notes`                                |
+| GET     | `/api/v1/moderation/users/{id}/actions`                              |
+| POST    | `/api/v1/moderation/users/{id}/timeout`                              |
+| POST    | `/api/v1/moderation/users/{id}/untimeout`                            |
+| POST    | `/api/v1/moderation/users/{id}/warn`                                 |
 | POST    | `/api/v1/reports/`                                                   |
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
 | POST    | `/api/v1/users/me/recovery-kit`                                      |
@@ -1982,6 +1988,175 @@ Nothing leaves a closed state — closing an already-closed report answers
 `409 CONFLICT`, including under a concurrent double-close.
 
 #### Response 204 No Content
+
+---
+
+### POST /api/v1/moderation/queue/{id}/act
+
+Perform a moderator action against the report's subject (or, for
+`"removal"`, the reported message) with `report_id` set on the ledger row,
+in one transaction with the action's effect. `{id}` is the opaque public id.
+**Auth:** Required. Reading the report first requires `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`) — the same read `GET .../{id}` gates; the action itself
+then requires the bit that action needs (see the permission ladder below).
+`403 SELF_REVIEW` if the caller is the report's own reporter.
+
+#### Request
+
+```json
+{
+  "kind": "timeout",
+  "reason": "at most 500 runes, no control characters",
+  "duration_seconds": 3600,
+  "message_id": "1234"
+}
+```
+
+`kind` is one of `warning`, `timeout`, `kick`, `ban`, `removal`.
+`duration_seconds` applies to `timeout` only (60..2419200, i.e. 1 minute to
+28 days). `message_id` applies to `removal` only, and defaults to the
+report's own target when the report is against a message.
+
+#### Response 204 No Content
+
+#### Errors
+
+Same shape as `POST /api/v1/moderation/users/{id}/warn`/`timeout` below,
+plus the report read's own `403 SELF_REVIEW` and `404 NOT_FOUND` (missing
+report, or the caller is its subject).
+
+---
+
+## Moderator actions
+
+Warning, timeout, kick and ban (BPR-072), narrowly permissioned per action —
+gating a gentle warning on the ability to ban would invert the moderation
+ladder:
+
+| Action                     | Permission                       |
+| -------------------------- | --------------------------------- |
+| Warning                    | `MODERATE_MEMBERS`                |
+| Timeout / lift a timeout   | `MODERATE_MEMBERS`                |
+| Content removal            | `MANAGE_MESSAGES` (existing)      |
+| Kick                       | `KICK_MEMBERS` (existing)         |
+| Ban                        | `BAN_MEMBERS` (existing)          |
+
+**Kick's real meaning.** OwnCord is single-server, so "remove from guild"
+has no referent — kick is `ForceLogout`: every session of the target is
+revoked and they must sign in again. It does not restrict the account from
+returning immediately.
+
+Every action writes a row to the moderator-action ledger, in the same
+transaction as its effect, so an appeal (B5-10) always has something to
+reference. The actor must strictly outrank the target by role position
+(`requireOutranks`), re-validated live at write time so a target promoted
+between the check and the write is refused, not sanctioned. Self, a peer, a
+superior, and the owner as target are all refused.
+
+### POST /api/v1/moderation/users/{id}/warn
+
+Issue a warning: an audited notice the target must acknowledge on next
+connect. **Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters" }
+```
+
+#### Response 201 Created
+
+```json
+{ "id": 42 }
+```
+
+A live target also receives a `mod_action` frame
+(`{"id":42,"kind":"warning","reason":"...","expires_at":null}`), targeted
+and unsequenced.
+
+#### Errors
+
+| Status | Code          | Cause                                                              |
+| ------ | ------------- | ------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | invalid id, self-target, or reason too long/unsafe                  |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or does not outrank the target      |
+| 404    | `NOT_FOUND`   | no such user                                                        |
+
+---
+
+### POST /api/v1/moderation/users/{id}/timeout
+
+Time-box a restriction: the target cannot send messages, add reactions, or
+join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters", "duration_seconds": 3600 }
+```
+
+`duration_seconds` is bounded 60..2419200 (1 minute to 28 days).
+
+#### Response 201 Created
+
+```json
+{ "id": 43, "voice": "applied" }
+```
+
+`voice` is `"applied"` when the actor also holds `MUTE_MEMBERS` and the
+target is currently in voice (the existing server-mute mechanism is
+applied), or `"skipped"` when the actor lacks `MUTE_MEMBERS` — the timeout
+still lands for text and reactions either way; it never grants a voice mute
+a `MUTE_MEMBERS`-less moderator could not perform themselves. A live target
+also receives a `mod_action` frame carrying `expires_at`. The restriction is
+live on the target's very next send — no reconnect needed.
+
+#### Errors
+
+Same shape as `warn` above, plus `400 BAD_REQUEST` for a duration outside
+60..2419200.
+
+---
+
+### POST /api/v1/moderation/users/{id}/untimeout
+
+Lift an active timeout early, including its voice half if it was applied.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Response 204 No Content
+
+A live target also receives a `mod_action` frame with `expires_at: null`.
+
+#### Errors
+
+Same shape as `warn` above, plus `404 NOT_FOUND` when there is no active
+timeout to lift.
+
+---
+
+### GET /api/v1/moderation/users/{id}/actions
+
+The full moderator-action ledger for one user, newest first: kind, actor,
+reason, timestamps, and the linked report's public id when one exists.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+---
+
+### POST /api/v1/users/me/notices/{id}/ack
+
+Acknowledge a warning — own rows only. `{id}` is the ledger row id from
+`ready`'s `notices` (see [protocol.md](protocol.md)). **Auth:** Required
+(session).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                          |
+| ------ | ------------- | ----------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer                                      |
+| 404    | `NOT_FOUND`   | not a warning, already acknowledged, or belongs to another user   |
 
 ---
 

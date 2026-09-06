@@ -433,6 +433,17 @@ func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.
 
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
+	return s.deleteMessage(ctx, userID, msgID, nil)
+}
+
+// DeleteMessageForReport is DeleteMessage with a report link (B5-9's
+// report-linked removal entry point, plan item 7): same authorization and
+// effect, plus report_id on the removal ledger row.
+func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64) (*DeleteMessageResult, error) {
+	return s.deleteMessage(ctx, userID, msgID, &reportID)
+}
+
+func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64) (*DeleteMessageResult, error) {
 	// Rate limit.
 	ratKey := auth.Key("chat_delete", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
@@ -478,7 +489,7 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		return nil, err
 	}
 
-	if err := s.st.DeleteMessage(ctx, msgID, userID, isMod); err != nil {
+	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID); err != nil {
 		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
 		// so a message that raced this request to the writer between the
 		// msg.Deleted check above and this write surfaces here as

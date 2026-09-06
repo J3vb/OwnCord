@@ -111,7 +111,19 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 	if cp == nil {
 		return permissions.Subject{}, nil
 	}
-	return permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}, nil
+	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}
+	// TimedOut is a live, uncached lookup on every call (B5-9): a 30s-stale
+	// answer here would let a just-lifted timeout keep refusing, or a
+	// just-issued one keep landing. Administrator is exempt, mirroring
+	// permissions.Checker.Subject's own short-circuit.
+	if !permissions.HasAdmin(cp.rolePerms) {
+		timedOut, toErr := s.st.HasActiveTimeout(ctx, userID)
+		if toErr != nil {
+			return permissions.Subject{}, toErr
+		}
+		sub.TimedOut = timedOut
+	}
+	return sub, nil
 }
 
 // RequireChannelAccess checks whether the user can access the channel with

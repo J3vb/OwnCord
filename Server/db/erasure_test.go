@@ -90,6 +90,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// report 901's evidence (author_id = uid) is already caught by the
 	// sibling "OR author_id = ?" branch.
 	exec(`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (900, 0, ?, 'context by another author about the subject')`, other)
+	// B5-9 moderation-action classes (migration 049): a warning ABOUT the
+	// subject (23a, target_id) and a timeout BY the subject that they also
+	// lifted (23b, actor_id and lifted_by both).
+	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, reason) VALUES ('warning', ?, ?, 'seed warning about subject')`, uid, other)
+	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, lifted_by, lifted_at, expires_at, reason) VALUES ('timeout', ?, ?, ?, datetime('now'), datetime('now', '+1 hour'), 'seed timeout by subject')`, other, uid, uid)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 

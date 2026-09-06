@@ -258,6 +258,8 @@ func joinDenial(err error) ClientError {
 		return ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}
 	case errors.Is(err, permissions.ErrBlocked):
 		return ClientError{Code: ErrCodeForbidden, Message: "cannot join voice: blocked"}
+	case errors.Is(err, permissions.ErrTimedOut):
+		return ClientError{Code: ErrCodeTimedOut, Message: "you are timed out"}
 	default:
 		return ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"}
 	}

@@ -62,6 +62,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/emoji_handler.go":            {"adapter", "", "Emoji/User types only"},
 	"api/invite_handler.go":           {"adapter", "", "Invite/User types only"},
 	"api/middleware.go":               {"adapter", "", "User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard"},
+	"api/moderation_handler.go":       {"adapter", "", "db.ModerationAction response type only; ModerationService owns every call"},
 	"api/moderation_queue_handler.go": {"adapter", "", "db.User from the auth context only; ReportService owns every call"},
 	"api/plugins_handler.go":          {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
 	"api/profile_handler.go":          {"adapter", "", "User/Session types in the profile and session response shapes; the services own the calls"},

@@ -40,6 +40,10 @@ type ReadySnapshotReader interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
+	// ListUnacknowledgedWarnings is B5-9's per-user notices slot: every
+	// warning issued to the connecting user that they have not yet
+	// acknowledged.
+	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 }
 
 // MemberPayloadReader is what member broadcast payloads (hub_broadcast.go)
