@@ -380,9 +380,15 @@ func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before i
 // plan item 6): a self-delete or a non-moderator delete writes no row,
 // exactly as DeleteMessage always has. authorID is the message's author,
 // already resolved by the caller. reportID links a report-linked removal.
-func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64) error {
+// reason is the ledger row's text; empty falls back to the fixed phrase
+// "message removed" (every caller but the report-linked one, P2-10 Codex
+// review: a direct moderator delete carries no reason of its own to store).
+func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error {
 	if !isMod || deleterID == authorID {
 		return d.DeleteMessage(ctx, msgID, deleterID, isMod)
+	}
+	if reason == "" {
+		reason = "message removed"
 	}
 
 	tx, err := d.writer.BeginTx(ctx, nil)
@@ -399,7 +405,7 @@ func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int6
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("DeleteMessageWithRemoval: message %d: %w", msgID, ErrNotFound)
 	}
-	if err := recordLedgerRow(ctx, tx, "removal", authorID, deleterID, reportID, "message removed"); err != nil {
+	if err := recordLedgerRow(ctx, tx, "removal", authorID, deleterID, reportID, reason); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

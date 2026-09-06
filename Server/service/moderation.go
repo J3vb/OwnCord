@@ -48,9 +48,16 @@ type ModActionNotifier interface {
 // TimeoutVoiceMuter is the minimal voice-hub surface Timeout/LiftTimeout use
 // to apply or lift the voice half of a timeout, reusing voice_mod_mute's own
 // SFU mechanism rather than reimplementing it. Muted with no live voice
-// connection is a silent no-op. *ws.Hub implements it.
+// connection is a silent no-op. *ws.Hub implements it. It reports whether the
+// mute was actually applied — false covers every no-op path (no voice store,
+// no live connection, a channel-switch race) so the caller's "voice":
+// "applied"/"skipped" outcome reflects what really happened rather than
+// merely that the call was attempted (P3-14, Codex review). Whether the
+// caller is even ELIGIBLE to attempt this is decided beforehand by
+// ModerationService (actorCanModerateVoiceFor, P1-3) — this method performs
+// no authorization of its own.
 type TimeoutVoiceMuter interface {
-	ApplyTimeoutMute(ctx context.Context, userID int64, muted bool)
+	ApplyTimeoutMute(ctx context.Context, userID int64, muted bool) bool
 }
 
 // NewModerationService creates a ModerationService.
@@ -346,18 +353,52 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_timeout", "user", targetID,
 		fmt.Sprintf("timeout issued, expires %s", expires.UTC().Format(time.RFC3339)))
 
-	// The voice half defers to MUTE_MEMBERS (decision 6): a server-scoped
-	// check with no channel to resolve a Subject for, mirroring
-	// requirePerm's own residue row.
-	voiceSkipped := !permissions.HasServerPerm(actorRole.Permissions, permissions.MuteMembers)
-	if !voiceSkipped && s.voiceMuter != nil {
-		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, true)
+	// The voice half's eligibility is the actor's CanModerateVoice standing in
+	// the TARGET's CURRENT voice channel (P1-3, Codex review) — not a bare
+	// server-wide MUTE_MEMBERS bit, which bypassed a channel-level deny, room
+	// visibility and DM membership entirely. "applied" additionally requires
+	// the voice muter to report success (P3-14): a target not currently in
+	// voice, or a channel-switch race, must not be reported as applied just
+	// because the actor was eligible.
+	voiceApplied := false
+	if s.actorCanModerateVoiceFor(ctx, actorID, targetID) && s.voiceMuter != nil {
+		if s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, true) {
+			voiceApplied = true
+			if err := s.st.SetTimeoutVoiceMuted(context.WithoutCancel(ctx), id); err != nil {
+				slog.Error("timeout: failed to record voice_muted", "err", err, "action_id", id)
+			}
+		}
 	}
+	voiceSkipped := !voiceApplied
 
 	s.notifyModAction(targetID, id, "timeout", reason, &expires)
 
 	slog.Info("user timed out", "actor_id", actorID, "target_id", targetID, "expires_at", expires, "voice_skipped", voiceSkipped)
 	return &TimeoutResult{ID: id, VoiceSkipped: voiceSkipped}, nil
+}
+
+// actorCanModerateVoiceFor reports whether actorID may run the voice half of
+// a timeout or lift against targetID's CURRENT voice channel (P1-3, Codex
+// review): permissions.CanModerateVoice over the actor's Subject in that
+// channel, so a channel-level deny, a room the actor cannot see, or (for a
+// DM call) the actor not being a participant all refuse it exactly as
+// voice_mod_mute's own gate does — never a server-wide bit alone. False when
+// the target has no live voice connection at all: there is no channel to
+// authorize against, so the voice half is simply skipped, not refused.
+func (s *ModerationService) actorCanModerateVoiceFor(ctx context.Context, actorID, targetID int64) bool {
+	state, err := s.st.GetVoiceState(ctx, targetID)
+	if err != nil || state == nil {
+		return false
+	}
+	ch, err := s.st.GetChannel(ctx, state.ChannelID)
+	if err != nil || ch == nil {
+		return false
+	}
+	sub, err := channelSubject(ctx, s.st, s.perms, actorID, ch, false)
+	if err != nil {
+		return false
+	}
+	return permissions.CanModerateVoice(sub) == nil
 }
 
 // LiftTimeout ends targetID's active timeout early (decision 6): same
@@ -385,15 +426,24 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 		return err
 	}
 
-	lifted, err := s.st.LiftTimeout(ctx, targetID, actorID)
+	lifted, voiceMuted, err := s.st.LiftTimeout(ctx, targetID, actorID)
 	if err != nil {
+		if errors.Is(err, db.ErrOutranked) {
+			// The concurrent-role-change case: refused, not applied.
+			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+		}
 		return fmt.Errorf("%w: failed to lift timeout: %w", ErrInternal, err)
 	}
 	if !lifted {
 		return fmt.Errorf("%w: no active timeout", ErrNotFound)
 	}
 
-	if s.voiceMuter != nil {
+	// Clear the SFU mute only when this timeout actually applied it AND this
+	// lifting actor separately passes CanModerateVoice in the target's
+	// current channel (P1-4, Codex review): unconditionally clearing here
+	// would silently undo a mute a DIFFERENT moderator set through
+	// voice_mod_mute, or one this timeout never applied in the first place.
+	if voiceMuted && s.voiceMuter != nil && s.actorCanModerateVoiceFor(ctx, actorID, targetID) {
 		s.voiceMuter.ApplyTimeoutMute(context.WithoutCancel(ctx), targetID, false)
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_untimeout", "user", targetID, "timeout lifted")
@@ -418,30 +468,77 @@ type ActOnReportParams struct {
 	ReportID        int64
 }
 
+// ActOnReportResult is ActOnReport's outcome: enough for the queue's act
+// route to dispatch the SAME transport broadcasts the direct routes send
+// after their own commit (P2-7, Codex review) without a parallel
+// implementation of what each kind's effect actually was.
+type ActOnReportResult struct {
+	Kind string
+	// TargetID is the sanctioned user (warning/timeout/kick/ban); zero for
+	// removal, which has no single target (see recordLedgerRow's doc
+	// comment on why removal's ledger target is the actor, not the author).
+	TargetID int64
+	// Voice is timeout's voice outcome, "applied" or "skipped" (P1-3/P3-14);
+	// empty for every other kind.
+	Voice string
+	// ChannelID/MessageID are removal's transport needs (a chat_bulk_deleted
+	// broadcast, mirroring the direct purge route); zero for every other
+	// kind.
+	ChannelID int64
+	MessageID int64
+}
+
 // ActOnReport dispatches a report-linked moderator action across all five
 // kinds through one call, so the queue's act route carries no per-kind
-// branching of its own. Every branch sets report_id on the ledger row.
-func (s *ModerationService) ActOnReport(ctx context.Context, p ActOnReportParams) error {
+// branching of its own beyond reading the result to broadcast. Every branch
+// sets report_id on the ledger row and calls the exact same service method
+// (Warn/Timeout/forceLogout/banUser/DeleteMessageForReport) its direct-route
+// sibling calls — no parallel implementation of any kind's effect.
+// validateActionReason runs once here, up front, for every kind (P2-10,
+// Codex review): Warn/Timeout/banUser already validate their own reason
+// internally, but kick and removal did not before this boundary existed.
+func (s *ModerationService) ActOnReport(ctx context.Context, p ActOnReportParams) (*ActOnReportResult, error) {
+	if err := validateActionReason(p.Reason); err != nil {
+		return nil, err
+	}
 	reportID := p.ReportID
 	switch p.Kind {
 	case "warning":
-		_, err := s.Warn(ctx, p.ActorID, p.TargetID, p.Reason, &reportID)
-		return err
+		if _, err := s.Warn(ctx, p.ActorID, p.TargetID, p.Reason, &reportID); err != nil {
+			return nil, err
+		}
+		return &ActOnReportResult{Kind: p.Kind, TargetID: p.TargetID}, nil
 	case "timeout":
-		_, err := s.Timeout(ctx, p.ActorID, p.TargetID, p.Reason, time.Duration(p.DurationSeconds)*time.Second, &reportID)
-		return err
+		result, err := s.Timeout(ctx, p.ActorID, p.TargetID, p.Reason, time.Duration(p.DurationSeconds)*time.Second, &reportID)
+		if err != nil {
+			return nil, err
+		}
+		voice := "applied"
+		if result.VoiceSkipped {
+			voice = "skipped"
+		}
+		return &ActOnReportResult{Kind: p.Kind, TargetID: p.TargetID, Voice: voice}, nil
 	case "kick":
-		return s.forceLogout(ctx, p.ActorID, p.TargetID, &reportID)
+		if err := s.forceLogout(ctx, p.ActorID, p.TargetID, p.Reason, &reportID); err != nil {
+			return nil, err
+		}
+		return &ActOnReportResult{Kind: p.Kind, TargetID: p.TargetID}, nil
 	case "ban":
-		return s.banUser(ctx, p.ActorID, p.TargetID, p.Reason, nil, &reportID)
+		if err := s.banUser(ctx, p.ActorID, p.TargetID, p.Reason, nil, &reportID); err != nil {
+			return nil, err
+		}
+		return &ActOnReportResult{Kind: p.Kind, TargetID: p.TargetID}, nil
 	case "removal":
 		if s.messages == nil {
-			return fmt.Errorf("%w: message removal unavailable", ErrInternal)
+			return nil, fmt.Errorf("%w: message removal unavailable", ErrInternal)
 		}
-		_, err := s.messages.DeleteMessageForReport(ctx, p.ActorID, p.MessageID, p.ReportID)
-		return err
+		delResult, err := s.messages.DeleteMessageForReport(ctx, p.ActorID, p.MessageID, p.ReportID, p.Reason)
+		if err != nil {
+			return nil, err
+		}
+		return &ActOnReportResult{Kind: p.Kind, ChannelID: delResult.ChannelID, MessageID: delResult.MessageID}, nil
 	default:
-		return fmt.Errorf("%w: invalid kind", ErrBadRequest)
+		return nil, fmt.Errorf("%w: invalid kind", ErrBadRequest)
 	}
 }
 
@@ -478,6 +575,11 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	}
 	if actorID == targetID {
 		return fmt.Errorf("%w: cannot ban yourself", ErrBadRequest)
+	}
+	// Ban never validated its reason before this (P2-10, Codex review) —
+	// Warn and Timeout always have, via this same helper.
+	if err := validateActionReason(reason); err != nil {
+		return err
 	}
 
 	// Authorization before existence: an actor without ban authority learns
@@ -595,16 +697,19 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 // hierarchy rule as ban, so a moderator cannot log out an admin or the
 // owner.
 func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID int64) error {
-	return s.forceLogout(ctx, actorID, targetID, nil)
+	return s.forceLogout(ctx, actorID, targetID, "", nil)
 }
 
 // ForceLogoutWithReport is ForceLogout with a report link (plan item 2's
 // "...WithReport variant"; ForceLogout's own signature is unchanged).
 func (s *ModerationService) ForceLogoutWithReport(ctx context.Context, actorID, targetID int64, reportID int64) error {
-	return s.forceLogout(ctx, actorID, targetID, &reportID)
+	return s.forceLogout(ctx, actorID, targetID, "", &reportID)
 }
 
-func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID int64, reportID *int64) error {
+// forceLogout's reason is the ledger row's text; empty falls back to the
+// fixed phrase "all sessions terminated" (P2-10, Codex review: this used to
+// be the ONLY phrase, discarding whatever ActOnReport's caller submitted).
+func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID int64, reason string, reportID *int64) error {
 	if err := requireHumanActor(actorID); err != nil {
 		return err
 	}
@@ -613,6 +718,9 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 	}
 	if actorID == targetID {
 		return fmt.Errorf("%w: cannot force-logout yourself", ErrBadRequest)
+	}
+	if err := validateActionReason(reason); err != nil {
+		return err
 	}
 
 	// Authorization before existence — see BanUser.
@@ -628,7 +736,7 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 		return err
 	}
 
-	if _, err := s.st.ForceLogoutWithAction(ctx, targetID, actorID, reportID); err != nil {
+	if _, err := s.st.ForceLogoutWithAction(ctx, targetID, actorID, reportID, reason); err != nil {
 		if errors.Is(err, db.ErrOutranked) {
 			return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
 		}
@@ -636,6 +744,7 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 	}
 
 	// Audit rows must survive a request canceled after the sessions were cut.
+	// Fixed phrase, never the reason text — same posture as Ban's audit row.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "force_logout", "user", targetID,
 		"all sessions terminated")
 

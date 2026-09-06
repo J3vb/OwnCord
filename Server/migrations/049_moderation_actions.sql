@@ -53,6 +53,16 @@
 -- moderation.action_retention_days after expiry/acknowledgement (default
 -- 90, 0 = never) unless an appeal references them. Ban, kick and removal
 -- rows stay until the account itself goes -- they are not on this clock.
+--
+-- voice_muted (Codex review, added on this same branch before release --
+-- a 049 deviation from the HP-5 draft, not a new migration): 1 when this
+-- timeout row's voice half actually landed a mute (the target was in a
+-- voice channel, and the SFU accepted it), 0 otherwise, including when the
+-- actor's channel-level authorization refused it (P1-3) or the row is not
+-- a timeout at all. LiftTimeout reads it to decide whether clearing the
+-- SFU mute on lift is this row's business at all (P1-4): unconditionally
+-- clearing on every lift would undo a mute a DIFFERENT moderator applied
+-- (voice_mod_mute) or one this timeout never actually set.
 CREATE TABLE IF NOT EXISTS moderation_actions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
@@ -65,6 +75,7 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     acknowledged_at TEXT,
     lifted_at       TEXT,
     lifted_by       INTEGER NOT NULL DEFAULT 0,
+    voice_muted     INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_actions_target ON moderation_actions(target_id, kind, created_at);

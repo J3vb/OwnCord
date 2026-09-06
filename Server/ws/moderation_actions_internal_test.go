@@ -84,19 +84,24 @@ func applyTimeoutMuteTestDB(t *testing.T) (*db.DB, int64) {
 }
 
 // TestApplyTimeoutMute_NoVoiceStore is a no-op when the hub has no voice
-// store wired at all.
+// store wired at all, and reports applied=false (P3-14: the caller's
+// "voice": "applied"/"skipped" must reflect what actually happened).
 func TestApplyTimeoutMute_NoVoiceStore(t *testing.T) {
 	h := &Hub{}
-	h.ApplyTimeoutMute(context.Background(), 1, true) // must not panic
+	if applied := h.ApplyTimeoutMute(context.Background(), 1, true); applied { // must not panic
+		t.Fatal("applied = true, want false: no voice store wired")
+	}
 }
 
 // TestApplyTimeoutMute_NotInVoice is a silent no-op for a target with no
 // live voice state — Timeout's text/reaction restriction still lands
-// regardless.
+// regardless — and reports applied=false.
 func TestApplyTimeoutMute_NotInVoice(t *testing.T) {
 	database, _ := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
-	h.ApplyTimeoutMute(context.Background(), 999, true) // no voice_states row for 999
+	if applied := h.ApplyTimeoutMute(context.Background(), 999, true); applied { // no voice_states row for 999
+		t.Fatal("applied = true, want false: target has no live voice state")
+	}
 }
 
 // TestApplyTimeoutMute_MutesAndBroadcasts applies and then lifts the voice
@@ -114,7 +119,9 @@ func TestApplyTimeoutMute_MutesAndBroadcasts(t *testing.T) {
 		t.Fatalf("Join: %v", err)
 	}
 
-	h.ApplyTimeoutMute(context.Background(), uid, true)
+	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); !applied {
+		t.Fatal("applied = false, want true: the target is in voice and SetServerMute matched")
+	}
 	state, err := h.voice.State(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("State: %v", err)
@@ -123,7 +130,9 @@ func TestApplyTimeoutMute_MutesAndBroadcasts(t *testing.T) {
 		t.Fatalf("state = %+v, want ServerMuted", state)
 	}
 
-	h.ApplyTimeoutMute(context.Background(), uid, false)
+	if applied := h.ApplyTimeoutMute(context.Background(), uid, false); !applied {
+		t.Fatal("applied = false, want true: the lift matched too")
+	}
 	state, err = h.voice.State(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("State (after lift): %v", err)
@@ -163,7 +172,9 @@ func TestApplyTimeoutMute_StateLookupFailed(t *testing.T) {
 	database, _ := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, stateErr: errors.New("boom")}
-	h.ApplyTimeoutMute(context.Background(), 1, true) // must not panic
+	if applied := h.ApplyTimeoutMute(context.Background(), 1, true); applied { // must not panic
+		t.Fatal("applied = true, want false: the state lookup failed")
+	}
 }
 
 // TestApplyTimeoutMute_SetServerMuteFailed and
@@ -182,7 +193,9 @@ func TestApplyTimeoutMute_SetServerMuteFailed(t *testing.T) {
 		t.Fatalf("Join: %v", err)
 	}
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteErr: errors.New("boom")}
-	h.ApplyTimeoutMute(context.Background(), uid, true) // must not panic
+	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); applied { // must not panic
+		t.Fatal("applied = true, want false: SetServerMute failed")
+	}
 }
 
 func TestApplyTimeoutMute_SetServerMuteNoMatch(t *testing.T) {
@@ -196,5 +209,7 @@ func TestApplyTimeoutMute_SetServerMuteNoMatch(t *testing.T) {
 		t.Fatalf("Join: %v", err)
 	}
 	h.voice = &errorVoiceStore{VoiceStore: h.voice, muteMatch: false}
-	h.ApplyTimeoutMute(context.Background(), uid, true) // must not panic, no broadcast
+	if applied := h.ApplyTimeoutMute(context.Background(), uid, true); applied { // must not panic, no broadcast
+		t.Fatal("applied = true, want false: SetServerMute reported no match")
+	}
 }

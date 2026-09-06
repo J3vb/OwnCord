@@ -84,16 +84,22 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, 
 }
 
 // channelSubject resolves what the channel predicates need for userID in ch:
-// role bits and both override layers from the permission cache (a lookup
-// failure or a missing role yields no bits — fail closed, as HasChannelPerm
-// always has), the channel's flags, and for a DM its membership and, when
-// withBlock is set, the two-party block state. The only error is a DM lookup
-// failure, wrapped as ErrInternal; callers keep their own posture toward it
-// (SendMessage reports it, typing drops silently).
+// role bits and both override layers from the permission cache, the
+// channel's flags, and for a DM its membership and, when withBlock is set,
+// the two-party block state. A perms.Subject failure (which now includes an
+// uncached HasActiveTimeout lookup, B5-9) is PROPAGATED rather than
+// collapsed into a permissive zero-bit Subject (P2-11, Codex review): a
+// zero Subject fails closed for a non-DM channel (no SEND_MESSAGES bit,
+// TimedOut also defaults false) but a DM's CanSendMessage/CanAddReaction
+// consult DMParticipant/DMBlocked/TimedOut, not RolePerms, so silently
+// substituting TimedOut=false on an unknown-state error let a DM message
+// or reaction through while the real timeout state was unknown. Every
+// caller already checks this error and fails closed on it (typing drops
+// the indicator, everything else answers Forbidden/Internal).
 func channelSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
-		sub = permissions.Subject{}
+		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
 	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
 	if ch.Type != "dm" {

@@ -15,8 +15,18 @@ import (
 // connected moderation-bit holders of a queue change. Satisfied by *ws.Hub.
 // Takes the INTERNAL report id — the hub resolves the public id itself
 // (db.Report.PublicID) so every caller stays oblivious to the distinction.
+//
+// BroadcastMemberBan/BroadcastChatBulkDeleted are the two transport
+// broadcasts the queue's act route (moderation_queue_handler.go) sends after
+// a report-linked ban or removal commits — the SAME calls the direct admin
+// PATCH route and the direct purge route make (P2-7, Codex review): ban and
+// removal have no live-target notifier of their own the way Warn/Timeout do
+// (ModerationService.notifyModAction), so without these two methods here,
+// acting through the queue silently dropped both broadcasts.
 type ModQueueBroadcaster interface {
 	BroadcastModQueue(ctx context.Context, reportID int64, state string)
+	BroadcastMemberBan(userID int64)
+	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 }
 
 // fileReportRequest is POST /api/v1/reports' body.

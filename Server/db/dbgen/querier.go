@@ -188,8 +188,6 @@ type Querier interface {
 	// so a resolved row is always usable. Matches the sessions never-expiring
 	// convention (expires_at IS NULL).
 	GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiToken, error)
-	// The active timeout row itself, for LiftTimeout's guard.
-	GetActiveTimeout(ctx context.Context, targetID int64) (GetActiveTimeoutRow, error)
 	GetAllSettings(ctx context.Context) ([]Setting, error)
 	GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error)
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
@@ -349,12 +347,18 @@ type Querier interface {
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
-	// Guarded on EXISTS(users) for the lifting actor, same shape as the report
-	// queries' moderator-erased-mid-flight guard.
-	LiftTimeout(ctx context.Context, arg LiftTimeoutParams) (int64, error)
+	// Lifts EVERY currently-active timeout row for target_id in one statement
+	// (P2-9), guarded on EXISTS(users) for the lifting actor same as before --
+	// rather than the single newest row LiftTimeout used to touch.
+	LiftAllActiveTimeouts(ctx context.Context, arg LiftAllActiveTimeoutsParams) (int64, error)
 	// Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
 	// token shown at creation is usable).
 	ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
+	// Every currently-active timeout row for target_id -- normally at most one
+	// after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts on
+	// all of them defensively (P2-9). voice_muted tells LiftTimeout whether any
+	// of them actually applied the voice half (P1-4).
+	ListActiveTimeouts(ctx context.Context, targetID int64) ([]ListActiveTimeoutsRow, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error)
@@ -368,10 +372,10 @@ type Querier interface {
 	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	// The queue detail's "actions taken" list.
-	ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ModerationAction, error)
+	ListModerationActionsForReport(ctx context.Context, reportID *int64) ([]ListModerationActionsForReportRow, error)
 	// GET /api/v1/moderation/users/{id}/actions: the full ledger for one user,
 	// newest first.
-	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ModerationAction, error)
+	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]ListModerationActionsForTargetRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListReportEvents(ctx context.Context, reportID int64) ([]ReportEvent, error)
@@ -468,7 +472,19 @@ type Querier interface {
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
+	// Records that this timeout row's voice half actually landed a mute
+	// (P1-4/P3-14): called once, right after ApplyTimeoutMute reports success,
+	// never reconsidered afterward.
+	SetTimeoutVoiceMuted(ctx context.Context, id int64) error
 	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
+	// On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
+	// still-active timeout row for the same target, in the same transaction as
+	// the new row's insert, so a repeated timeout never leaves two overlapping
+	// active rows for LiftTimeout to pick between -- the single-row
+	// GetActiveTimeout this replaced used to silently orphan every row but the
+	// newest. id excludes the row this same transaction just inserted, which
+	// must stay active.
+	SupersedeActiveTimeouts(ctx context.Context, arg SupersedeActiveTimeoutsParams) (int64, error)
 	// The operator's storage figure on the metrics surface: every attachments
 	// row, legacy rows with a NULL uploader_id included, so it is a total and
 	// not a sum of counters.

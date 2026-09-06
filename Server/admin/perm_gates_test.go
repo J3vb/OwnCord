@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -212,36 +214,53 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 	}
 }
 
+// ownerOnlyRoutePathParam replaces every {param} segment in a route pattern
+// with a harmless literal, so a request can actually be dispatched to it —
+// the literal value never matters to ownerOnlyMiddleware, which runs before
+// any handler touches the param.
+var ownerOnlyRoutePathParam = regexp.MustCompile(`\{[^}]+\}`)
+
 // TestOwnerOnlyControlsStayOwnerOnly extends TestOwnerOnlyRoutes_ModeratorForbidden
-// with a narrower role than moderatorMask: a user holding ONLY
-// MODERATE_MEMBERS|KICK_MEMBERS|BAN_MEMBERS|MUTE_MEMBERS (B5-9's new bit
-// plus the pre-existing voice/ban/kick moderation bits, nothing else) is
-// still refused on every TLS, backup and update route the admin panel
-// gates owner-only — proven by test, not merely asserted alongside the
-// permission ladder documentation (BPR-072). This role passes the
-// perimeter (it holds KICK_MEMBERS/BAN_MEMBERS/MUTE_MEMBERS, all AdminPerimeter
-// bits) but must still hit ownerOnlyMiddleware's refusal on every one of
-// these routes.
+// by walking the ACTUAL set of owner-only routes NewAdminAPI wires
+// (admin.OwnerOnlyRoutesForTest) instead of a hand-listed subset (P2-13,
+// Codex review: the previous version of this test hard-coded six routes and
+// had already drifted, missing backup delete and restore). A vacuity guard
+// fails loudly if that inventory is ever empty or unexpectedly small, so a
+// refactor that stopped recording routes could not pass this test by
+// accident. For each route: a narrow-but-AdminPerimeter role (MODERATE_
+// MEMBERS|KICK_MEMBERS|BAN_MEMBERS|MUTE_MEMBERS, none of them owner-only) is
+// refused with 403, and a POSITIVE CONTROL — an actual Owner-role user — is
+// never refused with 403, proving the walk exercises ownerOnlyMiddleware's
+// real gate rather than routes that would 403 (or 404, or panic) for
+// everyone regardless of role. admin.SetBackupBaseDir points the two backup
+// routes with real filesystem effects at a temp dir so the Owner's requests
+// stay hermetic.
 func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	database := openAdminTestDB(t)
+	admin.SetBackupBaseDir(t.TempDir())
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
-	_, token := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
 
-	for _, tc := range []struct {
-		method string
-		path   string
-	}{
-		{http.MethodGet, "/tokens"},
-		{http.MethodPost, "/tokens"},
-		{http.MethodGet, "/backups"},
-		{http.MethodPost, "/backup"},
-		{http.MethodGet, "/updates"},
-		{http.MethodPost, "/updates/apply"},
-	} {
-		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
-			t.Errorf("%s %s = %d, want 403; body: %s", tc.method, tc.path, w.Code, w.Body.String())
-		}
+	routes := admin.OwnerOnlyRoutesForTest()
+	const minExpectedRoutes = 8 // vacuity guard — today's inventory has 10
+	if len(routes) < minExpectedRoutes {
+		t.Fatalf("admin.OwnerOnlyRoutesForTest() = %d routes, want >= %d: %+v", len(routes), minExpectedRoutes, routes)
+	}
+
+	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
+	_, modToken := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "realowneruser")
+
+	for _, route := range routes {
+		path := ownerOnlyRoutePathParam.ReplaceAllString(route.Pattern, "x")
+		t.Run(route.Method+" "+route.Pattern, func(t *testing.T) {
+			if w := doRequest(t, handler, route.Method, path, modToken, nil); w.Code != http.StatusForbidden {
+				t.Errorf("%s %s (narrow AdminPerimeter role) = %d, want 403; body: %s", route.Method, path, w.Code, w.Body.String())
+			}
+			if w := doRequest(t, handler, route.Method, path, ownerToken, nil); w.Code == http.StatusForbidden {
+				t.Errorf("%s %s (Owner) = 403, want anything but 403 — ownerOnlyMiddleware must admit an actual Owner", route.Method, path)
+			}
+		})
 	}
 }
 

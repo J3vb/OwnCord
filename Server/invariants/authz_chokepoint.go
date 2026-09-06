@@ -115,8 +115,11 @@ type AuthzResidueEntry struct {
 // side effect of editing the function.
 //
 // 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4; B5-9
-// added a 20th (service.(*PermissionService).Subject, 22 bound calls) for
-// the TimedOut admin short-circuit.
+// added service.(*PermissionService).Subject for the TimedOut admin
+// short-circuit, and (briefly) service.(*ModerationService).Timeout for a
+// bare MUTE_MEMBERS check — P1-3 (Codex review) replaced that check with
+// permissions.CanModerateVoice over a real Subject, so Timeout's own row is
+// gone again; only Subject's remains.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -124,8 +127,12 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
-	"service.(*ModerationService).Timeout":     {classServerScoped, "the voice half defers to MUTE_MEMBERS, server-wide, no channel to resolve a Subject for (decision 6)", calls{"HasServerPerm": 1}},
-	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
+	// service.(*ModerationService).Timeout's own row is GONE (P1-3, Codex
+	// review): the voice half used to defer to a bare, server-wide
+	// MUTE_MEMBERS bit with no channel to resolve a Subject for (decision 6);
+	// it now builds a Subject for the target's CURRENT voice channel and asks
+	// permissions.CanModerateVoice — the canonical predicate, not a residue.
+	"service.(*RoleService).actorRole": {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
 	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},

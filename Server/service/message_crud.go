@@ -323,7 +323,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	chanType := ch.Type
 	isDM := chanType == "dm"
 
-	if accessErr := s.editMessageCheckAccess(ctx, userID, msg.ChannelID, ch, isDM); accessErr != nil {
+	if accessErr := s.editMessageCheckAccess(ctx, userID, ch); accessErr != nil {
 		return nil, accessErr
 	}
 
@@ -377,29 +377,27 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	return result, nil
 }
 
-// editMessageCheckAccess gates an edit on the channel the message lives in:
-// participation plus the block check for a DM, the shared send gate for
-// everything else. isDM is the caller's already-computed ch.Type == "dm".
-func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID, channelID int64, ch *db.Channel, isDM bool) error {
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+// editMessageCheckAccess gates an edit through the same predicate a send
+// uses (permissions.CanSendMessage, via channelSubject/denial) instead of a
+// second, DM-only copy of participation/block — a timed-out user must not
+// be able to broadcast new text into a channel or a DM by editing an old
+// message (P1-2, Codex review). isDM is the caller's already-computed
+// ch.Type == "dm".
+//
+// Most of the verdict is still collapsed into one opaque "cannot edit this
+// message" (ErrForbidden) so the reply stays an ownership/permission
+// non-oracle — but ErrTimedOut, and a DM's ErrBlocked (the prior DM branch's
+// own behavior), pass through distinctly: TIMED_OUT and "blocked" are
+// signals the client already surfaces elsewhere and are not oracles here.
+func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int64, ch *db.Channel) error {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
+		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	if verdict := denial(permissions.CanSendMessage(sub)); verdict != nil {
+		if errors.Is(verdict, ErrTimedOut) || (ch.Type == "dm" && errors.Is(verdict, ErrBlocked)) {
+			return verdict
 		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return blkErr
-		}
-	} else if permErr := s.checkSendPermission(ctx, userID, ch); permErr != nil {
-		// An edit injects new text into the channel and is fanned out to every
-		// reader, so it must clear the same gate as a send rather than
-		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
-		// channel (the panel's "Can access" toggle denies
-		// READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES intact) cannot
-		// rewrite its old posts, and the announcement rule so a demoted
-		// moderator cannot rewrite a trusted broadcast. Mirrors DeleteMessage,
-		// SetMessagePinned and handleReaction, which already require
-		// READ_MESSAGES. The reason is collapsed into this sink's single opaque
-		// error so the reply stays an ownership/permission non-oracle.
 		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 	return nil
@@ -433,17 +431,24 @@ func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.
 
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
-	return s.deleteMessage(ctx, userID, msgID, nil)
+	return s.deleteMessage(ctx, userID, msgID, nil, "")
 }
 
 // DeleteMessageForReport is DeleteMessage with a report link (B5-9's
 // report-linked removal entry point, plan item 7): same authorization and
-// effect, plus report_id on the removal ledger row.
-func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64) (*DeleteMessageResult, error) {
-	return s.deleteMessage(ctx, userID, msgID, &reportID)
+// effect, plus report_id on the removal ledger row. reason is the
+// moderator's submitted reason for the removal, stored on the ledger row
+// (P2-10, Codex review: this used to be silently discarded in favor of the
+// fixed phrase every other delete path uses) — empty falls back to that
+// same fixed phrase.
+func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64, reason string) (*DeleteMessageResult, error) {
+	return s.deleteMessage(ctx, userID, msgID, &reportID, reason)
 }
 
-func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64) (*DeleteMessageResult, error) {
+func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64, reason string) (*DeleteMessageResult, error) {
+	if err := validateActionReason(reason); err != nil {
+		return nil, err
+	}
 	// Rate limit.
 	ratKey := auth.Key("chat_delete", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
@@ -489,7 +494,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		return nil, err
 	}
 
-	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID); err != nil {
+	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
 		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
 		// so a message that raced this request to the writer between the
 		// msg.Deleted check above and this write surfaces here as
