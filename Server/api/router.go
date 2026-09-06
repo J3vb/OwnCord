@@ -181,14 +181,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
-	// DM (direct message) REST routes — mounted after hub creation so the
-	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, svc, hub)
-
-	// Message request inbox (B5-6) — mounted beside MountDMRoutes for the
-	// same reason: transitions send real-time dm_channel_open/dm_request
-	// events through the hub.
-	MountDMRequestRoutes(r, svc, hub)
+	// DM (direct message) REST routes, and the message request inbox (B5-6)
+	// beside them — mounted after hub creation so real-time
+	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
+	// clients.
+	routerDMRoutes(r, database, svc, hub)
 
 	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
 	// creation so a message purge or an nsfw_ack can broadcast through it.
@@ -206,8 +203,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// queue (B5-8) — mounted after hub creation so a filed report, an
 	// assignment or a close can notify connected MODERATE_MEMBERS/
 	// Administrator holders via mod_queue.
-	MountReportRoutes(r, svc, hub)
-	MountModerationQueueRoutes(r, svc, hub)
+	routerReportRoutes(r, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -429,9 +425,22 @@ func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) 
 // routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
 // acknowledgement toggle beside it — both need the hub to fan out real-time
 // events (chat_bulk_deleted, nsfw_ack).
+func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub) {
+	MountDMRoutes(r, database, svc, hub)
+	MountDMRequestRoutes(r, svc, hub)
+}
+
 func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
 	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
+}
+
+// routerReportRoutes mounts report intake, the reporter's own status view,
+// and the moderation queue (B5-8) — the hub is the mod_queue broadcaster for
+// a filed report, an assignment, or a close.
+func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
+	MountReportRoutes(r, svc, hub)
+	MountModerationQueueRoutes(r, svc, hub)
 }
 
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
