@@ -3,7 +3,8 @@
 The hand-run reversal of every migration the B4 phase added, and every one
 since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
 
-`045_push_subscriptions` is B5-4's — see the cost table below.
+`045_push_subscriptions` is B5-4's and `046_message_requests` is B5-6's — see
+the cost table below.
 
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
@@ -64,17 +65,18 @@ Reversing a schema change is cheap. Reversing what the migration made possible
 is usually not, and every file says so in its own comment. The ones worth
 knowing before you start:
 
-| Reversal                     | What it costs                                                                                                                                                                                                                       |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `045_push_subscriptions`     | Every stored Web Push subscription is gone. Nothing was dispatching to them yet (B5-4 is storage-only), so no delivery in flight is lost — every device just has to re-subscribe.                                                   |
-| `043_setup_completed`        | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup"). |
-| `042` + `041` (audit tokens) | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                         |
-| `039_retention`              | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                      |
-| `037_erasure_jobs`           | An erasure that had not finished its file half loses the journal listing the files still to remove. Reconcile storage by hand afterwards.                                                                                           |
-| `036` / `035` (recovery)     | Every issued credential and every enrolled kit stops working. Tell the people holding them first.                                                                                                                                   |
-| `034_registration_modes`     | `approval` and `open` have no boolean spelling, so the mode becomes closed. Accounts awaiting approval become ordinary accounts that can sign in — settle them first.                                                               |
-| `032_second_factor_state`    | Emergency recovery codes are invalidated, in-flight logins and enrolments dropped.                                                                                                                                                  |
-| `markers.down.sql`           | Forfeits the anti-resurrection guarantee for every erasure so far: a restore of an older backup brings erased subjects back with nothing to stop them. Record it in the audit log first.                                            |
+| Reversal                     | What it costs                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `046_message_requests`       | Every pending request and every ignored/deleted/blocked decision the recipient made is lost, and a later re-apply's grandfathering backfill collapses the `sent_first`/`accepted`/`grandfathered` distinction on standing trust to just "trust exists" — see the reversal's own comment. |
+| `045_push_subscriptions`     | Every stored Web Push subscription is gone. Nothing was dispatching to them yet (B5-4 is storage-only), so no delivery in flight is lost — every device just has to re-subscribe.                                                                                                        |
+| `043_setup_completed`        | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup").                                                      |
+| `042` + `041` (audit tokens) | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                                                                              |
+| `039_retention`              | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                                                                           |
+| `037_erasure_jobs`           | An erasure that had not finished its file half loses the journal listing the files still to remove. Reconcile storage by hand afterwards.                                                                                                                                                |
+| `036` / `035` (recovery)     | Every issued credential and every enrolled kit stops working. Tell the people holding them first.                                                                                                                                                                                        |
+| `034_registration_modes`     | `approval` and `open` have no boolean spelling, so the mode becomes closed. Accounts awaiting approval become ordinary accounts that can sign in — settle them first.                                                                                                                    |
+| `032_second_factor_state`    | Emergency recovery codes are invalidated, in-flight logins and enrolments dropped.                                                                                                                                                                                                       |
+| `markers.down.sql`           | Forfeits the anti-resurrection guarantee for every erasure so far: a restore of an older backup brings erased subjects back with nothing to stop them. Record it in the audit log first.                                                                                                 |
 
 `markers.down.sql` is the odd one out: the deletion-marker file carries its own
 schema, applied on every open by `Server/db/markers.go`, so it is not a

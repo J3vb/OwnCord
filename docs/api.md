@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 139 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 144 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -119,6 +119,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | GET     | `/api/v1/client-update/{target}/{current_version}`                   |
 | GET     | `/api/v1/diagnostics/connectivity`                                   |
+| GET     | `/api/v1/dm-requests/`                                               |
+| POST    | `/api/v1/dm-requests/{id}/accept`                                    |
+| POST    | `/api/v1/dm-requests/{id}/block`                                     |
+| POST    | `/api/v1/dm-requests/{id}/delete`                                    |
+| POST    | `/api/v1/dm-requests/{id}/ignore`                                    |
 | GET     | `/api/v1/dms/`                                                       |
 | POST    | `/api/v1/dms/`                                                       |
 | POST    | `/api/v1/dms/group`                                                  |
@@ -1350,11 +1355,14 @@ subscriptions are stored but nothing is ever sent to one.
 **What dispatch sends, and to whom.** With both keys true, a new message
 sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
 name, sender or count — to: the message's direct `@mentions` in a guild
-channel, or every other participant of a one-to-one DM. Within that set,
-only offline subscribers are pushed to (a connected client already has the
-message), permission is re-checked at dispatch time (`CanViewChannel`, not
-whatever it was when the subscription was created), and a channel labelled
-`nsfw` gets no push at all. At most one push per user per channel per 60
+channel, or every other participant of a one-to-one DM who trusts the
+author (the same `trusted_senders` row Message Requests gates on — see
+"Message Requests" below; a first-contact message from someone not yet
+trusted rings no one's phone). Within that set, only offline subscribers
+are pushed to (a connected client already has the message), permission is
+re-checked at dispatch time (`CanViewChannel`, not whatever it was when the
+subscription was created), and a channel labelled `nsfw` gets no push at
+all. At most one push per user per channel per 60
 seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
 (or a network error) gets two retries — three attempts total — before being
 dropped, and any other failure status drops immediately. Nothing is written
@@ -1660,6 +1668,106 @@ participants receive a fresh `dm_channel_open` with the new membership.
 | Status | Code        | Reason                       |
 | ------ | ----------- | ---------------------------- |
 | 404    | `NOT_FOUND` | Not a participant of this DM |
+
+---
+
+## Message Requests
+
+B5-6: the first message from a sender the recipient does not yet trust, in a
+**one-to-one** DM, stages a request instead of opening the conversation
+(`message_requests`, `trusted_senders` — `docs/schema.md`, migration `046`).
+Group DMs are untouched. Existing one-to-one DM pairs were grandfathered as
+trusted when `046` applied, so no live conversation broke on upgrade.
+
+**The sender's side is byte-identical across `pending`, `ignored` and
+`deleted`** (decision 5, `docs/architecture/community-services.md` section
+S1): `chat_send_ok`, `chat_message`, `GET /api/v1/dms` and
+`GET /channels/{id}/messages` are the same whether the request ends up
+pending, ignored or deleted. A sender can never distinguish those three
+states from one another, or from a request nobody has looked at yet —
+silence, not a rejection. `block` is not part of this claim: a blocked
+sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
+the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
+and it is visible to the sender by design.
+
+Transitions are **recipient-only** and legal **only from `pending`**:
+
+- `accept` — trusts the sender, opens the conversation for the recipient
+  (`dm_channel_open`), and marks the request accepted, all in one
+  transaction.
+- `ignore` — the request drops out of the inbox; nothing else changes.
+- `delete` — identical to `ignore` server-side; the held message rows stay in
+  the channel (the recipient never opened it).
+- `block` — blocks the sender (`PUT /api/v1/blocks/{userId}`'s existing
+  effects) and only then marks the request blocked.
+
+A transition attempted on a row that is not pending returns **409
+CONFLICT** if the row exists for the caller (a race, including the loser of
+two simultaneous decisions) or **404 NOT_FOUND** if it does not — including
+when the caller is the sender or an unrelated user, so a foreign request's
+existence is never confirmed.
+
+### GET /api/v1/dm-requests
+
+List the caller's pending inbox, newest first.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "requests": [
+    {
+      "id": 1,
+      "channel_id": 42,
+      "sender": {
+        "id": 7,
+        "username": "stranger",
+        "display_name": "",
+        "avatar": ""
+      },
+      "preview": {
+        "message_id": 100,
+        "content": "hi, stranger",
+        "timestamp": "2026-09-05T12:00:00Z"
+      },
+      "created_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/v1/dm-requests/{id}/accept
+
+### POST /api/v1/dm-requests/{id}/ignore
+
+### POST /api/v1/dm-requests/{id}/delete
+
+### POST /api/v1/dm-requests/{id}/block
+
+Decide a pending request. `block` additionally blocks the sender.
+
+**Auth:** Required (recipient only)
+
+#### Response 200 OK
+
+```json
+{
+  "id": 1,
+  "state": "accepted",
+  "decided_at": "2026-09-05T12:05:00Z"
+}
+```
+
+#### Errors
+
+| Status | Code        | Reason                                             |
+| ------ | ----------- | -------------------------------------------------- |
+| 404    | `NOT_FOUND` | Not this recipient's request, or it does not exist |
+| 409    | `CONFLICT`  | The request is no longer pending                   |
 
 ---
 

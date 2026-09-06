@@ -47,7 +47,21 @@ func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any)
 	payload := buildTypingMsg(channelID, userID, info.Username)
 
 	if ch.Type == "dm" {
-		participantIDs, pErr := d.ChannelSvc.GetDMParticipantIDs(ctx, channelID)
+		// B5-6: the same message-request-aware audience every other DM frame
+		// path uses (MessageService.DMAudience), so an untrusted recipient of
+		// a held first message hears no typing indicator either. Falls back
+		// to the unfiltered participant list when MessageSvc was not wired
+		// (a test built without it), matching DMAudience's own
+		// nil-messageRequests posture.
+		var (
+			participantIDs []int64
+			pErr           error
+		)
+		if d.MessageSvc != nil {
+			participantIDs, pErr = d.MessageSvc.DMAudience(ctx, channelID, userID)
+		} else {
+			participantIDs, pErr = d.ChannelSvc.GetDMParticipantIDs(ctx, channelID)
+		}
 		if pErr != nil {
 			return Result{}
 		}

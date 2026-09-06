@@ -135,6 +135,32 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     PRIMARY KEY (message_id, mentioned_user_id)
 );
 
+-- Needed by GetMessages' permission resolution and reaction enrichment, even
+-- for a DM-only test: channelSubject/PermissionService reads channel_overrides
+-- unconditionally, and scanAndEnrichMessages always joins reactions.
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(channel_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    emoji      TEXT    NOT NULL,
+    UNIQUE(message_id, user_id, emoji)
+);
+
 -- Mirrors migrations/001. Required, not optional decoration: the DM close
 -- path (db.LeaveGroupDM) unlinks a channel's attachments before hard-deleting
 -- the channel row, because messages.channel_id and attachments.message_id both
@@ -148,7 +174,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     stored_as   TEXT    NOT NULL,
     mime_type   TEXT    NOT NULL,
     size        INTEGER NOT NULL,
-    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    width       INTEGER,
+    height      INTEGER
 );
 
 
@@ -180,6 +208,32 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     PRIMARY KEY (blocker_id, blocked_id),
     CHECK (blocker_id != blocked_id)
 );
+
+-- Message requests and trusted senders (migration 046, B5-6): required by
+-- every DM send through MessageService now that first contact is gated, not
+-- just by dm_request_handler_test.go.
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
+    ON message_requests(recipient_id, state);
 `)
 
 // ─── helpers ────────────────────────────────────────────────────────────────

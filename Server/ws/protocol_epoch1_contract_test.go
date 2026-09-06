@@ -665,6 +665,8 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"typing", journeyTyping},
 		{"mark-read", journeyMarkRead},
 		{"dm-send", journeyDMSend},
+		{"dm-request", journeyDMRequest},
+		{"dm-request-ignored", journeyDMRequestIgnored},
 		{"resume-replay", journeyResumeReplay},
 		{"voice-join-e2ee-leave", journeyVoiceJoinE2EELeave},
 	}
@@ -921,11 +923,26 @@ func journeyMarkRead(t *testing.T, r *epochRig) {
 // journeyDMSend records a direct message. DM traffic is addressed to the
 // participant ids rather than a channel topic, so neither side needs focus,
 // and the whole fan-out is synchronous on the sender's connection.
+//
+// B5-6 gate note: GetOrCreateDMChannel below runs at the DB layer, below
+// service.MessageService's first-contact gate, and this pair has no
+// trusted_senders row at journey start (migration 046's grandfathering
+// backfill runs once at migration time over pairs that already exist then —
+// this journey's pair does not exist yet). Without the explicit TrustSender
+// call, alice's send below would be gated exactly like a stranger's first
+// message: bob would get a dm_request instead of chat_message, and this
+// fixture would silently start recording a different journey. Trusting the
+// pair here keeps the recorded frames byte-identical to before B5-6 — see
+// the spec's own warning that a green dm-send.json never proved anything
+// about the gate.
 func journeyDMSend(t *testing.T, r *epochRig) {
 	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
 	dmChannel, _, err := r.db.GetOrCreateDMChannel(context.Background(), aliceID, bobID)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	if err := r.db.TrustSender(context.Background(), bobID, aliceID, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
 	}
 
 	a, b := r.dial(t, "a"), r.dial(t, "b")
@@ -942,6 +959,88 @@ func journeyDMSend(t *testing.T, r *epochRig) {
 	a.expect("chat_send_ok")
 	a.expect("chat_message")
 	b.expect("chat_message")
+	a.barrier()
+	b.barrier()
+}
+
+// journeyDMRequest records alice, a stranger to bob, sending the first
+// message of a fresh one-to-one DM (B5-6): alice's side is byte-identical to
+// journeyDMSend (chat_send_ok, chat_message — decision 5), and bob, who does
+// not yet trust alice, gets exactly one dm_request instead of the message
+// itself.
+func journeyDMRequest(t *testing.T, r *epochRig) {
+	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
+	dmChannel, _, err := r.db.GetOrCreateDMChannel(context.Background(), aliceID, bobID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	a, b := r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence")
+
+	a.record, b.record = true, true
+	a.send(map[string]any{
+		"type":    "chat_send",
+		"id":      "req-dm-request-1",
+		"payload": map[string]any{"channel_id": dmChannel.ID, "content": "hi, stranger"},
+	})
+	a.expect("chat_send_ok")
+	a.expect("chat_message")
+	b.expect("dm_request")
+	a.barrier()
+	b.barrier()
+}
+
+// journeyDMRequestIgnored records a resend after the recipient ignored the
+// first request (decision 5's silence property, and the "resend creates
+// nothing" rule): bob ignores alice's first message (drained, not part of
+// this journey — the request gate itself is service/message_request_test.go's
+// job), then alice sends again. Alice's side records the same two frame
+// types as any other send; bob records nothing at all — no second
+// dm_request, no chat_message.
+func journeyDMRequestIgnored(t *testing.T, r *epochRig) {
+	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
+	dmChannel, _, err := r.db.GetOrCreateDMChannel(context.Background(), aliceID, bobID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	a, b := r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence")
+
+	// Setup, not recorded: alice's first message stages the request and bob
+	// drains the resulting dm_request, then the request is marked ignored
+	// directly — there is no REST/WS decision route wired into this harness;
+	// the transition itself is service/message_request_test.go's and
+	// api/dm_request_handler_test.go's job.
+	a.send(map[string]any{
+		"type":    "chat_send",
+		"id":      "req-dm-request-ignored-setup",
+		"payload": map[string]any{"channel_id": dmChannel.ID, "content": "hi, stranger"},
+	})
+	a.expect("chat_send_ok")
+	a.expect("chat_message")
+	b.drain("dm_request")
+
+	ctx := context.Background()
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE message_requests SET state = 'ignored', decided_at = datetime('now') WHERE sender_id = ? AND recipient_id = ?`,
+		aliceID, bobID); err != nil {
+		t.Fatalf("marking the request ignored: %v", err)
+	}
+
+	a.record, b.record = true, true
+	a.send(map[string]any{
+		"type":    "chat_send",
+		"id":      "req-dm-request-ignored-1",
+		"payload": map[string]any{"channel_id": dmChannel.ID, "content": "hello again"},
+	})
+	a.expect("chat_send_ok")
+	a.expect("chat_message")
 	a.barrier()
 	b.barrier()
 }

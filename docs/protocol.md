@@ -97,7 +97,7 @@ The sequence number system enables reconnection with state recovery.
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                                                      |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                                          |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
 | Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                        |
 
@@ -322,7 +322,9 @@ DM chat events (`chat_message`, `chat_edited`, `chat_deleted`,
 `events` table as channel broadcasts, so they replay at tiers 1 and 2 —
 filtered to the DM's participants. The unsequenced DM lifecycle events
 (`dm_channel_open`/`dm_channel_close`) are not replayed; that state is always
-recoverable via the full `ready` payload.
+recoverable via the full `ready` payload. `dm_request` (B5-6) is unsequenced
+too, but its state is not in `ready` — a missed one is recovered from
+`GET /api/v1/dm-requests` instead (see the dm_request section below).
 
 ---
 
@@ -1386,6 +1388,78 @@ Sent to the caller of `DELETE /api/v1/dms/{id}`. For a group that is a _leave_,
 and the remaining participants receive a fresh `dm_channel_open` carrying the
 new membership.
 
+### dm_request (Server -> Client)
+
+B5-6, one-to-one DMs only. Sent to the **recipient** in two situations:
+
+- **On creation**, once: the first message from a sender the recipient does
+  not yet trust (`docs/schema.md` migration `046`) stages a `message_requests`
+  row instead of opening the conversation, and the recipient gets this frame
+  with `preview` set. A resend while the request is still pending, or after
+  it was ignored or deleted, creates no second row and sends nothing
+  (decision 5) — the sender's own frames (`chat_send_ok`, `chat_message`) are
+  unaffected either way, and the sender never learns which of the two cases
+  they hit. `blocked` is not part of this silence (Codex P2-9): a resend from
+  a blocked sender never reaches this gate at all — it is refused up front
+  with `ErrBlocked` by the existing, pre-B5-6 block check, which the sender
+  does see.
+- **On every transition**, with the new `state` and `preview: null` (the held
+  message never changes): `accept` (`dm_channel_open` is sent first, then
+  this), `ignore`, `delete`, `block` — see `docs/api.md`'s "Message Requests"
+  section for the REST routes that decide a request. Sent to the recipient's
+  other live connections, not to the sender.
+
+```json
+{
+  "type": "dm_request",
+  "payload": {
+    "id": 1,
+    "state": "pending",
+    "channel_id": 100,
+    "sender": {
+      "id": 7,
+      "username": "stranger",
+      "display_name": "",
+      "avatar": ""
+    },
+    "preview": {
+      "message_id": 55,
+      "content": "hi, stranger",
+      "timestamp": "2026-09-05T12:00:00Z"
+    },
+    "created_at": "2026-09-05T12:00:00Z",
+    "decided_at": null
+  }
+}
+```
+
+| Field        | Type           | Description                                                                                   |
+| ------------ | -------------- | --------------------------------------------------------------------------------------------- |
+| `state`      | string         | `pending`, `accepted`, `ignored`, `deleted` or `blocked`                                      |
+| `sender`     | object         | The message's author — a stranger's profile, safely previewed with no automatic fetch (below) |
+| `preview`    | object \| null | The held message's id/content/timestamp; present only on creation, `null` on every transition |
+| `decided_at` | string \| null | Set once a recipient transition lands; `null` while pending                                   |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_channel_close`
+above: a client that misses one recovers from `GET /api/v1/dm-requests`, the
+persisted source of truth, rather than the replay ring buffer. Unlike
+`dm_channel_open` it does not bump the visibility watermark — a missed
+`dm_request` does not strand a channel a full resync is needed to see, the
+REST inbox already has it.
+
+**The recipient's client must render this with every automatic media, embed,
+link-preview and avatar fetch suppressed** — decision 4's "safely previewed":
+`sender.avatar` can be an external URL (Codex P3-10), so fetching it is
+exactly the kind of network request to a stranger-controlled endpoint this
+frame exists to withhold, same as any link or embed in the message body.
+Nothing the client would otherwise auto-fetch runs until the recipient
+accepts (B9 implements the client half; this frame carries the flag by
+construction — the suppression list above is exhaustive over what the
+payload contains to fetch from).
+
+**The sender receives nothing from this path, ever** — not a hint that a
+request exists, not its state, not whether it was ever decided.
+
 ### DM Authorization
 
 All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
@@ -1624,6 +1698,7 @@ tables below add per-type behavioral notes.
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
+| `dm_request`          | No       | Direct to recipient (B5-6)                                              |
 | `call_incoming`       | No       | Direct to each other DM participant                                     |
 | `call_declined`       | No       | Direct to each other DM participant                                     |
 | `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |

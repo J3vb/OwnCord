@@ -835,6 +835,83 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) 
 	})
 }
 
+// dmRequestSenderPayload is the sender profile a dm_request frame carries —
+// enough for the recipient's inbox to render a name and avatar without a
+// second fetch. Mirrors what GET /api/v1/dm-requests returns for the same
+// field (docs/protocol.md's dm_request section).
+type dmRequestSenderPayload struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar"`
+}
+
+// dmRequestPreviewPayload is the held message's preview, present only on
+// creation (nil on a transition frame, since the message never changes).
+type dmRequestPreviewPayload struct {
+	MessageID int64  `json:"message_id"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// dmRequestPayload is the dm_request wire payload (docs/protocol.md).
+type dmRequestPayload struct {
+	ID        int64                    `json:"id"`
+	State     string                   `json:"state"`
+	ChannelID int64                    `json:"channel_id"`
+	Sender    dmRequestSenderPayload   `json:"sender"`
+	Preview   *dmRequestPreviewPayload `json:"preview"`
+	CreatedAt string                   `json:"created_at"`
+	DecidedAt *string                  `json:"decided_at"`
+}
+
+// buildDMRequest constructs a dm_request event (B5-6): sent to the
+// recipient once on creation (Preview set) and again, with a new State, on
+// every transition (Preview nil) — see DMRequestEvent's doc comment for
+// where each caller builds this.
+func buildDMRequest(p dmRequestPayload) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeDMRequest,
+		Payload: p,
+	})
+}
+
+// buildDMRequestForCreation builds the creation-time dm_request frame for a
+// freshly-staged request: req is one entry of
+// service.SendMessageResult.RequestCreatedFor, sender the message's author
+// (service.SendMessageResult.SenderUser), and preview the held message
+// (service.SendMessageResult.RequestPreview).
+func buildDMRequestForCreation(req *db.MessageRequest, sender *db.User, preview *service.DMRequestPreview) []byte {
+	avatar := ""
+	if sender.Avatar != nil {
+		avatar = *sender.Avatar
+	}
+	displayName := ""
+	if sender.DisplayName != nil {
+		displayName = *sender.DisplayName
+	}
+	var previewPayload *dmRequestPreviewPayload
+	if preview != nil {
+		previewPayload = &dmRequestPreviewPayload{
+			MessageID: preview.MessageID,
+			Content:   preview.Content,
+			Timestamp: preview.Timestamp,
+		}
+	}
+	return buildDMRequest(dmRequestPayload{
+		ID:        req.ID,
+		State:     req.State,
+		ChannelID: req.ChannelID,
+		Sender: dmRequestSenderPayload{
+			ID: sender.ID, Username: sender.Username,
+			DisplayName: displayName, Avatar: avatar,
+		},
+		Preview:   previewPayload,
+		CreatedAt: req.CreatedAt,
+		DecidedAt: req.DecidedAt,
+	})
+}
+
 // buildCallSignal constructs a call_incoming or call_declined frame.
 func buildCallSignal(msgType string, channelID, fromUserID int64, username string) []byte {
 	return buildJSON(wsMsg{

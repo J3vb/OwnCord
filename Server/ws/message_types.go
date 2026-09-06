@@ -74,6 +74,7 @@ const (
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
 	MsgTypeDMChannelClose      = "dm_channel_close"
+	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)

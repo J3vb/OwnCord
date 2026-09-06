@@ -164,6 +164,17 @@ type MessageMention struct {
 	MentionedUserID int64 `json:"mentionedUserId"`
 }
 
+type MessageRequest struct {
+	ID             int64   `json:"id"`
+	SenderID       int64   `json:"senderId"`
+	RecipientID    int64   `json:"recipientId"`
+	ChannelID      int64   `json:"channelId"`
+	FirstMessageID *int64  `json:"firstMessageId"`
+	State          string  `json:"state"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
 }
@@ -295,6 +306,13 @@ type TotpUsedCode struct {
 	UserID    int64  `json:"userId"`
 	CodeHash  string `json:"codeHash"`
 	ExpiresAt string `json:"expiresAt"`
+}
+
+type TrustedSender struct {
+	RecipientID int64  `json:"recipientId"`
+	SenderID    int64  `json:"senderId"`
+	Source      string `json:"source"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type User struct {
