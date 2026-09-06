@@ -41,7 +41,7 @@ pull-request ref (`git fetch origin 'refs/pull/<n>/head:pr-<n>'`).
 | #1543 | B5-2 — per-user upload quotas, one reserved-headroom floor, tick reconciliation (SEC-04) | `123b07d8` | `8a1594a2`      |
 | #1545 | B5-4 — Web Push subscription storage, nothing dispatched                                 | `a504d61e` | `2de7c3a0`      |
 | #1544 | B5-5 — rich-content inventory, GIF result-URL hygiene, S-03 pinned                       | `1311fee9` | `212ce942`      |
-| #1546 | B5-12 — register and roadmap reconciliation                                              | pending    | `2cf163c3`      |
+| #1546 | B5-12 — register and roadmap reconciliation                                              | `2b187b64` | `2cf163c3`      |
 | this  | HP-5 — this scorecard and the schema drafts                                              | —          | —               |
 
 B5-2's two-commit structure (the `maintenanceTick` extraction `f3f7c6f5`,
@@ -303,7 +303,7 @@ B5-4, B5-5 and B5-12 land:
 | ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------- | ----- |
 | B5-4  | `feature/b5-4-push-subscriptions`     | `2de7c3a0` → squash `a504d61e`; Codex round in `3ef5bfc6`, floor tests in `2de7c3a0`              | #1545 |
 | B5-5  | `feature/b5-5-rich-content-inventory` | `212ce942` → squash `1311fee9`; Codex round fixed in `00a2398b`, verification round in `212ce942` | #1544 |
-| B5-12 | `docs/b5-12-register-roadmap`         | `2cf163c3`                                                                                        | #1546 |
+| B5-12 | `docs/b5-12-register-roadmap`         | `2cf163c3` → squash `2b187b64`; Codex round fixed in `2cf163c3`                                   | #1546 |
 
 **Signed:** \_\_\_\_\_\_\_\_\_\_ (owner, date) — acceptance authorises B5-6 →
 B5-7, B5-8 → B5-9 → B5-10, and B5-11, and claims nothing about beta
