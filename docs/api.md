@@ -1355,9 +1355,11 @@ only offline subscribers are pushed to (a connected client already has the
 message), permission is re-checked at dispatch time (`CanViewChannel`, not
 whatever it was when the subscription was created), and a channel labelled
 `nsfw` gets no push at all. At most one push per user per channel per 60
-seconds. A `404`/`410` response prunes the subscription; other failures
-retry a bounded number of times, then drop — nothing is written per attempt,
-and a restart drops anything in flight. Turning dispatch on makes the server
+seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
+(or a network error) gets two retries — three attempts total — before being
+dropped, and any other failure status drops immediately. Nothing is written
+per attempt, and a restart drops anything in flight. Turning dispatch on
+makes the server
 open outbound HTTPS connections to the push service named in each stored
 subscription's endpoint — see
 [diagnostics.md](architecture/diagnostics.md)'s egress table.

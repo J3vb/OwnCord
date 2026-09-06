@@ -104,7 +104,8 @@ on, a new message in a channel or DM sends a generic `{"t":"activity"}`
 payload (no message text, channel name or sender) to every offline,
 permitted recipient's subscriptions, coalesced to at most one push per user
 per channel per 60 seconds; a `404`/`410` response prunes the subscription,
-other failures retry up to 3 times before being dropped.
+a `429` or `5xx` (or a network error) gets two retries — three attempts
+total — before being dropped; any other failure status drops immediately.
 
 | Key                          | Type   | Default | Description                                                                                                                                                                                                |
 | ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

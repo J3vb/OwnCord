@@ -10,6 +10,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -131,9 +133,10 @@ type pushFetchResult struct {
 // so a test can assert on which endpoints were actually reached, in what
 // order, and with what body — never a real network call.
 type recordingPushFetcher struct {
-	mu     sync.Mutex
-	perURL map[string][]pushFetchResult
-	calls  []safefetch.Request
+	mu       sync.Mutex
+	perURL   map[string][]pushFetchResult
+	handlers map[string]func(ctx context.Context) (*safefetch.Response, error)
+	calls    []safefetch.Request
 }
 
 func newRecordingPushFetcher() *recordingPushFetcher {
@@ -153,9 +156,41 @@ func (f *recordingPushFetcher) always(url string, status int) {
 	f.sequence(url, pushFetchResult{status: status})
 }
 
-func (f *recordingPushFetcher) Fetch(_ context.Context, req safefetch.Request) (*safefetch.Response, error) {
+// onFetch installs a raw handler for url, bypassing sequence entirely —
+// for a test that needs to run a side effect (flip a flag, revoke a role)
+// exactly when the fetch happens, not just plan a status code in advance.
+func (f *recordingPushFetcher) onFetch(url string, h func(ctx context.Context) (*safefetch.Response, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.handlers == nil {
+		f.handlers = make(map[string]func(context.Context) (*safefetch.Response, error))
+	}
+	f.handlers[url] = h
+}
+
+// block makes url's Fetch hang until the returned release func is called
+// (or the caller's context ends), then answer 201 — used to prove a stalled
+// subscription does not stop concurrent delivery to the others.
+func (f *recordingPushFetcher) block(url string) (release func()) {
+	gate := make(chan struct{})
+	f.onFetch(url, func(ctx context.Context) (*safefetch.Response, error) {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+		}
+		return &safefetch.Response{StatusCode: 201}, nil
+	})
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
+}
+
+func (f *recordingPushFetcher) Fetch(ctx context.Context, req safefetch.Request) (*safefetch.Response, error) {
+	f.mu.Lock()
+	if h, ok := f.handlers[req.URL]; ok {
+		f.calls = append(f.calls, req)
+		f.mu.Unlock()
+		return h(ctx)
+	}
 	seenBefore := 0
 	for _, c := range f.calls {
 		if c.URL == req.URL {
@@ -164,6 +199,7 @@ func (f *recordingPushFetcher) Fetch(_ context.Context, req safefetch.Request) (
 	}
 	f.calls = append(f.calls, req)
 	seq := f.perURL[req.URL]
+	f.mu.Unlock()
 	if len(seq) == 0 {
 		return &safefetch.Response{StatusCode: 201}, nil
 	}
@@ -543,9 +579,19 @@ func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 	seedUserRole(t, f.database, 2, 4)
 	f.subscribe(t, 2, "https://push.hostile.example/x")
 
+	// P2-7: a Dial spy proves the classifier is what refused this, not some
+	// downstream timeout that happens to land in the same counters --
+	// removing the classification step would still leave this test green if
+	// dialing 10.0.0.1 merely failed slowly, so the assertion that matters
+	// is zero dials, not just the counters.
+	var dialAttempts atomic.Int32
 	policy := pushPolicy()
 	policy.Resolve = func(_ context.Context, _ string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
+	}
+	policy.Dial = func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialAttempts.Add(1)
+		return nil, fmt.Errorf("test dial spy: must never be called for %s %s", network, addr)
 	}
 	fetcher, err := safefetch.New(policy)
 	if err != nil {
@@ -562,6 +608,45 @@ func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 	}
 	if n := f.subscriptionCount(t, 2); n != 1 {
 		t.Errorf("subscription removed after a refused connect: %d rows, want 1", n)
+	}
+	if got := dialAttempts.Load(); got != 0 {
+		t.Errorf("dial attempts = %d, want 0 -- the classifier must refuse before any connect", got)
+	}
+}
+
+// TestPushDispatch_ClassificationRemovedWouldDial is revert-proof (k) for
+// the test above: with Resolve still pointing at 10.0.0.1 but Classify
+// relaxed to accept it (standing in for "the classification step was
+// removed"), the Dial spy above DOES see a dial -- proving that spy is
+// actually load-bearing and not a vacuous assertion.
+func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.hostile.example/x")
+
+	var dialAttempts atomic.Int32
+	policy := pushPolicy()
+	policy.Resolve = func(_ context.Context, _ string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
+	}
+	policy.Classify = func(netip.Addr) error { return nil } // stands in for "classification removed"
+	policy.Dial = func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialAttempts.Add(1)
+		return nil, fmt.Errorf("test dial spy: refusing to actually connect to %s %s", network, addr)
+	}
+	fetcher, err := safefetch.New(policy)
+	if err != nil {
+		t.Fatalf("safefetch.New: %v", err)
+	}
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetcher)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := dialAttempts.Load(); got == 0 {
+		t.Error("dial attempts = 0 with classification relaxed -- the spy should have seen a dial")
 	}
 }
 
@@ -685,5 +770,290 @@ func TestPushDispatch_SendOneWrapsAFetchError(t *testing.T) {
 	}
 	if _, fl, _ := dispatcher.Counters(); fl != 1 {
 		t.Errorf("failed = %d, want 1", fl)
+	}
+}
+
+// --- Codex review round: P1-1, P2-3, P2-4, P2-5, P2-6, P2-8 ---
+
+// isGroupDMErrorStore overrides only IsGroupDM to fail, delegating
+// everything else to the wrapped Store (the message_crud_test.go
+// disconnectAfterWriteStore pattern) -- proves P2-3's fail-closed posture on
+// a lookup error without needing a fake for the whole interface.
+type isGroupDMErrorStore struct{ Store }
+
+func (isGroupDMErrorStore) IsGroupDM(context.Context, int64) (bool, error) {
+	return false, errors.New("boom")
+}
+
+// listBlockersErrorStore overrides only ListBlockersOf to fail, for P2-4's
+// fail-closed test.
+type listBlockersErrorStore struct{ Store }
+
+func (listBlockersErrorStore) ListBlockersOf(context.Context, int64) ([]int64, error) {
+	return nil, errors.New("boom")
+}
+
+// TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline is P1-1: a recipient
+// who comes online between the first (transiently failing) attempt and the
+// retry must receive nothing on the retry -- stillEligible has to run again
+// immediately before every attempt, not just once for the whole dispatch.
+func TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.example.net/goes-online")
+
+	var wentOnline atomic.Bool
+	online := func(uid int64) bool { return uid == 2 && wentOnline.Load() }
+
+	fetch := newRecordingPushFetcher()
+	var calls atomic.Int32
+	fetch.onFetch("https://push.example.net/goes-online", func(context.Context) (*safefetch.Response, error) {
+		n := calls.Add(1)
+		if n > 1 {
+			t.Error("a second attempt reached the fetcher after the recipient came online")
+			return &safefetch.Response{StatusCode: 201}, nil
+		}
+		wentOnline.Store(true) // simulate: recipient connects right after the first attempt
+		return &safefetch.Response{StatusCode: 503}, nil
+	})
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, online, fetch)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
+	}
+	d, fl, p := dispatcher.Counters()
+	if d != 0 || fl != 0 || p != 0 {
+		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
+	}
+}
+
+// TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess is P1-1's other
+// half: a recipient whose CanViewChannel is revoked between the first
+// (transiently failing) attempt and the retry must receive nothing on the
+// retry.
+func TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedRole(t, f.database, &db.Role{ID: 5, Name: "Restricted", Permissions: 0, Position: 0})
+	f.subscribe(t, 2, "https://push.example.net/loses-access")
+
+	fetch := newRecordingPushFetcher()
+	var calls atomic.Int32
+	fetch.onFetch("https://push.example.net/loses-access", func(ctx context.Context) (*safefetch.Response, error) {
+		n := calls.Add(1)
+		if n > 1 {
+			t.Error("a second attempt reached the fetcher after access was revoked")
+			return &safefetch.Response{StatusCode: 201}, nil
+		}
+		// Revoke between the first attempt and the retry.
+		if _, err := f.database.ExecContext(ctx, `UPDATE users SET role_id = ? WHERE id = ?`, int64(5), int64(2)); err != nil {
+			t.Fatal(err)
+		}
+		f.perms.InvalidateAll()
+		return &safefetch.Response{StatusCode: 503}, nil
+	})
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
+	}
+	d, fl, p := dispatcher.Counters()
+	if d != 0 || fl != 0 || p != 0 {
+		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
+	}
+}
+
+// TestPushDispatch_GroupDMExcluded is P2-3: a group DM has Type == "dm"
+// too, but only one-to-one DMs are in scope for push.
+func TestPushDispatch_GroupDMExcluded(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
+	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET is_group = 1 WHERE id = ?`, int64(20)); err != nil {
+		t.Fatal(err)
+	}
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedDMParticipant(t, f.database, 20, 1)
+	seedDMParticipant(t, f.database, 20, 2)
+	f.subscribe(t, 2, "https://push.example.net/group-dm")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
+
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Errorf("fetch calls = %v, want none for a group DM", urls)
+	}
+}
+
+// TestPushDispatch_GroupDMLookupFailureFailsClosed: a lookup error is
+// treated as "assume it's a group" -- no push, same as P2-4's block-lookup
+// posture.
+func TestPushDispatch_GroupDMLookupFailureFailsClosed(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedDMParticipant(t, f.database, 20, 1)
+	seedDMParticipant(t, f.database, 20, 2)
+	f.subscribe(t, 2, "https://push.example.net/group-dm-lookup-fails")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(isGroupDMErrorStore{f.database}, f.perms, f.push, nil, fetch)
+	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
+
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Errorf("fetch calls = %v, want none: an IsGroupDM lookup failure must fail closed", urls)
+	}
+}
+
+// TestPushDispatch_BlockedByAuthorExcluded is P2-4: a user who has blocked
+// the author must never be pushed about the author's message, mirroring
+// applyMentionCounts' ListBlockersOf(authorID) exclusion for badges.
+func TestPushDispatch_BlockedByAuthorExcluded(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedBlock(t, f.database, 2, 1) // user 2 has blocked user 1 (the author)
+	f.subscribe(t, 2, "https://push.example.net/blocker")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Errorf("fetch calls = %v, want none: the recipient blocked the author", urls)
+	}
+}
+
+// TestPushDispatch_BlockerLookupFailureFailsClosed: a ListBlockersOf failure
+// drops the whole round rather than risk pushing a blocker.
+func TestPushDispatch_BlockerLookupFailureFailsClosed(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.example.net/blocker-lookup-fails")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(listBlockersErrorStore{f.database}, f.perms, f.push, nil, fetch)
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if urls := fetch.urls(); len(urls) != 0 {
+		t.Errorf("fetch calls = %v, want none: a blocker lookup failure must fail closed", urls)
+	}
+}
+
+// TestPushDispatch_CoalesceMapEvictsExpiredAndCapsSize is P2-5: an expired
+// entry is swept on a later call, and the map never grows past
+// pushCoalesceMapCap even when every entry is still within its window.
+func TestPushDispatch_CoalesceMapEvictsExpiredAndCapsSize(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
+
+	past := time.Now().Add(-2 * pushCoalesceWindow)
+	if dispatcher.coalesced(1, 100, past) {
+		t.Fatal("first call for a key must never itself report coalesced")
+	}
+	if len(dispatcher.lastSent) != 1 {
+		t.Fatalf("lastSent has %d entries, want 1", len(dispatcher.lastSent))
+	}
+	dispatcher.coalesced(2, 200, time.Now())
+	if _, ok := dispatcher.lastSent[pushCoalesceKey{userID: 1, channelID: 100}]; ok {
+		t.Error("an entry older than the coalescing window survived a later call's sweep")
+	}
+
+	// Cap: every one of these is within the window, so only the cap
+	// eviction -- not expiry -- can be what keeps the map bounded.
+	now := time.Now()
+	for i := range int64(pushCoalesceMapCap + 10) {
+		dispatcher.coalesced(i, 1, now)
+	}
+	if len(dispatcher.lastSent) > pushCoalesceMapCap {
+		t.Errorf("lastSent has %d entries after exceeding the cap, want <= %d", len(dispatcher.lastSent), pushCoalesceMapCap)
+	}
+}
+
+// TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall is P2-6: one stalled
+// subscription must not stop the others sharing the dispatch from being
+// attempted promptly.
+func TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	for _, uid := range []int64{1, 2, 3, 4} {
+		seedUserRole(t, f.database, uid, 4)
+	}
+	f.subscribe(t, 2, "https://push.example.net/stall")
+	f.subscribe(t, 3, "https://push.example.net/fast-a")
+	f.subscribe(t, 4, "https://push.example.net/fast-b")
+
+	fetch := newRecordingPushFetcher()
+	release := fetch.block("https://push.example.net/stall")
+	defer release()
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	done := make(chan struct{})
+	go func() {
+		dispatcher.Notify(context.Background(), 10, 1, []int64{2, 3, 4})
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for fetch.countFor("https://push.example.net/fast-a") != 1 || fetch.countFor("https://push.example.net/fast-b") != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the two healthy subscriptions were never attempted while the stalled one was in flight")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	release()
+	<-done
+
+	d, _, _ := dispatcher.Counters()
+	if d != 3 {
+		t.Errorf("dispatched = %d, want 3 (all three eventually succeed)", d)
+	}
+}
+
+// TestPushDispatch_ThroughSendMessageHook is P2-8's positive half: a real
+// SendMessage call, with the notifier installed, delivers through the
+// background runner. The off-by-default half is
+// TestPushDispatch_OffByDefaultSendsNothing, which already goes through the
+// same SendMessage path with no notifier installed.
+func TestPushDispatch_ThroughSendMessageHook(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.example.net/via-sendmessage")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+
+	msgSvc := NewMessageService(f.database, f.perms, nil)
+	msgSvc.RunBackgroundInlineForTest()
+	msgSvc.SetPushNotifier(dispatcher)
+
+	if _, err := msgSvc.SendMessage(context.Background(), SendMessageParams{
+		UserID: 1, ChannelID: 10, Username: "u1", Content: "@" + seedUsername(2) + " hi",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	if got := fetch.countFor("https://push.example.net/via-sendmessage"); got != 1 {
+		t.Errorf("fetch called %d times through the SendMessage hook, want 1", got)
+	}
+	if d, _, _ := dispatcher.Counters(); d != 1 {
+		t.Errorf("dispatched = %d, want 1", d)
 	}
 }

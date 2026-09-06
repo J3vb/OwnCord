@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,17 +27,25 @@ var pushActivityPayload = []byte(`{"t":"activity"}`)
 // the worst case is one extra push right after a restart.
 const pushCoalesceWindow = 60 * time.Second
 
+// pushCoalesceMapCap bounds the coalescer's memory: past this many live
+// entries, the oldest are evicted to make room, on top of the ordinary
+// expiry sweep. 10000 concurrently "recently pushed" (user, channel) pairs
+// is far past anything a self-hosted deployment produces; this is a ceiling
+// against an unbounded growth path, not a tuned capacity.
+const pushCoalesceMapCap = 10000
+
 // pushDispatchTimeout bounds one Notify call end to end: the channel and
 // permission lookups, every subscriber's subscriptions, and every attempt
 // (including retries) against every one of them. It is generous rather than
 // tight because a push is a hint with no caller waiting on it -- the request
 // that triggered it has already returned.
-//
-// ponytail: subscribers are dispatched to sequentially inside one deadline,
-// not fanned out concurrently. Fine at self-hosted scale (a handful of
-// push-subscribed recipients per event); switch to a bounded worker pool if
-// a single channel ever has enough subscribers that 60s is not enough.
 const pushDispatchTimeout = 60 * time.Second
+
+// pushMaxConcurrentSends bounds how many subscriptions Notify delivers to at
+// once, within the shared pushFetcher's own MaxConcurrent (8): a handful of
+// slow or stuck endpoints must not serialise behind each other and starve
+// the rest of pushDispatchTimeout (a bare sequential loop did exactly that).
+const pushMaxConcurrentSends = 4
 
 // pushMaxAttempts is the retry budget for one subscription: the initial
 // attempt plus two retries, backing off by pushRetryBackoffs between them.
@@ -45,7 +55,9 @@ const pushMaxAttempts = 3
 // two entries are ever used -- pushMaxAttempts caps the loop at 3 attempts,
 // which needs 2 waits -- the third is kept so the schedule reads as the
 // intended exponential curve (1s, 4s, 16s) rather than stopping short of it
-// by coincidence.
+// by coincidence. The wait happens after safefetch.Fetcher.Fetch has already
+// returned (or timed out at its own 10s policy deadline), so it is always
+// outside any one attempt's fetch deadline.
 var pushRetryBackoffs = []time.Duration{time.Second, 4 * time.Second, 16 * time.Second}
 
 // PushNotifier is installed on MessageService when dispatch is on; nil
@@ -56,9 +68,9 @@ type PushNotifier interface {
 	// authored by authorID in channelID. candidateIDs is the caller's
 	// pre-narrowed audience seed: the message's direct @mentions for a
 	// guild channel, or the DM's participant ids for a DM -- Notify applies
-	// every remaining filter (author, online, permission, NSFW label,
-	// coalescing) itself. It never returns an error; failures are counted,
-	// not surfaced to the send path a user is waiting on.
+	// every remaining filter (author, blocked, group-DM, online, permission,
+	// NSFW label, coalescing) itself. It never returns an error; failures
+	// are counted, not surfaced to the send path a user is waiting on.
 	Notify(ctx context.Context, channelID, authorID int64, candidateIDs []int64)
 }
 
@@ -171,68 +183,119 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	// behind HP-5 too and may not have merged yet). Once it does, a
 	// subscriber with an acknowledgement row for this channel should still
 	// receive the (generic) push; until then, gate on the label alone --
-	// no push at all for a labelled channel.
+	// no push at all for a labelled channel. Re-checked per attempt in
+	// stillEligible too, since dispatch can outlive a label change.
 	if ch.NSFW {
 		return
 	}
+	// Only one-to-one DMs are in scope (plan decision 4's Message Requests
+	// boundary and this step's own audience rule) -- a group DM has
+	// Type == "dm" too, so it needs its own check. Fail closed: a lookup
+	// error is treated the same as "it is a group", because a push to a
+	// group we can no longer classify is not a risk worth taking.
+	if ch.Type == "dm" {
+		isGroup, gErr := d.st.IsGroupDM(ctx, channelID)
+		if gErr != nil || isGroup {
+			return
+		}
+	}
 
-	eligible := d.eligibleAudience(ctx, ch, authorID, candidateIDs)
-	if len(eligible) == 0 {
+	// A user who has blocked the author must never be pushed about the
+	// author's message -- the same exclusion applyMentionCounts applies to
+	// mention badges (mentions.go). Fail closed: a lookup failure drops the
+	// whole round rather than risk pushing someone who blocked the sender.
+	blockers, err := d.st.ListBlockersOf(ctx, authorID)
+	if err != nil {
+		slog.Error("PushDispatcher.Notify ListBlockersOf", "err", err, "user_id", authorID)
+		return
+	}
+	blockedByAuthor := make(map[int64]bool, len(blockers))
+	for _, b := range blockers {
+		blockedByAuthor[b] = true
+	}
+
+	coalesced := d.coalesceAudience(candidateIDs, authorID, blockedByAuthor, channelID)
+	if len(coalesced) == 0 {
 		return
 	}
 
 	keyID := d.push.currentKeyID()
-	subs, err := d.st.ListPushSubscriptionsForDispatch(ctx, eligible, keyID)
+	subs, err := d.st.ListPushSubscriptionsForDispatch(ctx, coalesced, keyID)
 	if err != nil {
 		slog.Error("PushDispatcher.Notify ListPushSubscriptionsForDispatch", "err", err, "channel_id", channelID)
 		return
 	}
+
+	// Bounded fan-out: a semaphore of pushMaxConcurrentSends, so a handful
+	// of slow or stuck subscriptions run alongside healthy ones instead of
+	// queuing behind them for the whole shared pushDispatchTimeout.
+	sem := make(chan struct{}, pushMaxConcurrentSends)
+	var wg sync.WaitGroup
 	for _, sub := range subs {
-		d.sendOne(ctx, sub)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sub db.PushSubscriptionForDispatch) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			d.sendOne(ctx, channelID, sub)
+		}(sub)
 	}
+	wg.Wait()
 }
 
-// eligibleAudience narrows candidateIDs to the users dispatch may push to:
-// distinct, not the author, not currently connected (online), permitted to
-// view ch right now, and not inside their coalescing window for ch. The
-// coalescing window starts the instant a user clears every other check --
-// whether or not they turn out to have a subscription -- so a user with zero
-// devices does not get re-evaluated on every message in a busy channel
-// either.
+// coalesceAudience narrows candidateIDs to the users a push is even worth
+// attempting for: distinct, not the author, not blocked by (a blocker of)
+// the author, and not inside their coalescing window for channelID.
+//
+// Permission and online state are deliberately NOT checked here: a bounded
+// but potentially slow dispatch (retries, a bounded worker pool) can take
+// long enough that either changes mid-flight, so both are re-checked
+// immediately before every delivery attempt in stillEligible instead of
+// once up front.
 //
 // For a DM, permission IS participation (permissions.CanViewChannel checks
 // only DMParticipant for a "dm" channel), so a non-participant candidate is
-// already excluded here. B5-6: trusted_senders does not exist on this
-// branch (B5-6 is behind HP-5 too and may not have merged yet). Once it
-// does, a DM push should also require that the recipient trusts the
-// sender -- the same row Message Requests gates on -- so a first-contact
-// message from an unknown sender cannot ring a stranger's phone before
-// they have decided to accept it.
-func (d *PushDispatcher) eligibleAudience(ctx context.Context, ch *db.Channel, authorID int64, candidateIDs []int64) []int64 {
+// excluded by stillEligible the same way. B5-6: trusted_senders does not
+// exist on this branch (B5-6 is behind HP-5 too and may not have merged
+// yet). Once it does, a DM push should also require that the recipient
+// trusts the sender -- the same row Message Requests gates on -- so a
+// first-contact message from an unknown sender cannot ring a stranger's
+// phone before they have decided to accept it.
+func (d *PushDispatcher) coalesceAudience(candidateIDs []int64, authorID int64, blockedByAuthor map[int64]bool, channelID int64) []int64 {
 	seen := make(map[int64]bool, len(candidateIDs))
 	out := make([]int64, 0, len(candidateIDs))
 	now := time.Now()
 	for _, uid := range candidateIDs {
-		if uid == authorID || uid <= 0 || seen[uid] {
+		if uid == authorID || uid <= 0 || seen[uid] || blockedByAuthor[uid] {
 			continue
 		}
 		seen[uid] = true
-		if d.online != nil && d.online(uid) {
-			continue
-		}
-		sub, err := channelSubject(ctx, d.st, d.perms, uid, ch, false)
-		if err != nil {
-			continue
-		}
-		if permissions.CanViewChannel(sub) != nil {
-			continue
-		}
-		if d.coalesced(uid, ch.ID, now) {
+		if d.coalesced(uid, channelID, now) {
 			continue
 		}
 		out = append(out, uid)
 	}
 	return out
+}
+
+// stillEligible re-resolves, immediately before one delivery attempt, the
+// three things that can change while a bounded dispatch is in flight: the
+// recipient came online (their client already has the message), the
+// channel was labelled nsfw, or the recipient lost CanViewChannel. Called
+// before the first attempt and again before every retry.
+func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, userID int64) bool {
+	if d.online != nil && d.online(userID) {
+		return false
+	}
+	ch, err := d.st.GetChannel(ctx, channelID)
+	if err != nil || ch == nil || ch.NSFW {
+		return false
+	}
+	sub, err := channelSubject(ctx, d.st, d.perms, userID, ch, false)
+	if err != nil {
+		return false
+	}
+	return permissions.CanViewChannel(sub) == nil
 }
 
 // coalesced reports whether userID was already pushed about channelID
@@ -244,14 +307,47 @@ func (d *PushDispatcher) coalesced(userID, channelID int64, now time.Time) bool 
 	if last, ok := d.lastSent[key]; ok && now.Sub(last) < pushCoalesceWindow {
 		return true
 	}
+	d.sweepCoalesceLocked(now)
 	d.lastSent[key] = now
 	return false
 }
 
-// sendOne encrypts and POSTs one push to one subscription, retrying a
-// transient failure within pushMaxAttempts. It never returns an error;
-// every outcome lands in exactly one counter.
-func (d *PushDispatcher) sendOne(ctx context.Context, sub db.PushSubscriptionForDispatch) {
+// sweepCoalesceLocked removes every entry whose window has already expired,
+// then, if the map is still at pushCoalesceMapCap or over, evicts the
+// oldest entries down under it. Called with d.mu held.
+//
+// ponytail: a full linear scan (and, on the rare cap-exceeded path, a full
+// sort) on every call, bounded by pushCoalesceMapCap entries. Fine at that
+// size; move to a background ticker or a time-ordered structure if the cap
+// is ever raised enough for this to show up in profiles.
+func (d *PushDispatcher) sweepCoalesceLocked(now time.Time) {
+	for k, t := range d.lastSent {
+		if now.Sub(t) >= pushCoalesceWindow {
+			delete(d.lastSent, k)
+		}
+	}
+	if len(d.lastSent) < pushCoalesceMapCap {
+		return
+	}
+	type entry struct {
+		key pushCoalesceKey
+		at  time.Time
+	}
+	entries := make([]entry, 0, len(d.lastSent))
+	for k, t := range d.lastSent {
+		entries = append(entries, entry{k, t})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].at.Before(entries[j].at) })
+	for _, e := range entries[:len(entries)-pushCoalesceMapCap+1] {
+		delete(d.lastSent, e.key)
+	}
+}
+
+// sendOne encrypts and POSTs one push to one subscription, re-checking
+// eligibility and retrying a transient failure within pushMaxAttempts. It
+// never returns an error; every outcome lands in exactly one counter (or
+// none, if stillEligible refuses an attempt).
+func (d *PushDispatcher) sendOne(ctx context.Context, channelID int64, sub db.PushSubscriptionForDispatch) {
 	p256dh, err := decodePushBase64(sub.P256dh)
 	if err != nil {
 		d.failed.Add(1)
@@ -286,6 +382,9 @@ func (d *PushDispatcher) sendOne(ctx context.Context, sub db.PushSubscriptionFor
 	}
 
 	for attempt := 1; attempt <= pushMaxAttempts; attempt++ {
+		if !d.stillEligible(ctx, channelID, sub.UserID) {
+			return
+		}
 		resp, err := d.fetch.Fetch(ctx, req)
 		if err == nil {
 			switch {

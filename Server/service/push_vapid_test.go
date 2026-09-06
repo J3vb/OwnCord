@@ -137,3 +137,33 @@ func TestPushVAPID_EmptyContactOmitsSub(t *testing.T) {
 		t.Errorf("claims = %s, want no sub claim with an empty contact", claimsJSON)
 	}
 }
+
+// TestPushVAPID_AudIsRFC6454Origin proves the "aud" claim is a normalised
+// origin, not a copy of the endpoint's host: uppercase folds to lowercase
+// and an explicit default port (443 for https) is dropped, so a push
+// service comparing "aud" byte-for-byte against its own origin string
+// matches regardless of how the endpoint happened to be written.
+func TestPushVAPID_AudIsRFC6454Origin(t *testing.T) {
+	svc := NewPushService(nil)
+	svc.SetVAPIDKey(genTestVAPIDKey(t))
+
+	header, err := svc.vapidAuthorization("https://PUSH.EXAMPLE.NET:443/x")
+	if err != nil {
+		t.Fatalf("vapidAuthorization: %v", err)
+	}
+	jwtPart, _, _ := strings.Cut(strings.TrimPrefix(header, "vapid t="), ", k=")
+	parts := strings.Split(jwtPart, ".")
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decoding claims: %v", err)
+	}
+	var claims struct {
+		Aud string `json:"aud"`
+	}
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("unmarshalling claims: %v", err)
+	}
+	if claims.Aud != "https://push.example.net" {
+		t.Errorf("aud = %q, want %q", claims.Aud, "https://push.example.net")
+	}
+}

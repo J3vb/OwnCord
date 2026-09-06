@@ -214,6 +214,34 @@ type vapidClaims struct {
 	Sub string `json:"sub,omitempty"`
 }
 
+// webOrigin serialises u's origin per RFC 6454 SS4: lowercase scheme,
+// lowercase host, and the port omitted when it is the scheme's default —
+// "https://PUSH.EXAMPLE.NET:443/x" and "https://push.example.net/x" name
+// the same origin, and a push service comparing the VAPID "aud" claim
+// byte-for-byte against its own origin string must see the same bytes
+// either way.
+func webOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	if port := u.Port(); port != "" && port != defaultPortFor(scheme) {
+		host = host + ":" + port
+	}
+	return scheme + "://" + host
+}
+
+// defaultPortFor is the scheme's default port per RFC 6454; "" for any
+// other scheme, which webOrigin then never treats as default.
+func defaultPortFor(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
+
 // vapidAuthorization builds the RFC 8292 VAPID Authorization header value
 // for a push to endpoint: an ES256-signed JWT with header
 // {"typ":"JWT","alg":"ES256"}, claims aud (the endpoint's scheme://host),
@@ -237,9 +265,8 @@ func (s *PushService) vapidAuthorization(endpoint string) (string, error) {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", fmt.Errorf("%w: endpoint has no origin", ErrInvalidSubscription)
 	}
-	origin := u.Scheme + "://" + u.Host
 
-	claims := vapidClaims{Aud: origin, Exp: time.Now().Add(vapidTokenTTL).Unix()}
+	claims := vapidClaims{Aud: webOrigin(u), Exp: time.Now().Add(vapidTokenTTL).Unix()}
 	if contact != "" {
 		claims.Sub = "mailto:" + contact
 	}
