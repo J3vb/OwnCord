@@ -2433,7 +2433,7 @@ before it was squashed (`91251b3e` merged its review round), then merged
 with B5-9's final tip `c3852795` (`0f54ba43`), which carries `dev` at
 `ae6b9c04` and so every earlier B5 step: built behind HP-5, which the owner
 accepted on 2026-09-06 (#1547, signature recorded in #1550); PR to `dev`
-#TBD-B5-10, after B5-9's #1553. Commits `e24805fd` (the feature),
+#1555, after B5-9's #1553. Commits `e24805fd` (the feature),
 `14511571`, `ea3fc3bc`, `3f1b3fac` (three independent review rounds), the
 merge, and `9c1c92b8` (the voice reversal, wired once B5-9's reconcile
 existed). One premise the plan inherited was false at the base: moderation
