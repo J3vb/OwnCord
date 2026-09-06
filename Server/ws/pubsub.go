@@ -173,19 +173,27 @@ const (
 // Publish sends msg to all subscribers of topic at normal priority.
 // If a client's buffer is full, it is disconnected.
 func (ps *PubSub) Publish(topic Topic, msg []byte, excludeUserID int64) int {
-	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityNormal)
+	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityNormal, nil)
+}
+
+// PublishFiltered is Publish narrowed to subscribers allow approves (B5-7's
+// NSFW gate): the subscriber list is read fresh, right here, under whatever
+// lock the caller already holds — never a list resolved earlier and handed
+// in, which is exactly what would go stale across a concurrent reconnect.
+func (ps *PubSub) PublishFiltered(topic Topic, msg []byte, allow func(userID int64) bool) int {
+	return ps.publishWithPriority(topic, msg, 0, PriorityNormal, allow)
 }
 
 // PublishHigh sends msg at high priority (DMs, mentions).
 // High-priority messages are drained before normal/low by writePump.
 func (ps *PubSub) PublishHigh(topic Topic, msg []byte, excludeUserID int64) int {
-	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityHigh)
+	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityHigh, nil)
 }
 
 // PublishLow sends msg at low priority (typing, presence).
 // If a client's buffer is full the message is silently dropped.
 func (ps *PubSub) PublishLow(topic Topic, msg []byte, excludeUserID int64) int {
-	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityLow)
+	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityLow, nil)
 }
 
 // PublishGlobal sends msg to every client subscribed to the "global" topic
@@ -200,17 +208,22 @@ func (ps *PubSub) PublishGlobalLow(msg []byte) int {
 }
 
 // publishWithPriority is the core publish method routing to the appropriate
-// client send method based on priority level.
-func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int64, priority int) int {
+// client send method based on priority level. allow, when non-nil, drops any
+// subscriber it returns false for (PublishFiltered); nil means unfiltered.
+func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int64, priority int, allow func(userID int64) bool) int {
 	ps.mu.RLock()
 	subs := ps.topics[topic]
 	// Snapshot the subscriber slice under read lock to avoid holding the lock
 	// while calling sendMsg (which acquires the client's own mutex).
 	clients := make([]*Client, 0, len(subs))
 	for uid, c := range subs {
-		if uid != excludeUserID {
-			clients = append(clients, c)
+		if uid == excludeUserID {
+			continue
 		}
+		if allow != nil && !allow(uid) {
+			continue
+		}
+		clients = append(clients, c)
 	}
 	ps.mu.RUnlock()
 
@@ -236,21 +249,6 @@ func (ps *PubSub) SubscriberCount(topic Topic) int {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	return len(ps.topics[topic])
-}
-
-// SubscriberIDs returns the user ids currently subscribed to topic. Used by
-// B5-7's content-audience resolution (ws/hub_visibility.go), which narrows a
-// content-bearing broadcast to the same live audience Publish would already
-// reach — never wider — before filtering it by CanReadContent.
-func (ps *PubSub) SubscriberIDs(topic Topic) []int64 {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	subs := ps.topics[topic]
-	ids := make([]int64, 0, len(subs))
-	for uid := range subs {
-		ids = append(ids, uid)
-	}
-	return ids
 }
 
 // TopicsForClient returns the set of topics a client is subscribed to.

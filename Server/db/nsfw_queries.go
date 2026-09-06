@@ -7,14 +7,41 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
+// acknowledgeNSFWIfLabelledSQL is hand-rolled rather than a sqlc query
+// (P2-2): sqlc's SQLite engine mis-slices the generated query text for an
+// INSERT ... SELECT ... FROM statement in this codebase's pinned version —
+// it silently drops the final token of the statement (reproduced against
+// v1.30.0; corrupts the NEXT query in the same file too), so the generated
+// constant would run a truncated, syntactically invalid statement. This is
+// plain database/sql, exactly like the ExecContext/QueryRowContext escape
+// hatch db.go already exposes for hand-rolled SQL.
+//
+// The label check and the insert are ONE statement: a concurrent unlabel
+// landing between a separate check and a separate insert can no longer make
+// a stale "yes" land after the flag (and any acknowledgement rows a
+// clearing update deleted) turns off. The SELECT only produces a row, and
+// so the INSERT only fires, when channels.id = ? currently has nsfw = 1.
+const acknowledgeNSFWIfLabelledSQL = `
+INSERT OR IGNORE INTO nsfw_acknowledgements (user_id, channel_id)
+SELECT ?, ? FROM channels WHERE channels.id = ? AND channels.nsfw = 1`
+
 // AcknowledgeNSFW records that userID has consented to see channelID's
-// labelled content (migration 047, B5-7). INSERT OR IGNORE: acknowledging
-// twice is a no-op, not an error — PUT /nsfw-acknowledgement is idempotent.
-func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) error {
-	if err := d.q.AcknowledgeNSFW(ctx, dbgen.AcknowledgeNSFWParams{UserID: userID, ChannelID: channelID}); err != nil {
-		return fmt.Errorf("AcknowledgeNSFW: %w", err)
+// labelled content (migration 047, B5-7), atomically gated on the channel
+// being labelled at the moment the statement runs (see
+// acknowledgeNSFWIfLabelledSQL). Reports whether a row was actually
+// inserted; rows affected 0 means either "already acknowledged" (INSERT OR
+// IGNORE, idempotent) or "not labelled" — the caller (service.NSFWService)
+// tells the two apart with a HasNSFWAcknowledgement read.
+func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error) {
+	res, err := d.ExecContext(ctx, acknowledgeNSFWIfLabelledSQL, userID, channelID, channelID)
+	if err != nil {
+		return false, fmt.Errorf("AcknowledgeNSFW: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("AcknowledgeNSFW rows affected: %w", err)
+	}
+	return n > 0, nil
 }
 
 // RevokeNSFW deletes userID's acknowledgement of channelID, taking effect on

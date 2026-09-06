@@ -28,7 +28,7 @@ func TestAcknowledgeNSFW_RevokeAndHasNSFWAcknowledgement(t *testing.T) {
 		t.Fatalf("HasNSFWAcknowledgement before ack = (%v, %v), want (false, nil)", ok, err)
 	}
 
-	if err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 	if ok, err := database.HasNSFWAcknowledgement(ctx, uid, chID); err != nil || !ok {
@@ -36,7 +36,7 @@ func TestAcknowledgeNSFW_RevokeAndHasNSFWAcknowledgement(t *testing.T) {
 	}
 
 	// INSERT OR IGNORE: acknowledging twice is a no-op, not an error.
-	if err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW (second time): %v", err)
 	}
 
@@ -62,14 +62,14 @@ func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
 	bob := seedUser(t, database, "bob")
 	carol := seedUser(t, database, "carol")
 
-	if err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW(alice): %v", err)
 	}
-	if err := database.AcknowledgeNSFW(ctx, bob, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, bob, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW(bob): %v", err)
 	}
 	// carol acknowledges a DIFFERENT channel — must not show up for chID.
-	if err := database.AcknowledgeNSFW(ctx, carol, other); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, carol, other); err != nil {
 		t.Fatalf("AcknowledgeNSFW(carol): %v", err)
 	}
 
@@ -103,10 +103,10 @@ func TestDeleteNSFWAcknowledgementsForChannel(t *testing.T) {
 	other := nsfwChannel(t, database, "other-labelled")
 	alice := seedUser(t, database, "alice")
 
-	if err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW(chID): %v", err)
 	}
-	if err := database.AcknowledgeNSFW(ctx, alice, other); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, alice, other); err != nil {
 		t.Fatalf("AcknowledgeNSFW(other): %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestNSFW_ChannelDeletionCascades(t *testing.T) {
 	chID := nsfwChannel(t, database, "doomed")
 	alice := seedUser(t, database, "alice")
 
-	if err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestNSFW_NewSessionInheritsTheAcknowledgement(t *testing.T) {
 	if _, err := database.CreateSession(ctx, uid, "hash-first-device", "phone", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession(first): %v", err)
 	}
-	if err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, uid, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestAdminUpdateChannelClearingNSFW_ClearsAcksInTheSameCommit(t *testing.T) 
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "was-labelled")
 	alice := seedUser(t, database, "alice")
-	if err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, alice, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 

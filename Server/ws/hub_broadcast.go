@@ -41,6 +41,13 @@ type broadcastMsg struct {
 	// acknowledged, regardless of who is in recipients. Every other
 	// broadcast still reaches the sink exactly as before.
 	skipPluginSink bool
+	// contentFilter narrows a channel-scoped topic Publish (recipients nil,
+	// channelID != 0) to the subset of the topic's subscribers it approves
+	// (B5-7): nil means unfiltered, the pre-B5-7 behaviour. Evaluated inside
+	// deliverBroadcast against the LIVE subscriber list, after the topic
+	// limiter and the seq allocation — see channelNSFWFilter for why it must
+	// not be a precomputed recipient list.
+	contentFilter func(userID int64) bool
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -449,8 +456,16 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq
-			// was allocated.
-			delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
+			// was allocated. contentFilter (B5-7) narrows delivery to the
+			// subset of THIS LIVE subscriber list it approves, resolved here
+			// rather than by the caller so a concurrent reconnect's
+			// registration (also under seqMu) can never land in a gap
+			// between "who was asked" and "who actually got it".
+			if bm.contentFilter != nil {
+				delivered = h.pubsub.PublishFiltered(ChannelTopic(bm.channelID), msg, bm.contentFilter)
+			} else {
+				delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
+			}
 			channelSend = true
 		}
 		return seq, delivered, channelSend

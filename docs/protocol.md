@@ -782,8 +782,11 @@ omitted from it. See `PUT`/`DELETE
 /api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
 records or revokes consent, and the `nsfw_ack` frame below for the second-
 device signal. The desktop client's own gating UI (blur, consent prompt) is
-B9's; a client that ignores all of this simply never satisfies the server-side
-gate and receives no content to render.
+B9's; an account with no standing acknowledgement simply never satisfies the
+server-side gate and receives no content to render, on any device or client
+that ignores this UI — the row is per-user, not per-session or per-device, so
+a second device or a client that skips the gating UI inherits whatever the
+account has already acknowledged rather than bypassing consent.
 
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who

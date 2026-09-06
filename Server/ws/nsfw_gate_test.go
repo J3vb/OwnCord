@@ -27,6 +27,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -85,7 +86,7 @@ func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	if err != nil {
 		t.Fatalf("CreateUser(alice): %v", err)
 	}
-	if err := database.AcknowledgeNSFW(ctx, aliceID, labelledID); err != nil {
+	if _, err := database.AcknowledgeNSFW(ctx, aliceID, labelledID); err != nil {
 		t.Fatalf("AcknowledgeNSFW(alice): %v", err)
 	}
 
@@ -366,7 +367,7 @@ func TestReconnect_ReplaySkipsUnacknowledgedLabelledContent(t *testing.T) {
 			t.Fatalf("label channel: %v", err)
 		}
 		if acknowledge {
-			if err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
+			if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
 				t.Fatalf("AcknowledgeNSFW: %v", err)
 			}
 		}
@@ -423,6 +424,71 @@ func TestReconnect_ReplaySkipsUnacknowledgedLabelledContent(t *testing.T) {
 			t.Fatal("an acknowledged member's resume did not replay the labelled channel's content")
 		}
 	})
+}
+
+// TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent is P1-1: the
+// readable set reconnectPrecheck snapshots is several DB round trips and a
+// seqMu section old by the time events actually go out. A revoke landing in
+// that exact window — after reconnectRegister has already selected/queued
+// replay frames using the STALE snapshot, but before the fresh per-reconnect
+// recheck runs — must still be honoured: the fresh recheck drops the
+// content-bearing frames the stale snapshot would have let through.
+// reconnectReadableRecheckRaceHook pins the interleaving deterministically.
+func TestReconnect_RevokeInterleavedWithReplayRecheckDropsContent(t *testing.T) {
+	database := newTeardownTestDB(t)
+	ctx := context.Background()
+
+	userID, err := database.CreateUser(ctx, "interleave-nsfw-user", "hash", 4) // Member
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	chID, err := database.CreateChannel(ctx, "interleave-labelled", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
+		t.Fatalf("label channel: %v", err)
+	}
+	// Starts ACKNOWLEDGED: reconnectPrecheck's snapshot (taken before the
+	// hook fires) must see this channel as readable, or the test would prove
+	// nothing about the recheck.
+	if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	rb := hub.ReplayBuffer()
+	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"pre-existing"}}`))
+	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"anchor"}}`))
+	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"THE-SECRET-CONTENT"}}`))
+
+	t.Cleanup(func() { reconnectReadableRecheckRaceHook = nil })
+	reconnectReadableRecheckRaceHook = func(uid int64) {
+		if uid != userID {
+			return
+		}
+		if err := database.RevokeNSFW(context.Background(), userID, chID); err != nil {
+			t.Errorf("RevokeNSFW (in race hook): %v", err)
+		}
+	}
+
+	for _, evt := range dialAndResume(t, hub, token, 99) {
+		if strings.Contains(string(evt), "THE-SECRET-CONTENT") {
+			t.Fatalf("a revoke landing between the stale snapshot and the fresh recheck still let "+
+				"labelled content through the reconnect replay: %s", evt)
+		}
+	}
 }
 
 // erroringNSFWVisibilityReader wraps a real VisibilityReader and makes every
@@ -555,7 +621,7 @@ func TestNSFW_AdministratorAcknowledgesLikeAnyoneElse(t *testing.T) {
 		t.Errorf("Authorize(admin without a row) = %v, want ErrNSFWUnacknowledged", err)
 	}
 
-	if err := f.db.AcknowledgeNSFW(ctx, adminID, f.labelledID); err != nil {
+	if _, err := f.db.AcknowledgeNSFW(ctx, adminID, f.labelledID); err != nil {
 		t.Fatalf("AcknowledgeNSFW(admin): %v", err)
 	}
 	if _, _, err := f.svc.Messages.GetMessages(ctx, adminID, f.labelledID, 0, 50); err != nil {
@@ -566,23 +632,48 @@ func TestNSFW_AdministratorAcknowledgesLikeAnyoneElse(t *testing.T) {
 	}
 }
 
-// TestNSFW_PluginSinkGetsNoLabelledContent proves the GATE's decision, not an
-// observable guest-delivery effect: EventSink.Dispatch's own doc records that
-// no production code calls Subscribe today, so its subscriber loop is always
-// empty and nothing is observable regardless of this gate. What IS
-// observable and testable is channelContentAudience's own "labelled" report,
-// which deliverBroadcast wires directly into skipPluginSink.
+// TestNSFW_PluginSinkGetsNoLabelledContent asserts on the sink itself (P2-7),
+// not merely the gate's verdict: EventSink.Dispatch's own doc records that no
+// production code calls Subscribe today, so its subscriber loop never
+// iterates in either build — DispatchCount is what proves the hub withheld
+// the CALL, which is the actual decision 13 guarantee (a plugin sees nothing
+// of a labelled channel, not just "nothing forwarded to a subscriber list
+// that's empty anyway"). A control publish to the unlabelled channel proves
+// the sink is wired at all, so a suppression bug can't hide behind "nothing
+// ever reaches Dispatch".
 func TestNSFW_PluginSinkGetsNoLabelledContent(t *testing.T) {
 	f := newNSFWGateFixture(t)
 	ctx := context.Background()
 
-	_, labelled := f.hub.channelContentAudience(ctx, f.labelledID)
-	if !labelled {
-		t.Error("channelContentAudience did not report the labelled channel as labelled")
+	sink := plugin.NewEventSink()
+	f.hub.SetPluginEventSink(sink)
+	go f.hub.Run()
+	t.Cleanup(f.hub.Stop)
+
+	waitUntilRunning(t, f.hub)
+
+	labelledPayload, _ := json.Marshal(map[string]any{
+		"type":    MsgTypeChatMessage,
+		"payload": map[string]any{"channel_id": f.labelledID, "content": "labelled live"},
+	})
+	f.hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: f.labelledID, payload: labelledPayload}})
+	if err := f.hub.awaitDispatch(ctx); err != nil {
+		t.Fatalf("awaitDispatch: %v", err)
 	}
-	_, controlLabelled := f.hub.channelContentAudience(ctx, f.controlID)
-	if controlLabelled {
-		t.Error("channelContentAudience reported the unlabelled control channel as labelled")
+	if got := sink.DispatchCount.Load(); got != 0 {
+		t.Errorf("plugin sink received %d call(s) for the labelled channel's content, want 0", got)
+	}
+
+	controlPayload, _ := json.Marshal(map[string]any{
+		"type":    MsgTypeChatMessage,
+		"payload": map[string]any{"channel_id": f.controlID, "content": "control live"},
+	})
+	f.hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: f.controlID, payload: controlPayload}})
+	if err := f.hub.awaitDispatch(ctx); err != nil {
+		t.Fatalf("awaitDispatch: %v", err)
+	}
+	if got := sink.DispatchCount.Load(); got != 1 {
+		t.Fatalf("plugin sink received %d call(s) for the unlabelled control channel, want exactly 1 (sink not wired?)", got)
 	}
 }
 
@@ -618,6 +709,103 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	// nothing new.
 	if _, _, err := f.svc.Messages.GetMessages(ctx, f.aliceID, f.labelledID, 0, 50); !isNSFWForbidden(err) {
 		t.Errorf("GetMessages(alice) after relabel = %v, want ErrForbidden+ErrNSFWUnacknowledged (reprompt)", err)
+	}
+}
+
+// TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume is P2-8: nsfw_ack
+// is unsequenced and not replayed, so a revoke landing while the client is
+// disconnected can never reach it through the ordinary seq-replay path. The
+// handler bumps the visibility watermark (ws.Hub.MarkVisibilityChanged, the
+// same call dm_channel_open uses) on every acknowledge/revoke — this proves
+// a warm resume past that bump is forced onto the full-ready path and comes
+// back with the authoritative (revoked) nsfw_acknowledged state, with no
+// nsfw_ack frame involved at all.
+func TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume(t *testing.T) {
+	database := newTeardownTestDB(t)
+	ctx := context.Background()
+
+	userID, err := database.CreateUser(ctx, "resume-nsfw-revoke-user", "hash", 4) // Member
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	chID, err := database.CreateChannel(ctx, "resume-revoke-labelled", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
+		t.Fatalf("label channel: %v", err)
+	}
+	if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	hub := newTestHub(t, database, limiter, svc)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	// The client is not connected right now — anchor a last_seq the ring
+	// buffer can otherwise replay just fine (98..100 bracket 99 with room on
+	// both sides), so the full ready below is provably forced by the
+	// watermark bump, not by an unrelated "seq too old" ring-buffer miss.
+	rb := hub.ReplayBuffer()
+	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"pre-existing"}}`))
+	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"anchor"}}`))
+	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"unrelated"}}`))
+	// The ring buffer's contents don't move the hub's own seq counter (Push
+	// is a direct test seam) — align it, or bumpVisibilityWatermark below
+	// would ratchet the watermark to 0 (nothing broadcast yet) and never
+	// exceed last_seq=99, silently defeating the fix under test.
+	hub.SeedSeq(100)
+
+	// Revoke "while disconnected": the service call plus the exact watermark
+	// bump handleNSFWRevoke now performs — no socket ever sees an nsfw_ack
+	// frame for this.
+	if err := svc.NSFW.Revoke(ctx, userID, chID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	hub.MarkVisibilityChanged()
+
+	var sawReady bool
+	var ackAfterResume *bool
+	for _, evt := range dialAndResume(t, hub, token, 99) {
+		var frame struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Channels []struct {
+					ID               int64 `json:"id"`
+					NSFWAcknowledged bool  `json:"nsfw_acknowledged"`
+				} `json:"channels"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(evt, &frame) != nil || frame.Type != MsgTypeReady {
+			continue
+		}
+		sawReady = true
+		for _, ch := range frame.Payload.Channels {
+			if ch.ID == chID {
+				v := ch.NSFWAcknowledged
+				ackAfterResume = &v
+			}
+		}
+	}
+	if !sawReady {
+		t.Fatal("resume past a revoke's watermark bump did not send a full ready — a missed nsfw_ack is unrecoverable")
+	}
+	if ackAfterResume == nil {
+		t.Fatalf("ready did not carry channel %d at all", chID)
+	}
+	if *ackAfterResume {
+		t.Fatal("ready's nsfw_acknowledged is still true after a revoke that happened while disconnected")
 	}
 }
 

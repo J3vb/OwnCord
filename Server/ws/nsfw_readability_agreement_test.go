@@ -108,7 +108,7 @@ func TestChannelReadability_RESTWSReplayAgreement(t *testing.T) {
 	assertAllAgree(idSet([]int64{plainID}))
 
 	// After acknowledging: both readable.
-	if err := database.AcknowledgeNSFW(context.Background(), user.ID, labelledID); err != nil {
+	if _, err := database.AcknowledgeNSFW(context.Background(), user.ID, labelledID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 	assertAllAgree(idSet([]int64{plainID, labelledID}))

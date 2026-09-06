@@ -113,6 +113,24 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
+	// P1-1: nsfwReadableChannelIDs was snapshotted back in reconnectPrecheck,
+	// several DB round trips and a seqMu section ago. An acknowledge, revoke
+	// or re-label landing in that window must still be honoured — re-check
+	// live, right before the events actually go out, and drop any
+	// content-bearing frame the fresh read no longer allows. One query
+	// (computeReadableChannels), not one per frame; a failure fails closed
+	// (nothing content-bearing survives) rather than trusting the stale set.
+	if reconnectReadableRecheckRaceHook != nil {
+		reconnectReadableRecheckRaceHook(c.userID)
+	}
+	freshReadable, rerr := h.computeReadableChannels(ctx, h.readers.Visibility, c.user, allowedChannelIDs)
+	if rerr != nil {
+		slog.Warn("ws handleReconnect: readable-set recheck failed, dropping content-bearing frames",
+			"user_id", c.userID, "err", rerr)
+		freshReadable = map[int64]bool{}
+	}
+	events = filterContentReadable(events, freshReadable)
+
 	switch replaySource {
 	case "buffer":
 		h.reconnectTierBuf.Add(1)

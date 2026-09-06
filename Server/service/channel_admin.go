@@ -226,7 +226,17 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	// acknowledgements in the SAME transaction as the flag write, so a later
 	// re-label re-prompts everyone rather than trusting consent given for a
 	// different warning. Flipping the flag ON writes nothing extra.
-	if existing.NSFW && !req.NSFW {
+	//
+	// P2-3: gated on the RESULTING flag (req.NSFW == false), not a 1→0
+	// transition read from the stale `existing` snapshot this handler was
+	// dispatched with. Two concurrent edits — this one, which read
+	// existing.NSFW == false, and another that labelled the channel and was
+	// immediately acknowledged in between — must not let this edit's
+	// unconditional "nothing to clear" assumption skip the delete: whatever
+	// existing.NSFW says, an edit that turns the flag off (or leaves it off)
+	// always clears, so no acknowledgement row for a DIFFERENT labelling
+	// survives it.
+	if !req.NSFW {
 		if err := s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update); err != nil {
 			return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, err)
 		}

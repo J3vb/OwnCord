@@ -277,7 +277,7 @@ type Store interface {
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
 	// ── NSFW acknowledgements (migration 047, B5-7) ──
-	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) error
+	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
 	RevokeNSFW(ctx context.Context, userID, channelID int64) error
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)

@@ -216,3 +216,39 @@ func TestNSFW_SecondDeviceGetsTheSignal(t *testing.T) {
 		t.Errorf("revoke's nsfw_ack frame acknowledged = true, want false")
 	}
 }
+
+// TestNSFW_AcknowledgeAndRevokeBumpVisibilityWatermark is P2-8: nsfw_ack is
+// unsequenced and not replayed, so a frame dropped by a disconnected socket
+// is gone for good unless something else forces a resync. Both endpoints
+// must bump the visibility watermark exactly like dm_channel_open does
+// (markDMVisibilityChanged), so a later warm resume is forced onto the
+// full-ready path and comes back with the authoritative nsfw_acknowledged
+// state even when the frame itself was missed entirely.
+func TestNSFW_AcknowledgeAndRevokeBumpVisibilityWatermark(t *testing.T) {
+	database := newNSFWTestDB(t)
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	router := buildNSFWRouter(database, bc)
+	userID := mintUser(t, database, "watermark-user")
+	token, _ := mintSession(t, database, userID)
+
+	chID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	nsfwSetLabel(t, database, chID, true)
+
+	if rr := nsfwDo(t, router, http.MethodPut, nsfwPath(chID), token); rr.Code != http.StatusNoContent {
+		t.Fatalf("PUT = %d, want 204; body %s", rr.Code, rr.Body.String())
+	}
+	if bc.markCalls < 1 {
+		t.Fatalf("MarkVisibilityChanged calls after acknowledge = %d, want at least 1", bc.markCalls)
+	}
+
+	acksAfterPut := bc.markCalls
+	if rr := nsfwDo(t, router, http.MethodDelete, nsfwPath(chID), token); rr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d, want 204; body %s", rr.Code, rr.Body.String())
+	}
+	if bc.markCalls <= acksAfterPut {
+		t.Fatalf("MarkVisibilityChanged calls after revoke = %d, want more than %d", bc.markCalls, acksAfterPut)
+	}
+}

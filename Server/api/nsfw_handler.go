@@ -36,6 +36,12 @@ func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) htt
 			return
 		}
 		notifyNSFWAck(broadcaster, user.ID, channelID, true)
+		// P2-8: nsfw_ack is unsequenced and not replayed (protocol/schema.json's
+		// own note) — a warm resume that misses it has no other way to learn the
+		// caller's state changed. Bumping the visibility watermark forces the
+		// same full resync dm_channel_open uses, so the next `ready` carries the
+		// authoritative nsfw_acknowledged field even if this frame never arrived.
+		markDMVisibilityChanged(broadcaster)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -51,6 +57,8 @@ func handleNSFWRevoke(svc *service.Services, broadcaster DMBroadcaster) http.Han
 			return
 		}
 		notifyNSFWAck(broadcaster, user.ID, channelID, false)
+		// P2-8: see the matching comment in handleNSFWAcknowledge.
+		markDMVisibilityChanged(broadcaster)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
