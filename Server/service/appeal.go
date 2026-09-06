@@ -26,9 +26,11 @@ import (
 type AppealService struct {
 	st    Store
 	perms *PermissionService
-	// moderation is reused for LiftTimeout/UnbanUser/AcknowledgeWarning (the
-	// overturn effects) and for requireOutranksRole's identical hierarchy
-	// rule, package-private — same package, not exported.
+	// moderation is used for requireOutranksRole's hierarchy rule and, since
+	// round 4/5, FinalizeTimeoutLift — the overturn effects themselves
+	// (LiftTimeoutByActionID, UnbanUser's ledger half, warning acknowledged)
+	// run at the DB layer, inside DecideAppealTx's own transaction (F1
+	// review), never through a second ModerationService call.
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
 	notifier   AppealStatusNotifier
@@ -663,28 +665,48 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	}
 	// Audit rows must survive a request canceled after the decision committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "appeal_decide", "appeal", appeal.ID, detail)
-	// item 4: the reversal's own audit row, actor 0 (a mechanical consequence
-	// of the decision, not a second moderation action by a human — the same
-	// convention LiftTimeoutByActionID's lifted_by=0 already uses), detail
-	// naming the appeal that caused it. Best-effort, like appeal_decide's own
-	// row above (D8 policy) — written only when reversalApplied (N1: a
-	// superseded/already-lifted action reverses to a no-op, which is not
-	// itself an event worth auditing).
-	if reversalApplied {
-		if auditAction, ok := db.ReversalAuditActionFor(action.Kind); ok {
-			db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, auditAction, "user", action.TargetID, "overturned appeal "+appeal.PublicID)
-		}
-	}
-	// B5-10 round 3: voice reconcile after commit — wired when B5-9's round 4
-	// is merged. Once voice_states.server_muted_by and ModerationService's
-	// post-commit reconcile method land, an "overturned" timeout/ban here
-	// calls it (ctx, action.TargetID, []int64{action.ID}, actorID) so a
-	// live target's voice mute lifts alongside the ledger reversal above.
+	s.applyOverturnReversalEffects(ctx, appeal, action, outcome, reversalApplied)
 	s.notify(appeal.AppellantID, appeal.PublicID, outcome, &note)
 	s.notifyQueue(ctx, appeal.ID, outcome)
 
 	slog.Info("appeal decided", "actor_id", actorID, "appeal_id", appeal.ID, "outcome", outcome, "sole_moderator", soleModerator)
 	return nil
+}
+
+// applyOverturnReversalEffects runs Decide's two post-commit, best-effort
+// consequences of an overturn (D8 policy — both survive a request canceled
+// after the decision committed, via context.WithoutCancel), split out of
+// Decide itself to keep it under the cyclop budget:
+//
+//   - item 4's reversal audit row, actor 0 (a mechanical consequence of the
+//     decision, not a second moderation action by a human — the same
+//     convention LiftTimeoutByActionID's lifted_by=0 already uses), detail
+//     naming the appeal that caused it. Written only when reversalApplied
+//     (N1: a superseded/already-lifted action reverses to a no-op, which is
+//     not itself an event worth auditing). "timeout" is excluded here — its
+//     audit row (also "user_untimeout") is FinalizeTimeoutLift's own below,
+//     so this generic write never runs twice for the same event.
+//   - B5-10 round 4/5's voice reconcile, now that B5-9's own post-commit
+//     method (ModerationService.FinalizeTimeoutLift) exists. Called
+//     unconditionally for every overturned timeout — not gated on
+//     reversalApplied — because FinalizeTimeoutLift's own doc comment
+//     anticipates exactly this caller and does its own staleness check
+//     (HasActiveTimeout): a newer timeout that has since superseded this one
+//     still gets its voice half repaired (clearing only what THIS action id
+//     owns, a no-op if it owns nothing) but is not announced or audited
+//     again, since the newer timeout's own issue already published the
+//     target's current state. actorID 0: the reversal is a system
+//     consequence, not a second moderation action by the human decider, who
+//     is already on the appeal_decide row Decide wrote.
+func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal *db.Appeal, action *db.ModerationAction, outcome string, reversalApplied bool) {
+	if reversalApplied {
+		if auditAction, ok := db.ReversalAuditActionFor(action.Kind); ok && action.Kind != "timeout" {
+			db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, auditAction, "user", action.TargetID, "overturned appeal "+appeal.PublicID)
+		}
+	}
+	if outcome == "overturned" && action.Kind == "timeout" {
+		s.moderation.FinalizeTimeoutLift(ctx, action.TargetID, []int64{action.ID}, 0)
+	}
 }
 
 // checkModeratorAuthority is DecideAppealTx's and AssignAppealTx's fresh

@@ -2713,11 +2713,16 @@ actor `0` (a mechanical consequence of the decision, not a second
 moderation action by the human decider), alongside the decision's own
 `appeal_decide` row.
 
-**Voice**, for a live target already muted by an overturned timeout or ban:
-wired in this PR's final commit, once B5-9's own voice reconcile method
-lands — until then a live target's voice mute does not lift automatically
-alongside the ledger reversal above, and clears on their next voice
-rejoin/session refresh instead.
+**Voice**, for a live target server-muted by the overturned timeout: lifts
+alongside the ledger reversal above, through
+`ModerationService.FinalizeTimeoutLift` — the same post-commit method a
+moderator's direct `POST .../untimeout` uses. It clears only a mute the
+appealed action itself put in place (session-bound ownership, never a
+different moderator's own `voice_mod_mute`, and never a still-active,
+strictly newer timeout that has since superseded this one — that mute stays
+until ITS OWN issue or lift decides it, and this overturn sends no frame
+for it). A ban carries no voice-mute reconcile of its own; the target's
+live session was already ended when the ban landed.
 
 #### Errors
 

@@ -754,12 +754,18 @@ func TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors(t 
 	if decideEntry.ActorID != fixturePeerMod {
 		t.Fatalf("appeal_decide actor = %d, want the human decider %d", decideEntry.ActorID, fixturePeerMod)
 	}
+	// round 4/5: "user_untimeout" is now FinalizeTimeoutLift's own audit
+	// write (not a second, appeal-specific one — see Decide's comment on why
+	// the generic reversal-audit block excludes "timeout"), so its detail is
+	// the same fixed "timeout lifted" a moderator-initiated LiftTimeout
+	// leaves, not the appeal's public id; the appeal_decide row above is
+	// where the appeal's own identity lives.
 	reversalEntry := rec.Wait(t, "user_untimeout")
 	if reversalEntry.ActorID != 0 {
 		t.Fatalf("user_untimeout actor = %d, want 0 (a mechanical consequence of the decision)", reversalEntry.ActorID)
 	}
-	if !strings.Contains(reversalEntry.Detail, publicID) {
-		t.Fatalf("user_untimeout detail = %q, want it to name the appeal %q", reversalEntry.Detail, publicID)
+	if reversalEntry.Detail != "timeout lifted" {
+		t.Fatalf("user_untimeout detail = %q, want %q (FinalizeTimeoutLift's own)", reversalEntry.Detail, "timeout lifted")
 	}
 	for _, e := range rec.Entries() {
 		if strings.Contains(e.Detail, body) || strings.Contains(e.Detail, note) {
@@ -867,7 +873,13 @@ func TestAppeal_OverturnLiftsTimeoutUnbansAcknowledgesWarning(t *testing.T) {
 func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
+	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
+	notifier := &fakeModActionNotifier{}
+	f.mod.SetNotifier(notifier)
 
+	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
 	olderResult, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "first", time.Hour, nil)
 	if err != nil {
 		t.Fatalf("Timeout (older): %v", err)
@@ -879,10 +891,18 @@ func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
 	if olderResult.ID == newerResult.ID {
 		t.Fatal("the two Timeout calls returned the same action id")
 	}
+	state, err := f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil || !state.ServerMuted {
+		t.Fatalf("test setup broken: want the target server-muted (owned by the newer timeout) before the appeal, got %+v, err=%v", state, err)
+	}
+	notifier.kinds = nil // discard Timeout's own two "timeout" issue frames.
 
 	// The older timeout is already superseded (lifted) by the newer one —
 	// appealing it anyway (the target may not know which of two attempts a
-	// notice referred to) must not disturb the newer, still-active row.
+	// notice referred to) must not disturb the newer, still-active row, its
+	// voice mute (still owned by the newer timeout), or send a stale
+	// "lifted" frame — B5-10 round 4/5, FinalizeTimeoutLift's own staleness
+	// check (HasActiveTimeout).
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, olderResult.ID, "please")
 	if err != nil {
 		t.Fatalf("Submit against the older (superseded) timeout: %v", err)
@@ -906,6 +926,115 @@ func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
 		if r := &rows[i]; r.ID == newerResult.ID && r.LiftedAt != nil {
 			t.Fatalf("the newer timeout (action %d) was lifted by overturning a different action", newerResult.ID)
 		}
+	}
+	state, err = f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil || !state.ServerMuted {
+		t.Fatalf("target must still be server-muted — the newer timeout still owns the mute, got %+v, err=%v", state, err)
+	}
+	if len(notifier.kinds) != 0 {
+		t.Fatalf("NotifyModAction calls after overturning the superseded timeout = %v, want none — the newer timeout's own issue already published the current state", notifier.kinds)
+	}
+}
+
+// TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied is B5-10 round
+// 4/5's voice-reconcile wiring, the common case: the target is in voice
+// when the timeout lands (the mute applies), and overturning the appeal
+// against it — through Decide, not ModerationService.LiftTimeout — must
+// still call FinalizeTimeoutLift and leave the target genuinely unmuted, the
+// same as a moderator lifting it directly.
+func TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
+	notifier := &fakeModActionNotifier{}
+	f.mod.SetNotifier(notifier)
+
+	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if result.VoiceSkipped {
+		t.Fatal("test setup broken: want the voice half to apply")
+	}
+	state, err := f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil || !state.ServerMuted {
+		t.Fatalf("test setup broken: want the target server-muted before the appeal, got %+v, err=%v", state, err)
+	}
+	notifier.kinds = nil // discard Timeout's own issue frame.
+
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	state, err = f.database.GetVoiceState(ctx, fixtureMember)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %+v, %v", state, err)
+	}
+	if state.ServerMuted {
+		t.Fatal("target still server-muted after the appeal was overturned")
+	}
+	found := false
+	for _, k := range notifier.kinds {
+		if k == "timeout" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("NotifyModAction calls = %v, want a \"timeout\" (timeout-cleared) frame", notifier.kinds)
+	}
+}
+
+// TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState is B5-10
+// round 4/5's voice-reconcile wiring, the other common case: the target was
+// never in voice (the mute never applied, VoiceSkipped=true), so
+// FinalizeTimeoutLift's own UnmuteForTimeout call has nothing to clear —
+// overturning the appeal must not create or otherwise touch any voice
+// state, though the ledger/notification side of the lift still applies.
+func TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
+	notifier := &fakeModActionNotifier{}
+	f.mod.SetNotifier(notifier)
+
+	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
+	if err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if !result.VoiceSkipped {
+		t.Fatal("test setup broken: want the voice half to be skipped (the target is not in voice)")
+	}
+	if state, err := f.database.GetVoiceState(ctx, fixtureMember); err != nil || state != nil {
+		t.Fatalf("test setup broken: want no voice state for the target, got %+v, err=%v", state, err)
+	}
+	notifier.kinds = nil // discard Timeout's own issue frame.
+
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	if state, err := f.database.GetVoiceState(ctx, fixtureMember); err != nil || state != nil {
+		t.Fatalf("voice state after overturning a never-applied timeout = %+v, err=%v, want still none", state, err)
+	}
+	found := false
+	for _, k := range notifier.kinds {
+		if k == "timeout" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("NotifyModAction calls = %v, want a \"timeout\" (timeout-cleared) frame even without a voice half", notifier.kinds)
 	}
 }
 
