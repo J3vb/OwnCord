@@ -328,21 +328,24 @@ func (d *DB) AssignReport(ctx context.Context, id, assigneeID, observedAssigneeI
 	return n == 1, nil
 }
 
-// AssignReportForced is the force-reassign path's guarded write (Codex
-// review): the observed assignee's CURRENT role position is read through
-// this same transaction's connection, and compared to actorRolePosition,
-// immediately before the UPDATE — closing the gap the plain outrank check
-// left, where the read (of the target's role) and the write happened as two
-// separate statements, one of which SQLite's single-writer serialization
-// does not otherwise force together. Returns (true, nil) on success,
-// (false, nil) for the ordinary state/observed/existence conflict AssignReport
-// already covers, and (false, ErrForbidden) when actorRolePosition does not
-// outrank the assignee's fresh position — the caller (ReportService.Assign)
-// maps that to a 403, distinctly from the 409 the plain conflict gets.
-func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error) {
-	tx, err := d.writer.BeginTx(ctx, nil)
+// forceReassignGuarded is the shared machinery behind AssignReportForced and
+// AssignAppealForced (B5-10): the observed assignee's CURRENT role position
+// is read through this same transaction's connection, and compared to
+// actorRolePosition, immediately before doUpdate runs — closing the gap the
+// plain outrank check leaves, where the read (of the target's role) and the
+// write happen as two separate statements, one of which SQLite's
+// single-writer serialization does not otherwise force together. Returns
+// (true, nil) on success, (false, nil) for the ordinary state/observed/
+// existence conflict doUpdate's own guard already covers (including the
+// observed assignee no longer resolving to any role at all, erased
+// mid-race — nothing to outrank, and doUpdate's own EXISTS(users) guard
+// would refuse it too), and (false, ErrForbidden) when actorRolePosition
+// does not outrank the assignee's fresh position — the caller maps that to
+// a 403, distinctly from the 409 the plain conflict gets.
+func forceReassignGuarded(ctx context.Context, writer *sql.DB, observedAssigneeID, actorRolePosition int64, doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
+	tx, err := writer.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("AssignReportForced begin tx: %w", err)
+		return false, fmt.Errorf("forceReassignGuarded begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
@@ -350,28 +353,33 @@ func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAss
 	targetRole, err := q.GetRoleForUser(ctx, observedAssigneeID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			// The current assignee no longer resolves to a role at all (erased
-			// mid-race) — nothing to outrank, and the EXISTS(users) guard on
-			// the UPDATE below will refuse the write on the same grounds.
 			return false, nil
 		}
-		return false, fmt.Errorf("AssignReportForced role lookup: %w", err)
+		return false, fmt.Errorf("forceReassignGuarded role lookup: %w", err)
 	}
 	if actorRolePosition <= targetRole.Position {
 		return false, ErrForbidden
 	}
 
-	n, err := q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
+	n, err := doUpdate(q)
 	if err != nil {
-		return false, fmt.Errorf("AssignReportForced: %w", err)
+		return false, fmt.Errorf("forceReassignGuarded: %w", err)
 	}
 	if n != 1 {
 		return false, nil
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("AssignReportForced commit: %w", err)
+		return false, fmt.Errorf("forceReassignGuarded commit: %w", err)
 	}
 	return true, nil
+}
+
+// AssignReportForced is the report queue's force-reassign path. See
+// forceReassignGuarded for the shared mechanics.
+func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error) {
+	return forceReassignGuarded(ctx, d.writer, observedAssigneeID, actorRolePosition, func(q *dbgen.Queries) (int64, error) {
+		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
+	})
 }
 
 // CloseReport closes report id with outcome, guarded to open/assigned

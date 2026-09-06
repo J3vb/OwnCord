@@ -6,18 +6,28 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// modQueuePayload is the mod_queue frame's payload: the report's PUBLIC id
-// and its new state — never the reporter's identity, never the reported
-// content, never the subject (S5, report confidentiality), and never the
-// internal sequential id (P2-9 — that would let a bit holder infer a
-// neighbouring report's existence from a gap in the ids they see).
+// modQueuePayload is the mod_queue frame's payload: EITHER a report's
+// PUBLIC id (report_id) OR an appeal's PUBLIC id (appeal_id, B5-10) plus
+// the new state — never the reporter's/appellant's identity, never the
+// reported content, never the subject (S5, report confidentiality), and
+// never the internal sequential id (P2-9 — that would let a bit holder
+// infer a neighbouring report's or appeal's existence from a gap in the
+// ids they see). One wire type, two optional ids, so B5-8's audience
+// helper (moderationAudience) is reused for the appeal queue rather than a
+// second one being written; exactly one of ReportID/AppealID is set on any
+// given frame.
 type modQueuePayload struct {
-	PublicID string `json:"report_id"`
+	ReportID string `json:"report_id,omitempty"`
+	AppealID string `json:"appeal_id,omitempty"`
 	State    string `json:"state"`
 }
 
 func buildModQueue(publicID, state string) []byte {
-	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{PublicID: publicID, State: state}})
+	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{ReportID: publicID, State: state}})
+}
+
+func buildAppealModQueue(publicID, state string) []byte {
+	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{AppealID: publicID, State: state}})
 }
 
 // moderationAudience returns the connected user IDs whose current Subject
@@ -81,6 +91,27 @@ func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state strin
 	}
 	msg := buildModQueue(report.PublicID, state)
 	for _, uid := range h.moderationAudience(ctx, report.ReporterID, report.SubjectID) {
+		h.SendToUserLow(uid, msg)
+	}
+}
+
+// BroadcastAppealQueue notifies every connected moderation-bit holder that
+// appeal appealID (the INTERNAL id, resolved to a public id below before it
+// ever reaches the wire) changed, on submit, assign and decide. Unlike a
+// report, an appeal carries no confidentiality rule against its own
+// appellant or the acting moderator — both may already see it through
+// their own views — so, unlike BroadcastModQueue, no principal is excluded
+// from the audience here.
+func (h *Hub) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
+	if h.db == nil {
+		return
+	}
+	appeal, err := h.db.GetAppeal(ctx, appealID)
+	if err != nil || appeal == nil {
+		return
+	}
+	msg := buildAppealModQueue(appeal.PublicID, state)
+	for _, uid := range h.moderationAudience(ctx) {
 		h.SendToUserLow(uid, msg)
 	}
 }

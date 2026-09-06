@@ -40,6 +40,8 @@ type Services struct {
 	Auth *AuthService
 	// Reports is the local report intake and moderator queue (B5-8).
 	Reports *ReportService
+	// Appeals is the rate-limited appeal against a moderation action (B5-10).
+	Appeals *AppealService
 }
 
 // New creates all domain services wired together.
@@ -75,5 +77,6 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Sessions:    NewSessionService(st),
 		Setup:       NewSetupService(st),
 		Reports:     NewReportService(st, permSvc, messages, uploads, moderation, limiter),
+		Appeals:     NewAppealService(st, permSvc, moderation, limiter),
 	}
 }

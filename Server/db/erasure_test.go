@@ -98,6 +98,15 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// lifted (23b, actor_id and lifted_by both).
 	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, reason) VALUES ('warning', ?, ?, 'seed warning about subject')`, uid, other)
 	exec(`INSERT INTO moderation_actions (kind, target_id, actor_id, lifted_by, lifted_at, expires_at, reason) VALUES ('timeout', ?, ?, ?, datetime('now'), datetime('now', '+1 hour'), 'seed timeout by subject')`, other, uid, uid)
+	// B5-10 appeal classes (migration 050): an appeal BY the subject (24a,
+	// appellant_id) against an action targeting the OTHER user, and a
+	// separate appeal DECIDED BY the subject (24b, decided_by) whose
+	// appellant is the other user — the appellant_id cascade must not be
+	// what zeroes 24b's count, or this class would prove nothing.
+	exec(`INSERT INTO moderation_actions (id, kind, target_id, actor_id, reason) VALUES (950, 'warning', ?, ?, 'seed warning for appeal by subject')`, other, uid)
+	exec(`INSERT INTO appeals (public_id, action_id, appellant_id, body) VALUES ('pub-appeal-950', 950, ?, 'appeal by subject')`, uid)
+	exec(`INSERT INTO moderation_actions (id, kind, target_id, actor_id, reason) VALUES (951, 'warning', ?, ?, 'seed warning decided by subject')`, other, other)
+	exec(`INSERT INTO appeals (public_id, action_id, appellant_id, body, decided_by, state, decision_note) VALUES ('pub-appeal-951', 951, ?, 'please reconsider', ?, 'upheld', 'decided')`, other, uid)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 

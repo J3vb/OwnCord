@@ -192,16 +192,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountEmojiRoutes(r, database, svc, store, limiter, hub)
 	}
 
-	// Report intake, the reporter's own status view, and the moderation
-	// queue (B5-8) — mounted after hub creation so a filed report, an
-	// assignment or a close can notify connected MODERATE_MEMBERS/
-	// Administrator holders via mod_queue.
-	MountReportRoutes(r, svc, hub)
-	MountModerationQueueRoutes(r, svc, hub)
-	// Warning, timeout and the notice acknowledgement (B5-9) — mounted
-	// alongside the queue since both gate on the same MODERATE_MEMBERS bit
-	// and both can notify a connected target.
-	MountModerationRoutes(r, svc)
+	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
+	// mounted after hub creation so a filed report, an assignment, a
+	// decision or an action can notify connected clients.
+	mountModerationRoutes(r, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -387,12 +381,28 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 			svc.Moderation.SetNotifier(hub)
 			svc.Moderation.SetVoiceMuter(hub)
 		}
+		if svc.Appeals != nil {
+			// B5-10: a live appellant gets the appeal_status frame on
+			// assignment, decision and withdrawal.
+			svc.Appeals.SetNotifier(hub)
+		}
 	}
 	if svc.Erasure != nil {
 		authSvc.UseErasure(svc.Erasure)
 	} else {
 		slog.Error("wireAuth: bundle has no erasure runner; account deletion will run through AuthService's private runner, which records no deletion marker — a restore can resurrect an erased account")
 	}
+}
+
+// mountModerationRoutes mounts report intake, the moderation queue, warning/
+// timeout and appeals (B5-8/B5-9/B5-10) — grouped in one call so NewRouter
+// carries one statement here instead of five (funlen budget).
+func mountModerationRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
+	MountReportRoutes(r, svc, hub)
+	MountModerationQueueRoutes(r, svc, hub)
+	MountModerationRoutes(r, svc)
+	MountAppealRoutes(r, svc, hub)
+	MountModerationAppealRoutes(r, svc, hub)
 }
 
 // routerUploadRoutes mounts the file upload and serving routes and returns the

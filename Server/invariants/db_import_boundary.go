@@ -57,6 +57,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/types.go":                  {"adapter", "", "response DTOs only — its GetRoleByID went with the user family"},
 	"admin/update_handlers.go":        {"boundary", "", "audits the binary swap (OC-0391) with WriteAudit/LogAudit; no other calls"},
 	// ── api ───────────────────────────────────────────────────────────────
+	"api/appeal_handler.go":           {"adapter", "", "db.User from the auth context and db.ModerationAction response type only; AppealService owns every call"},
 	"api/channel_handler.go":          {"adapter", "", "response types only; service owns the calls"},
 	"api/dm_handler.go":               {"adapter", "", "DM response types + pure status helpers"},
 	"api/emoji_handler.go":            {"adapter", "", "Emoji/User types only"},

@@ -459,22 +459,59 @@ func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
 	}
 }
 
-// TestRetireModerationActions_RefusesWhenAppealsTableExists: B5-10 will add
-// an appeals-exclusion query; until then, if the appeals table exists on a
-// database this code runs against, the sweep must refuse rather than
-// silently retire a row an appeal references.
-func TestRetireModerationActions_RefusesWhenAppealsTableExists(t *testing.T) {
+// TestModerationRetention_SkipsAppealedActions: B5-10 wires the join
+// RetireModerationActions' comment used to point at — a warning or timeout
+// row an appeals row references must survive the sweep regardless of age,
+// because decision 8's UNIQUE(action_id) memory is what forbids re-appealing
+// it, and sweeping the row away would silently reopen that door.
+func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	if _, err := database.WarnUser(ctx, memberID, ownerID, nil, "x"); err != nil {
-		t.Fatalf("WarnUser: %v", err)
+	appealedID, err := database.WarnUser(ctx, memberID, ownerID, nil, "appealed")
+	if err != nil {
+		t.Fatalf("WarnUser(appealed): %v", err)
 	}
-	if _, err := database.ExecContext(ctx, `CREATE TABLE appeals (action_id INTEGER)`); err != nil {
-		t.Fatalf("create appeals table: %v", err)
+	unappealedID, err := database.WarnUser(ctx, memberID, ownerID, nil, "unappealed")
+	if err != nil {
+		t.Fatalf("WarnUser(unappealed): %v", err)
 	}
-	if _, err := database.RetireModerationActions(ctx, 1); err == nil {
-		t.Fatal("RetireModerationActions succeeded with an appeals table present; want a refusal until B5-10 adds the exclusion query")
+	if _, err := database.AcknowledgeWarning(ctx, memberID, appealedID); err != nil {
+		t.Fatalf("ack appealed: %v", err)
+	}
+	if _, err := database.AcknowledgeWarning(ctx, memberID, unappealedID); err != nil {
+		t.Fatalf("ack unappealed: %v", err)
+	}
+	// Backdate both past the retention window.
+	if _, err := database.ExecContext(ctx,
+		`UPDATE moderation_actions SET acknowledged_at = datetime('now', '-100 days') WHERE id IN (?, ?)`,
+		appealedID, unappealedID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if _, err := database.InsertAppeal(ctx, "pub-retention-appeal", appealedID, memberID, "please reconsider"); err != nil {
+		t.Fatalf("InsertAppeal: %v", err)
+	}
+
+	n, err := database.RetireModerationActions(ctx, 90)
+	if err != nil {
+		t.Fatalf("RetireModerationActions: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("retired %d rows, want 1 (only the unappealed one)", n)
+	}
+	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
+	if err != nil {
+		t.Fatalf("ListModerationActionsForTarget: %v", err)
+	}
+	remaining := map[int64]bool{}
+	for _, r := range rows {
+		remaining[r.ID] = true
+	}
+	if !remaining[appealedID] {
+		t.Error("the appealed warning was retired — decision 8's UNIQUE(action_id) memory is now unenforceable for it")
+	}
+	if remaining[unappealedID] {
+		t.Error("the unappealed warning was not retired")
 	}
 }
 

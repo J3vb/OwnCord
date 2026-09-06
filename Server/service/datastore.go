@@ -346,6 +346,27 @@ type Store interface {
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
+	// GetModerationAction is B5-10's appeal submission and decision both
+	// needing the appealed action's own kind, target and actor.
+	GetModerationAction(ctx context.Context, id int64) (*db.ModerationAction, error)
+
+	// ── Appeals (migration 050, B5-10) ──
+	// FindAppealForAction is the dedupe FAST PATH; InsertAppeal's
+	// UNIQUE(action_id) violation is what actually enforces decision 8's
+	// "one appeal per action, ever" under concurrency.
+	FindAppealForAction(ctx context.Context, actionID int64) (int64, error)
+	InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error)
+	GetAppeal(ctx context.Context, id int64) (*db.Appeal, error)
+	GetAppealByPublicID(ctx context.Context, publicID string) (*db.Appeal, error)
+	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
+	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
+	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
+	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error)
+	DecideAppeal(ctx context.Context, id int64, outcome string, decidedBy int64, note string) (bool, error)
+	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
+	// CountEligibleModerators is decision 8's self-review escape: the count
+	// of users (other than excludeID) whose role holds permBit or adminBit.
+	CountEligibleModerators(ctx context.Context, excludeID, permBit, adminBit int64) (int64, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

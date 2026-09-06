@@ -94,6 +94,70 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, nil
 		}},
+		{"appeal submit", "appeal_submit", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if _, err := appeals.Submit(context.Background(), fixtureMember, actionID, "please reconsider"); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			return rec, nil
+		}},
+		{"appeal withdraw", "appeal_withdraw", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, "please reconsider")
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
+				t.Fatalf("Withdraw: %v", err)
+			}
+			return rec, nil
+		}},
+		{"appeal assign", "appeal_assign", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, "please reconsider")
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
+				t.Fatalf("Assign: %v", err)
+			}
+			return rec, nil
+		}},
+		{"appeal decide", "appeal_decide", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newModerationActionsFixture(t)
+			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+			if err != nil {
+				t.Fatalf("Warn: %v", err)
+			}
+			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, "please reconsider")
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			rec := audittest.Install(t, f.database)
+			if err := appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", "no"); err != nil {
+				t.Fatalf("Decide: %v", err)
+			}
+			return rec, nil
+		}},
 		{"kick (force logout)", "force_logout", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
 			rec := audittest.Install(t, database)

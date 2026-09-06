@@ -66,6 +66,36 @@ func (q *Queries) GetActiveTimeout(ctx context.Context, targetID int64) (GetActi
 	return i, err
 }
 
+const getModerationActionByID = `-- name: GetModerationActionByID :one
+SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
+       expires_at, acknowledged_at, lifted_at, lifted_by, created_at
+  FROM moderation_actions
+ WHERE id = ?
+`
+
+// B5-10's appeal submission and decision both need the appealed action's
+// own row: its kind (appealable or not), its target (must be the appellant),
+// and its actor (the deciding-moderator self-review check).
+func (q *Queries) GetModerationActionByID(ctx context.Context, id int64) (ModerationAction, error) {
+	row := q.db.QueryRowContext(ctx, getModerationActionByID, id)
+	var i ModerationAction
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.TargetID,
+		&i.ActorID,
+		&i.ActorToken,
+		&i.ReportID,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.AcknowledgedAt,
+		&i.LiftedAt,
+		&i.LiftedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const hasActiveTimeout = `-- name: HasActiveTimeout :one
 SELECT EXISTS (
     SELECT 1 FROM moderation_actions
@@ -285,13 +315,15 @@ DELETE FROM moderation_actions
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1)
 `
 
-// The maintenance-tick retention sweep, run only when no appeals table
-// exists yet (B5-9; B5-10's migration 050 adds appeals and this query is
-// replaced by one that excludes referenced ids -- see the // B5-10: comment
-// in Server/db/moderation_action_queries.go). Warnings retire
-// moderation.action_retention_days after acknowledged_at; timeouts the same
-// number of days after expires_at, or after lifted_at when lifted early.
-// Ban, kick and removal rows are never touched here.
+// The maintenance-tick retention sweep, kept only as the pre-appeals
+// fallback RetireModerationActions falls back to if the appeals table is
+// somehow absent (Server/db/moderation_action_queries.go) -- in ordinary
+// operation migration 050 has always run by the time this executes, so
+// RetireRetiredCandidatesExcludingAppealed (appeals.sql) is the query that
+// actually runs. Warnings retire moderation.action_retention_days after
+// acknowledged_at; timeouts the same number of days after expires_at, or
+// after lifted_at when lifted early. Ban, kick and removal rows are never
+// touched here.
 func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retireRetiredCandidates, cutoff)
 	if err != nil {

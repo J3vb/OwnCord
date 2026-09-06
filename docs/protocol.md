@@ -96,7 +96,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`                                                                                                                            |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`                                                                                                          |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                                          |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
@@ -986,6 +986,27 @@ correlate `report_id` values in order could otherwise infer a report's
 position relative to reports they cannot see). `state` is one of `open`,
 `assigned`, `resolved`, `dismissed`.
 
+**B5-10 reuses this same wire type for an appeal-queue change** (a
+submission, assignment or decision), carrying `appeal_id` instead of
+`report_id` — one wire type, two optional ids, exactly one of which is ever
+set on a given frame:
+
+```json
+{
+  "type": "mod_queue",
+  "payload": {
+    "appeal_id": "1a2b3c4d5e6f7081920a1b2c3d4e5f60",
+    "state": "overturned"
+  }
+}
+```
+
+Unlike a report, an appeal carries no confidentiality rule against its own
+appellant or the acting moderator — both may already see it through their
+own views — so this frame is not filtered against either principal the way
+the report variant excludes the reporter and subject. `state` here is one
+of `open`, `assigned`, `upheld`, `overturned`.
+
 ---
 
 ## Moderator Actions
@@ -1011,6 +1032,30 @@ connect, or feels the timeout on their next attempted send.
 
 `kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
 for a lifted timeout; present for an active timeout.
+
+## Appeals
+
+### appeal_status (Server -> Client)
+
+B5-10: an appeal's state changed (assigned, decided, or withdrawn),
+delivered ONLY to the appellant — targeted and unsequenced, never replayed.
+A disconnected appellant simply sees the current state on their next
+`GET /api/v1/appeals/mine`.
+
+```json
+{
+  "type": "appeal_status",
+  "payload": {
+    "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "state": "overturned",
+    "decision_note": "at most 2000 runes, no control characters"
+  }
+}
+```
+
+`id` is the appeal's opaque public id. `state` is one of `assigned`,
+`upheld`, `overturned`, `withdrawn`. `decision_note` is `null` until the
+appeal is decided.
 
 ### ready's notices
 
@@ -1711,6 +1756,7 @@ tables below add per-type behavioral notes.
 | `server_restart`      | Yes      | All clients                                                             |
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `mod_action`          | No       | Direct to the live target only                                          |
+| `appeal_status`       | No       | Direct to the appellant only                                            |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

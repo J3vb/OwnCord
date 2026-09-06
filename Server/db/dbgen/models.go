@@ -19,6 +19,21 @@ type ApiToken struct {
 	RevokedAt  *string `json:"revokedAt"`
 }
 
+type Appeal struct {
+	ID             int64   `json:"id"`
+	PublicID       string  `json:"publicId"`
+	ActionID       int64   `json:"actionId"`
+	AppellantID    int64   `json:"appellantId"`
+	Body           string  `json:"body"`
+	State          string  `json:"state"`
+	AssigneeID     int64   `json:"assigneeId"`
+	DecidedBy      int64   `json:"decidedBy"`
+	DecidedByToken *string `json:"decidedByToken"`
+	DecisionNote   string  `json:"decisionNote"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
+}
+
 type Attachment struct {
 	ID         string `json:"id"`
 	MessageID  *int64 `json:"messageId"`
