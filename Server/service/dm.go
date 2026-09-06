@@ -89,6 +89,18 @@ type CreateDMResult struct {
 	Channel   *db.Channel
 	Created   bool
 	Recipient *db.User
+	// RecipientOpened reports whether the recipient's side is actually open
+	// and safe to announce (dm_channel_open, ready.dm_channels, GET /dms).
+	// Only meaningful when Created is true — GetOrCreateDMChannel's existing-
+	// channel branch never touches the other party's dm_open_state, so an
+	// existing channel's visibility is whatever it already was. B5-6: a
+	// brand-new one-to-one channel is pre-seeded open for BOTH sides
+	// (GetOrCreateDMChannel), which would show the caller in the recipient's
+	// sidebar before any first-contact gate ever runs if the caller is not
+	// yet trusted. CreateDM closes the recipient's premature open in that
+	// case; RecipientOpened tells the caller (api/dm_handler.go) whether to
+	// broadcast dm_channel_open.
+	RecipientOpened bool
 }
 
 // CreateDM creates or retrieves a DM channel between two users.
@@ -141,10 +153,34 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: failed to create DM channel", ErrInternal)
 	}
 
+	// B5-6 (Codex P1-1): a brand-new channel opens both sides
+	// unconditionally, which would let the caller show up in the recipient's
+	// DM list (and reconnect replay) before any first-contact decision. Undo
+	// the recipient's half when they do not yet trust the caller — their
+	// side opens at acceptance instead (MessageRequestService.Accept /
+	// AcceptMessageRequest). Only relevant on a fresh channel; an existing
+	// one never had its recipient side touched by GetOrCreateDMChannel here.
+	recipientOpened := true
+	if created {
+		trusted, tErr := s.st.IsTrustedSender(ctx, recipientID, userID)
+		if tErr != nil {
+			slog.Error("DMService.CreateDM: trust lookup failed, closing the recipient's side to be safe",
+				"err", tErr, "recipient_id", recipientID, "user_id", userID)
+		}
+		recipientOpened = tErr == nil && trusted
+		if !recipientOpened {
+			if closeErr := s.st.CloseDM(ctx, recipientID, ch.ID); closeErr != nil {
+				slog.Error("DMService.CreateDM: failed to close the recipient's premature open",
+					"err", closeErr, "recipient_id", recipientID, "channel_id", ch.ID)
+			}
+		}
+	}
+
 	return &CreateDMResult{
-		Channel:   ch,
-		Created:   created,
-		Recipient: recipient,
+		Channel:         ch,
+		Created:         created,
+		Recipient:       recipient,
+		RecipientOpened: recipientOpened,
 	}, nil
 }
 
@@ -486,11 +522,24 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
+
+	// B5-6 (Codex P1-2): call_incoming/call_declined is a DM interaction
+	// like chat, typing and reactions — an untrusted recipient of a pending
+	// request must not learn the sender is present in voice either. Group
+	// DMs are untouched (decision 4), matching the block check above.
+	isGroup, gErr := s.st.IsGroupDM(ctx, channelID)
+
 	targets := make([]int64, 0, len(ids))
 	for _, pid := range ids {
-		if pid != userID {
-			targets = append(targets, pid)
+		if pid == userID {
+			continue
 		}
+		if gErr == nil && !isGroup {
+			if trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID); tErr != nil || !trusted {
+				continue
+			}
+		}
+		targets = append(targets, pid)
 	}
 	return targets, nil
 }

@@ -17,9 +17,15 @@ type MessageRequest struct {
 	SenderID    int64
 	RecipientID int64
 	ChannelID   int64
-	State       string
-	CreatedAt   string
-	DecidedAt   *string
+	// FirstMessageID is the message this request was created for, set once
+	// at creation (Codex P1-4/P2-6 — see the migration's own deviation
+	// note). nil for a grandfathered installation's pre-existing rows,
+	// which cannot happen today since nothing grandfathers message_requests
+	// itself, only trusted_senders.
+	FirstMessageID *int64
+	State          string
+	CreatedAt      string
+	DecidedAt      *string
 }
 
 // MessageRequestView is one pending request the way GET /api/v1/dm-requests
@@ -39,13 +45,14 @@ type MessageRequestView struct {
 
 func fromDBGenMessageRequest(r dbgen.MessageRequest) *MessageRequest {
 	return &MessageRequest{
-		ID:          r.ID,
-		SenderID:    r.SenderID,
-		RecipientID: r.RecipientID,
-		ChannelID:   r.ChannelID,
-		State:       r.State,
-		CreatedAt:   r.CreatedAt,
-		DecidedAt:   r.DecidedAt,
+		ID:             r.ID,
+		SenderID:       r.SenderID,
+		RecipientID:    r.RecipientID,
+		ChannelID:      r.ChannelID,
+		FirstMessageID: r.FirstMessageID,
+		State:          r.State,
+		CreatedAt:      r.CreatedAt,
+		DecidedAt:      r.DecidedAt,
 	}
 }
 
@@ -72,20 +79,68 @@ func (d *DB) TrustSender(ctx context.Context, recipientID, senderID int64, sourc
 }
 
 // CreateMessageRequest stages a pending request for (senderID, recipientID)
-// in channelID. INSERT OR IGNORE against the UNIQUE(sender_id, recipient_id)
-// constraint: one row per pair EVER, so a request already existing in ANY
-// state — pending, ignored, deleted, blocked, even accepted, though an
-// accepted pair is trusted and should never reach here — leaves created
-// false and changes nothing. That is what makes a resend after "ignored"
-// silent (decision 5): there is only ever one row to have created.
-func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID int64) (bool, error) {
-	n, err := d.q.InsertMessageRequest(ctx, dbgen.InsertMessageRequestParams{
-		SenderID: senderID, RecipientID: recipientID, ChannelID: channelID,
+// in channelID, naming firstMessageID as the held message, and — in the SAME
+// transaction — marks senderID as a trusted sender of recipientID (source
+// "sent_first"): senderID initiated, so recipientID's eventual reply is a
+// reply, not a first-contact request back. Codex P2-6: the two writes used
+// to be separate calls, so a request insert that committed followed by a
+// failed trust write left a pending row with no reverse trust and no way to
+// repair it — a resend finds the row already there (INSERT OR IGNORE) and
+// stays silent forever (decision 5), so nothing ever retries the trust
+// write either.
+//
+// The request insert is INSERT OR IGNORE against the UNIQUE(sender_id,
+// recipient_id) constraint: one row per pair EVER, so a request already
+// existing in ANY state — pending, ignored, deleted, blocked, even
+// accepted, though an accepted pair is trusted and should never reach here
+// — leaves created false and changes nothing. That is what makes a resend
+// after "ignored" silent (decision 5): there is only ever one row to have
+// created. The trust write itself is unconditional (also INSERT OR IGNORE)
+// regardless of created: a repeat send while the request is still pending
+// (or already ignored/deleted) just re-affirms a trust row that may already
+// be there, and skipping it on a race would leave the loser of two
+// concurrent first messages without it. Under two concurrent first sends
+// only one request INSERT wins, so first_message_id always names the
+// winner's own message — the same one its dm_request frame carries as a
+// preview (Codex P2-6).
+func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("CreateMessageRequest begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	q := d.q.WithTx(tx)
+
+	n, err := q.InsertMessageRequest(ctx, dbgen.InsertMessageRequestParams{
+		SenderID: senderID, RecipientID: recipientID, ChannelID: channelID, FirstMessageID: &firstMessageID,
 	})
 	if err != nil {
-		return false, fmt.Errorf("CreateMessageRequest: %w", err)
+		return false, fmt.Errorf("CreateMessageRequest insert: %w", err)
 	}
+	if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: senderID, SenderID: recipientID, Source: "sent_first"}); err != nil {
+		return false, fmt.Errorf("CreateMessageRequest trust: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("CreateMessageRequest commit: %w", err)
+	}
+	committed = true
 	return n > 0, nil
+}
+
+// SetAcceptMessageRequestGuardHookForTest installs (or, with a nil hook,
+// clears) the acceptGuardHook test seam described on DB.acceptGuardHook
+// (Codex P2-8). Exported for cross-package tests (service), following the
+// existing *ForTest convention (ws.HandleMessageForTest,
+// MessageService.RunBackgroundInlineForTest) rather than an export_test.go,
+// which only reaches tests of this same package.
+func (d *DB) SetAcceptMessageRequestGuardHookForTest(hook func()) {
+	d.acceptGuardHook = hook
 }
 
 // GetMessageRequest reads request id, scoped to recipientID so one user can
@@ -190,6 +245,9 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 	}
 	if row.State != "pending" {
 		return nil, ErrConflict
+	}
+	if hook := d.acceptGuardHook; hook != nil {
+		hook()
 	}
 
 	if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: row.SenderID, Source: "accepted"}); err != nil {

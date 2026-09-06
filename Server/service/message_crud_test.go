@@ -149,6 +149,65 @@ func TestDeleteMessage_DMFanoutSurvivesDeleterDisconnectAfterCommit(t *testing.T
 	}
 }
 
+// erroringDMAudienceStore fails GetDMParticipantIDs unconditionally,
+// modeling any post-commit audience-resolution failure (not just a canceled
+// context) so Edit/DeleteMessage's DM branch takes its error path.
+type erroringDMAudienceStore struct {
+	Store
+}
+
+func (s erroringDMAudienceStore) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+	return nil, errors.New("simulated audience lookup failure")
+}
+
+// TestEditMessage_DMAudienceErrorFailsClosedToEditor is Codex P2-5: an
+// audience-resolution error must not leave ParticipantIDs empty, which
+// dmEventOrFallback (ws/handlers_chat.go) reads as "no explicit audience"
+// and falls back to the plain per-channel-topic broadcast — reaching an
+// untrusted recipient subscribed to the DM's topic (channel_focus is
+// participant-gated, not trust-gated). It must fail closed to the editor.
+func TestEditMessage_DMAudienceErrorFailsClosedToEditor(t *testing.T) {
+	database, permSvc := newDMFixture(t)
+	plainSvc := NewMessageService(database, permSvc, nil)
+	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "original",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	svc := NewMessageService(erroringDMAudienceStore{Store: database}, permSvc, nil)
+	editResult, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "edited content")
+	if err != nil {
+		t.Fatalf("EditMessage: %v", err)
+	}
+	if len(editResult.ParticipantIDs) != 1 || editResult.ParticipantIDs[0] != 1 {
+		t.Errorf("ParticipantIDs = %v, want exactly [1] (the editor, fail-closed)", editResult.ParticipantIDs)
+	}
+}
+
+// TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter is DeleteMessage's
+// half of the same Codex P2-5 fix.
+func TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter(t *testing.T) {
+	database, permSvc := newDMFixture(t)
+	plainSvc := NewMessageService(database, permSvc, nil)
+	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "delete me",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	svc := NewMessageService(erroringDMAudienceStore{Store: database}, permSvc, nil)
+	delResult, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID)
+	if err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if len(delResult.ParticipantIDs) != 1 || delResult.ParticipantIDs[0] != 1 {
+		t.Errorf("ParticipantIDs = %v, want exactly [1] (the deleter, fail-closed)", delResult.ParticipantIDs)
+	}
+}
+
 // erroringGetChannelStore fails GetChannel for exactly one channel id,
 // modeling a transient DB hiccup on that lookup alone.
 type erroringGetChannelStore struct {

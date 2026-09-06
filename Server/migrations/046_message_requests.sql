@@ -35,6 +35,20 @@
 -- (Server/db/erasure.go) AND in db.SubjectInventory (Server/db/inventory.go)
 -- for both columns of both tables -- a table added to one list and not the
 -- other is a silent pass under TestEraseAccount_EveryInventoryClassIsZero.
+--
+-- Deviation from the HP-5 draft (Codex review, P1-4/P2-6): the draft had no
+-- first_message_id column, so both the WS creation frame and the REST inbox
+-- listing derived "the held message" independently -- the frame from the
+-- send's own result, the REST query from MIN(id) over the channel. Under a
+-- concurrent race between two first sends only one INSERT OR IGNORE can win,
+-- and nothing tied the surviving row to that winner's specific message, so
+-- the two previews could name different messages, and a MIN(id) that landed
+-- on an already-deleted original leaked its content into the preview forever
+-- (soft delete never clears content, only sets messages.deleted). Recording
+-- the id at creation, set once by whichever INSERT actually wins, makes both
+-- previews the same message by construction and lets the query refuse to
+-- surface it once deleted (ON DELETE SET NULL plus the query's own deleted
+-- filter -- see ListPendingMessageRequests in db/queries/sqlite).
 CREATE TABLE IF NOT EXISTS trusted_senders (
     recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -44,14 +58,22 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
 );
 
 CREATE TABLE IF NOT EXISTS message_requests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id   INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    state        TEXT    NOT NULL DEFAULT 'pending'
-                 CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-    decided_at   TEXT,
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    -- The message this request was created for -- set once, at creation,
+    -- by whichever concurrent first send actually won the INSERT OR IGNORE
+    -- below. ON DELETE SET NULL rather than CASCADE: the request survives a
+    -- retention/erasure sweep of the message itself (DMs are never in
+    -- retention's scope, but the column stays correct if that ever changes),
+    -- and the query layer treats a NULL or deleted message the same way --
+    -- no preview, not a resurrected one.
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
     UNIQUE (sender_id, recipient_id)
 );
 CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state

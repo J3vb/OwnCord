@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,46 +172,89 @@ func TestMessageRequest_AcceptOpensAndDelivers(t *testing.T) {
 	}
 }
 
-// normalizeSenderFrame strips the volatile fields (ids, timestamps) from a
-// decoded chat_send_ok/chat_message envelope so two sends into different
-// channels, at different times, compare on shape alone.
+// normalizeSenderFrame recursively replaces every volatile field (a key
+// named "id" or ending in "_id", or a timestamp — "timestamp", "seq", or a
+// key ending in "_at") in a decoded envelope with a type-tagged placeholder,
+// leaving every OTHER field exactly as sent (Codex P2-7 — the old version
+// dropped "channel_id" and "message_id" outright, which could hide a real
+// divergence in either). channel_id is included among the volatile keys
+// here (unlike the epoch-1 fixture normaliser, which pins it deliberately
+// for a single fixed database): every capture below sends into a distinct
+// per-recipient DM channel, so the id itself is expected to differ and only
+// its type is worth comparing.
 func normalizeSenderFrame(env map[string]any) map[string]any {
-	out := map[string]any{"type": env["type"]}
-	payload, ok := env["payload"].(map[string]any)
-	if !ok {
-		return out
-	}
-	clean := map[string]any{}
-	for k, v := range payload {
-		switch k {
-		case "id", "message_id", "channel_id", "timestamp":
-			continue
-		default:
-			clean[k] = v
-		}
-	}
-	out["payload"] = clean
+	out, _ := normalizeSenderValue(env).(map[string]any)
 	return out
+}
+
+func normalizeSenderValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			if isVolatileSenderKey(k) {
+				out[k] = "<" + senderValueType(val) + ">"
+				continue
+			}
+			out[k] = normalizeSenderValue(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = normalizeSenderValue(t[i])
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func isVolatileSenderKey(key string) bool {
+	switch {
+	case key == "id", strings.HasSuffix(key, "_id"):
+		return true
+	case key == "timestamp", key == "seq", strings.HasSuffix(key, "_at"):
+		return true
+	default:
+		return false
+	}
+}
+
+func senderValueType(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case float64, json.Number:
+		return "number"
+	case bool:
+		return "bool"
+	default:
+		return "other"
+	}
 }
 
 // TestMessageRequest_SenderViewIsByteIdentical: decision 5's property, read
 // from the wire — alice's own chat_send_ok and chat_message frames do not
 // vary with the recipient's decision (pending, ignored, deleted) or with a
 // trusted control, once volatile ids/timestamps are normalised.
+//
+// Codex P2-7: the measured send for ignored/deleted is a RESEND made AFTER
+// the recipient's decision, not the original creating send — the property
+// under test is "does a send while the request sits ignored/deleted still
+// look normal", and the original implementation compared the one send that
+// happens before any decision exists across all four cases, which cannot
+// distinguish the states at all.
 func TestMessageRequest_SenderViewIsByteIdentical(t *testing.T) {
 	hub, database, _ := newDMRequestTestHub(t)
 	alice := seedOwnerUser(t, database, "mr-identical-alice")
 
-	sendAndCapture := func(recipientName string, preTrust bool, decide func(reqID int64)) []map[string]any {
+	// capture sends the MEASURED message on dmChID and returns alice's own
+	// chat_send_ok + chat_message frames, normalised.
+	capture := func(recipientName string, dmChID int64) []map[string]any {
 		t.Helper()
-		recipient := seedMemberUser(t, database, recipientName)
-		var dmChID int64
-		if preTrust {
-			dmChID = seedDMChannel(t, database, alice.ID, recipient.ID) // trusted control
-		} else {
-			dmChID = untrustedDMChannel(t, database, alice.ID, recipient.ID)
-		}
-
 		sendAlice := make(chan []byte, 64)
 		cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
 		hub.Register(cAlice)
@@ -222,29 +266,48 @@ func TestMessageRequest_SenderViewIsByteIdentical(t *testing.T) {
 		if ok == nil || msg == nil {
 			t.Fatalf("%s: alice did not receive both chat_send_ok and chat_message", recipientName)
 		}
-
-		if decide != nil {
-			reqID, err := database.GetMessageRequestByPair(context.Background(), alice.ID, recipient.ID)
-			if err != nil {
-				t.Fatalf("%s: GetMessageRequestByPair: %v", recipientName, err)
-			}
-			decide(reqID.ID)
-		}
 		return []map[string]any{normalizeSenderFrame(ok), normalizeSenderFrame(msg)}
 	}
 
-	pending := sendAndCapture("mr-identical-bob", false, nil)
-	ignored := sendAndCapture("mr-identical-carol", false, func(id int64) {
-		if _, err := database.TransitionMessageRequest(context.Background(), id, mustRecipientID(t, database, "mr-identical-carol"), "ignored"); err != nil {
-			t.Fatalf("TransitionMessageRequest: %v", err)
+	// pending: the very first send IS the measured one — it is what creates
+	// the pending request in the first place.
+	bob := seedMemberUser(t, database, "mr-identical-bob")
+	pending := capture("mr-identical-bob", untrustedDMChannel(t, database, alice.ID, bob.ID))
+
+	// ignored / deleted: an unmeasured setup send creates the request, the
+	// recipient decides, and only THEN does the measured resend run.
+	decideThenCapture := func(recipientName, newState string) []map[string]any {
+		t.Helper()
+		recipient := seedMemberUser(t, database, recipientName)
+		dmChID := untrustedDMChannel(t, database, alice.ID, recipient.ID)
+
+		setup := make(chan []byte, 64)
+		cSetup := ws.NewTestClientWithUser(hub, alice, dmChID, setup)
+		hub.Register(cSetup)
+		waitRegistered(t, hub, cSetup)
+		hub.HandleMessageForTest(cSetup, dmChatSendMsg(dmChID, "setup"))
+		if dmWaitMsgType(setup, "chat_send_ok", waitTimeout) == nil {
+			t.Fatalf("%s: setup send failed", recipientName)
 		}
-	})
-	deleted := sendAndCapture("mr-identical-dave", false, func(id int64) {
-		if _, err := database.TransitionMessageRequest(context.Background(), id, mustRecipientID(t, database, "mr-identical-dave"), "deleted"); err != nil {
-			t.Fatalf("TransitionMessageRequest: %v", err)
+		dmWaitMsgType(setup, "chat_message", waitTimeout)
+
+		reqRow, err := database.GetMessageRequestByPair(context.Background(), alice.ID, recipient.ID)
+		if err != nil {
+			t.Fatalf("%s: GetMessageRequestByPair: %v", recipientName, err)
 		}
-	})
-	trusted := sendAndCapture("mr-identical-eve", true, nil)
+		if _, err := database.TransitionMessageRequest(context.Background(), reqRow.ID, recipient.ID, newState); err != nil {
+			t.Fatalf("%s: TransitionMessageRequest: %v", recipientName, err)
+		}
+
+		return capture(recipientName, dmChID)
+	}
+	ignored := decideThenCapture("mr-identical-carol", "ignored")
+	deleted := decideThenCapture("mr-identical-dave", "deleted")
+
+	// Trusted control: pre-trusted, so — like the pending case — the first
+	// (only) send is the measured one.
+	eve := seedMemberUser(t, database, "mr-identical-eve")
+	trusted := capture("mr-identical-eve", seedDMChannel(t, database, alice.ID, eve.ID))
 
 	want, err := json.Marshal(pending)
 	if err != nil {
@@ -259,13 +322,4 @@ func TestMessageRequest_SenderViewIsByteIdentical(t *testing.T) {
 			t.Errorf("%s sender frames differ from pending's:\npending: %s\n%s:      %s", name, want, name, gotJSON)
 		}
 	}
-}
-
-func mustRecipientID(t *testing.T, database *db.DB, username string) int64 {
-	t.Helper()
-	u, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || u == nil {
-		t.Fatalf("GetUserByUsername(%q): %v", username, err)
-	}
-	return u.ID
 }

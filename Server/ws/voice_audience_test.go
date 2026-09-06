@@ -33,7 +33,7 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 	outsider := NewTestClient(h, 3, make(chan []byte, 8))
 	h.clients[3] = outsider
 
-	h.broadcastVoiceEvent(context.Background(), 5, buildVoiceLeave(5, 1))
+	h.broadcastVoiceEvent(context.Background(), 5, 1, buildVoiceLeave(5, 1))
 
 	select {
 	case bm := <-h.broadcast:

@@ -270,6 +270,94 @@ func TestDMRequestHandler_Block_BlocksTheSenderAndTransitions(t *testing.T) {
 	}
 }
 
+// TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice is Codex P1-3:
+// blocking through the request endpoint must run the same voice eviction
+// PUT /api/v1/blocks/{id} does — the two endpoints share
+// evictBlockedUserFromVoice (dm_handler.go).
+func TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice(t *testing.T) {
+	database := newDMTestDB(t)
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	router, svc := buildDMRequestRouter(database, bc)
+	senderID, _, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
+
+	sendResult, err := svc.Messages.SendMessage(context.Background(), service.SendMessageParams{
+		ChannelID: channelID, UserID: senderID, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	reqID := sendResult.RequestCreatedFor[0].ID
+	bc.evictCalls = nil
+
+	rr := dmPost(t, router, fmt.Sprintf("/api/v1/dm-requests/%d/block", reqID), recipientTok, map[string]any{})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("block = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != senderID || bc.evictCalls[0].channelID != channelID {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=%d channel=%d",
+			bc.evictCalls, senderID, channelID)
+	}
+}
+
+// raceAfterBlockStore wraps a real *db.DB and, the instant BlockUser
+// commits, flips the request's OWN row to "ignored" directly — simulating
+// another decision winning the race between BlockUser committing and this
+// request's own guarded transition to "blocked". The transition below must
+// then lose (409, state already decided), but BlockUser already committed.
+type raceAfterBlockStore struct {
+	*db.DB
+	requestID int64
+}
+
+func (s *raceAfterBlockStore) BlockUser(ctx context.Context, blockerID, blockedID int64) error {
+	if err := s.DB.BlockUser(ctx, blockerID, blockedID); err != nil {
+		return err
+	}
+	_, err := s.ExecContext(ctx, `UPDATE message_requests SET state = 'ignored', decided_at = datetime('now') WHERE id = ?`, s.requestID)
+	return err
+}
+
+// TestDMRequestHandler_Block_EvictsEvenWhenTransitionLosesRace is Codex
+// P1-3's other half: the eviction must run even when BlockUser committed but
+// the request's own state transition afterward lost a race (409) — the user
+// is blocked either way, and must not keep a live voice session because of
+// it.
+func TestDMRequestHandler_Block_EvictsEvenWhenTransitionLosesRace(t *testing.T) {
+	database := newDMTestDB(t)
+	senderID, _, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
+	svc0 := service.New(database, auth.NewRateLimiter())
+	sendResult, err := svc0.Messages.SendMessage(context.Background(), service.SendMessageParams{
+		ChannelID: channelID, UserID: senderID, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	reqID := sendResult.RequestCreatedFor[0].ID
+
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	store := &raceAfterBlockStore{DB: database, requestID: reqID}
+	svc := service.New(store, auth.NewRateLimiter())
+	r := chi.NewRouter()
+	api.MountDMRequestRoutes(r, svc, bc)
+
+	rr := dmPost(t, r, fmt.Sprintf("/api/v1/dm-requests/%d/block", reqID), recipientTok, map[string]any{})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("block = %d, want 409 (the race already decided the row); body=%s", rr.Code, rr.Body.String())
+	}
+
+	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != senderID || bc.evictCalls[0].channelID != channelID {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=%d channel=%d despite the 409",
+			bc.evictCalls, senderID, channelID)
+	}
+	var blocked int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?`, mustUserID(t, database, "bob"), senderID,
+	).Scan(&blocked); err != nil || blocked != 1 {
+		t.Errorf("user_blocks rows = %d, %v; want 1 (BlockUser committed before the race)", blocked, err)
+	}
+}
+
 // TestMessageRequest_SenderRESTViewIsByteIdentical: decision 5's property,
 // read from the REST surface — GET /api/v1/dms and GET
 // /channels/{id}/messages report the same shape for the sender regardless of
@@ -345,12 +433,28 @@ func TestMessageRequest_SenderRESTViewIsByteIdentical(t *testing.T) {
 		if !bytes.Equal(got.messages, pending.messages) {
 			t.Errorf("%s messages view differs from pending's:\npending: %s\n%s:  %s", name, pending.messages, name, got.messages)
 		}
+		if !bytes.Equal(got.dms, pending.dms) {
+			t.Errorf("%s dm list content/unread fields differ from pending's:\npending: %s\n%s:  %s", name, pending.dms, name, got.dms)
+		}
 	}
 }
 
-// normalizeDMListForCompare extracts just the one DM entry naming
-// wantChannelID and blanks its channel_id/last_message_id so the comparison
-// is over shape, not the arbitrary id each pair got.
+// dmListCompareFields is the sender-neutral slice of a GET /dms entry
+// decision 5 actually makes a claim about (Codex P2-7): last_message
+// (content) and unread/mention counts. Everything else in a db.DMChannelInfo
+// entry — channel_id, recipient, name — is either an arbitrary per-pair id
+// or the OTHER party's identity, which this test deliberately varies (bob,
+// carol, dave, eve) to prove the property holds across different people, not
+// just different states; comparing those fields would fail for that reason
+// alone and prove nothing about decision 5.
+type dmListCompareFields struct {
+	LastMessage  string `json:"last_message"`
+	UnreadCount  int    `json:"unread_count"`
+	MentionCount int    `json:"mention_count"`
+}
+
+// normalizeDMListForCompare extracts the sender-neutral content/unread
+// fields (dmListCompareFields) of the one DM entry naming wantChannelID.
 func normalizeDMListForCompare(t *testing.T, body []byte, wantChannelID int64) []byte {
 	t.Helper()
 	var parsed struct {
@@ -370,16 +474,23 @@ func normalizeDMListForCompare(t *testing.T, body []byte, wantChannelID int64) [
 		}
 	}
 	for _, entry := range list {
-		if id, ok := entry["channel_id"].(float64); ok && int64(id) == wantChannelID {
-			entry["channel_id"] = 0
-			delete(entry, "last_message_id")
-			delete(entry, "last_message_at")
-			out, err := json.Marshal(entry)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			return out
+		id, ok := entry["channel_id"].(float64)
+		if !ok || int64(id) != wantChannelID {
+			continue
 		}
+		raw, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var fields dmListCompareFields
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatalf("decode compare fields: %v; entry=%s", err, raw)
+		}
+		out, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatalf("marshal compare fields: %v", err)
+		}
+		return out
 	}
 	t.Fatalf("no dm_channels entry for channel %d in %s", wantChannelID, body)
 	return nil

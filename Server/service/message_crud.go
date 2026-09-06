@@ -338,7 +338,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 		return false // today's OpenDM path
 	}
 
-	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID)
+	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
 	if fcErr != nil {
 		slog.Error("MessageService.SendMessage: first-contact gate failed",
 			"err", fcErr, "recipient_id", recipientID, "sender_id", p.UserID)
@@ -461,6 +461,14 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: leaving ParticipantIDs nil here made
+			// dmEventOrFallback (ws/handlers_chat.go) treat the empty slice
+			// as "no explicit audience" and fall back to the plain
+			// per-channel-topic broadcast — reaching anyone subscribed to
+			// the DM's topic (channel_focus is participant-gated, not
+			// trust-gated) regardless of the first-contact gate. Fail closed
+			// to the editor only instead.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}
@@ -614,6 +622,12 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: see EditMessage's identical comment — an empty
+			// ParticipantIDs here would make dmEventOrFallback broadcast the
+			// chat_deleted over the plain channel topic instead, reaching an
+			// untrusted recipient subscribed to it. Fail closed to the
+			// deleter only.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}

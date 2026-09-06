@@ -541,7 +541,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 		}
 	}
 	h.updateKeyHolder(vs.ChannelID)
-	h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
+	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
 	if h.livekit == nil {
 		return
 	}

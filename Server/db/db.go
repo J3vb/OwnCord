@@ -51,6 +51,18 @@ type DB struct {
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
+
+	// acceptGuardHook is a test seam (Codex P2-8): called inside
+	// AcceptMessageRequest's transaction right after it confirms the row is
+	// still pending and before it writes anything. The transaction holds the
+	// sole writer connection (writer above) for as long as this hook blocks,
+	// so a test can force a competing TransitionMessageRequest call to be
+	// dispatched while this transaction is provably still open — the single
+	// writer connection then guarantees that call cannot execute until this
+	// one commits, proving the guard resolves a genuine race instead of
+	// relying on goroutine-scheduling luck for the two calls to ever
+	// overlap. Nil in production.
+	acceptGuardHook func()
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed

@@ -223,7 +223,8 @@ var dmRequestActions = map[string]dmRequestActionFn{
 		return svc.MessageRequests.Delete(ctx, r, id)
 	},
 	"block": func(svc *Services, ctx context.Context, r, id int64) (*db.MessageRequest, error) {
-		return svc.MessageRequests.Block(ctx, r, id)
+		req, _, err := svc.MessageRequests.Block(ctx, r, id)
+		return req, err
 	},
 }
 
@@ -288,9 +289,20 @@ func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
 	}
 }
 
-// TestMessageRequest_ConcurrentDecisionsOneWins: two goroutines decide the
-// same pending row at once — exactly one 200, one 409, and the trust
-// bookkeeping reflects whichever one actually won, never both.
+// TestMessageRequest_ConcurrentDecisionsOneWins: Accept and Ignore decide the
+// same pending row at once. Codex P2-8: the original version of this test
+// just launched two goroutines and hoped they overlapped — nothing stopped
+// the scheduler from running them fully sequentially, in which case the
+// assertions held without ever exercising a race at all. The
+// acceptGuardHook test seam (db/export_test.go) forces a genuine one: it
+// blocks AcceptMessageRequest's transaction open, still holding the sole
+// writer connection, after it has confirmed the row pending but before it
+// writes anything, so Ignore's competing call is provably dispatched while
+// Accept's transaction is open. The single writer connection then
+// guarantees Accept commits first no matter when Ignore's goroutine is
+// actually scheduled, so the outcome (Accept wins, Ignore loses) is
+// deterministic rather than a coin flip — assert the exact final state,
+// trust row and OpenDM effect.
 func TestMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
@@ -303,29 +315,97 @@ func TestMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
 	}
 	id := sendResult.RequestCreatedFor[0].ID
 
+	guardReached := make(chan struct{})
+	release := make(chan struct{})
+	database.SetAcceptMessageRequestGuardHookForTest(func() {
+		close(guardReached)
+		<-release
+	})
+	defer database.SetAcceptMessageRequestGuardHookForTest(nil)
+
 	var acceptErr, ignoreErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); _, acceptErr = svc.MessageRequests.Accept(ctx, 2, id) }()
+	<-guardReached // Accept confirmed pending and now holds the sole writer connection, transaction still open
+
 	go func() { defer wg.Done(); _, ignoreErr = svc.MessageRequests.Ignore(ctx, 2, id) }()
+	close(release) // let Accept finish; Ignore's write cannot execute until it does
 	wg.Wait()
 
-	acceptWon, ignoreWon := acceptErr == nil, ignoreErr == nil
-	if acceptWon == ignoreWon {
-		t.Fatalf("expected exactly one winner: acceptErr=%v ignoreErr=%v", acceptErr, ignoreErr)
+	if acceptErr != nil {
+		t.Fatalf("Accept = %v, want nil (forced to win)", acceptErr)
 	}
-	if acceptWon && !errors.Is(ignoreErr, ErrConflict) {
-		t.Errorf("ignore (loser) = %v, want ErrConflict", ignoreErr)
-	}
-	if ignoreWon && !errors.Is(acceptErr, ErrConflict) {
-		t.Errorf("accept (loser) = %v, want ErrConflict", acceptErr)
+	if !errors.Is(ignoreErr, ErrConflict) {
+		t.Fatalf("Ignore (forced loser) = %v, want ErrConflict", ignoreErr)
 	}
 
-	wantAccepted := 0
-	if acceptWon {
-		wantAccepted = 1
+	final, err := svc.MessageRequests.st.GetMessageRequest(ctx, id, 2)
+	if err != nil {
+		t.Fatalf("GetMessageRequest: %v", err)
 	}
-	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE source = 'accepted'`); n != wantAccepted {
-		t.Errorf("accepted-source trusted_senders rows = %d, want %d", n, wantAccepted)
+	if final.State != msgReqAccepted {
+		t.Errorf("state = %q, want %q", final.State, msgReqAccepted)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 2 AND sender_id = 1 AND source = 'accepted'`); n != 1 {
+		t.Errorf("accepted-source trusted_senders rows = %d, want 1", n)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 2 AND channel_id = 50`); n != 1 {
+		t.Errorf("dm_open_state rows for the recipient = %d, want 1 (opened on accept)", n)
+	}
+}
+
+// TestMessageRequest_ConcurrentFirstSendsProduceOneRequest: two concurrent
+// first sends from the same untrusted sender must produce exactly one
+// message_requests row and hand the creation frame (a non-empty
+// RequestCreatedFor) to exactly one of the two callers — Codex P2-8.
+// CreateMessageRequest's INSERT OR IGNORE against UNIQUE(sender_id,
+// recipient_id) is what a real UNIQUE constraint enforces regardless of
+// interleaving, so this holds without any test seam: both sends serialize on
+// db.DB's single writer connection either way.
+func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
+	database, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	results := make([]*SendMessageResult, 2)
+	errs := make([]error, 2)
+	wg.Add(2)
+	for i := range 2 {
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = svc.Messages.SendMessage(ctx, SendMessageParams{
+				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+			})
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+	}
+
+	created := 0
+	for i, r := range results {
+		if len(r.RequestCreatedFor) > 1 {
+			t.Errorf("send %d: RequestCreatedFor = %v, want at most one", i, r.RequestCreatedFor)
+		}
+		if len(r.RequestCreatedFor) > 0 {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Errorf("sends carrying a creation frame = %d, want exactly 1", created)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM message_requests`); n != 1 {
+		t.Errorf("message_requests rows = %d, want 1", n)
+	}
+	// trusted_senders(recipient=sender, sender=recipient, "sent_first"): the
+	// original sender (alice, 1) initiated, so trusts the recipient's (bob,
+	// 2) eventual reply — see db.CreateMessageRequest's own comment.
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 1 AND sender_id = 2 AND source = 'sent_first'`); n != 1 {
+		t.Errorf("sent_first trusted_senders rows = %d, want 1", n)
 	}
 }

@@ -1605,14 +1605,15 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
 );
 
 CREATE TABLE IF NOT EXISTS message_requests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id   INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    state        TEXT    NOT NULL DEFAULT 'pending'
-                 CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-    decided_at   TEXT,
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
     UNIQUE (sender_id, recipient_id)
 );
 CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state

@@ -84,18 +84,27 @@ func (s *MessageRequestService) Delete(ctx context.Context, userID, id int64) (*
 // Block blocks the request's sender (BlockService.BlockUser, with its
 // existing side effects) and only then transitions the request to blocked —
 // in that order, so a failed block leaves the request's state unchanged.
-func (s *MessageRequestService) Block(ctx context.Context, userID, id int64) (*db.MessageRequest, error) {
-	req, err := s.st.GetMessageRequest(ctx, id, userID)
+//
+// blockedSenderID is req.SenderID whenever BlockUser itself committed,
+// regardless of what happens to the transition afterward — the caller
+// (api/dm_request_handler.go, Codex P1-3) needs it to run the same voice
+// eviction PUT /api/v1/blocks/{id} does even when the transition below
+// loses a race and err is non-nil: the block already committed, and an
+// already-blocked user must not keep a live voice session in the pair's DM
+// just because the request's own state update failed.
+func (s *MessageRequestService) Block(ctx context.Context, userID, id int64) (req *db.MessageRequest, blockedSenderID int64, err error) {
+	current, err := s.st.GetMessageRequest(ctx, id, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: message request not found", ErrNotFound)
+		return nil, 0, fmt.Errorf("%w: message request not found", ErrNotFound)
 	}
-	if req.State != msgReqPending {
-		return nil, fmt.Errorf("%w: message request is not pending", ErrConflict)
+	if current.State != msgReqPending {
+		return nil, 0, fmt.Errorf("%w: message request is not pending", ErrConflict)
 	}
-	if err := s.blocks.BlockUser(ctx, userID, req.SenderID); err != nil {
-		return nil, err
+	if err := s.blocks.BlockUser(ctx, userID, current.SenderID); err != nil {
+		return nil, 0, err
 	}
-	return s.transition(ctx, userID, id, msgReqBlocked)
+	req, err = s.transition(ctx, userID, id, msgReqBlocked)
+	return req, current.SenderID, err
 }
 
 // transition is the shared guarded-UPDATE path for Ignore/Delete/Block's
@@ -130,26 +139,27 @@ func (s *MessageRequestService) raceOrNotFound(ctx context.Context, userID, id i
 
 // firstContact stages first contact from senderID to recipientID in a
 // one-to-one DM: creates a pending message_requests row if none exists yet
-// for the pair in ANY state (db.DB.CreateMessageRequest's INSERT OR IGNORE
-// against the UNIQUE(sender_id, recipient_id) constraint — decision 5's "one
-// row per pair, ever"), and marks senderID as a trusted sender of
-// recipientID (source "sent_first"): senderID initiated, so recipientID's
-// eventual reply is a reply, not a first-contact request back.
+// for the pair in ANY state, and marks senderID as a trusted sender of
+// recipientID (source "sent_first") — senderID initiated, so recipientID's
+// eventual reply is a reply, not a first-contact request back. Both writes
+// run in ONE transaction (db.DB.CreateMessageRequest, Codex P2-6): a
+// request insert that committed with no trust write to follow would leave
+// a pending row nothing could ever repair, since a resend just finds the
+// row already there (decision 5's "one row per pair, ever" silence) and
+// retries nothing.
+//
+// messageID is the send's own message — reused verbatim as
+// first_message_id (Codex P1-4/P2-6), so the row this call creates and the
+// dm_request frame the caller builds from its own result name the same
+// message even under a concurrent race, and the REST inbox's preview can
+// never drift from the live frame's.
 //
 // Returns the newly created row, or nil when a request already existed
 // (resend while pending/ignored/deleted/blocked, or the loser of a race) —
 // nil is not an error, it just means no new dm_request frame is owed.
-func (s *MessageRequestService) firstContact(ctx context.Context, senderID, recipientID, channelID int64) (*db.MessageRequest, error) {
-	created, err := s.st.CreateMessageRequest(ctx, senderID, recipientID, channelID)
+func (s *MessageRequestService) firstContact(ctx context.Context, senderID, recipientID, channelID, messageID int64) (*db.MessageRequest, error) {
+	created, err := s.st.CreateMessageRequest(ctx, senderID, recipientID, channelID, messageID)
 	if err != nil {
-		return nil, err
-	}
-	// Written whether or not this call created the request: TrustSender is
-	// INSERT OR IGNORE, so a repeat send while the request is still pending
-	// (or already ignored/deleted) just re-affirms a row that may already be
-	// there, and skipping it on a race would leave the loser of two
-	// concurrent first messages without it.
-	if err := s.st.TrustSender(ctx, senderID, recipientID, "sent_first"); err != nil {
 		return nil, err
 	}
 	if !created {

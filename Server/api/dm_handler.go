@@ -150,7 +150,12 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// creation path needs this — CreateDM re-opening an existing DM for
 		// the caller only touches the caller's own dm_open_state row, which
 		// the caller obviously already knows about.
-		if result.Created {
+		// RecipientOpened is false when the recipient does not yet trust the
+		// caller (B5-6): their side was closed back down after
+		// GetOrCreateDMChannel's unconditional both-sides open, so no
+		// dm_channel_open goes out — the request frame from the first
+		// message is their only signal until they accept.
+		if result.Created && result.RecipientOpened {
 			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
 
@@ -417,31 +422,39 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 			return
 		}
 
-		// The block has already committed at this point, so the rest of this
-		// handler must survive the caller's request context being cancelled
-		// right after that commit (client disconnect mid-handler) — same
-		// reasoning as handleRenameGroupDM's own bgCtx. Without this, a
-		// canceled request context makes the shared-DM lookup below fail and
-		// get skipped, silently defeating the eviction it gates.
-		bgCtx := context.WithoutCancel(r.Context())
-
-		// Revocation must evict a live session, not merely block the next
-		// join (the same invariant the voice sweep states): without this, a
-		// blocked user already in the pair's 1:1 DM voice call stays in it
-		// indefinitely — the block gate otherwise runs only on voice_join and
-		// voluntary voice_token_refresh, both of which the blocked client
-		// controls. Group DM calls are deliberately untouched, matching
-		// requireDMNotBlocked's group exemption.
-		if ve, evictable := broadcaster.(dmVoiceEvictor); evictable {
-			if chID, exists, err := svc.DMs.SharedOneToOneDM(bgCtx, user.ID, targetID); err != nil {
-				slog.Warn("block: shared-DM lookup for voice eviction failed",
-					"blocker_id", user.ID, "target_id", targetID, "err", err)
-			} else if exists {
-				ve.DisconnectFromVoiceInChannel(bgCtx, targetID, chID)
-			}
-		}
+		evictBlockedUserFromVoice(context.WithoutCancel(r.Context()), svc, broadcaster, user.ID, targetID)
 
 		writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
+	}
+}
+
+// evictBlockedUserFromVoice evicts targetID from the pair's shared 1:1 DM
+// voice call, if any — the post-block step both PUT /api/v1/blocks/{id} and
+// POST /api/v1/dm-requests/{id}/block (B5-6, Codex P1-3) owe once BlockUser
+// itself has committed. Callers pass a context detached from the request
+// (context.WithoutCancel): the block has already committed by the time this
+// runs, so a client disconnecting mid-handler must not silently skip it.
+//
+// Revocation must evict a live session, not merely block the next join (the
+// same invariant the voice sweep states): without this, a blocked user
+// already in the pair's 1:1 DM voice call stays in it indefinitely — the
+// block gate otherwise runs only on voice_join and voluntary
+// voice_token_refresh, both of which the blocked client controls. Group DM
+// calls are deliberately untouched, matching requireDMNotBlocked's group
+// exemption.
+func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, blockerID, targetID int64) {
+	ve, evictable := broadcaster.(dmVoiceEvictor)
+	if !evictable {
+		return
+	}
+	chID, exists, err := svc.DMs.SharedOneToOneDM(ctx, blockerID, targetID)
+	if err != nil {
+		slog.Warn("block: shared-DM lookup for voice eviction failed",
+			"blocker_id", blockerID, "target_id", targetID, "err", err)
+		return
+	}
+	if exists {
+		ve.DisconnectFromVoiceInChannel(ctx, targetID, chID)
 	}
 }
 

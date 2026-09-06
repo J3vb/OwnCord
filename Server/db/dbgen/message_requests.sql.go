@@ -10,7 +10,7 @@ import (
 )
 
 const getMessageRequestByPair = `-- name: GetMessageRequestByPair :one
-SELECT id, sender_id, recipient_id, channel_id, state, created_at, decided_at
+SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
 WHERE sender_id = ? AND recipient_id = ?
 `
@@ -28,6 +28,7 @@ func (q *Queries) GetMessageRequestByPair(ctx context.Context, arg GetMessageReq
 		&i.SenderID,
 		&i.RecipientID,
 		&i.ChannelID,
+		&i.FirstMessageID,
 		&i.State,
 		&i.CreatedAt,
 		&i.DecidedAt,
@@ -36,7 +37,7 @@ func (q *Queries) GetMessageRequestByPair(ctx context.Context, arg GetMessageReq
 }
 
 const getMessageRequestForRecipient = `-- name: GetMessageRequestForRecipient :one
-SELECT id, sender_id, recipient_id, channel_id, state, created_at, decided_at
+SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
 WHERE id = ? AND recipient_id = ?
 `
@@ -54,6 +55,7 @@ func (q *Queries) GetMessageRequestForRecipient(ctx context.Context, arg GetMess
 		&i.SenderID,
 		&i.RecipientID,
 		&i.ChannelID,
+		&i.FirstMessageID,
 		&i.State,
 		&i.CreatedAt,
 		&i.DecidedAt,
@@ -62,17 +64,23 @@ func (q *Queries) GetMessageRequestForRecipient(ctx context.Context, arg GetMess
 }
 
 const insertMessageRequest = `-- name: InsertMessageRequest :execrows
-INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id) VALUES (?, ?, ?)
+INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id) VALUES (?, ?, ?, ?)
 `
 
 type InsertMessageRequestParams struct {
-	SenderID    int64 `json:"senderId"`
-	RecipientID int64 `json:"recipientId"`
-	ChannelID   int64 `json:"channelId"`
+	SenderID       int64  `json:"senderId"`
+	RecipientID    int64  `json:"recipientId"`
+	ChannelID      int64  `json:"channelId"`
+	FirstMessageID *int64 `json:"firstMessageId"`
 }
 
 func (q *Queries) InsertMessageRequest(ctx context.Context, arg InsertMessageRequestParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, insertMessageRequest, arg.SenderID, arg.RecipientID, arg.ChannelID)
+	result, err := q.db.ExecContext(ctx, insertMessageRequest,
+		arg.SenderID,
+		arg.RecipientID,
+		arg.ChannelID,
+		arg.FirstMessageID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -116,9 +124,7 @@ SELECT
     COALESCE(pm.timestamp, '')    AS preview_timestamp
 FROM message_requests mr
 JOIN users u ON u.id = mr.sender_id
-LEFT JOIN messages pm ON pm.id = (
-    SELECT MIN(id) FROM messages WHERE channel_id = mr.channel_id
-)
+LEFT JOIN messages pm ON pm.id = mr.first_message_id AND pm.deleted = 0
 WHERE mr.recipient_id = ? AND mr.state = 'pending'
 ORDER BY mr.id DESC
 `
