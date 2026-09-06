@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 135 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 142 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -139,6 +139,13 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/moderation/queue/`                                          |
+| GET     | `/api/v1/moderation/queue/{id}`                                      |
+| POST    | `/api/v1/moderation/queue/{id}/assign`                               |
+| POST    | `/api/v1/moderation/queue/{id}/close`                                |
+| POST    | `/api/v1/moderation/queue/{id}/notes`                                |
+| POST    | `/api/v1/reports/`                                                   |
+| GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
@@ -203,6 +210,7 @@ endpoints return plain-text errors — see their section):
 | `RATE_LIMITED`                  | 429         | Too many requests; response includes `Retry-After` header (seconds)                                                                                                                                                                              |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
+| `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
 | `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
@@ -1796,6 +1804,164 @@ literal `:shortcode:` text. Broadcasts `emoji_update` on success.
 | 400    | `BAD_REQUEST` | id is not a positive integer |
 | 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
 | 404    | `NOT_FOUND`   | no emoji with that id        |
+
+---
+
+## Reports and the moderation queue
+
+Local report intake, greenfield since B5-8 (BPR-070, BPR-071's server half).
+There is no cross-server or central delivery of any kind — every route below
+is served by this server alone, over its own database (see
+`TestAbsenceContract_NoCentralOrCrossServerReportDelivery`).
+
+### POST /api/v1/reports
+
+File a report against a message, a user or an attachment. **Auth:**
+Required. Rate-limited: 5 per 10 minutes per reporter.
+
+The subject is derived by the server from the target (the message's author,
+the attachment's uploader, or the user named) — it is never read from the
+body, so there is no field for it.
+
+#### Request
+
+```json
+{
+  "target_type": "message",
+  "target_id": "1234",
+  "reason": "harassment",
+  "detail": "optional free text, at most 2000 runes, no control characters"
+}
+```
+
+`target_type` is one of `message`, `user`, `attachment`. `reason` is one of
+`spam`, `harassment`, `nsfw_unlabelled`, `illegal`, `other`.
+
+#### Response 201 Created
+
+```json
+{ "id": 42 }
+```
+
+#### Errors
+
+| Status | Code               | Cause                                                                                        |
+| ------ | ------------------ | -------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`    | invalid `target_type`/`reason`, missing `target_id`, or `detail` too long/unsafe             |
+| 404    | `NOT_FOUND`        | the target does not exist, or the reporter cannot see it (never `403` — no existence oracle) |
+| 409    | `DUPLICATE_REPORT` | the reporter already has an open or assigned report against this exact target                |
+| 429    | `RATE_LIMITED`     | more than 5 reports from this reporter in 10 minutes                                         |
+
+---
+
+### GET /api/v1/reports/mine
+
+The caller's own reports: id, target type, reason, state, outcome,
+`created_at`, `closed_at`. Never the assignee, never the internal notes.
+
+**Auth:** Required.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": 42,
+    "target_type": "message",
+    "reason": "harassment",
+    "state": "assigned",
+    "outcome": "",
+    "created_at": "2026-09-05T10:00:00Z",
+    "closed_at": null
+  }
+]
+```
+
+---
+
+### GET /api/v1/moderation/queue
+
+The moderator queue. **Auth:** Required. **Permission:** `MODERATE_MEMBERS`
+(or `ADMINISTRATOR`), through the canonical predicate (`CanModerate`) — never
+a raw bit check.
+
+**Query:** `state` — `open`, `assigned` or `closed` (every terminal state);
+omitted defaults to open+assigned together. Newest first. A report whose
+subject is the caller is excluded even when it would otherwise match — the
+confidentiality rule applies to the listing, not only to `GET .../{id}`.
+
+#### Response 200 OK
+
+Returns a JSON array of queue rows, each carrying the reporter's and
+subject's usernames but never the report's free-text detail or its notes.
+
+---
+
+### GET /api/v1/moderation/queue/{id}
+
+One report, its evidence snapshot and its internal notes. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+`404 NOT_FOUND` both for a missing id and for the caller's own report —
+indistinguishable, even when the caller holds the bit: the subject of a
+report must never learn one exists.
+
+---
+
+### POST /api/v1/moderation/queue/{id}/assign
+
+Assign the report to the caller. **Auth:** Required. **Permission:**
+`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `force=1` reassigns a report already assigned to someone else,
+and only succeeds when the caller outranks the current assignee (the same
+hierarchy rule ban/kick/timeout use).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Cause                                                                                              |
+| ------ | ----------- | -------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN` | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                   |
+| 404    | `NOT_FOUND` | no such report, or it is the caller's own                                                          |
+| 409    | `CONFLICT`  | already assigned to someone else and `force` was not set, or the report is no longer open/assigned |
+
+---
+
+### POST /api/v1/moderation/queue/{id}/notes
+
+Add an internal note, visible to `MODERATE_MEMBERS` holders only — never to
+the reporter, never to the subject. **Auth:** Required. **Permission:**
+`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+#### Request
+
+```json
+{ "body": "at most 4000 runes, no control characters" }
+```
+
+#### Response 204 No Content
+
+---
+
+### POST /api/v1/moderation/queue/{id}/close
+
+Close the report. **Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`).
+
+#### Request
+
+```json
+{ "outcome": "actioned" }
+```
+
+`outcome` is one of `actioned`, `no_action`, `duplicate`. `open` and
+`assigned` may both close directly (assigning first is not required).
+Nothing leaves a closed state — closing an already-closed report answers
+`409 CONFLICT`, including under a concurrent double-close.
+
+#### Response 204 No Content
 
 ---
 

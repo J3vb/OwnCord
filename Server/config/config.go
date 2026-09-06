@@ -35,6 +35,18 @@ type Config struct {
 	Plugins          PluginsConfig          `koanf:"plugins"`
 	GIF              GIFConfig              `koanf:"gif"`
 	Logging          LoggingConfig          `koanf:"logging"`
+	Moderation       ModerationConfig       `koanf:"moderation"`
+}
+
+// ModerationConfig holds the report queue's retention window (B5-8, plan
+// decision 7/scorecard Question 3 decision 2).
+type ModerationConfig struct {
+	// ReportRetentionDays bounds report CONTENT — evidence, notes and the
+	// free-text detail — deleted this many days after a report closes; the
+	// row itself is kept indefinitely (S5-d: the outcome is durable, the
+	// content is bounded). 0 means never prune content. Open reports
+	// (closed_at IS NULL) are never touched by this window.
+	ReportRetentionDays int `koanf:"report_retention_days"`
 }
 
 // LoggingConfig controls server log verbosity. Level gates both stdout and
@@ -407,6 +419,9 @@ func defaults() Config {
 		Logging: LoggingConfig{
 			Level: "info",
 		},
+		Moderation: ModerationConfig{
+			ReportRetentionDays: 180,
+		},
 	}
 }
 
@@ -525,6 +540,13 @@ voice:
 # OWNCORD_LOGGING_LEVEL environment variable.
 # logging:
 #   level: "info"             # debug | info | warn | error
+
+# Moderation: the report queue's content retention window (B5-8). The row
+# itself is kept indefinitely either way; this bounds only the evidence
+# snapshot, internal notes and free-text detail.
+# moderation:
+#   report_retention_days: 180  # days after a report closes before its content
+#                                # is pruned; 0 = never. Open reports are never touched.
 `
 
 // Load reads configuration from the given YAML file path, merging with
@@ -745,6 +767,7 @@ func boundedKeys(cfg *Config) []boundedKey {
 	return []boundedKey{
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
+		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
 	}
 }
 

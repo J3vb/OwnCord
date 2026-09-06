@@ -38,6 +38,8 @@ type Services struct {
 	// Auth is set by the composition root once the hub exists; the admin
 	// panel's owner-only recovery issuance (B4-6) shares it.
 	Auth *AuthService
+	// Reports is the local report intake and moderator queue (B5-8).
+	Reports *ReportService
 }
 
 // New creates all domain services wired together.
@@ -47,10 +49,12 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	erasure := NewErasureService(st)
 	moderation := NewModerationService(st, permSvc)
 	moderation.erasure = erasure
+	messages := NewMessageService(st, permSvc, limiter)
+	uploads := NewUploadService(st, permSvc)
 	return &Services{
 		Erasure:     erasure,
 		Retention:   NewRetentionService(st),
-		Messages:    NewMessageService(st, permSvc, limiter),
+		Messages:    messages,
 		Channels:    NewChannelService(st, permSvc),
 		Permissions: permSvc,
 		Users:       NewUserService(st),
@@ -61,10 +65,11 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Roles:       NewRoleService(st, permSvc),
 		Emoji:       NewEmojiService(st, permSvc),
 		Settings:    NewSettingsService(st),
-		Uploads:     NewUploadService(st, permSvc),
+		Uploads:     uploads,
 		Voice:       NewVoiceService(st),
 		Tokens:      NewTokenService(st),
 		Sessions:    NewSessionService(st),
 		Setup:       NewSetupService(st),
+		Reports:     NewReportService(st, permSvc, messages, uploads, moderation, limiter),
 	}
 }

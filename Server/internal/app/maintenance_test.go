@@ -47,6 +47,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 		"backup maintenance failed",
 		"failed to delete orphaned attachments",
 		"retention sweep failed",
+		"report content retention failed",
 		"erasure jobs still pending",
 		"storage reconciliation failed",
 		"storage recount failed",

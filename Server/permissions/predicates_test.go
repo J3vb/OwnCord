@@ -132,6 +132,19 @@ func TestCanModerateVoice(t *testing.T) {
 	})
 }
 
+// TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
+// server-wide, and — unlike every channel predicate above — never moved by a
+// channel override, because moderation authority is not a channel property.
+func TestCanModerate(t *testing.T) {
+	runPredicate(t, "CanModerate", CanModerate, []predicateCase{
+		{"holder allowed", Subject{RolePerms: ModerateMembers}, nil},
+		{"no bit refused", Subject{RolePerms: memberBits}, ErrPermissionDenied},
+		{"admin without the bit allowed", Subject{RolePerms: Administrator}, nil},
+		{"channel override cannot grant it", Subject{RolePerms: memberBits, Override: allow(ModerateMembers), Channel: text(false)}, ErrPermissionDenied},
+		{"channel override cannot strip it", Subject{RolePerms: ModerateMembers, Override: deny(ModerateMembers), Channel: text(false)}, nil},
+	})
+}
+
 // TestSubjectHas pins the one generic predicate every other one is built on:
 // Administrator bypasses overrides, everything else is the resolved two-layer
 // mask, and a zero perm is never held (matching HasPerm).

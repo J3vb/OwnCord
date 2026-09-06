@@ -221,6 +221,9 @@ func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTo
 	if err := erasureUnlinkAudit(ctx, tx, userID, subjectToken); err != nil {
 		return nil, err
 	}
+	if err := erasureUnlinkReports(ctx, tx, userID, subjectToken); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
 		return nil, fmt.Errorf("EraseAccount users: %w", err)
 	}
@@ -336,6 +339,92 @@ func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectTo
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE audit_log SET target_id = 0, detail = '', subject_token = ? WHERE target_type = 'user' AND target_id = ?`, token, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink audit target: %w", err)
+	}
+	return nil
+}
+
+// erasureUnlinkReports is B5-8's half of decision 7 (strengthened on
+// review): a report names two principals — the reporter and the subject —
+// each with its own bare-id-plus-token column, the same two-token shape
+// erasureUnlinkAudit applies to audit_log (migrations 038/041), for the same
+// reason: one erased principal must not overwrite the other's token.
+//
+// On the SUBJECT's erasure: every evidence row of every report about them,
+// and every evidence row they authored as context in someone else's report,
+// is hard-deleted — this is the half that keeps B4-9's signed exit condition
+// true, a restored backup cannot resurrect the content. The reports row
+// itself SURVIVES, rewritten to id 0 plus the token, detail and target_ref
+// cleared, and — if still open — closed as subject_erased: an unlinkable
+// outcome row, action/time/order and the token, nothing else (S5-d). An
+// implementation that deletes the row instead of rewriting it passes a test
+// that only checks the content is gone and fails the negative control that
+// checks the row (and its state) survives — this is the abuse path decision
+// 7 was strengthened to close: report someone, they erase, no trace the
+// report ever existed.
+//
+// On the REPORTER's erasure: only reporter_id/reporter_token change. The
+// report and its outcome are not the reporter's content and must not be
+// touched otherwise (TestReport_ReporterErasureKeepsTheReport).
+//
+// Notes and evidence authored by an erased MODERATOR, and assignments to
+// them, are unlinked the same way everywhere else in this file unlinks an
+// actor: id to 0, token filled.
+func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
+	var token any
+	if subjectToken != "" {
+		token = subjectToken
+	}
+	// 22c: evidence authored by the subject anywhere (their own reports' seq
+	// 0, or context rows in someone else's report) is content and is
+	// hard-deleted, not unlinked.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM report_evidence WHERE author_id = ?`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report evidence authored: %w", err)
+	}
+	// 22a: every evidence row of a report ABOUT the subject is content too.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM report_evidence WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report evidence about subject: %w", err)
+	}
+	// HP-5 review widening: the surviving outcome row must carry no content
+	// of any kind, and internal notes about the subject are content the
+	// subject never even saw — they do not get to keep the moderator's own
+	// account of them either.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM report_notes WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report notes about subject: %w", err)
+	}
+	// 22a: the reports row about the subject survives, rewritten.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE reports
+		    SET subject_id = 0,
+		        subject_token = ?,
+		        detail = '',
+		        target_ref = '',
+		        state = CASE WHEN closed_at IS NULL THEN 'subject_erased' ELSE state END,
+		        outcome = CASE WHEN closed_at IS NULL THEN 'subject_erased' ELSE outcome END,
+		        closed_at = COALESCE(closed_at, datetime('now')),
+		        updated_at = datetime('now')
+		  WHERE subject_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report subject: %w", err)
+	}
+	// 22b: the reporter's own reports are not their content, EXCEPT the
+	// free-text detail they personally wrote — that is the reporter's
+	// content just as much as the evidence snapshot is the subject's, so it
+	// is cleared alongside the principal columns (HP-5 review widening).
+	// The report and its outcome (state/outcome/closed_at) are untouched.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE reports SET reporter_id = 0, reporter_token = ?, detail = '' WHERE reporter_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report reporter: %w", err)
+	}
+	// 22d: notes authored by an erased moderator.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE report_notes SET author_id = 0, author_token = ? WHERE author_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report notes: %w", err)
+	}
+	// 22e: assignments to an erased moderator.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE reports SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report assignment: %w", err)
 	}
 	return nil
 }

@@ -22,6 +22,10 @@ type Querier interface {
 	// caller can tell a real no-op (target moved) from a normal apply.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
+	// Guarded by state: zero rows affected means the caller must answer 409.
+	// force=1 (checked by the caller before this runs) is the only way to
+	// reassign an already-assigned report to someone else.
+	AssignReport(ctx context.Context, arg AssignReportParams) (int64, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	// The quota guard and the increment are one statement, so exactly one of
@@ -41,6 +45,9 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
+	// open -> resolved|dismissed is close-without-assigning; assigned ->
+	// resolved|dismissed is the ordinary path. Nothing leaves a closed state.
+	CloseReport(ctx context.Context, arg CloseReportParams) (int64, error)
 	CompleteErasureJob(ctx context.Context, arg CompleteErasureJobParams) error
 	// The consume deletes only the live credential whose verifier the caller
 	// compared against, so the affected row count is what tells two concurrent
@@ -162,6 +169,9 @@ type Querier interface {
 	// boundary (blocks never gate group DMs). ORDER BY makes the row choice
 	// deterministic should duplicates ever exist.
 	FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelIDBetweenParams) (int64, error)
+	// The dedupe lookup: the same reporter, the same target, an open or
+	// assigned report already exists.
+	FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAssignedReportParams) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
 	// so a resolved row is always usable. Matches the sessions never-expiring
@@ -225,6 +235,7 @@ type Querier interface {
 	GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error)
 	GetRecoveryAssist(ctx context.Context, userID int64) (RecoveryAssist, error)
 	GetRecoveryKit(ctx context.Context, userID int64) (RecoveryKit, error)
+	GetReportByID(ctx context.Context, id int64) (Report, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
 	// collation, so this is the lookup that agrees with the constraint.
@@ -254,6 +265,12 @@ type Querier interface {
 	// maintenance tick until it is.
 	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
+	// reports is the B5-8 report intake, queue and evidence snapshot (migration
+	// 048). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
+	// the byte/rune difference of any multi-byte character.
+	InsertReport(ctx context.Context, arg InsertReportParams) (int64, error)
+	InsertReportEvidence(ctx context.Context, arg InsertReportEvidenceParams) error
+	InsertReportNote(ctx context.Context, arg InsertReportNoteParams) error
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
 	InstallPlugin(ctx context.Context, arg InstallPluginParams) (sql.Result, error)
@@ -293,6 +310,16 @@ type Querier interface {
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	ListReportEvidence(ctx context.Context, reportID int64) ([]ReportEvidence, error)
+	ListReportNotes(ctx context.Context, reportID int64) ([]ReportNote, error)
+	// Either concrete queue state, taken alone ("open" or "assigned").
+	ListReportsByState(ctx context.Context, state string) ([]ListReportsByStateRow, error)
+	// state=closed groups every terminal state, including the erasure-forced one.
+	ListReportsClosed(ctx context.Context) ([]ListReportsClosedRow, error)
+	// The reporter's own view: never the assignee, never the notes.
+	ListReportsMine(ctx context.Context, reporterID int64) ([]ListReportsMineRow, error)
+	// The default queue view: open and assigned together.
+	ListReportsOpenOrAssigned(ctx context.Context) ([]ListReportsOpenOrAssignedRow, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes
 	// them, but creating a role inserts just below the actor and may tie with an
 	// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
@@ -338,6 +365,9 @@ type Querier interface {
 	PluginKVGet(ctx context.Context, arg PluginKVGetParams) ([]byte, error)
 	PluginKVSet(ctx context.Context, arg PluginKVSetParams) error
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
+	PruneReportDetailOlderThan(ctx context.Context, closedAt *string) (int64, error)
+	PruneReportEvidenceOlderThan(ctx context.Context, closedAt *string) (int64, error)
+	PruneReportNotesOlderThan(ctx context.Context, closedAt *string) (int64, error)
 	RecordErasureJobAttempt(ctx context.Context, arg RecordErasureJobAttemptParams) error
 	// The truth: every counted byte this user holds in the store has an
 	// attachments row that names it (avatars are attachments). Emoji are a

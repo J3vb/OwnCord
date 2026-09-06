@@ -52,6 +52,15 @@ var SubjectInventory = []InventoryClass{
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},
 	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, inventoryBothIDs},
+	// B5-8 report classes: 22a and 22b count the principal COLUMNS, not the
+	// rows — the rows survive erasure by design (decision 7), so the class
+	// goes to zero when subject_id/reporter_id are rewritten to 0, exactly
+	// like every other bare-id-plus-token class in this file.
+	{"22a reports about the subject", `SELECT COUNT(*) FROM reports WHERE subject_id = ?`, inventoryByUID},
+	{"22b reports by the subject", `SELECT COUNT(*) FROM reports WHERE reporter_id = ?`, inventoryByUID},
+	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
+	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
+	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.

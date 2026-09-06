@@ -114,7 +114,7 @@
                 "id": "<id:number>",
                 "is_default": false,
                 "name": "Moderator",
-                "permissions": 3145727,
+                "permissions": 7340031,
                 "position": 60
               },
               {
@@ -317,7 +317,7 @@
                 "id": "<id:number>",
                 "is_default": false,
                 "name": "Moderator",
-                "permissions": 3145727,
+                "permissions": 7340031,
                 "position": 60
               },
               {

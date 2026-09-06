@@ -285,6 +285,20 @@ type Store interface {
 	RecountUserStorage(ctx context.Context, userID int64) error
 	TotalAttachmentBytes(ctx context.Context) (int64, error)
 
+	// ── Reports (migration 048, B5-8) ──
+	InsertReport(ctx context.Context, reporterID, subjectID int64, targetType, targetRef string, channelID *int64, reason, detail string) (int64, error)
+	GetReport(ctx context.Context, id int64) (*db.Report, error)
+	FindOpenOrAssignedReport(ctx context.Context, reporterID int64, targetType, targetRef string) (int64, error)
+	ListReportsQueue(ctx context.Context, state string) ([]db.ReportQueueRow, error)
+	ListReportsMine(ctx context.Context, reporterID int64) ([]db.ReportSummary, error)
+	AssignReport(ctx context.Context, id, assigneeID int64) (bool, error)
+	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
+	InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error
+	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
+	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) error
+	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
+	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
+
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)

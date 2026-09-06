@@ -70,6 +70,7 @@ const (
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeServerRestart       = "server_restart"
+	MsgTypeModQueue            = "mod_queue" // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"

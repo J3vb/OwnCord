@@ -78,6 +78,12 @@
     { "wire": "roles_update", "go": "MsgTypeRolesUpdate", "ts": "ROLES_UPDATE" },
     { "wire": "emoji_update", "go": "MsgTypeEmojiUpdate", "ts": "EMOJI_UPDATE" },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
+    {
+      "wire": "mod_queue",
+      "go": "MsgTypeModQueue",
+      "ts": "MOD_QUEUE",
+      "note": "B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only"
+    },
     { "wire": "error", "go": "MsgTypeError", "ts": "ERROR" },
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },

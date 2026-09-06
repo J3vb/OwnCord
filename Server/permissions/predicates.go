@@ -148,6 +148,20 @@ func CanJoinVoice(s Subject) error {
 	return nil
 }
 
+// CanModerate is the report queue and B5-9's moderator-action gate:
+// MODERATE_MEMBERS or Administrator, server-wide. Deliberately independent of
+// s.Has/EffectiveChannelPerms — moderation authority is not a channel
+// property, and a channel override must never be able to grant or strip it.
+// This is the canonical predicate path B5-8/B5-9 route through
+// (Server/invariants/authz_chokepoint.go forbids a raw permissions.HasServerPerm
+// call anywhere else for this decision).
+func CanModerate(s Subject) error {
+	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ModerateMembers) {
+		return nil
+	}
+	return missing(ModerateMembers)
+}
+
 // CanModerateVoice is the actor's authority in the TARGET's channel:
 // effective MUTE_MEMBERS there (so a per-channel deny holds — SEC-02), and
 // READ_MESSAGES so a moderator can only act in a room they can see; a DM call

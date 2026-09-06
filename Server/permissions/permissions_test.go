@@ -543,3 +543,37 @@ func TestMentionEveryone_BitIsFreeAndNamed(t *testing.T) {
 		t.Errorf("Name(MentionEveryone) = %q", got)
 	}
 }
+
+// TestModerateMembersIsOutsideTheAdminPerimeter locks B5-8's new bit: 22 was
+// unassigned, it is part of AllPerms so an externally supplied mask keeps
+// it, and — the plan's trap — it stays OUT of AdminPerimeter: a
+// warning-only moderator must not inherit the perimeter's read surface
+// (/stats, the /users list, /me). Revert-proof (g): adding it to
+// AdminPerimeter must turn this test red.
+func TestModerateMembersIsOutsideTheAdminPerimeter(t *testing.T) {
+	if permissions.ModerateMembers != 0x400000 {
+		t.Errorf("ModerateMembers = 0x%X, want 0x400000 (bit 22)", permissions.ModerateMembers)
+	}
+	for _, other := range []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
+		permissions.AddReactions, permissions.ConnectVoice, permissions.SpeakVoice,
+		permissions.UseVideo, permissions.ShareScreen, permissions.ManageMessages,
+		permissions.ManageChannels, permissions.KickMembers, permissions.BanMembers,
+		permissions.MuteMembers, permissions.MentionEveryone, permissions.ManageRoles,
+		permissions.ManageServer, permissions.ManageInvites, permissions.ViewAuditLog,
+		permissions.Administrator,
+	} {
+		if other&permissions.ModerateMembers != 0 {
+			t.Errorf("bit 22 collides with 0x%X", other)
+		}
+	}
+	if permissions.AllPerms&permissions.ModerateMembers == 0 {
+		t.Error("AllPerms must include ModerateMembers")
+	}
+	if permissions.AdminPerimeter&permissions.ModerateMembers != 0 {
+		t.Error("ModerateMembers must not admit to the admin perimeter")
+	}
+	if got := permissions.Name(permissions.ModerateMembers); got != "MODERATE_MEMBERS" {
+		t.Errorf("Name(ModerateMembers) = %q", got)
+	}
+}

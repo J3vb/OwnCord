@@ -233,6 +233,45 @@ type RecoveryKit struct {
 	UsedAt    *string `json:"usedAt"`
 }
 
+type Report struct {
+	ID            int64   `json:"id"`
+	ReporterID    int64   `json:"reporterId"`
+	ReporterToken *string `json:"reporterToken"`
+	SubjectID     int64   `json:"subjectId"`
+	SubjectToken  *string `json:"subjectToken"`
+	TargetType    string  `json:"targetType"`
+	TargetRef     string  `json:"targetRef"`
+	ChannelID     *int64  `json:"channelId"`
+	Reason        string  `json:"reason"`
+	Detail        string  `json:"detail"`
+	State         string  `json:"state"`
+	AssigneeID    int64   `json:"assigneeId"`
+	Outcome       string  `json:"outcome"`
+	CreatedAt     string  `json:"createdAt"`
+	UpdatedAt     string  `json:"updatedAt"`
+	ClosedAt      *string `json:"closedAt"`
+}
+
+type ReportEvidence struct {
+	ReportID    int64   `json:"reportId"`
+	Seq         int64   `json:"seq"`
+	MessageID   *int64  `json:"messageId"`
+	AuthorID    int64   `json:"authorId"`
+	AuthorToken *string `json:"authorToken"`
+	Content     string  `json:"content"`
+	Attachments string  `json:"attachments"`
+	CapturedAt  string  `json:"capturedAt"`
+}
+
+type ReportNote struct {
+	ID          int64   `json:"id"`
+	ReportID    int64   `json:"reportId"`
+	AuthorID    int64   `json:"authorId"`
+	AuthorToken *string `json:"authorToken"`
+	Body        string  `json:"body"`
+	CreatedAt   string  `json:"createdAt"`
+}
+
 type RetentionRun struct {
 	ID              int64   `json:"id"`
 	StartedAt       string  `json:"startedAt"`

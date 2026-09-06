@@ -192,6 +192,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountEmojiRoutes(r, database, svc, store, limiter, hub)
 	}
 
+	// Report intake, the reporter's own status view, and the moderation
+	// queue (B5-8) — mounted after hub creation so a filed report, an
+	// assignment or a close can notify connected MODERATE_MEMBERS/
+	// Administrator holders via mod_queue.
+	MountReportRoutes(r, svc, hub)
+	MountModerationQueueRoutes(r, svc, hub)
+
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
 	r.With(AuthMiddleware(svc.Sessions),

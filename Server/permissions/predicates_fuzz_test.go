@@ -18,7 +18,7 @@ import (
 //
 // The committed corpus is seeded from protocol/fixtures/epoch-1: the four
 // role permission values the ready payload carries (Owner 2147483647,
-// Admin 1073741823, Moderator 3145727, Member 7779) against the channel
+// Admin 1073741823, Moderator 7340031, Member 7779) against the channel
 // types those journeys use.
 
 // rawEffective is EffectivePerms/EffectiveChannelPerms written out as the
@@ -103,7 +103,7 @@ func FuzzPredicateParity(f *testing.F) {
 	const (
 		owner  = int64(2147483647)
 		admin  = int64(1073741823)
-		mod    = int64(3145727)
+		mod    = int64(7340031)
 		member = int64(7779)
 	)
 	types := []string{"text", "voice", "dm", "announcement", "", "TEXT"}
