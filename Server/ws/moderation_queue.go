@@ -6,25 +6,28 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// modQueuePayload is the mod_queue frame's payload: the report id and its
-// new state — never the reporter's identity, never the reported content,
-// never the subject (S5, report confidentiality).
+// modQueuePayload is the mod_queue frame's payload: the report's PUBLIC id
+// and its new state — never the reporter's identity, never the reported
+// content, never the subject (S5, report confidentiality), and never the
+// internal sequential id (P2-9 — that would let a bit holder infer a
+// neighbouring report's existence from a gap in the ids they see).
 type modQueuePayload struct {
-	ReportID int64  `json:"report_id"`
+	PublicID string `json:"report_id"`
 	State    string `json:"state"`
 }
 
-func buildModQueue(reportID int64, state string) []byte {
-	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{ReportID: reportID, State: state}})
+func buildModQueue(publicID, state string) []byte {
+	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{PublicID: publicID, State: state}})
 }
 
 // moderationAudience returns the connected user IDs whose current Subject
-// satisfies permissions.CanModerate — the server-wide mirror of
-// channelReadAudienceImpl (hub_visibility.go), which resolves a per-channel
-// predicate the same way. CanModerate is not channel-scoped, so this asks
-// each connected user's role-only Subject (channelID 0: no channel exists to
-// resolve an override against, and CanModerate does not consult one).
-func (h *Hub) moderationAudience(ctx context.Context) []int64 {
+// satisfies permissions.CanModerate, excluding any id in exclude — the
+// server-wide mirror of channelReadAudienceImpl (hub_visibility.go), which
+// resolves a per-channel predicate the same way. CanModerate is not
+// channel-scoped, so this asks each connected user's role-only Subject
+// (channelID 0: no channel exists to resolve an override against, and
+// CanModerate does not consult one).
+func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 {
 	h.mu.RLock()
 	userIDs := make([]int64, 0, len(h.clients))
 	for uid := range h.clients {
@@ -34,6 +37,16 @@ func (h *Hub) moderationAudience(ctx context.Context) []int64 {
 
 	audience := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {
+		excluded := false
+		for _, ex := range exclude {
+			if ex != 0 && uid == ex {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
 		sub, err := h.subjectFor(ctx, uid, 0)
 		if err != nil {
 			continue
@@ -46,15 +59,28 @@ func (h *Hub) moderationAudience(ctx context.Context) []int64 {
 }
 
 // BroadcastModQueue notifies every connected moderation-bit holder that
-// report reportID changed, on create, assign and close. Never reaches the
-// subject or the reporter unless they also hold the bit, and even then the
-// frame carries only the id and state. Unsequenced and not replayed
-// (SendToUserLow): a moderator who was offline gets the current queue from
-// GET /api/v1/moderation/queue, not from reconnect replay, so a dropped
-// frame under backpressure costs nothing durable.
+// report reportID (the INTERNAL id, resolved to a public id below before it
+// ever reaches the wire) changed, on create, assign and close.
+//
+// P1-1 (Codex review): a bit-holding SUBJECT or REPORTER must never receive
+// this frame even though they satisfy CanModerate — the whole point of
+// filing confidentially is that the subject (and the reporter's identity)
+// stays unknown to them. The prior version excluded neither, which leaked a
+// bit holder's own report to them the moment they were also its subject or
+// reporter. Both principals are looked up here (not threaded through every
+// caller) so File/Assign/Close's signatures stay untouched. Fails closed:
+// if the report cannot be read, nothing is sent to anyone, rather than
+// guessing who is safe to exclude.
 func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state string) {
-	msg := buildModQueue(reportID, state)
-	for _, uid := range h.moderationAudience(ctx) {
+	if h.db == nil {
+		return
+	}
+	report, err := h.db.GetReport(ctx, reportID)
+	if err != nil || report == nil {
+		return
+	}
+	msg := buildModQueue(report.PublicID, state)
+	for _, uid := range h.moderationAudience(ctx, report.ReporterID, report.SubjectID) {
 		h.SendToUserLow(uid, msg)
 	}
 }

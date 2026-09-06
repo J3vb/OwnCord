@@ -11,20 +11,27 @@ import (
 
 const assignReport = `-- name: AssignReport :execrows
 UPDATE reports
-   SET assignee_id = ?, state = 'assigned', updated_at = datetime('now')
- WHERE id = ? AND state IN ('open', 'assigned')
+   SET assignee_id = ?1, state = 'assigned', updated_at = datetime('now')
+ WHERE reports.id = ?2
+   AND reports.state IN ('open', 'assigned')
+   AND reports.assignee_id = ?3
+   AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?1)
 `
 
 type AssignReportParams struct {
-	AssigneeID int64 `json:"assigneeId"`
-	ID         int64 `json:"id"`
+	AssigneeID         int64 `json:"assigneeId"`
+	ID                 int64 `json:"id"`
+	ObservedAssigneeID int64 `json:"observedAssigneeId"`
 }
 
-// Guarded by state: zero rows affected means the caller must answer 409.
-// force=1 (checked by the caller before this runs) is the only way to
-// reassign an already-assigned report to someone else.
+// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
+// assignee (optimistic concurrency -- a concurrent reassignment moves this
+// out from under a racing caller, so its stale outrank verdict can never be
+// applied), and EXISTS(users) (a moderator erased between requirePerm and
+// this write cannot land as the new assignee). Zero rows affected covers
+// all three causes; the caller answers 409 for each.
 func (q *Queries) AssignReport(ctx context.Context, arg AssignReportParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, assignReport, arg.AssigneeID, arg.ID)
+	result, err := q.db.ExecContext(ctx, assignReport, arg.AssigneeID, arg.ID, arg.ObservedAssigneeID)
 	if err != nil {
 		return 0, err
 	}
@@ -66,8 +73,11 @@ type FindOpenOrAssignedReportParams struct {
 	TargetRef  string `json:"targetRef"`
 }
 
-// The dedupe lookup: the same reporter, the same target, an open or
-// assigned report already exists.
+// The dedupe FAST PATH: the same reporter, the same target, an open or
+// assigned report already exists. This is a pre-check only -- it saves the
+// caller building an evidence snapshot for a report that will be refused --
+// idx_reports_active_unique (migration 048) is what actually enforces the
+// rule under concurrency; this query has no such guarantee alone.
 func (q *Queries) FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAssignedReportParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, findOpenOrAssignedReport, arg.ReporterID, arg.TargetType, arg.TargetRef)
 	var id int64
@@ -76,7 +86,7 @@ func (q *Queries) FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAs
 }
 
 const getReportByID = `-- name: GetReportByID :one
-SELECT id, reporter_id, reporter_token, subject_id, subject_token, target_type,
+SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
        target_ref, channel_id, reason, detail, state, assignee_id, outcome,
        created_at, updated_at, closed_at
   FROM reports WHERE id = ?
@@ -87,6 +97,41 @@ func (q *Queries) GetReportByID(ctx context.Context, id int64) (Report, error) {
 	var i Report
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.ReporterID,
+		&i.ReporterToken,
+		&i.SubjectID,
+		&i.SubjectToken,
+		&i.TargetType,
+		&i.TargetRef,
+		&i.ChannelID,
+		&i.Reason,
+		&i.Detail,
+		&i.State,
+		&i.AssigneeID,
+		&i.Outcome,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ClosedAt,
+	)
+	return i, err
+}
+
+const getReportByPublicID = `-- name: GetReportByPublicID :one
+SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
+       target_ref, channel_id, reason, detail, state, assignee_id, outcome,
+       created_at, updated_at, closed_at
+  FROM reports WHERE public_id = ?
+`
+
+// The only lookup a route parameter or a mod_queue frame's id ever drives:
+// public_id is the sole externally-visible identifier (Codex review).
+func (q *Queries) GetReportByPublicID(ctx context.Context, publicID string) (Report, error) {
+	row := q.db.QueryRowContext(ctx, getReportByPublicID, publicID)
+	var i Report
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
 		&i.ReporterID,
 		&i.ReporterToken,
 		&i.SubjectID,
@@ -108,12 +153,13 @@ func (q *Queries) GetReportByID(ctx context.Context, id int64) (Report, error) {
 
 const insertReport = `-- name: InsertReport :one
 
-INSERT INTO reports (reporter_id, subject_id, target_type, target_ref, channel_id, reason, detail)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO reports (public_id, reporter_id, subject_id, target_type, target_ref, channel_id, reason, detail)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type InsertReportParams struct {
+	PublicID   string `json:"publicId"`
 	ReporterID int64  `json:"reporterId"`
 	SubjectID  int64  `json:"subjectId"`
 	TargetType string `json:"targetType"`
@@ -126,8 +172,14 @@ type InsertReportParams struct {
 // reports is the B5-8 report intake, queue and evidence snapshot (migration
 // 048). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
 // the byte/rune difference of any multi-byte character.
+// public_id is generated in Go (crypto/rand) before this runs; the UNIQUE
+// constraint on it is not expected to ever fire. idx_reports_active_unique
+// (migration 048) is the constraint expected to fire here on a race: two
+// simultaneous filings of the same (reporter, target) both reach this
+// INSERT, and the loser's violates that partial unique index.
 func (q *Queries) InsertReport(ctx context.Context, arg InsertReportParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, insertReport,
+		arg.PublicID,
 		arg.ReporterID,
 		arg.SubjectID,
 		arg.TargetType,
@@ -167,9 +219,10 @@ func (q *Queries) InsertReportEvidence(ctx context.Context, arg InsertReportEvid
 	return err
 }
 
-const insertReportNote = `-- name: InsertReportNote :exec
+const insertReportNote = `-- name: InsertReportNote :execrows
 INSERT INTO report_notes (report_id, author_id, body)
-VALUES (?, ?, ?)
+SELECT ?1, ?2, ?3
+ WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = ?2)
 `
 
 type InsertReportNoteParams struct {
@@ -178,9 +231,15 @@ type InsertReportNoteParams struct {
 	Body     string `json:"body"`
 }
 
-func (q *Queries) InsertReportNote(ctx context.Context, arg InsertReportNoteParams) error {
-	_, err := q.db.ExecContext(ctx, insertReportNote, arg.ReportID, arg.AuthorID, arg.Body)
-	return err
+// INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
+// between requirePerm and this write must not land as a note's author.
+// Zero rows affected means the caller answers 409.
+func (q *Queries) InsertReportNote(ctx context.Context, arg InsertReportNoteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertReportNote, arg.ReportID, arg.AuthorID, arg.Body)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const listReportEvidence = `-- name: ListReportEvidence :many
@@ -260,7 +319,7 @@ func (q *Queries) ListReportNotes(ctx context.Context, reportID int64) ([]Report
 }
 
 const listReportsByState = `-- name: ListReportsByState :many
-SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
+SELECT r.id, r.public_id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
        r.channel_id, r.reason, r.state, r.assignee_id, r.outcome,
        r.created_at, r.updated_at, r.closed_at,
        COALESCE(ru.username, '') AS reporter_name,
@@ -274,6 +333,7 @@ SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
 
 type ListReportsByStateRow struct {
 	ID           int64   `json:"id"`
+	PublicID     string  `json:"publicId"`
 	ReporterID   int64   `json:"reporterId"`
 	SubjectID    int64   `json:"subjectId"`
 	TargetType   string  `json:"targetType"`
@@ -302,6 +362,7 @@ func (q *Queries) ListReportsByState(ctx context.Context, state string) ([]ListR
 		var i ListReportsByStateRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.ReporterID,
 			&i.SubjectID,
 			&i.TargetType,
@@ -331,7 +392,7 @@ func (q *Queries) ListReportsByState(ctx context.Context, state string) ([]ListR
 }
 
 const listReportsClosed = `-- name: ListReportsClosed :many
-SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
+SELECT r.id, r.public_id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
        r.channel_id, r.reason, r.state, r.assignee_id, r.outcome,
        r.created_at, r.updated_at, r.closed_at,
        COALESCE(ru.username, '') AS reporter_name,
@@ -345,6 +406,7 @@ SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
 
 type ListReportsClosedRow struct {
 	ID           int64   `json:"id"`
+	PublicID     string  `json:"publicId"`
 	ReporterID   int64   `json:"reporterId"`
 	SubjectID    int64   `json:"subjectId"`
 	TargetType   string  `json:"targetType"`
@@ -373,6 +435,7 @@ func (q *Queries) ListReportsClosed(ctx context.Context) ([]ListReportsClosedRow
 		var i ListReportsClosedRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.ReporterID,
 			&i.SubjectID,
 			&i.TargetType,
@@ -402,7 +465,7 @@ func (q *Queries) ListReportsClosed(ctx context.Context) ([]ListReportsClosedRow
 }
 
 const listReportsMine = `-- name: ListReportsMine :many
-SELECT id, target_type, reason, state, outcome, created_at, closed_at
+SELECT id, public_id, target_type, reason, state, outcome, created_at, closed_at
   FROM reports
  WHERE reporter_id = ?
  ORDER BY created_at DESC, id DESC
@@ -410,6 +473,7 @@ SELECT id, target_type, reason, state, outcome, created_at, closed_at
 
 type ListReportsMineRow struct {
 	ID         int64   `json:"id"`
+	PublicID   string  `json:"publicId"`
 	TargetType string  `json:"targetType"`
 	Reason     string  `json:"reason"`
 	State      string  `json:"state"`
@@ -430,6 +494,7 @@ func (q *Queries) ListReportsMine(ctx context.Context, reporterID int64) ([]List
 		var i ListReportsMineRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.TargetType,
 			&i.Reason,
 			&i.State,
@@ -451,7 +516,7 @@ func (q *Queries) ListReportsMine(ctx context.Context, reporterID int64) ([]List
 }
 
 const listReportsOpenOrAssigned = `-- name: ListReportsOpenOrAssigned :many
-SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
+SELECT r.id, r.public_id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
        r.channel_id, r.reason, r.state, r.assignee_id, r.outcome,
        r.created_at, r.updated_at, r.closed_at,
        COALESCE(ru.username, '') AS reporter_name,
@@ -465,6 +530,7 @@ SELECT r.id, r.reporter_id, r.subject_id, r.target_type, r.target_ref,
 
 type ListReportsOpenOrAssignedRow struct {
 	ID           int64   `json:"id"`
+	PublicID     string  `json:"publicId"`
 	ReporterID   int64   `json:"reporterId"`
 	SubjectID    int64   `json:"subjectId"`
 	TargetType   string  `json:"targetType"`
@@ -493,6 +559,7 @@ func (q *Queries) ListReportsOpenOrAssigned(ctx context.Context) ([]ListReportsO
 		var i ListReportsOpenOrAssignedRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.ReporterID,
 			&i.SubjectID,
 			&i.TargetType,

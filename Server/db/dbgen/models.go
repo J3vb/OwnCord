@@ -235,6 +235,7 @@ type RecoveryKit struct {
 
 type Report struct {
 	ID            int64   `json:"id"`
+	PublicID      string  `json:"publicId"`
 	ReporterID    int64   `json:"reporterId"`
 	ReporterToken *string `json:"reporterToken"`
 	SubjectID     int64   `json:"subjectId"`

@@ -1,42 +1,44 @@
-package ws
+package ws_test
 
-// Internal (package ws) because moderationAudience is unexported. Builds a
-// real Hub over a migrated database (migration 048 already grants
-// MODERATE_MEMBERS to the seeded Moderator role, id 3) so CanModerate's
-// verdict comes from the same resolution path production traffic uses.
+// Package ws_test (external) because BroadcastModQueue is exported and this
+// package's existing synchronisation helpers (waitRegistered,
+// assertReceived, assertNotReceived — hub_test.go, wait_helpers_test.go)
+// already cover everything this test needs: no reason to reach into
+// moderationAudience directly, or to hand-roll a second poll loop.
+//
+// This uses the real migration set (db.Migrate), not the package's minimal
+// hubTestSchema fixture (openTestDB) — migration 048's reports table and its
+// Moderator-role grant have to exist for a report row and CanModerate to
+// resolve the way production does.
 
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-func waitClientRegistered(t *testing.T, h *Hub, uid int64) {
+func openReportTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.GetClient(uid) != nil {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("client %d never registered", uid)
-}
-
-func TestModerationAudience_OnlyBitHoldersOrAdmin(t *testing.T) {
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
 
+// TestModerationAudience_OnlyBitHoldersOrAdmin pins the base property: only
+// connected MODERATE_MEMBERS/Administrator holders are ever in the
+// audience, and a mod_queue frame reaches exactly them.
+func TestModerationAudience_OnlyBitHoldersOrAdmin(t *testing.T) {
+	database := openReportTestDB(t)
 	ctx := context.Background()
 	ownerID, err := database.CreateUser(ctx, "mq-owner", "hash", 1) // Owner: Administrator
 	if err != nil {
@@ -50,72 +52,96 @@ func TestModerationAudience_OnlyBitHoldersOrAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser(member): %v", err)
 	}
+	// A report naming neither connected user: the audience should be
+	// unfiltered by principal exclusion here, isolating the bit check.
+	reporterID, err := database.CreateUser(ctx, "mq-reporter-offline", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(reporter): %v", err)
+	}
+	subjectID, err := database.CreateUser(ctx, "mq-subject-offline", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(subject): %v", err)
+	}
+	reportID, err := database.FileReport(ctx, "pub-base", reporterID, subjectID, "user", "1", nil, "spam", "", nil)
+	if err != nil {
+		t.Fatalf("FileReport: %v", err)
+	}
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	hub := newTestHub(t, database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	defer hub.Stop()
 
 	ownerSend := make(chan []byte, 4)
 	modSend := make(chan []byte, 4)
 	memberSend := make(chan []byte, 4)
-	hub.Register(NewTestClient(hub, ownerID, ownerSend))
-	hub.Register(NewTestClient(hub, modID, modSend))
-	hub.Register(NewTestClient(hub, memberID, memberSend))
-	waitClientRegistered(t, hub, ownerID)
-	waitClientRegistered(t, hub, modID)
-	waitClientRegistered(t, hub, memberID)
+	ownerClient := ws.NewTestClient(hub, ownerID, ownerSend)
+	modClient := ws.NewTestClient(hub, modID, modSend)
+	memberClient := ws.NewTestClient(hub, memberID, memberSend)
+	hub.Register(ownerClient)
+	hub.Register(modClient)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, ownerClient)
+	waitRegistered(t, hub, modClient)
+	waitRegistered(t, hub, memberClient)
 
-	audience := hub.moderationAudience(ctx)
-	got := map[int64]bool{}
-	for _, uid := range audience {
-		got[uid] = true
-	}
-	if !got[ownerID] {
-		t.Error("owner (Administrator) missing from the moderation audience")
-	}
-	if !got[modID] {
-		t.Error("moderator (MODERATE_MEMBERS) missing from the moderation audience")
-	}
-	if got[memberID] {
-		t.Error("plain member must not be in the moderation audience")
-	}
-	if len(audience) != 2 {
-		t.Errorf("audience = %v, want exactly the owner and the moderator", audience)
-	}
+	hub.BroadcastModQueue(ctx, reportID, "assigned")
 
-	hub.BroadcastModQueue(ctx, 42, "assigned")
-
-	select {
-	case msg := <-ownerSend:
-		if !containsBytes(msg, "mod_queue") || !containsBytes(msg, `"report_id":42`) {
-			t.Errorf("owner frame = %s", msg)
-		}
-	case <-time.After(time.Second):
-		t.Error("owner never received the mod_queue frame")
-	}
-	select {
-	case msg := <-modSend:
-		if !containsBytes(msg, "mod_queue") {
-			t.Errorf("moderator frame = %s", msg)
-		}
-	case <-time.After(time.Second):
-		t.Error("moderator never received the mod_queue frame")
-	}
-	select {
-	case <-memberSend:
-		t.Error("plain member received the mod_queue frame")
-	case <-time.After(100 * time.Millisecond):
-	}
+	assertReceived(t, ownerSend, []byte(`{"type":"mod_queue","payload":{"report_id":"pub-base","state":"assigned"}}`), "owner")
+	assertReceived(t, modSend, []byte(`{"type":"mod_queue","payload":{"report_id":"pub-base","state":"assigned"}}`), "moderator")
+	assertNotReceived(t, memberSend, "plain member")
 }
 
-func containsBytes(b []byte, sub string) bool {
-	s := string(b)
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+// TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit is P1-1's
+// regression test: filing (or acting on) a report about a bit holder, or
+// filed by one, must not tell either of them — even though both would
+// otherwise pass the CanModerate check the audience is built from. A third
+// bit holder, named by neither role, must still receive the frame.
+func TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit(t *testing.T) {
+	database := openReportTestDB(t)
+	ctx := context.Background()
+	// All three are Moderator-role (id 3): CanModerate is satisfied by all,
+	// so only the principal exclusion can be responsible for who is left out.
+	reporterID, err := database.CreateUser(ctx, "mq-reporter-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser(reporter): %v", err)
 	}
-	return false
+	subjectID, err := database.CreateUser(ctx, "mq-subject-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser(subject): %v", err)
+	}
+	thirdModID, err := database.CreateUser(ctx, "mq-third-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser(third): %v", err)
+	}
+	reportID, err := database.FileReport(ctx, "pub-excl", reporterID, subjectID, "user", "1", nil, "spam", "", nil)
+	if err != nil {
+		t.Fatalf("FileReport: %v", err)
+	}
+
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	hub := newTestHubDeps(t, database, limiter, svc)
+	go hub.Run()
+	defer hub.Stop()
+
+	reporterSend := make(chan []byte, 4)
+	subjectSend := make(chan []byte, 4)
+	thirdSend := make(chan []byte, 4)
+	reporterClient := ws.NewTestClient(hub, reporterID, reporterSend)
+	subjectClient := ws.NewTestClient(hub, subjectID, subjectSend)
+	thirdClient := ws.NewTestClient(hub, thirdModID, thirdSend)
+	hub.Register(reporterClient)
+	hub.Register(subjectClient)
+	hub.Register(thirdClient)
+	waitRegistered(t, hub, reporterClient)
+	waitRegistered(t, hub, subjectClient)
+	waitRegistered(t, hub, thirdClient)
+
+	hub.BroadcastModQueue(ctx, reportID, "open")
+
+	assertNotReceived(t, reporterSend, "the reporter (a bit holder)")
+	assertNotReceived(t, subjectSend, "the subject (a bit holder)")
+	assertReceived(t, thirdSend, []byte(`{"type":"mod_queue","payload":{"report_id":"pub-excl","state":"open"}}`), "an uninvolved moderator")
 }

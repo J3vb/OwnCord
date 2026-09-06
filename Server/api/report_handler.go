@@ -13,6 +13,8 @@ import (
 
 // ModQueueBroadcaster is the hub capability the report routes need: notify
 // connected moderation-bit holders of a queue change. Satisfied by *ws.Hub.
+// Takes the INTERNAL report id — the hub resolves the public id itself
+// (db.Report.PublicID) so every caller stays oblivious to the distinction.
 type ModQueueBroadcaster interface {
 	BroadcastModQueue(ctx context.Context, reportID int64, state string)
 }
@@ -25,9 +27,10 @@ type fileReportRequest struct {
 	Detail     string `json:"detail"`
 }
 
-// reportSummaryResponse is one row of GET /api/v1/reports/mine.
+// reportSummaryResponse is one row of GET /api/v1/reports/mine. ID is the
+// PUBLIC id (P2-9) — the sequential internal id never reaches a response.
 type reportSummaryResponse struct {
-	ID         int64   `json:"id"`
+	ID         string  `json:"id"`
 	TargetType string  `json:"target_type"`
 	Reason     string  `json:"reason"`
 	State      string  `json:"state"`
@@ -71,7 +74,12 @@ func handleFileReport(svc *service.Services, hub ModQueueBroadcaster) http.Handl
 		if hub != nil {
 			hub.BroadcastModQueue(context.WithoutCancel(r.Context()), id, "open")
 		}
-		writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
+		publicID, err := svc.Reports.PublicIDFor(r.Context(), id)
+		if err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"id": publicID})
 	}
 }
 
@@ -90,7 +98,7 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 		resp := make([]reportSummaryResponse, 0, len(rows))
 		for _, row := range rows {
 			resp = append(resp, reportSummaryResponse{
-				ID: row.ID, TargetType: row.TargetType, Reason: row.Reason,
+				ID: row.PublicID, TargetType: row.TargetType, Reason: row.Reason,
 				State: row.State, Outcome: row.Outcome, CreatedAt: row.CreatedAt, ClosedAt: row.ClosedAt,
 			})
 		}
@@ -98,14 +106,18 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// writeReportServiceError special-cases the two report-shaped errors this
+// writeReportServiceError special-cases the report-shaped errors this
 // endpoint's wire contract names — validation as INVALID_INPUT (not the
-// generic BAD_REQUEST) and duplicates as DUPLICATE_REPORT (not the generic
-// CONFLICT) — falling through to writeServiceError for everything else.
+// generic BAD_REQUEST), duplicates as DUPLICATE_REPORT (not the generic
+// CONFLICT), and a moderator acting on their own filed report as
+// SELF_REVIEW (not the generic FORBIDDEN, P2-6) — falling through to
+// writeServiceError for everything else.
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrDuplicateReport):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "DUPLICATE_REPORT", Message: err.Error()})
+	case errors.Is(err, service.ErrSelfReview):
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "SELF_REVIEW", Message: err.Error()})
 	case errors.Is(err, service.ErrBadRequest):
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
 	default:

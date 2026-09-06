@@ -973,15 +973,18 @@ reconnect replay.
 {
   "type": "mod_queue",
   "payload": {
-    "report_id": 42,
+    "report_id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
     "state": "assigned"
   }
 }
 ```
 
-The payload carries only the report id and its new state — never the
-reporter's identity, never the reported content, never the subject.
-`state` is one of `open`, `assigned`, `resolved`, `dismissed`.
+The payload carries only the report's opaque public id and its new state —
+never the reporter's identity, never the reported content, never the
+subject, and never the sequential internal id (a bit holder who could
+correlate `report_id` values in order could otherwise infer a report's
+position relative to reports they cannot see). `state` is one of `open`,
+`assigned`, `resolved`, `dismissed`.
 
 ---
 

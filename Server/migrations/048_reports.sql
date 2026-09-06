@@ -1,12 +1,30 @@
 -- B5-8: local report intake and queue (BPR-070, BPR-071's server half,
 -- BG-14's server half a, plan decision 7, strengthened on review). Copied
--- from the HP-5 draft (docs/plans/hp-5-drafts/reports.up.sql) plus ONE
--- statement the draft did not carry: granting the new MODERATE_MEMBERS bit
--- (22, 0x400000 = 4194304) to the default Moderator role, so a fresh queue
--- has someone able to read it without a manual role edit. Granted by id AND
--- name (Moderator is role id 3 per migration 001_initial_schema.sql) so the
--- grant still lands if either one alone has drifted (a rename, or a reseed
--- under a different id) -- OR rather than AND, so either match is enough.
+-- from the HP-5 draft (docs/plans/hp-5-drafts/reports.up.sql) plus statements
+-- the draft did not carry, and deviations a Codex review of the shipped
+-- draft required (recorded here so the drafts README can carry them
+-- forward): granting the new MODERATE_MEMBERS bit (22, 0x400000 = 4194304)
+-- to the default Moderator role, a `public_id` so the queue never leaks the
+-- sequential id (see (10) below), and the partial unique index at (11) that
+-- makes the dedupe check race-proof instead of merely a pre-check.
+--
+-- The grant is scoped to the UNTOUCHED default Moderator row only:
+-- id = 3 AND name = 'Moderator' AND permissions = 3145727 (0x2FFFFF). That
+-- is NOT 001_initial_schema.sql's seed value (0x000FFFFF / 1048575) --
+-- migration 022_message_mentions.sql unconditionally ORs bit 21
+-- (MENTION_EVERYONE, 0x200000) into roles 1/2/3, so 0x2FFFFF is what an
+-- untouched Moderator role actually holds by the time this migration runs.
+-- Tracing the value THROUGH every migration up to this one, not just
+-- reading the 001 seed, is what this condition depends on -- a further
+-- migration that touches role 3 owes this comment and condition an update.
+-- A prior draft of this migration granted on
+-- `id = 3 OR name = 'Moderator'`, which would hand confidential-report
+-- access to whatever role an operator had repurposed id 3 for, or renamed
+-- into 'Moderator'. Grant-by-exact-match means an install whose Moderator
+-- role was ever customised (renamed, or its permissions edited) does NOT
+-- get MODERATE_MEMBERS automatically -- the operator grants "Moderate
+-- Members" by hand in the admin panel's role grid
+-- (docs/server-configuration.md documents this).
 --
 -- (1) A report names two principals -- the reporter and the subject -- so
 -- it carries two token columns, the same shape audit_log grew across
@@ -85,8 +103,28 @@
 -- account erasure and NOT durable against a restore of an older backup --
 -- stated here, not defended: a restore taken before a report closed simply
 -- does not have the row.
+--
+-- (10) public_id (Codex review, not in the HP-5 draft): the sequential
+-- integer id is never exposed outside the server -- every API response,
+-- every route parameter and the mod_queue frame carry public_id instead.
+-- Sequential ids leak order: a bit holder who files reports 1 and 3 and
+-- never sees 2 in any queue view they can read infers report 2 is about
+-- them. public_id is 16 random bytes from crypto/rand, hex-encoded (32
+-- chars), generated in Go at file time -- opaque and unguessable, so seeing
+-- one report's id reveals nothing about neighbouring reports.
+--
+-- (11) idx_reports_active_unique (Codex review, not in the HP-5 draft): the
+-- HP-5 draft's dedupe check was a SELECT before the INSERT -- correct
+-- sequentially, racy concurrently (two simultaneous filings of the same
+-- target both pass the SELECT before either INSERT lands). The partial
+-- unique index below makes SQLite itself the second, race-proof gate: the
+-- loser's INSERT fails UNIQUE constraint, which the Go layer maps to
+-- DUPLICATE_REPORT. `reporter_id <> 0` excludes an erased reporter's rows
+-- from the constraint, since decision 7 leaves many closed/erased reports
+-- sharing reporter_id = 0 and they must not collide with each other.
 CREATE TABLE IF NOT EXISTS reports (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_id      TEXT    NOT NULL UNIQUE,
     reporter_id    INTEGER NOT NULL DEFAULT 0,
     reporter_token TEXT,
     subject_id     INTEGER NOT NULL DEFAULT 0,
@@ -109,6 +147,10 @@ CREATE INDEX IF NOT EXISTS idx_reports_queue    ON reports(state, created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_subject  ON reports(subject_id);
 CREATE INDEX IF NOT EXISTS idx_reports_reporter ON reports(reporter_id);
 CREATE INDEX IF NOT EXISTS idx_reports_dedupe   ON reports(reporter_id, target_type, target_ref);
+-- See (11) above: the race-proof half of the dedupe check.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_active_unique
+    ON reports(reporter_id, target_type, target_ref)
+ WHERE state IN ('open', 'assigned') AND reporter_id <> 0;
 
 CREATE TABLE IF NOT EXISTS report_evidence (
     report_id    INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -133,5 +175,8 @@ CREATE TABLE IF NOT EXISTS report_notes (
 
 -- The one statement the HP-5 draft did not carry (plan B5-8, item 1): grant
 -- the queue's permission bit to the default Moderator role so the queue has
--- a reader out of the box. 4194304 = 0x400000 = bit 22.
-UPDATE roles SET permissions = permissions | 4194304 WHERE id = 3 OR name = 'Moderator';
+-- a reader out of the box. 4194304 = 0x400000 = bit 22. Scoped to the
+-- untouched default row only -- see the header comment for why 3145727,
+-- not the 001 seed value, is the right comparison.
+UPDATE roles SET permissions = permissions | 4194304
+ WHERE id = 3 AND name = 'Moderator' AND permissions = 3145727;

@@ -78,10 +78,18 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// evidence and a note authored by the subject (22c/22d), and an
 	// assignment to the subject (22e) — plus a report between two OTHER
 	// users that must survive untouched.
-	exec(`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (900, ?, ?, 'user', 'ref-about-subject', 'harassment', 'd')`, other, uid)
-	exec(`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (901, ?, ?, 'message', 'ref-by-subject', 'spam', 'd', ?)`, uid, other, uid)
+	exec(`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (900, 'pub-900', ?, ?, 'user', 'ref-about-subject', 'harassment', 'd')`, other, uid)
+	exec(`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (901, 'pub-901', ?, ?, 'message', 'ref-by-subject', 'spam', 'd', ?)`, uid, other, uid)
 	exec(`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (901, 0, ?, 'evidence text by subject')`, uid)
 	exec(`INSERT INTO report_notes (report_id, author_id, body) VALUES (901, ?, 'note by subject')`, uid)
+	// P2-10 (Codex review): a report ABOUT the subject with evidence
+	// authored by someone ELSE -- the case seedEraseSubject was missing.
+	// Without this row, the "DELETE FROM report_evidence WHERE report_id IN
+	// (SELECT id FROM reports WHERE subject_id = ?)" branch could be deleted
+	// entirely and every existing assertion would still pass, because
+	// report 901's evidence (author_id = uid) is already caught by the
+	// sibling "OR author_id = ?" branch.
+	exec(`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (900, 0, ?, 'context by another author about the subject')`, other)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 
@@ -94,9 +102,16 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	// erasure.
 	witness := seedUser(t, database, "witness-user")
 	if _, err := database.ExecContext(ctx,
-		`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (902, ?, ?, 'user', 'ref-unrelated', 'other', 'untouched detail')`,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (902, 'pub-902', ?, ?, 'user', 'ref-unrelated', 'other', 'untouched detail')`,
 		witness, sub.other); err != nil {
 		t.Fatalf("seed unrelated report: %v", err)
+	}
+	// P2-10 positive control: this report's evidence belongs to neither the
+	// subject nor a report about them, and must survive untouched.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (902, 0, ?, 'unrelated context')`,
+		witness); err != nil {
+		t.Fatalf("seed unrelated evidence: %v", err)
 	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
@@ -205,6 +220,13 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM report_evidence WHERE report_id IN (900, 901)`); n != 0 {
 		t.Errorf("report evidence after erasure = %d, want 0 (content hard-deleted)", n)
 	}
+	// P2-10: the positive control. Evidence on an unrelated report (902,
+	// authored by a third party, about neither the subject nor a report of
+	// theirs) must survive untouched — proving the DELETE above is scoped
+	// to "about the subject", not every report_evidence row.
+	if n := count(`SELECT COUNT(*) FROM report_evidence WHERE report_id = 902`); n != 1 {
+		t.Errorf("unrelated report 902's evidence after erasure = %d, want 1 (untouched)", n)
+	}
 
 	// The report BY the subject (901) is not the subject's content: only the
 	// reporter columns change, the report and its outcome stay as they are.
@@ -254,7 +276,7 @@ func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
 	subject := seedUser(t, database, "subject-only")
 	moderator := seedUser(t, database, "mod-for-950")
 	if _, err := database.ExecContext(ctx,
-		`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (950, ?, ?, 'user', 'ref', 'spam', 'the detail')`,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (950, 'pub-950', ?, ?, 'user', 'ref', 'spam', 'the detail')`,
 		reporter, subject); err != nil {
 		t.Fatalf("seed report: %v", err)
 	}
@@ -303,7 +325,7 @@ func TestReport_ReporterErasureKeepsTheReport(t *testing.T) {
 	reporter := seedUser(t, database, "reporter-erases")
 	subject := seedUser(t, database, "subject-stays")
 	if _, err := database.ExecContext(ctx,
-		`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail, state, outcome, closed_at) VALUES (960, ?, ?, 'user', 'ref', 'spam', 'kept detail', 'resolved', 'actioned', datetime('now'))`,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, state, outcome, closed_at) VALUES (960, 'pub-960', ?, ?, 'user', 'ref', 'spam', 'kept detail', 'resolved', 'actioned', datetime('now'))`,
 		reporter, subject); err != nil {
 		t.Fatalf("seed report: %v", err)
 	}
@@ -343,7 +365,7 @@ func TestReport_ModeratorErasureUnlinksNotesAndAssignment(t *testing.T) {
 	subject := seedUser(t, database, "subject-mod-case")
 	moderator := seedUser(t, database, "moderator-erases")
 	if _, err := database.ExecContext(ctx,
-		`INSERT INTO reports (id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (970, ?, ?, 'user', 'ref', 'spam', 'd', ?)`,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (970, 'pub-970', ?, ?, 'user', 'ref', 'spam', 'd', ?)`,
 		reporter, subject, moderator); err != nil {
 		t.Fatalf("seed report: %v", err)
 	}

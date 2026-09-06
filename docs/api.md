@@ -1814,6 +1814,12 @@ There is no cross-server or central delivery of any kind — every route below
 is served by this server alone, over its own database (see
 `TestAbsenceContract_NoCentralOrCrossServerReportDelivery`).
 
+`MODERATE_MEMBERS` is granted automatically only to an untouched, default
+Moderator role. If that role was ever renamed or had its permissions edited
+before upgrading to a server version carrying this bit, the queue has no
+reader by default — grant "Moderate Members" to the role that should have it
+by hand, in the admin panel's role grid.
+
 ### POST /api/v1/reports
 
 File a report against a message, a user or an attachment. **Auth:**
@@ -1840,8 +1846,14 @@ body, so there is no field for it.
 #### Response 201 Created
 
 ```json
-{ "id": 42 }
+{ "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9" }
 ```
+
+`id` is an opaque 32-character hex string (16 random bytes), never the
+report's sequential internal id — every response, route parameter and the
+`mod_queue` frame carry this public id only. Reports are filed in sequence
+server-side, so a bit holder who can see reports 1 and 3 but not 2 could
+otherwise infer report 2 concerns them; the public id carries no order.
 
 #### Errors
 
@@ -1858,6 +1870,7 @@ body, so there is no field for it.
 
 The caller's own reports: id, target type, reason, state, outcome,
 `created_at`, `closed_at`. Never the assignee, never the internal notes.
+`id` is the opaque public id (see above).
 
 **Auth:** Required.
 
@@ -1866,7 +1879,7 @@ The caller's own reports: id, target type, reason, state, outcome,
 ```json
 [
   {
-    "id": 42,
+    "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
     "target_type": "message",
     "reason": "harassment",
     "state": "assigned",
@@ -1899,19 +1912,23 @@ subject's usernames but never the report's free-text detail or its notes.
 
 ### GET /api/v1/moderation/queue/{id}
 
-One report, its evidence snapshot and its internal notes. **Auth:**
-Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+One report, its evidence snapshot and its internal notes. `{id}` is the
+opaque public id, resolved to the internal id server-side before any lookup.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
-`404 NOT_FOUND` both for a missing id and for the caller's own report —
-indistinguishable, even when the caller holds the bit: the subject of a
-report must never learn one exists.
+`404 NOT_FOUND` both for a missing id and for a report whose SUBJECT is the
+caller — indistinguishable, even when the caller holds the bit: the subject
+of a report must never learn one exists. A moderator who is instead the
+report's REPORTER may read it (their own filing, already visible via
+`GET /api/v1/reports/mine`), but `notes` is always `[]` for them — internal
+notes never reach the person who filed the report.
 
 ---
 
 ### POST /api/v1/moderation/queue/{id}/assign
 
-Assign the report to the caller. **Auth:** Required. **Permission:**
-`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+Assign the report to the caller. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
 **Query:** `force=1` reassigns a report already assigned to someone else,
 and only succeeds when the caller outranks the current assignee (the same
@@ -1921,19 +1938,21 @@ hierarchy rule ban/kick/timeout use).
 
 #### Errors
 
-| Status | Code        | Cause                                                                                              |
-| ------ | ----------- | -------------------------------------------------------------------------------------------------- |
-| 403    | `FORBIDDEN` | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                   |
-| 404    | `NOT_FOUND` | no such report, or it is the caller's own                                                          |
-| 409    | `CONFLICT`  | already assigned to someone else and `force` was not set, or the report is no longer open/assigned |
+| Status | Code          | Cause                                                                                              |
+| ------ | ------------- | -------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                   |
+| 403    | `SELF_REVIEW` | caller is the report's own reporter — a moderator may not act on a report they filed               |
+| 404    | `NOT_FOUND`   | no such report, or its subject is the caller                                                       |
+| 409    | `CONFLICT`    | already assigned to someone else and `force` was not set, or the report is no longer open/assigned |
 
 ---
 
 ### POST /api/v1/moderation/queue/{id}/notes
 
 Add an internal note, visible to `MODERATE_MEMBERS` holders only — never to
-the reporter, never to the subject. **Auth:** Required. **Permission:**
-`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+the reporter, never to the subject. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`). `403
+SELF_REVIEW` if the caller is the report's own reporter.
 
 #### Request
 
@@ -1947,8 +1966,9 @@ the reporter, never to the subject. **Auth:** Required. **Permission:**
 
 ### POST /api/v1/moderation/queue/{id}/close
 
-Close the report. **Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or
-`ADMINISTRATOR`).
+Close the report. `{id}` is the opaque public id. **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`). `403 SELF_REVIEW` if
+the caller is the report's own reporter.
 
 #### Request
 

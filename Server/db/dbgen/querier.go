@@ -22,9 +22,12 @@ type Querier interface {
 	// caller can tell a real no-op (target moved) from a normal apply.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
-	// Guarded by state: zero rows affected means the caller must answer 409.
-	// force=1 (checked by the caller before this runs) is the only way to
-	// reassign an already-assigned report to someone else.
+	// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
+	// assignee (optimistic concurrency -- a concurrent reassignment moves this
+	// out from under a racing caller, so its stale outrank verdict can never be
+	// applied), and EXISTS(users) (a moderator erased between requirePerm and
+	// this write cannot land as the new assignee). Zero rows affected covers
+	// all three causes; the caller answers 409 for each.
 	AssignReport(ctx context.Context, arg AssignReportParams) (int64, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
@@ -169,8 +172,11 @@ type Querier interface {
 	// boundary (blocks never gate group DMs). ORDER BY makes the row choice
 	// deterministic should duplicates ever exist.
 	FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelIDBetweenParams) (int64, error)
-	// The dedupe lookup: the same reporter, the same target, an open or
-	// assigned report already exists.
+	// The dedupe FAST PATH: the same reporter, the same target, an open or
+	// assigned report already exists. This is a pre-check only -- it saves the
+	// caller building an evidence snapshot for a report that will be refused --
+	// idx_reports_active_unique (migration 048) is what actually enforces the
+	// rule under concurrency; this query has no such guarantee alone.
 	FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAssignedReportParams) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
@@ -236,6 +242,9 @@ type Querier interface {
 	GetRecoveryAssist(ctx context.Context, userID int64) (RecoveryAssist, error)
 	GetRecoveryKit(ctx context.Context, userID int64) (RecoveryKit, error)
 	GetReportByID(ctx context.Context, id int64) (Report, error)
+	// The only lookup a route parameter or a mod_queue frame's id ever drives:
+	// public_id is the sole externally-visible identifier (Codex review).
+	GetReportByPublicID(ctx context.Context, publicID string) (Report, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
 	// collation, so this is the lookup that agrees with the constraint.
@@ -268,9 +277,17 @@ type Querier interface {
 	// reports is the B5-8 report intake, queue and evidence snapshot (migration
 	// 048). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
 	// the byte/rune difference of any multi-byte character.
+	// public_id is generated in Go (crypto/rand) before this runs; the UNIQUE
+	// constraint on it is not expected to ever fire. idx_reports_active_unique
+	// (migration 048) is the constraint expected to fire here on a race: two
+	// simultaneous filings of the same (reporter, target) both reach this
+	// INSERT, and the loser's violates that partial unique index.
 	InsertReport(ctx context.Context, arg InsertReportParams) (int64, error)
 	InsertReportEvidence(ctx context.Context, arg InsertReportEvidenceParams) error
-	InsertReportNote(ctx context.Context, arg InsertReportNoteParams) error
+	// INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
+	// between requirePerm and this write must not land as a note's author.
+	// Zero rows affected means the caller answers 409.
+	InsertReportNote(ctx context.Context, arg InsertReportNoteParams) (int64, error)
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
 	InstallPlugin(ctx context.Context, arg InstallPluginParams) (sql.Result, error)

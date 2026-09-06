@@ -558,20 +558,188 @@ func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
 	}
 }
 
-func TestReport_ModQueueFrameReachesOnlyBitHolders(t *testing.T) {
-	// The frame itself is a ws-layer concern (ws.BroadcastModQueue,
-	// ws/moderation_audience_test.go) -- ReportService has no hub dependency
-	// by design (like ModerationService, it is the REST handler's job to
-	// broadcast after a successful service call). This test pins the service
-	// half of that contract: nothing here ever computes or exposes an
-	// audience, so there is no path in this package that could leak to
-	// anyone but the moderators the caller's own hub audience resolves.
+// The mod_queue frame's audience (including that it must exclude a
+// bit-holding subject or reporter — P1-1) is fully covered at the ws layer:
+// ws.TestModerationAudience_OnlyBitHoldersOrAdmin and
+// ws.TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit
+// (Server/ws/moderation_queue_test.go). ReportService has no hub dependency
+// by design — like ModerationService, broadcasting after a successful
+// service call is the REST handler's job — so there is nothing left for a
+// service-package test to assert here that those two do not already prove.
+
+// TestReport_CreateAuditActorIsSystemNotReporter is P1-2's regression test:
+// the report_create audit row must never carry the reporter's identity as
+// actor_id, because VIEW_AUDIT_LOG and MODERATE_MEMBERS are two different
+// bits — a holder of the former (who may not hold the latter) must not be
+// able to read the reporter's id off the audit log.
+func TestReport_CreateAuditActorIsSystemNotReporter(t *testing.T) {
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
-	seedChannel(t, database, &db.Channel{ID: 1200, Name: "general"})
-	msgID := seedReportMessage(t, database, 1200, 11, "hi")
-	if _, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"}); err != nil {
+	seedChannel(t, database, &db.Channel{ID: 1500, Name: "general"})
+	msgID := seedReportMessage(t, database, 1500, 11, "hi")
+	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
+	if err != nil {
 		t.Fatalf("File: %v", err)
 	}
-	_ = database
+	var actorID int64
+	if err := database.QueryRowContext(ctx,
+		`SELECT actor_id FROM audit_log WHERE action = 'report_create' AND target_type = 'report' AND target_id = ?`, id,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("read report_create audit row: %v", err)
+	}
+	if actorID != 0 {
+		t.Errorf("report_create actor_id = %d, want 0 (system actor, not the reporter)", actorID)
+	}
+}
+
+// TestReport_MessageTargetErrorsAreIndistinguishable is P2-5's regression
+// test: a nonexistent message id and a real message id the reporter cannot
+// see must produce the EXACT SAME error text. A distinguishable message is
+// itself an existence oracle.
+func TestReport_MessageTargetErrorsAreIndistinguishable(t *testing.T) {
+	svc, database := newTestReportService(t)
+	ctx := context.Background()
+	seedChannel(t, database, &db.Channel{ID: 1501, Name: "blind-channel-p25"})
+	unreadableMsg := seedReportMessage(t, database, 1501, 11, "secret")
+
+	_, errMissing := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: "99999999", Reason: "spam"})
+	_, errUnreadable := svc.File(ctx, FileReportParams{ReporterID: 16, TargetType: TargetMessage, TargetID: strconv.FormatInt(unreadableMsg, 10), Reason: "spam"})
+	if !errors.Is(errMissing, ErrNotFound) || !errors.Is(errUnreadable, ErrNotFound) {
+		t.Fatalf("errMissing=%v errUnreadable=%v, want both ErrNotFound", errMissing, errUnreadable)
+	}
+	if errMissing.Error() != errUnreadable.Error() {
+		t.Errorf("error text differs: missing=%q unreadable=%q, want identical (no existence oracle)",
+			errMissing.Error(), errUnreadable.Error())
+	}
+}
+
+// TestReport_ModeratorReporterCannotActOnOwnReport is P2-6's regression
+// test: a moderator who filed a report may still read its status (Mine, and
+// Get for the report's own metadata) but never its internal notes, and may
+// not assign/note/close it — that would be reviewing their own filing.
+func TestReport_ModeratorReporterCannotActOnOwnReport(t *testing.T) {
+	svc, database := newTestReportService(t)
+	ctx := context.Background()
+	seedChannel(t, database, &db.Channel{ID: 1502, Name: "general"})
+	// Role 2 (moderator) carries only ModerateMembers, not ReadMessages — grant
+	// user 2 read access to this channel so File's target-visibility check
+	// isn't what blocks them from filing (that's not what this test is about).
+	seedChannelUserOverride(t, database, 2, 1502, permissions.ReadMessages, 0)
+	msgID := seedReportMessage(t, database, 1502, 11, "hi")
+	// User 2 is a moderator (role 2, ModerateMembers) AND files this report.
+	id, err := svc.File(ctx, FileReportParams{ReporterID: 2, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	// A different moderator adds a note before the reporter-moderator looks.
+	if err := svc.Note(ctx, 3, id, "internal note the reporter must not see"); err != nil {
+		t.Fatalf("Note(other moderator): %v", err)
+	}
+
+	detail, err := svc.Get(ctx, 2, id)
+	if err != nil {
+		t.Fatalf("Get(moderator-reporter): %v", err)
+	}
+	if len(detail.Notes) != 0 {
+		t.Errorf("Get(moderator-reporter).Notes = %+v, want empty", detail.Notes)
+	}
+
+	if err := svc.Assign(ctx, 2, id, false); !errors.Is(err, ErrSelfReview) {
+		t.Errorf("Assign(self): %v, want ErrSelfReview", err)
+	}
+	if err := svc.Note(ctx, 2, id, "trying to note my own report"); !errors.Is(err, ErrSelfReview) {
+		t.Errorf("Note(self): %v, want ErrSelfReview", err)
+	}
+	if _, err := svc.Close(ctx, 2, id, "no_action"); !errors.Is(err, ErrSelfReview) {
+		t.Errorf("Close(self): %v, want ErrSelfReview", err)
+	}
+}
+
+// TestReport_ConcurrentFilingExactlyOneSucceeds is P2-7's regression test:
+// idx_reports_active_unique must make the dedupe check race-proof, not just
+// a sequential pre-check. Two goroutines file the identical report at once;
+// exactly one must succeed and the other must see ErrDuplicateReport.
+func TestReport_ConcurrentFilingExactlyOneSucceeds(t *testing.T) {
+	svc, database := newTestReportService(t)
+	ctx := context.Background()
+	seedChannel(t, database, &db.Channel{ID: 1503, Name: "general"})
+	msgID := seedReportMessage(t, database, 1503, 11, "hi")
+
+	// File's own rate limit (5 filings / 10 min per reporter) would otherwise
+	// mask the race with ErrRateLimited, so this races exactly at that ceiling.
+	const attempts = 5
+	var wg sync.WaitGroup
+	var successes, duplicates atomic.Int32
+	for range attempts {
+		wg.Go(func() {
+			_, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, ErrDuplicateReport):
+				duplicates.Add(1)
+			default:
+				t.Errorf("unexpected error racing File: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if successes.Load() != 1 {
+		t.Errorf("concurrent filings: %d succeeded, want exactly 1", successes.Load())
+	}
+	if duplicates.Load() != attempts-1 {
+		t.Errorf("concurrent filings: %d saw ErrDuplicateReport, want %d", duplicates.Load(), attempts-1)
+	}
+	var rows int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE reporter_id = 10 AND target_ref = ?`, strconv.FormatInt(msgID, 10)).Scan(&rows); err != nil {
+		t.Fatalf("count reports: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("reports rows for the raced target = %d, want 1", rows)
+	}
+}
+
+// TestModerationQueue_ConcurrentUnforcedAssignOneWins is P2-8's regression
+// test: the assign UPDATE is guarded on the observed assignee, not just
+// state, so two unforced assigns racing on the same open report can never
+// both succeed.
+func TestModerationQueue_ConcurrentUnforcedAssignOneWins(t *testing.T) {
+	svc, database := newTestReportService(t)
+	ctx := context.Background()
+	seedChannel(t, database, &db.Channel{ID: 1504, Name: "general"})
+	msgID := seedReportMessage(t, database, 1504, 11, "hi")
+	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	var successes, conflicts atomic.Int32
+	for _, mod := range []int64{2, 3} {
+		wg.Go(func() {
+			err := svc.Assign(ctx, mod, id, false)
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, ErrConflict):
+				conflicts.Add(1)
+			default:
+				t.Errorf("unexpected error racing Assign: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if successes.Load() != 1 {
+		t.Errorf("concurrent unforced assigns: %d succeeded, want exactly 1", successes.Load())
+	}
+	if conflicts.Load() != 1 {
+		t.Errorf("concurrent unforced assigns: %d saw ErrConflict, want 1", conflicts.Load())
+	}
+	report, err := database.GetReport(ctx, id)
+	if err != nil {
+		t.Fatalf("GetReport: %v", err)
+	}
+	if report.AssigneeID != 2 && report.AssigneeID != 3 {
+		t.Errorf("final assignee = %d, want 2 or 3", report.AssigneeID)
+	}
 }
