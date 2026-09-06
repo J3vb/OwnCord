@@ -1853,7 +1853,7 @@ half — blur, gate and consent UI — is B9.
 on B5-6 (`4b7635b8`, then B5-6's `32eb9c28` and its final `96098bef` merged
 in, the latter carrying `dev`'s B5-11): built behind HP-5, which the owner
 accepted on 2026-09-06 (#1547, signature recorded in #1550); PR to `dev`
-#TBD-B5-7, stacked on #1549. Commits `d4baf5da` (the feature), `6c4282e5`
+#1551, stacked on #1549. Commits `d4baf5da` (the feature), `6c4282e5`
 (the independent review round), `040a8a4d` and `65d70ca4` (its two
 verification rounds), `2d238899` (the race test made to instrument the lock
 rather than the clock), `1e2710de` (the merge of B5-6's tip) and `ac9d25cd`
