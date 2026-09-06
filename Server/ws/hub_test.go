@@ -1617,4 +1617,12 @@ CREATE TABLE IF NOT EXISTS message_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
     ON message_requests(recipient_id, state);
+
+-- Per-user NSFW acknowledgement (migration 047, B5-7).
+CREATE TABLE IF NOT EXISTS nsfw_acknowledgements (
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    acknowledged_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
 `)

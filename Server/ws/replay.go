@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 
@@ -34,7 +35,7 @@ const (
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
 ) (handled, startPumps bool) {
-	allowedChannelIDs, ok := h.reconnectPrecheck(ctx, c, lastSeq)
+	allowedChannelIDs, nsfwReadableChannelIDs, ok := h.reconnectPrecheck(ctx, c, lastSeq)
 	if !ok {
 		return false, false
 	}
@@ -54,7 +55,7 @@ func (h *Hub) handleReconnect(
 		liveVoiceChID = old.getVoiceChID()
 	}
 
-	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs)
+	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
 	if events == nil {
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
@@ -107,7 +108,7 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
-	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
 	if !ok {
 		return false, false
 	}
@@ -153,11 +154,13 @@ func (h *Hub) handleReconnect(
 }
 
 // reconnectPrecheck runs handleReconnect's two entry guards and, when replay is
-// still on the table, returns the read-permission set replay is filtered by.
+// still on the table, returns the read-permission set replay is filtered by
+// (allowedChannelIDs — visibility) and its B5-7 narrowing (nsfwReadableChannelIDs
+// — visibility minus any labelled channel the user has not acknowledged).
 // ok=false means the caller must fall through to a full ready.
 func (h *Hub) reconnectPrecheck(
 	ctx context.Context, c *Client, lastSeq uint64,
-) (map[int64]bool, bool) {
+) (allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool, ok bool) {
 	// The configured seam, never a caller-supplied handle: binding it here is
 	// what lets a service-backed or instrumented reader actually intercept the
 	// two reads below — the same posture handleFreshConnect takes.
@@ -170,7 +173,7 @@ func (h *Hub) reconnectPrecheck(
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return nil, false
+		return nil, nil, false
 	}
 	// c.user is the auth-time snapshot; a role reassignment landing between
 	// authenticateConn and here would otherwise be resolved from the OLD
@@ -182,7 +185,7 @@ func (h *Hub) reconnectPrecheck(
 	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
 		slog.Warn("ws handleReconnect: user re-read failed, falling back to full ready",
 			"user_id", c.userID, "err", err)
-		return nil, false
+		return nil, nil, false
 	}
 	// Compute the set of channel IDs the reconnecting user can access so that
 	// channel-scoped replay events are filtered by current permissions (M3).
@@ -190,9 +193,44 @@ func (h *Hub) reconnectPrecheck(
 	if err != nil {
 		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
 			"user_id", c.userID, "err", err)
-		return nil, false
+		return nil, nil, false
 	}
-	return allowedChannelIDs, true
+	nsfwReadableChannelIDs, err = h.computeReadableChannels(ctx, database, c.user, allowedChannelIDs)
+	if err != nil {
+		slog.Warn("ws handleReconnect: computeReadableChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return nil, nil, false
+	}
+	return allowedChannelIDs, nsfwReadableChannelIDs, true
+}
+
+// computeReadableChannels narrows allowed (the visible set) to B5-7's
+// readable set: every visible channel that is either not labelled, or
+// labelled and acknowledged by user. Bounded by how many labelled channels
+// sit in the visible set (typically zero), not by the full channel list.
+func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
+	channels, err := database.ListChannels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("computeReadableChannels ListChannels: %w", err)
+	}
+	readable := make(map[int64]bool, len(allowed))
+	for id := range allowed {
+		readable[id] = true
+	}
+	for i := range channels {
+		ch := &channels[i]
+		if !ch.NSFW || !allowed[ch.ID] {
+			continue
+		}
+		ok, ackErr := database.HasNSFWAcknowledgement(ctx, user.ID, ch.ID)
+		if ackErr != nil {
+			return nil, fmt.Errorf("computeReadableChannels HasNSFWAcknowledgement: %w", ackErr)
+		}
+		if !ok {
+			delete(readable, ch.ID)
+		}
+	}
+	return readable, nil
 }
 
 // reconnectSelectReplay picks the tier that serves this resume — the ring
@@ -202,7 +240,7 @@ func (h *Hub) reconnectPrecheck(
 // A nil events return means neither tier can replay and the caller must fall
 // through to a full ready.
 func (h *Hub) reconnectSelectReplay(
-	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs map[int64]bool,
+	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, string, [][]byte, uint64) {
 	var (
 		events          [][]byte
@@ -210,7 +248,7 @@ func (h *Hub) reconnectSelectReplay(
 		persistedTail   [][]byte // cold-tier rows only; re-merged with a fresh buffer tail below
 		maxPersistedSeq uint64
 	)
-	if buf := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs); buf != nil {
+	if buf := h.ReplayBuffer().EventsSinceFilteredContent(lastSeq, allowedChannelIDs, nsfwReadableChannelIDs); buf != nil {
 		events = buf
 		return events, replaySource, persistedTail, maxPersistedSeq
 	}
@@ -261,7 +299,7 @@ func (h *Hub) reconnectSelectReplay(
 				slog.Warn("ws handleReconnect: retention pruning left a gap before last_seq, forcing full ready",
 					"user_id", c.userID, "last_seq", lastSeq, "oldest_seq", oldestSeq)
 			default:
-				persistedTail, maxPersistedSeq = h.reconnectVetColdTail(ctx, c, es, lastSeq, persisted, allowedChannelIDs)
+				persistedTail, maxPersistedSeq = h.reconnectVetColdTail(ctx, c, es, lastSeq, persisted, allowedChannelIDs, nsfwReadableChannelIDs)
 				if persistedTail != nil {
 					events = persistedTail
 					replaySource = "db"
@@ -278,10 +316,18 @@ func (h *Hub) reconnectSelectReplay(
 // row. The returned seq is the highest one in persisted.
 func (h *Hub) reconnectVetColdTail(
 	ctx context.Context, c *Client, es EventStore, lastSeq uint64,
-	persisted []db.PersistedEvent, allowedChannelIDs map[int64]bool,
+	persisted []db.PersistedEvent, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, uint64) {
+	// B5-7: a content-bearing row for a channel that is allowed (visible) but
+	// not readable (labelled and unacknowledged) is dropped here — the same
+	// rule EventsSinceFilteredContent applies to the ring buffer. Checked
+	// against the row's own stored EventType/ChannelID, not a JSON parse of
+	// its payload.
 	persistedTail := make([][]byte, 0, len(persisted))
 	for _, p := range persisted {
+		if contentBearingKinds[p.EventType] && !nsfwReadableChannelIDs[p.ChannelID] {
+			continue
+		}
 		persistedTail = append(persistedTail, p.Payload)
 	}
 	maxPersistedSeq := uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
@@ -317,7 +363,7 @@ func (h *Hub) reconnectVetColdTail(
 		// authoritative re-read happens atomically with registerNow
 		// below, but a hole here must still force a full ready
 		// rather than a replay with a silent gap at its end.
-		switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
+		switch tail := h.ReplayBuffer().EventsSinceFilteredContent(maxPersistedSeq, allowedChannelIDs, nsfwReadableChannelIDs); {
 		case tail != nil:
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
 			// Post-restart empty buffer with the hub seq seeded from
@@ -338,14 +384,14 @@ func (h *Hub) reconnectVetColdTail(
 // It returns the events to actually send; ok=false means one of the re-checks
 // tripped and the caller must fall through to a full ready.
 func (h *Hub) reconnectRegister(
-	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs map[int64]bool,
+	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) ([][]byte, bool) {
 	var events [][]byte
 	h.seqMu.Lock()
 	switch replaySource {
 	case "buffer":
-		fresh := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs)
+		fresh := h.ReplayBuffer().EventsSinceFilteredContent(lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
 		if fresh == nil {
 			// The buffer window closed between the earlier check and this
 			// lock (an extreme write burst evicted lastSeq) — there is
@@ -359,7 +405,7 @@ func (h *Hub) reconnectRegister(
 		}
 		events = fresh
 	case "db":
-		switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
+		switch tail := h.ReplayBuffer().EventsSinceFilteredContent(maxPersistedSeq, allowedChannelIDs, nsfwReadableChannelIDs); {
 		case tail != nil:
 			events = append(append([][]byte{}, persistedTail...), tail...)
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:

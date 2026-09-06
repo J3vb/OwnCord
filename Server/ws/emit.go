@@ -108,7 +108,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
 		case ChannelEvent:
-			h.BroadcastToChannel(e.ChannelID(), e.Payload())
+			h.broadcastChannelEvent(ctx, e)
 		case VoiceVisibilityEvent:
 			// Server-wide, but never to a client that cannot read the channel.
 			// ctx is threaded from the dispatching connection so the audience

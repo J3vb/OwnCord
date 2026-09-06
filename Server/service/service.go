@@ -48,6 +48,10 @@ type Services struct {
 	// (MessageService.SetMessageRequests), which is where the gate actually
 	// runs (service/message_crud.go's OpenDM accumulation).
 	MessageRequests *MessageRequestService
+	// NSFW owns the per-user, per-channel acknowledgement row (B5-7); the
+	// four content read paths (REST, search, socket, attachments) resolve it
+	// through permissions.CanReadContent.
+	NSFW *NSFWService
 }
 
 // New creates all domain services wired together.
@@ -82,5 +86,6 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Setup:           NewSetupService(st),
 		Push:            NewPushService(st),
 		MessageRequests: messageRequests,
+		NSFW:            NewNSFWService(st, permSvc),
 	}
 }

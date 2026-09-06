@@ -28,6 +28,13 @@ type VisibilityReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
+	// HasNSFWAcknowledgement and ListNSFWAcknowledgedUserIDs back B5-7's
+	// content gate: the ready payload's per-channel nsfw_acknowledged field,
+	// reconnect replay's readable-set filter, and the hub's per-broadcast
+	// content audience (hub_visibility.go). Taken live, never cached, and
+	// only when a channel is actually labelled.
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
 }
 
 // ReadySnapshotReader is what the ready payload (serve_ready.go) may read on

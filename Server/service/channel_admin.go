@@ -211,7 +211,7 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		return nil, fmt.Errorf("voice_max_video must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
 	}
 
-	if err := s.st.AdminUpdateChannel(ctx, existing.ID, db.ChannelUpdate{
+	update := db.ChannelUpdate{
 		Name:          meta.Name,
 		Topic:         meta.Topic,
 		Category:      meta.Category,
@@ -221,7 +221,16 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		NSFW:          req.NSFW,
 		VoiceMaxUsers: req.VoiceMaxUsers,
 		VoiceMaxVideo: req.VoiceMaxVideo,
-	}); err != nil {
+	}
+	// B5-7 decision 13: clearing the flag deletes the channel's standing
+	// acknowledgements in the SAME transaction as the flag write, so a later
+	// re-label re-prompts everyone rather than trusting consent given for a
+	// different warning. Flipping the flag ON writes nothing extra.
+	if existing.NSFW && !req.NSFW {
+		if err := s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update); err != nil {
+			return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, err)
+		}
+	} else if err := s.st.AdminUpdateChannel(ctx, existing.ID, update); err != nil {
 		return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, err)
 	}
 

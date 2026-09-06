@@ -190,9 +190,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// events through the hub.
 	MountDMRequestRoutes(r, svc, hub)
 
-	// Channel and message REST routes — mounted after hub creation so a
-	// message purge can broadcast chat_bulk_deleted to the channel.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
+	// creation so a message purge or an nsfw_ack can broadcast through it.
+	routerChannelRoutes(r, database, svc, limiter, cfg, hub)
 
 	// Custom emoji REST routes — mounted after hub creation so an upload or a
 	// delete can fan the new set out as an emoji_update. Requires the same file
@@ -417,6 +417,14 @@ func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) 
 		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
 		Dir:            cfg.Upload.StorageDir,
 	})
+}
+
+// routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
+// acknowledgement toggle beside it — both need the hub to fan out real-time
+// events (chat_bulk_deleted, nsfw_ack).
+func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	MountNSFWRoutes(r, svc, hub)
 }
 
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy

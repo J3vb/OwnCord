@@ -20,6 +20,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/go-chi/chi/v5"
@@ -430,6 +431,10 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 	switch {
 	case errors.Is(err, service.ErrNotFound):
 		http.NotFound(w, r)
+	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
+		// B5-7: the response carries the code and nothing else — no detail
+		// that could distinguish it from any other refusal on this route.
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
 	case errors.Is(err, service.ErrForbidden):
 		writeJSON(w, http.StatusForbidden, errorResponse{
 			Error:   "FORBIDDEN",

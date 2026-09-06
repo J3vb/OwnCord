@@ -146,6 +146,24 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 		}
 	}
 
+	// B5-7 decision 13: the NSFW gate runs BEFORE the admin bypass below, so
+	// an administrator without a row is refused exactly like anyone else —
+	// no bit and no admin bypass skips this. DMs cannot be labelled, so this
+	// only ever applies to the non-DM branch.
+	if aa.ChannelID != nil && aa.ChannelType != "dm" && aa.ChannelNSFW {
+		if actor == nil {
+			return errFileForbidden()
+		}
+		ok, ackErr := s.st.HasNSFWAcknowledgement(ctx, actor.ID, *aa.ChannelID)
+		if ackErr != nil {
+			slog.Error("failed to check NSFW acknowledgement", "attachment_id", aa.ID, "error", ackErr)
+			return errFileForbidden()
+		}
+		if !ok {
+			return fmt.Errorf("%w", permissions.ErrNSFWUnacknowledged)
+		}
+	}
+
 	if role != nil && permissions.HasAdmin(role.Permissions) {
 		return nil
 	}

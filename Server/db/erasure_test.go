@@ -78,6 +78,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, other, uid)
 	exec(`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'pending')`, other, third, chID)
 	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, third, other)
+	// NSFW acknowledgements (migration 047, B5-7, class 18a): one row naming
+	// the subject, plus one for another user on the same channel that must
+	// survive the subject's erasure untouched.
+	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, uid, chID)
+	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, other, chID)
 	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
@@ -178,6 +183,9 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM trusted_senders`); n != 1 {
 		t.Errorf("trusted senders left = %d, want 1 (the one between two other users)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM nsfw_acknowledgements`); n != 1 {
+		t.Errorf("nsfw acknowledgements left = %d, want 1 (the other user's)", n)
 	}
 }
 

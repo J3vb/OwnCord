@@ -238,6 +238,21 @@ func (ps *PubSub) SubscriberCount(topic Topic) int {
 	return len(ps.topics[topic])
 }
 
+// SubscriberIDs returns the user ids currently subscribed to topic. Used by
+// B5-7's content-audience resolution (ws/hub_visibility.go), which narrows a
+// content-bearing broadcast to the same live audience Publish would already
+// reach — never wider — before filtering it by CanReadContent.
+func (ps *PubSub) SubscriberIDs(topic Topic) []int64 {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	subs := ps.topics[topic]
+	ids := make([]int64, 0, len(subs))
+	for uid := range subs {
+		ids = append(ids, uid)
+	}
+	return ids
+}
+
 // TopicsForClient returns the set of topics a client is subscribed to.
 // Intended for debugging and tests.
 func (ps *PubSub) TopicsForClient(userID int64) []Topic {

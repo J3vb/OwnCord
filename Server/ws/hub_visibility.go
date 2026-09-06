@@ -55,13 +55,41 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		userIDs = append(userIDs, uid)
 	}
 	h.mu.RUnlock()
+	audience, _ := h.filterChannelAudience(ctx, channelID, userIDs, ignoreArchived, permissions.CanViewChannel, false)
+	return audience
+}
 
+// channelContentAudience is channelReadAudienceImpl's B5-7 counterpart for
+// content-bearing broadcasts (chat_message, chat_edited, reaction_update,
+// plugin_broadcast — see the contentBearingKinds table). The candidate pool
+// is today's actual topic subscribers, never every connected client: content
+// delivery must not reach anyone beyond who Publish would already reach, only
+// narrow that set further by CanReadContent. labelled reports whether the
+// channel turned out to be NSFW, which the caller uses to withhold the frame
+// from the plugin sink too (decision 13: a plugin has no acknowledgement).
+func (h *Hub) channelContentAudience(ctx context.Context, channelID int64) (recipients []int64, labelled bool) {
+	subscribers := h.pubsub.SubscriberIDs(ChannelTopic(channelID))
+	return h.filterChannelAudience(ctx, channelID, subscribers, false, permissions.CanReadContent, true)
+}
+
+// filterChannelAudience is channelReadAudienceImpl and channelContentAudience's
+// shared body: resolve the channel once, then apply predicate to every
+// candidate's Subject. content selects CanReadContent's extra cost — the
+// ONE batch ListNSFWAcknowledgedUserIDs query, taken only when the channel is
+// actually labelled, so an unlabelled channel (and every CanViewChannel
+// caller, which never sets content) pays nothing beyond what this function
+// already cost before B5-7.
+func (h *Hub) filterChannelAudience(
+	ctx context.Context, channelID int64, candidates []int64, ignoreArchived bool,
+	predicate func(permissions.Subject) error, content bool,
+) (audience []int64, labelled bool) {
 	// A DM channel carries no channel_overrides rows, so every connected
 	// user whose base role holds READ_MESSAGES would otherwise pass the role
 	// scan below — leaking a private DM call's voice_state/voice_leave
 	// events to the whole server. Resolve the DM's real audience (its
-	// participants, intersected with who is actually connected) instead,
-	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
+	// participants, intersected with the candidate pool) instead, mirroring
+	// the IsDMParticipant membership rule hasChannelAccess uses. DMs cannot
+	// be labelled, so labelled is always false here.
 	var ref permissions.ChannelRef
 	if h.db != nil {
 		ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
@@ -70,7 +98,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 			// the role scan, which would treat it as a readable non-DM channel.
 			slog.Error("ws: channelReadAudience GetChannel failed, denying",
 				"channel_id", channelID, "err", err)
-			return []int64{}
+			return []int64{}, false
 		}
 		// Fail closed on a missing row too (OC-0090): GetChannel returns
 		// (nil, nil) for a deleted channel, and falling through would hand a
@@ -80,10 +108,10 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		// tear down voice union the room's participants and the leaver back
 		// in afterwards, so eviction/E2EE-teardown signals still arrive.
 		if ch == nil {
-			return []int64{}
+			return []int64{}, false
 		}
 		if ch.Type == "dm" {
-			return h.channelReadAudienceDM(ctx, channelID, userIDs)
+			return h.channelReadAudienceDM(ctx, channelID, candidates), false
 		}
 		ref = channelRef(ch)
 		// CanViewChannel hides an archived channel from everyone, mirroring
@@ -98,24 +126,43 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		}
 	}
 
+	var ackSet map[int64]bool
+	if content && ref.NSFW {
+		ids, err := h.readers.Visibility.ListNSFWAcknowledgedUserIDs(ctx, channelID)
+		if err != nil {
+			slog.Error("ws: channelContentAudience ListNSFWAcknowledgedUserIDs failed, denying",
+				"channel_id", channelID, "err", err)
+			// ackSet stays nil: every candidate below reads NSFWAcknowledged
+			// as false — fail closed rather than silently widening delivery.
+		} else {
+			ackSet = make(map[int64]bool, len(ids))
+			for _, id := range ids {
+				ackSet[id] = true
+			}
+		}
+	}
+
 	// Resolved per USER, not memoised per role: channel_user_overrides is the
 	// last layer of the resolution order, so two members of the same role can
 	// legitimately disagree about one channel and a per-role memo would hand
-	// one of them the other's verdict. The verdict is CanViewChannel over
+	// one of them the other's verdict. The verdict is predicate over
 	// subjectFor (cached service or live checker); an unresolvable user is
 	// left out.
-	audience := make([]int64, 0, len(userIDs))
-	for _, uid := range userIDs {
+	audience = make([]int64, 0, len(candidates))
+	for _, uid := range candidates {
 		sub, err := h.subjectFor(ctx, uid, channelID)
 		if err != nil {
 			continue
 		}
 		sub.Channel = ref
-		if permissions.CanViewChannel(sub) == nil {
+		if content {
+			sub.NSFWAcknowledged = ackSet[uid]
+		}
+		if predicate(sub) == nil {
 			audience = append(audience, uid)
 		}
 	}
-	return audience
+	return audience, ref.NSFW
 }
 
 // channelReadAudienceDM resolves the audience of a DM channel: the DM's
