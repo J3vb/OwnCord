@@ -26,6 +26,13 @@ type Querier interface {
 	// caller can tell a real no-op (target moved) from a normal apply.
 	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	ApprovePendingUser(ctx context.Context, id int64) (sql.Result, error)
+	// Guarded three ways: state (nothing leaves a closed state), the OBSERVED
+	// assignee (optimistic concurrency -- a concurrent reassignment moves this
+	// out from under a racing caller, so its stale outrank verdict can never be
+	// applied), and EXISTS(users) (a moderator erased between requirePerm and
+	// this write cannot land as the new assignee). Zero rows affected covers
+	// all three causes; the caller answers 409 for each.
+	AssignReport(ctx context.Context, arg AssignReportParams) (int64, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	// The quota guard and the increment are one statement, so exactly one of
@@ -45,6 +52,9 @@ type Querier interface {
 	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
+	// open -> resolved|dismissed is close-without-assigning; assigned ->
+	// resolved|dismissed is the ordinary path. Nothing leaves a closed state.
+	CloseReport(ctx context.Context, arg CloseReportParams) (int64, error)
 	CompleteErasureJob(ctx context.Context, arg CompleteErasureJobParams) error
 	// The consume deletes only the live credential whose verifier the caller
 	// compared against, so the affected row count is what tells two concurrent
@@ -174,6 +184,12 @@ type Querier interface {
 	// boundary (blocks never gate group DMs). ORDER BY makes the row choice
 	// deterministic should duplicates ever exist.
 	FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelIDBetweenParams) (int64, error)
+	// The dedupe FAST PATH: the same reporter, the same target, an open or
+	// assigned report already exists. This is a pre-check only -- it saves the
+	// caller building an evidence snapshot for a report that will be refused --
+	// idx_reports_active_unique (migration 048) is what actually enforces the
+	// rule under concurrency; this query has no such guarantee alone.
+	FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAssignedReportParams) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
 	// so a resolved row is always usable. Matches the sessions never-expiring
@@ -242,6 +258,10 @@ type Querier interface {
 	GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error)
 	GetRecoveryAssist(ctx context.Context, userID int64) (RecoveryAssist, error)
 	GetRecoveryKit(ctx context.Context, userID int64) (RecoveryKit, error)
+	GetReportByID(ctx context.Context, id int64) (Report, error)
+	// The only lookup a route parameter or a mod_queue frame's id ever drives:
+	// public_id is the sole externally-visible identifier (Codex review).
+	GetReportByPublicID(ctx context.Context, publicID string) (Report, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
 	// collation, so this is the lookup that agrees with the constraint.
@@ -273,6 +293,40 @@ type Querier interface {
 	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
 	InsertMessageRequest(ctx context.Context, arg InsertMessageRequestParams) (int64, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
+	// reports is the B5-8 report intake, queue and evidence snapshot (migration
+	// 048). Keep this file ASCII-only: sqlc v1.30 truncates the next query by
+	// the byte/rune difference of any multi-byte character.
+	// public_id is generated in Go (crypto/rand) before this runs; the UNIQUE
+	// constraint on it is not expected to ever fire. idx_reports_active_unique
+	// (migration 048) is the constraint expected to fire here on a race: two
+	// simultaneous filings of the same (reporter, target) both reach this
+	// INSERT, and the loser's violates that partial unique index.
+	// Re-validated inside the transaction (Codex review, P1-4 widened): the
+	// evidence snapshot is built and the reporter/subject resolved before the
+	// transaction opens, so an erasure landing between that resolution and this
+	// INSERT must not restore a since-erased reporter or subject id -- the
+	// INSERT ... SELECT ... WHERE EXISTS guard turns that race into zero rows
+	// (mapped to db.ErrNotFound) rather than a row naming an erased account.
+	// subject_id = 0 is a valid, principal-less target (an attachment with no
+	// resolvable uploader) and skips the EXISTS check for it.
+	InsertReport(ctx context.Context, arg InsertReportParams) (int64, error)
+	// report_events is this feature's own immutable history, never the shared
+	// audit_log (second Codex review): detail is the state or outcome word
+	// only, never free text.
+	InsertReportEvent(ctx context.Context, arg InsertReportEventParams) error
+	// Guarded (Codex review, P1-4 widened): an evidence row's author erased
+	// between the snapshot's capture and this transaction's commit must not
+	// land -- the row is silently dropped (0 = a valid author-less context row,
+	// e.g. a system message, and skips the check).
+	InsertReportEvidence(ctx context.Context, arg InsertReportEvidenceParams) error
+	// INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
+	// between requirePerm and this write must not land as a note's author, and
+	// (Codex review) the report must still be open/assigned -- a note added
+	// between GetReport's read and this write, on a report a concurrent Close
+	// just closed, must not land either. Both guards are in the one INSERT's
+	// WHERE clause, so there is no read-then-write gap between them. Zero rows
+	// affected means the caller answers 409, for either cause.
+	InsertReportNote(ctx context.Context, arg InsertReportNoteParams) (int64, error)
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InsertUsedTOTPCode(ctx context.Context, arg InsertUsedTOTPCodeParams) (sql.Result, error)
 	InstallPlugin(ctx context.Context, arg InstallPluginParams) (sql.Result, error)
@@ -337,6 +391,17 @@ type Querier interface {
 	// the same reason ListPushSubscriptions is: a row under a different key is
 	// one the server can no longer sign for.
 	ListPushSubscriptionsForDispatch(ctx context.Context, arg ListPushSubscriptionsForDispatchParams) ([]ListPushSubscriptionsForDispatchRow, error)
+	ListReportEvents(ctx context.Context, reportID int64) ([]ReportEvent, error)
+	ListReportEvidence(ctx context.Context, reportID int64) ([]ReportEvidence, error)
+	ListReportNotes(ctx context.Context, reportID int64) ([]ReportNote, error)
+	// Either concrete queue state, taken alone ("open" or "assigned").
+	ListReportsByState(ctx context.Context, state string) ([]ListReportsByStateRow, error)
+	// state=closed groups every terminal state, including the erasure-forced one.
+	ListReportsClosed(ctx context.Context) ([]ListReportsClosedRow, error)
+	// The reporter's own view: never the assignee, never the notes.
+	ListReportsMine(ctx context.Context, reporterID int64) ([]ListReportsMineRow, error)
+	// The default queue view: open and assigned together.
+	ListReportsOpenOrAssigned(ctx context.Context) ([]ListReportsOpenOrAssignedRow, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes
 	// them, but creating a role inserts just below the actor and may tie with an
 	// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
@@ -382,6 +447,9 @@ type Querier interface {
 	PluginKVGet(ctx context.Context, arg PluginKVGetParams) ([]byte, error)
 	PluginKVSet(ctx context.Context, arg PluginKVSetParams) error
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
+	PruneReportDetailOlderThan(ctx context.Context, closedAt *string) (int64, error)
+	PruneReportEvidenceOlderThan(ctx context.Context, closedAt *string) (int64, error)
+	PruneReportNotesOlderThan(ctx context.Context, closedAt *string) (int64, error)
 	RecordErasureJobAttempt(ctx context.Context, arg RecordErasureJobAttemptParams) error
 	// The truth: every counted byte this user holds in the store has an
 	// attachments row that names it (avatars are attachments). Emoji are a

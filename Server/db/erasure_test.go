@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -87,6 +88,26 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (3, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":3,"type":"typing","payload":{"user_id":%d}}`, other), chID)
+	// B5-8 report classes (migration 048): a report about the subject by
+	// another user (22a), a report by the subject about another user (22b),
+	// evidence and a note authored by the subject (22c/22d), and an
+	// assignment to the subject (22e) — plus a report between two OTHER
+	// users that must survive untouched.
+	exec(`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (900, 'pub-900', ?, ?, 'user', 'ref-about-subject', 'harassment', 'd')`, other, uid)
+	exec(`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (901, 'pub-901', ?, ?, 'message', 'ref-by-subject', 'spam', 'd', ?)`, uid, other, uid)
+	exec(`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (901, 0, ?, 'evidence text by subject')`, uid)
+	exec(`INSERT INTO report_notes (report_id, author_id, body) VALUES (901, ?, 'note by subject')`, uid)
+	// P2-10 (Codex review): a report ABOUT the subject with evidence
+	// authored by someone ELSE -- the case seedEraseSubject was missing.
+	// Without this row, the "DELETE FROM report_evidence WHERE report_id IN
+	// (SELECT id FROM reports WHERE subject_id = ?)" branch could be deleted
+	// entirely and every existing assertion would still pass, because
+	// report 901's evidence (author_id = uid) is already caught by the
+	// sibling "OR author_id = ?" branch.
+	exec(`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (900, 0, ?, 'context by another author about the subject')`, other)
+	// 22f (second Codex review): a report_events row where the subject was
+	// the ACTOR (they moderated report 900 at some point before erasure).
+	exec(`INSERT INTO report_events (report_id, actor_id, action, detail) VALUES (900, ?, 'noted', '')`, uid)
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 
@@ -94,6 +115,22 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
+	// A report between two OTHER users, naming neither the subject nor
+	// carrying anything of theirs: it must be untouched by the subject's
+	// erasure.
+	witness := seedUser(t, database, "witness-user")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (902, 'pub-902', ?, ?, 'user', 'ref-unrelated', 'other', 'untouched detail')`,
+		witness, sub.other); err != nil {
+		t.Fatalf("seed unrelated report: %v", err)
+	}
+	// P2-10 positive control: this report's evidence belongs to neither the
+	// subject nor a report about them, and must survive untouched.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (902, 0, ?, 'unrelated context')`,
+		witness); err != nil {
+		t.Fatalf("seed unrelated evidence: %v", err)
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
@@ -175,6 +212,73 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM reactions`); n != 0 {
 		t.Errorf("reactions left = %d, want 0", n)
 	}
+
+	// B5-8, decision 7: the report ABOUT the subject survives as an
+	// unlinkable outcome row — the negative control. An implementation that
+	// deletes the row instead of rewriting it passes every check above (the
+	// generic inventory class is zero either way) and fails this one.
+	var state, outcome, detail, targetRef, closedAt string
+	var subjectID int64
+	var subjectToken sql.NullString
+	if err := database.QueryRowContext(ctx,
+		`SELECT subject_id, subject_token, detail, target_ref, state, outcome, closed_at FROM reports WHERE id = 900`,
+	).Scan(&subjectID, &subjectToken, &detail, &targetRef, &state, &outcome, &closedAt); err != nil {
+		t.Fatalf("report 900 after erasure: %v", err)
+	}
+	if subjectID != 0 || detail != "" || targetRef != "" || state != "subject_erased" || outcome != "subject_erased" || closedAt == "" {
+		t.Errorf("report 900 after subject erasure = subject_id=%d detail=%q target_ref=%q state=%q outcome=%q closed_at=%q, want id 0, empty detail/target_ref, subject_erased/subject_erased, closed_at set",
+			subjectID, detail, targetRef, state, outcome, closedAt)
+	}
+	_ = subjectToken // this test erases with an empty token; the dedicated
+	// token tests below (TestReport_SubjectErasureKeepsTheOutcomeRow etc.)
+	// assert the token itself is carried when one is given.
+	if n := count(`SELECT COUNT(*) FROM reports WHERE id = 900`); n != 1 {
+		t.Errorf("report 900 row count after erasure = %d, want 1 (kept, not deleted)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM report_evidence WHERE report_id IN (900, 901)`); n != 0 {
+		t.Errorf("report evidence after erasure = %d, want 0 (content hard-deleted)", n)
+	}
+	// P2-10: the positive control. Evidence on an unrelated report (902,
+	// authored by a third party, about neither the subject nor a report of
+	// theirs) must survive untouched — proving the DELETE above is scoped
+	// to "about the subject", not every report_evidence row.
+	if n := count(`SELECT COUNT(*) FROM report_evidence WHERE report_id = 902`); n != 1 {
+		t.Errorf("unrelated report 902's evidence after erasure = %d, want 1 (untouched)", n)
+	}
+
+	// The report BY the subject (901) is not the subject's content: only the
+	// reporter columns change, the report and its outcome stay as they are.
+	var reporterID int64
+	var reporterToken sql.NullString
+	var assigneeID int64
+	if err := database.QueryRowContext(ctx,
+		`SELECT reporter_id, reporter_token, assignee_id FROM reports WHERE id = 901`,
+	).Scan(&reporterID, &reporterToken, &assigneeID); err != nil {
+		t.Fatalf("report 901 after erasure: %v", err)
+	}
+	_ = reporterToken
+	if reporterID != 0 {
+		t.Errorf("report 901 reporter after subject erasure = id=%d, want 0", reporterID)
+	}
+	if assigneeID != 0 {
+		t.Errorf("report 901 assignee after subject erasure = %d, want 0 (unlinked)", assigneeID)
+	}
+	if n := count(`SELECT COUNT(*) FROM report_notes WHERE report_id = 901 AND author_id = 0`); n != 1 {
+		t.Errorf("report 901 note after subject erasure: want 1 row with author_id 0")
+	}
+
+	// The unrelated report between two other users is untouched.
+	var untouchedReporter, untouchedSubject int64
+	var untouchedDetail string
+	if err := database.QueryRowContext(ctx,
+		`SELECT reporter_id, subject_id, detail FROM reports WHERE id = 902`,
+	).Scan(&untouchedReporter, &untouchedSubject, &untouchedDetail); err != nil {
+		t.Fatalf("report 902 after erasure: %v", err)
+	}
+	if untouchedReporter != witness || untouchedSubject != sub.other || untouchedDetail != "untouched detail" {
+		t.Errorf("unrelated report 902 changed by the subject's erasure: reporter=%d subject=%d detail=%q",
+			untouchedReporter, untouchedSubject, untouchedDetail)
+	}
 	if n := count(`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, sub.other); n != 1 {
 		t.Errorf("other user's push subscription left = %d, want 1", n)
 	}
@@ -186,6 +290,144 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM nsfw_acknowledgements`); n != 1 {
 		t.Errorf("nsfw acknowledgements left = %d, want 1 (the other user's)", n)
+	}
+}
+
+// TestReport_SubjectErasureKeepsTheOutcomeRow is the negative control by
+// itself, isolated from the rest of the inventory fixture: erase a user who
+// is ONLY a report subject, and the report row must still exist, closed as
+// subject_erased, with no content and no id naming them. An implementation
+// that deletes the reports row on erasure — which would make every OTHER
+// assertion in this file pass — fails exactly this one.
+func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "reporter-only")
+	subject := seedUser(t, database, "subject-only")
+	moderator := seedUser(t, database, "mod-for-950")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail) VALUES (950, 'pub-950', ?, ?, 'user', 'ref', 'spam', 'the detail')`,
+		reporter, subject); err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO report_notes (report_id, author_id, body) VALUES (950, ?, 'a note about the subject')`, moderator); err != nil {
+		t.Fatalf("seed note: %v", err)
+	}
+	if _, err := database.EraseAccount(ctx, subject, "marker-tok-subject"); err != nil {
+		t.Fatalf("EraseAccount(subject): %v", err)
+	}
+	// HP-5 review widening: the surviving row carries no content of any
+	// kind, including a note about the subject the subject never even saw.
+	var notesLeft int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = 950`).Scan(&notesLeft); err != nil {
+		t.Fatalf("count report_notes: %v", err)
+	}
+	if notesLeft != 0 {
+		t.Errorf("report_notes about the erased subject = %d, want 0", notesLeft)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE subject_token = ?`, "marker-tok-subject").Scan(&n); err != nil {
+		t.Fatalf("count by subject_token: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("reports with subject_token = %d, want 1 -- the negative control: an implementation that deletes the row fails this", n)
+	}
+	var state, outcome, detail, createdAt, closedAt string
+	if err := database.QueryRowContext(ctx,
+		`SELECT state, outcome, detail, created_at, closed_at FROM reports WHERE subject_token = ?`, "marker-tok-subject",
+	).Scan(&state, &outcome, &detail, &createdAt, &closedAt); err != nil {
+		t.Fatalf("read survivor row: %v", err)
+	}
+	if state != "subject_erased" || outcome != "subject_erased" || detail != "" || createdAt == "" || closedAt == "" {
+		t.Errorf("survivor row = state=%q outcome=%q detail=%q created_at=%q closed_at=%q, want subject_erased/subject_erased/empty/set/set",
+			state, outcome, detail, createdAt, closedAt)
+	}
+}
+
+// TestReport_ReporterErasureKeepsTheReport pins that erasing the REPORTER
+// leaves the report and its outcome exactly as they were: only the reporter
+// columns are unlinked. Decision 7 is about the subject's content; the
+// reporter's own report is not that content.
+func TestReport_ReporterErasureKeepsTheReport(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "reporter-erases")
+	subject := seedUser(t, database, "subject-stays")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, state, outcome, closed_at) VALUES (960, 'pub-960', ?, ?, 'user', 'ref', 'spam', 'kept detail', 'resolved', 'actioned', datetime('now'))`,
+		reporter, subject); err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	if _, err := database.EraseAccount(ctx, reporter, "marker-tok-reporter"); err != nil {
+		t.Fatalf("EraseAccount(reporter): %v", err)
+	}
+	var reporterID, subjectID int64
+	var reporterToken sql.NullString
+	var state, outcome, detail string
+	if err := database.QueryRowContext(ctx,
+		`SELECT reporter_id, reporter_token, subject_id, state, outcome, detail FROM reports WHERE id = 960`,
+	).Scan(&reporterID, &reporterToken, &subjectID, &state, &outcome, &detail); err != nil {
+		t.Fatalf("read report 960: %v", err)
+	}
+	if reporterID != 0 || !reporterToken.Valid || reporterToken.String != "marker-tok-reporter" {
+		t.Errorf("reporter columns = id=%d token=%v, want id 0 and the marker token", reporterID, reporterToken)
+	}
+	if subjectID != subject || state != "resolved" || outcome != "actioned" {
+		t.Errorf("report 960 after reporter erasure = subject=%d state=%q outcome=%q, want unchanged",
+			subjectID, state, outcome)
+	}
+	// HP-5 review widening: the reporter's free text is their own content
+	// and is cleared, even though the report and its outcome are not theirs.
+	if detail != "" {
+		t.Errorf("report 960 detail after reporter erasure = %q, want empty (the reporter's free text is their content)", detail)
+	}
+}
+
+// TestReport_ModeratorErasureUnlinksNotesAndAssignment covers the third
+// principal a report can name: a moderator who wrote a note or holds the
+// assignment. Their erasure unlinks both, and touches neither the reporter
+// nor the subject columns.
+func TestReport_ModeratorErasureUnlinksNotesAndAssignment(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "reporter-mod-case")
+	subject := seedUser(t, database, "subject-mod-case")
+	moderator := seedUser(t, database, "moderator-erases")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, target_type, target_ref, reason, detail, assignee_id) VALUES (970, 'pub-970', ?, ?, 'user', 'ref', 'spam', 'd', ?)`,
+		reporter, subject, moderator); err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO report_notes (report_id, author_id, body) VALUES (970, ?, 'note body')`, moderator); err != nil {
+		t.Fatalf("seed note: %v", err)
+	}
+	if _, err := database.EraseAccount(ctx, moderator, "marker-tok-mod"); err != nil {
+		t.Fatalf("EraseAccount(moderator): %v", err)
+	}
+	var assigneeID int64
+	if err := database.QueryRowContext(ctx, `SELECT assignee_id FROM reports WHERE id = 970`).Scan(&assigneeID); err != nil {
+		t.Fatalf("read assignee: %v", err)
+	}
+	if assigneeID != 0 {
+		t.Errorf("assignee_id after moderator erasure = %d, want 0", assigneeID)
+	}
+	var authorID int64
+	var authorToken sql.NullString
+	if err := database.QueryRowContext(ctx, `SELECT author_id, author_token FROM report_notes WHERE report_id = 970`).Scan(&authorID, &authorToken); err != nil {
+		t.Fatalf("read note author: %v", err)
+	}
+	if authorID != 0 || !authorToken.Valid || authorToken.String != "marker-tok-mod" {
+		t.Errorf("note author after moderator erasure = id=%d token=%v, want id 0 and the marker token", authorID, authorToken)
+	}
+	var reporterID, subjectID int64
+	if err := database.QueryRowContext(ctx, `SELECT reporter_id, subject_id FROM reports WHERE id = 970`).Scan(&reporterID, &subjectID); err != nil {
+		t.Fatalf("read report principals: %v", err)
+	}
+	if reporterID != reporter || subjectID != subject {
+		t.Errorf("reporter/subject changed by an unrelated moderator's erasure: reporter=%d (want %d) subject=%d (want %d)",
+			reporterID, reporter, subjectID, subject)
 	}
 }
 

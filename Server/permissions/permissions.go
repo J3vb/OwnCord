@@ -20,6 +20,7 @@ const (
 	BanMembers      = int64(0x80000)    // bit 19
 	MuteMembers     = int64(0x100000)   // bit 20
 	MentionEveryone = int64(0x200000)   // bit 21
+	ModerateMembers = int64(0x400000)   // bit 22 — warn and time out members, work the report queue (B5-8/B5-9)
 	ManageRoles     = int64(0x1000000)  // bit 24
 	ManageServer    = int64(0x2000000)  // bit 25
 	ManageInvites   = int64(0x4000000)  // bit 26
@@ -32,13 +33,17 @@ const (
 const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
-	MentionEveryone | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
+	MentionEveryone | ModerateMembers | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
 	Administrator
 
 // AdminPerimeter is the set of bits that admits a principal to the /admin/api
 // surface. Holding ANY one of them is enough to pass the perimeter; each route
 // group then re-checks the specific bit it needs. ManageMessages and
-// ManageInvites are excluded: neither has an admin-panel route.
+// ManageInvites are excluded: neither has an admin-panel route. ModerateMembers
+// is deliberately excluded too (B5-8 plan, decision 6/Question 5): a
+// warning-only moderator must not inherit the perimeter's read surface
+// (/stats, the /users list, /me), which re-checks nothing by design — the
+// report queue lives under /api/v1, not /admin/api.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers
 
@@ -59,6 +64,7 @@ var bitNames = map[int64]string{
 	BanMembers:      "BAN_MEMBERS",
 	MuteMembers:     "MUTE_MEMBERS",
 	MentionEveryone: "MENTION_EVERYONE",
+	ModerateMembers: "MODERATE_MEMBERS",
 	ManageRoles:     "MANAGE_ROLES",
 	ManageServer:    "MANAGE_SERVER",
 	ManageInvites:   "MANAGE_INVITES",

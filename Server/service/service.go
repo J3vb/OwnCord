@@ -38,6 +38,8 @@ type Services struct {
 	// Auth is set by the composition root once the hub exists; the admin
 	// panel's owner-only recovery issuance (B4-6) shares it.
 	Auth *AuthService
+	// Reports is the local report intake and moderator queue (B5-8).
+	Reports *ReportService
 	// Push stores Web Push subscriptions (B5-4); the composition root
 	// installs the VAPID key and the staleness TTL on it. A pointer field
 	// so Services stays comparable (admin/services_bundle_test.go compares
@@ -71,6 +73,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messages := NewMessageService(st, permSvc, limiter)
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
+	uploads := NewUploadService(st, permSvc)
 	return &Services{
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),
@@ -85,11 +88,12 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Roles:           NewRoleService(st, permSvc),
 		Emoji:           NewEmojiService(st, permSvc),
 		Settings:        NewSettingsService(st),
-		Uploads:         NewUploadService(st, permSvc),
+		Uploads:         uploads,
 		Voice:           NewVoiceService(st),
 		Tokens:          NewTokenService(st),
 		Sessions:        NewSessionService(st),
 		Setup:           NewSetupService(st),
+		Reports:         NewReportService(st, permSvc, messages, uploads, moderation, limiter),
 		Push:            NewPushService(st),
 		MessageRequests: messageRequests,
 		NSFW:            NewNSFWService(st, permSvc),

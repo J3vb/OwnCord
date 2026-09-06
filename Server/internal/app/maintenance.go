@@ -26,7 +26,10 @@ type maintenance struct {
 	erasure   *service.ErasureService
 	retention *service.RetentionService
 	uploads   *service.UploadService
-	push      *service.PushService
+	reports   *service.ReportService
+	// reportRetentionDays is moderation.report_retention_days (0 = never).
+	reportRetentionDays int
+	push                *service.PushService
 }
 
 // maintenanceStep is one sweep: name is the warning logged when run fails.
@@ -39,9 +42,10 @@ type maintenanceStep struct {
 // may be nil (a partial wiring in tests), which leaves every service-backed
 // step skipped.
 func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
-	m := &maintenance{log: log, database: database}
+	m := &maintenance{log: log, database: database, reportRetentionDays: cfg.Moderation.ReportRetentionDays}
 	if svc != nil {
 		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
+		m.reports = svc.Reports
 		m.push = svc.Push
 	}
 	// Periodically purge expired sessions and orphaned attachments.
@@ -144,6 +148,7 @@ func (m *maintenance) steps() []maintenanceStep {
 		{"backup maintenance failed", m.maintainBackups},
 		{"failed to delete orphaned attachments", m.sweepOrphans},
 		{"retention sweep failed", m.sweepRetention},
+		{"report content retention failed", m.pruneReportContent},
 		{"erasure jobs still pending", m.resumeErasure},
 		{"storage reconciliation failed", m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
@@ -241,6 +246,17 @@ func (m *maintenance) sweepRetention(ctx context.Context) error {
 		return fmt.Errorf("%w (messages=%d)", err, rep.Messages)
 	}
 	return nil
+}
+
+// pruneReportContent is B5-8's retention step (moderation.report_retention_days,
+// default 180, 0 = never): deletes the evidence and notes and clears the
+// detail of every report closed longer ago than the window. The reports row
+// itself is kept — content is bounded, the outcome is indefinite (S5-d).
+func (m *maintenance) pruneReportContent(ctx context.Context) error {
+	if m.reports == nil || m.reportRetentionDays <= 0 {
+		return nil
+	}
+	return m.reports.PruneClosedContent(ctx, time.Duration(m.reportRetentionDays)*24*time.Hour)
 }
 
 // resumeErasure runs every unfinished erasure job once (no runner is a

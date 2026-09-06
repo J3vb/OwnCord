@@ -114,6 +114,9 @@ const CHECK_SERVER = [
   // docs/architecture/community-services.md, which is outside this module, so
   // the -race run above answers a doc-only edit from cache.
   step("go", ["test", "-count=1", "./migrations/"], "Server"),
+  // Same rule, same reason: TestSchemaDocBitMapCoversEveryPermissionBit
+  // (B5-8) reads docs/schema.md's permission bit map, outside this module.
+  step("go", ["test", "-count=1", "./permissions/"], "Server"),
   optional(
     "golangci-lint",
     "golangci-lint",

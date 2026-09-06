@@ -25,14 +25,15 @@ All client-server real-time communication happens over a single WebSocket connec
 12. [Channel Focus and Read State](#channel-focus-and-read-state)
 13. [Channel Updates](#channel-updates)
 14. [Member Updates](#member-updates)
-15. [Voice Signaling](#voice-signaling)
-16. [Voice Moderation](#voice-moderation)
-17. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
-18. [Direct Messages](#direct-messages)
-19. [Server Restart](#server-restart)
-20. [Error Handling](#error-handling)
-21. [Rate Limits](#rate-limits)
-22. [Message Type Reference Table](#message-type-reference-table)
+15. [Moderation Queue](#moderation-queue)
+16. [Voice Signaling](#voice-signaling)
+17. [Voice Moderation](#voice-moderation)
+18. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
+19. [Direct Messages](#direct-messages)
+20. [Server Restart](#server-restart)
+21. [Error Handling](#error-handling)
+22. [Rate Limits](#rate-limits)
+23. [Message Type Reference Table](#message-type-reference-table)
 
 ---
 
@@ -95,7 +96,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                                                      |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`                                                                                                                                         |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
@@ -998,6 +999,37 @@ surface a TOFU mismatch.
 
 ---
 
+## Moderation Queue
+
+### mod_queue (Server -> Client)
+
+B5-8: a change in the report queue — a report filed, assigned or closed —
+delivered ONLY to connected holders of the `MODERATE_MEMBERS` permission bit
+(or `ADMINISTRATOR`). The reporter and the subject never receive this frame,
+even if one of them separately holds the bit (report confidentiality). It is
+unsequenced and never replayed: a moderator who was offline when a report
+changed gets the current queue from `GET /api/v1/moderation/queue`, not from
+reconnect replay.
+
+```json
+{
+  "type": "mod_queue",
+  "payload": {
+    "report_id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "state": "assigned"
+  }
+}
+```
+
+The payload carries only the report's opaque public id and its new state —
+never the reporter's identity, never the reported content, never the
+subject, and never the sequential internal id (a bit holder who could
+correlate `report_id` values in order could otherwise infer a report's
+position relative to reports they cannot see). `state` is one of `open`,
+`assigned`, `resolved`, `dismissed`.
+
+---
+
 ## Voice Signaling
 
 Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/state) while the actual audio/video flows through LiveKit's own WebSocket connection.
@@ -1744,6 +1776,7 @@ tables below add per-type behavioral notes.
 | `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
 | `voice_e2ee_offer`    | No       | Direct to target participant                                            |
 | `server_restart`      | Yes      | All clients                                                             |
+| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

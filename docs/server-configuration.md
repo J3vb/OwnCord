@@ -222,11 +222,21 @@ ring buffer that backs the admin panel's live log view.
 | --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
 
+### Moderation (`moderation`)
+
+The report queue's content retention window (B5-8). The `reports` row itself
+— the outcome, kept for `VIEW_AUDIT_LOG` holders and B4-10's marker
+unlinking — is never pruned; only its content is bounded.
+
+| Key                                | Type | Default | Description                                                                                                                                                                                                                                                     |
+| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning. |
+
 ## Key index (generated)
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 64 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 65 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -246,6 +256,7 @@ Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags
 | `github.repo`                               | GitHub / Updates (`github`)             |
 | `github.token`                              | GitHub / Updates (`github`)             |
 | `logging.level`                             | Logging (`logging`)                     |
+| `moderation.report_retention_days`          | Moderation (`moderation`)               |
 | `plugins.cpu_budget_ms`                     | Plugins (`plugins`)                     |
 | `plugins.directory`                         | Plugins (`plugins`)                     |
 | `plugins.enabled`                           | Plugins (`plugins`)                     |
@@ -344,6 +355,7 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_DATABASE_TYPE`                     | `database.type`                     |
 | `OWNCORD_TELEMETRY_OTLP_INSECURE`           | `telemetry.otlp_insecure`           |
 | `OWNCORD_LOGGING_LEVEL`                     | `logging.level`                     |
+| `OWNCORD_MODERATION_REPORT_RETENTION_DAYS`  | `moderation.report_retention_days`  |
 
 ## Example config.yaml
 
@@ -434,6 +446,11 @@ gif:
 # log view alike. Override without editing this file via OWNCORD_LOGGING_LEVEL.
 logging:
   level: "info" # debug | info | warn | error
+
+# Moderation: the report queue's content retention window (B5-8). The row
+# itself is kept indefinitely; only its content is bounded.
+moderation:
+  report_retention_days: 180 # days after close; 0 = never prune content
 ```
 
 ## See Also

@@ -43,6 +43,7 @@ export const ServerMessageType = {
   ROLES_UPDATE: "roles_update",
   EMOJI_UPDATE: "emoji_update",
   SERVER_RESTART: "server_restart",
+  MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
