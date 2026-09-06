@@ -127,6 +127,12 @@ func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster,
 		var (
 			req *db.MessageRequest
 			err error
+			// blockedSenderID is only set by the block action, and only when
+			// BlockUser itself committed — see MessageRequestService.Block's
+			// doc comment. Checked below regardless of err, so a block that
+			// committed but then lost the race on its own state transition
+			// still evicts the sender from voice (Codex P1-3).
+			blockedSenderID int64
 		)
 		switch action {
 		case dmRequestActionAccept:
@@ -136,7 +142,11 @@ func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster,
 		case dmRequestActionDelete:
 			req, err = svc.MessageRequests.Delete(r.Context(), user.ID, id)
 		case dmRequestActionBlock:
-			req, err = svc.MessageRequests.Block(r.Context(), user.ID, id)
+			req, blockedSenderID, err = svc.MessageRequests.Block(r.Context(), user.ID, id)
+		}
+
+		if blockedSenderID != 0 {
+			evictBlockedUserFromVoice(context.WithoutCancel(r.Context()), svc, broadcaster, user.ID, blockedSenderID)
 		}
 		if err != nil {
 			writeServiceError(r.Context(), w, err)

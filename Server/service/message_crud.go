@@ -337,8 +337,11 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	if trusted {
 		return false // today's OpenDM path
 	}
+	if hook := s.afterFirstContactTrustCheck; hook != nil {
+		hook()
+	}
 
-	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID)
+	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
 	if fcErr != nil {
 		slog.Error("MessageService.SendMessage: first-contact gate failed",
 			"err", fcErr, "recipient_id", recipientID, "sender_id", p.UserID)
@@ -347,14 +350,30 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	if req != nil {
 		result.RequestCreatedFor = append(result.RequestCreatedFor, req)
 		if result.RequestPreview == nil {
-			result.RequestPreview = &DMRequestPreview{
-				MessageID: result.MessageID,
-				Content:   result.Content,
-				Timestamp: result.Timestamp,
+			if hook := s.beforeRequestPreviewLookup; hook != nil {
+				hook(result.MessageID)
 			}
+			result.RequestPreview = s.canonicalRequestPreview(ctx, result.MessageID)
 		}
 	}
 	return true
+}
+
+// canonicalRequestPreview reads messageID fresh rather than trusting the
+// send's own cached content (Codex review round 2, P1): the WS dm_request
+// frame's preview must never disagree with the REST inbox's
+// (db.DB.ListPendingMessageRequests joins first_message_id with
+// deleted = 0) — building it from cached content let a delete racing the
+// frame leave a stale, since-deleted preview on the wire while REST already
+// reported preview: null for the very same request. nil (no preview on the
+// frame) when the message cannot be read or has since been deleted —
+// exactly ListPendingMessageRequests' own condition.
+func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
+	msg, err := s.st.GetMessage(ctx, messageID)
+	if err != nil || msg == nil || msg.Deleted {
+		return nil
+	}
+	return &DMRequestPreview{MessageID: msg.ID, Content: msg.Content, Timestamp: msg.Timestamp}
 }
 
 // dmAudience is the live-delivery audience for a DM frame senderID's action
@@ -461,6 +480,14 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: leaving ParticipantIDs nil here made
+			// dmEventOrFallback (ws/handlers_chat.go) treat the empty slice
+			// as "no explicit audience" and fall back to the plain
+			// per-channel-topic broadcast — reaching anyone subscribed to
+			// the DM's topic (channel_focus is participant-gated, not
+			// trust-gated) regardless of the first-contact gate. Fail closed
+			// to the editor only instead.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}
@@ -614,6 +641,12 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: see EditMessage's identical comment — an empty
+			// ParticipantIDs here would make dmEventOrFallback broadcast the
+			// chat_deleted over the plain channel topic instead, reaching an
+			// untrusted recipient subscribed to it. Fail closed to the
+			// deleter only.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}

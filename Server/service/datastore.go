@@ -244,6 +244,7 @@ type Store interface {
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
@@ -262,7 +263,7 @@ type Store interface {
 	// ── Message requests (migration 046, B5-6) ──
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
-	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID int64) (bool, error)
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error)
 	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
 	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
 	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)

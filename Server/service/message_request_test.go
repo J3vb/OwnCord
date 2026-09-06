@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -141,6 +142,38 @@ func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
 	}
 }
 
+// TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent is Codex
+// review round 2, P1: canonicalRequestPreview must read the held message
+// fresh, not the send's own cached content, so a delete racing the exact
+// window between the request being staged and the frame's preview being
+// built comes back nil (matching REST's own preview: null for a deleted
+// original) rather than carrying the deleted text. beforeRequestPreviewLookup
+// fires in that exact window, with the message id about to be read.
+func TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent(t *testing.T) {
+	_, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+
+	svc.Messages.beforeRequestPreviewLookup = func(messageID int64) {
+		if _, err := svc.Messages.DeleteMessage(ctx, 1, messageID); err != nil {
+			t.Fatalf("DeleteMessage (racing the preview lookup): %v", err)
+		}
+	}
+	defer func() { svc.Messages.beforeRequestPreviewLookup = nil }()
+
+	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "racing content",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(sendResult.RequestCreatedFor) != 1 {
+		t.Fatalf("RequestCreatedFor = %v, want exactly one", sendResult.RequestCreatedFor)
+	}
+	if sendResult.RequestPreview != nil {
+		t.Errorf("RequestPreview = %+v, want nil (the message was deleted before the canonical lookup ran)", sendResult.RequestPreview)
+	}
+}
+
 // TestMessageRequest_ResendAfterIgnoreCreatesNothing: one row per pair ever
 // (decision 5) — a second send while the request is ignored creates no
 // second request and no second notification.
@@ -223,7 +256,8 @@ var dmRequestActions = map[string]dmRequestActionFn{
 		return svc.MessageRequests.Delete(ctx, r, id)
 	},
 	"block": func(svc *Services, ctx context.Context, r, id int64) (*db.MessageRequest, error) {
-		return svc.MessageRequests.Block(ctx, r, id)
+		req, _, err := svc.MessageRequests.Block(ctx, r, id)
+		return req, err
 	},
 }
 
@@ -288,44 +322,70 @@ func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
 	}
 }
 
-// TestMessageRequest_ConcurrentDecisionsOneWins: two goroutines decide the
-// same pending row at once — exactly one 200, one 409, and the trust
-// bookkeeping reflects whichever one actually won, never both.
-func TestMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
+// TestMessageRequest_ConcurrentFirstSendsProduceOneRequest: two concurrent
+// first sends from the same untrusted sender must produce exactly one
+// message_requests row and hand the creation frame (a non-empty
+// RequestCreatedFor) to exactly one of the two callers — Codex P2-8. The
+// afterFirstContactTrustCheck test seam is an acknowledged 2-party barrier:
+// each send's goroutine blocks at the hook (right after its own trust read
+// comes back false) until BOTH have arrived, so neither can reach
+// firstContact's insert before the other has already committed to racing it
+// — a genuine forced overlap rather than two goroutines that might simply
+// run one after the other. CreateMessageRequest's INSERT OR IGNORE against
+// UNIQUE(sender_id, recipient_id) is what actually resolves the race.
+func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
-	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
-		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
+	barrier := make(chan struct{})
+	var arrived atomic.Int32
+	svc.Messages.afterFirstContactTrustCheck = func() {
+		if arrived.Add(1) == 2 {
+			close(barrier)
+		}
+		<-barrier
 	}
-	id := sendResult.RequestCreatedFor[0].ID
+	defer func() { svc.Messages.afterFirstContactTrustCheck = nil }()
 
-	var acceptErr, ignoreErr error
 	var wg sync.WaitGroup
+	results := make([]*SendMessageResult, 2)
+	errs := make([]error, 2)
 	wg.Add(2)
-	go func() { defer wg.Done(); _, acceptErr = svc.MessageRequests.Accept(ctx, 2, id) }()
-	go func() { defer wg.Done(); _, ignoreErr = svc.MessageRequests.Ignore(ctx, 2, id) }()
+	for i := range 2 {
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = svc.Messages.SendMessage(ctx, SendMessageParams{
+				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+			})
+		}()
+	}
 	wg.Wait()
 
-	acceptWon, ignoreWon := acceptErr == nil, ignoreErr == nil
-	if acceptWon == ignoreWon {
-		t.Fatalf("expected exactly one winner: acceptErr=%v ignoreErr=%v", acceptErr, ignoreErr)
-	}
-	if acceptWon && !errors.Is(ignoreErr, ErrConflict) {
-		t.Errorf("ignore (loser) = %v, want ErrConflict", ignoreErr)
-	}
-	if ignoreWon && !errors.Is(acceptErr, ErrConflict) {
-		t.Errorf("accept (loser) = %v, want ErrConflict", acceptErr)
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
 	}
 
-	wantAccepted := 0
-	if acceptWon {
-		wantAccepted = 1
+	created := 0
+	for i, r := range results {
+		if len(r.RequestCreatedFor) > 1 {
+			t.Errorf("send %d: RequestCreatedFor = %v, want at most one", i, r.RequestCreatedFor)
+		}
+		if len(r.RequestCreatedFor) > 0 {
+			created++
+		}
 	}
-	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE source = 'accepted'`); n != wantAccepted {
-		t.Errorf("accepted-source trusted_senders rows = %d, want %d", n, wantAccepted)
+	if created != 1 {
+		t.Errorf("sends carrying a creation frame = %d, want exactly 1", created)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM message_requests`); n != 1 {
+		t.Errorf("message_requests rows = %d, want 1", n)
+	}
+	// trusted_senders(recipient=sender, sender=recipient, "sent_first"): the
+	// original sender (alice, 1) initiated, so trusts the recipient's (bob,
+	// 2) eventual reply — see db.CreateMessageRequest's own comment.
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 1 AND sender_id = 2 AND source = 'sent_first'`); n != 1 {
+		t.Errorf("sent_first trusted_senders rows = %d, want 1", n)
 	}
 }

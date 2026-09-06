@@ -1436,9 +1436,13 @@ B5-6, one-to-one DMs only. Sent to the **recipient** in two situations:
   not yet trust (`docs/schema.md` migration `046`) stages a `message_requests`
   row instead of opening the conversation, and the recipient gets this frame
   with `preview` set. A resend while the request is still pending, or after
-  it was ignored/deleted/blocked, creates no second row and sends nothing
+  it was ignored or deleted, creates no second row and sends nothing
   (decision 5) — the sender's own frames (`chat_send_ok`, `chat_message`) are
-  unaffected either way, and the sender never learns which case they hit.
+  unaffected either way, and the sender never learns which of the two cases
+  they hit. `blocked` is not part of this silence (Codex P2-9): a resend from
+  a blocked sender never reaches this gate at all — it is refused up front
+  with `ErrBlocked` by the existing, pre-B5-6 block check, which the sender
+  does see.
 - **On every transition**, with the new `state` and `preview: null` (the held
   message never changes): `accept` (`dm_channel_open` is sent first, then
   this), `ignore`, `delete`, `block` — see `docs/api.md`'s "Message Requests"
@@ -1483,12 +1487,15 @@ persisted source of truth, rather than the replay ring buffer. Unlike
 `dm_request` does not strand a channel a full resync is needed to see, the
 REST inbox already has it.
 
-**The recipient's client must render this with every automatic media, embed
-and link-preview fetch suppressed** — decision 4's "safely previewed": the
-sender's profile and the message text are shown, nothing the client would
-otherwise auto-fetch from the message body runs until the recipient accepts
-(B9 implements the client half; this frame carries the flag by construction —
-there is nothing else in the payload for a client to fetch from).
+**The recipient's client must render this with every automatic media, embed,
+link-preview and avatar fetch suppressed** — decision 4's "safely previewed":
+`sender.avatar` can be an external URL (Codex P3-10), so fetching it is
+exactly the kind of network request to a stranger-controlled endpoint this
+frame exists to withhold, same as any link or embed in the message body.
+Nothing the client would otherwise auto-fetch runs until the recipient
+accepts (B9 implements the client half; this frame carries the flag by
+construction — the suppression list above is exhaustive over what the
+payload contains to fetch from).
 
 **The sender receives nothing from this path, ever** — not a hint that a
 request exists, not its state, not whether it was ever decided.

@@ -8,10 +8,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// seedMessageRequestPair creates two users and a one-to-one DM channel
-// between them, returning their ids and the channel id. No trust row exists
-// for either direction.
-func seedMessageRequestPair(t *testing.T, database *db.DB, senderName, recipientName string) (senderID, recipientID, channelID int64) {
+// seedMessageRequestPair creates two users, a one-to-one DM channel between
+// them, and a first message in it — CreateMessageRequest's first_message_id
+// (Codex P1-4/P2-6) has a NOT-nullable FK to messages(id), so every request
+// needs a real row to name. No trust row exists for either direction.
+func seedMessageRequestPair(t *testing.T, database *db.DB, senderName, recipientName string) (senderID, recipientID, channelID, messageID int64) {
 	t.Helper()
 	senderID = seedUser(t, database, senderName)
 	recipientID = seedUser(t, database, recipientName)
@@ -19,13 +20,17 @@ func seedMessageRequestPair(t *testing.T, database *db.DB, senderName, recipient
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	return senderID, recipientID, ch.ID
+	messageID, err = database.CreateMessage(context.Background(), ch.ID, senderID, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	return senderID, recipientID, ch.ID, messageID
 }
 
 func TestIsTrustedSender_TrustSender(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, _ := seedMessageRequestPair(t, database, "mrq-trust-sender", "mrq-trust-recipient")
+	sender, recipient, _, _ := seedMessageRequestPair(t, database, "mrq-trust-sender", "mrq-trust-recipient")
 
 	if trusted, err := database.IsTrustedSender(ctx, recipient, sender); err != nil || trusted {
 		t.Fatalf("IsTrustedSender before any trust row = %v, %v; want false, nil", trusted, err)
@@ -55,13 +60,13 @@ func TestIsTrustedSender_TrustSender(t *testing.T) {
 func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-create-sender", "mrq-create-recipient")
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-create-sender", "mrq-create-recipient")
 
-	created, err := database.CreateMessageRequest(ctx, sender, recipient, channelID)
+	created, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
 	if err != nil || !created {
 		t.Fatalf("first CreateMessageRequest = %v, %v; want true, nil", created, err)
 	}
-	created, err = database.CreateMessageRequest(ctx, sender, recipient, channelID)
+	created, err = database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
 	if err != nil || created {
 		t.Fatalf("second CreateMessageRequest = %v, %v; want false, nil (one row per pair, ever)", created, err)
 	}
@@ -76,17 +81,50 @@ func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	created, err = database.CreateMessageRequest(ctx, sender, third, otherCh.ID)
+	otherMsgID, err := database.CreateMessage(ctx, otherCh.ID, sender, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	created, err = database.CreateMessageRequest(ctx, sender, third, otherCh.ID, otherMsgID)
 	if err != nil || !created {
 		t.Fatalf("CreateMessageRequest for a different pair = %v, %v; want true, nil", created, err)
+	}
+}
+
+// TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically is Codex
+// P2-6: the request insert and the sent_first trust write happen in the
+// same transaction, so a caller that observes created=true has also always
+// already committed the trust row — there is no window where one exists
+// without the other.
+func TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-atomic-sender", "mrq-atomic-recipient")
+
+	created, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	if err != nil || !created {
+		t.Fatalf("CreateMessageRequest = %v, %v; want true, nil", created, err)
+	}
+	if n := countRowsMR(t, database, `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? AND recipient_id = ?`, sender, recipient); n != 1 {
+		t.Errorf("message_requests rows = %d, want 1", n)
+	}
+	// trusted_senders(recipient=sender, sender=recipient, "sent_first"): the
+	// original sender initiated, so trusts the recipient's eventual reply.
+	if trusted, err := database.IsTrustedSender(ctx, sender, recipient); err != nil || !trusted {
+		t.Errorf("IsTrustedSender(sender, recipient) after CreateMessageRequest = %v, %v; want true, nil", trusted, err)
+	}
+	var source string
+	if err := database.QueryRowContext(ctx, `SELECT source FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`,
+		sender, recipient).Scan(&source); err != nil || source != "sent_first" {
+		t.Errorf("trust source = %q, %v; want \"sent_first\"", source, err)
 	}
 }
 
 func TestGetMessageRequest_ScopedToRecipient(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-get-sender", "mrq-get-recipient")
-	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID); err != nil {
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-get-sender", "mrq-get-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 	byPair, err := database.GetMessageRequestByPair(ctx, sender, recipient)
@@ -120,12 +158,12 @@ func TestGetMessageRequest_ScopedToRecipient(t *testing.T) {
 func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-list-sender", "mrq-list-recipient")
+	sender, recipient, channelID, _ := seedMessageRequestPair(t, database, "mrq-list-sender", "mrq-list-recipient")
 	msgID, err := database.CreateMessage(ctx, channelID, sender, "hello there", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID); err != nil {
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 
@@ -164,11 +202,46 @@ func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
 	}
 }
 
+// TestListPendingMessageRequests_DeletedOriginalHasNoPreview is Codex P1-4:
+// a request whose held message has since been soft-deleted (deleted = 1,
+// content untouched — DeleteMessage never clears it) must report no preview
+// at all, never the deleted content.
+func TestListPendingMessageRequests_DeletedOriginalHasNoPreview(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-delpreview-sender", "mrq-delpreview-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
+		t.Fatalf("CreateMessageRequest: %v", err)
+	}
+
+	if err := database.DeleteMessage(ctx, msgID, sender, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	// The row's content survives soft delete — this is what would leak
+	// without the query's own deleted = 0 filter.
+	var content string
+	if err := database.QueryRowContext(ctx, `SELECT content FROM messages WHERE id = ?`, msgID).Scan(&content); err != nil || content == "" {
+		t.Fatalf("sanity: deleted message content = %q, %v; want the original text still there", content, err)
+	}
+
+	views, err := database.ListPendingMessageRequests(ctx, recipient)
+	if err != nil {
+		t.Fatalf("ListPendingMessageRequests: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("views = %d, want 1 (the request itself is unaffected by the message's deletion)", len(views))
+	}
+	v := views[0]
+	if v.PreviewMessageID != 0 || v.PreviewContent != "" || v.PreviewTimestamp != "" {
+		t.Errorf("preview for a deleted original = %+v, want all empty (no preview)", v)
+	}
+}
+
 func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-transition-sender", "mrq-transition-recipient")
-	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID); err != nil {
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-transition-sender", "mrq-transition-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
@@ -191,8 +264,8 @@ func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
 		t.Fatalf("transition on an already-decided row = %v, %v; want false, nil", ok, err)
 	}
 	// Wrong recipient: the guarded UPDATE matches nothing either.
-	sender2, recipient2, channelID2 := seedMessageRequestPair(t, database, "mrq-transition-sender2", "mrq-transition-recipient2")
-	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2); err != nil {
+	sender2, recipient2, channelID2, msgID2 := seedMessageRequestPair(t, database, "mrq-transition-sender2", "mrq-transition-recipient2")
+	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2, msgID2); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 	req2, err := database.GetMessageRequestByPair(ctx, sender2, recipient2)
@@ -215,8 +288,8 @@ func TestMessageRequest_ErasingEitherPartyRemovesRequestAndTrust(t *testing.T) {
 		t.Run(eraseWho, func(t *testing.T) {
 			database := openMigratedMemory(t)
 			ctx := context.Background()
-			sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-erase-sender-"+eraseWho, "mrq-erase-recipient-"+eraseWho)
-			if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID); err != nil {
+			sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-erase-sender-"+eraseWho, "mrq-erase-recipient-"+eraseWho)
+			if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 				t.Fatalf("CreateMessageRequest: %v", err)
 			}
 			if err := database.TrustSender(ctx, sender, recipient, "sent_first"); err != nil {
@@ -253,8 +326,8 @@ func countRowsMR(t *testing.T, database *db.DB, query string, args ...any) int {
 func TestAcceptMessageRequest(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	sender, recipient, channelID := seedMessageRequestPair(t, database, "mrq-accept-sender", "mrq-accept-recipient")
-	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID); err != nil {
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-accept-sender", "mrq-accept-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
@@ -287,8 +360,8 @@ func TestAcceptMessageRequest(t *testing.T) {
 		t.Errorf("AcceptMessageRequest(unknown id) = %v, want ErrNotFound", err)
 	}
 	// Wrong recipient: ErrNotFound, not ErrConflict — the row is not theirs.
-	sender2, recipient2, channelID2 := seedMessageRequestPair(t, database, "mrq-accept-sender2", "mrq-accept-recipient2")
-	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2); err != nil {
+	sender2, recipient2, channelID2, msgID2 := seedMessageRequestPair(t, database, "mrq-accept-sender2", "mrq-accept-recipient2")
+	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2, msgID2); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 	req2, err := database.GetMessageRequestByPair(ctx, sender2, recipient2)
@@ -298,4 +371,57 @@ func TestAcceptMessageRequest(t *testing.T) {
 	if _, err := database.AcceptMessageRequest(ctx, req2.ID, sender2); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("AcceptMessageRequest(by the sender) = %v, want ErrNotFound", err)
 	}
+}
+
+// TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound
+// exercises the generic (non sql.ErrNoRows) error branch every read/write in
+// this file wraps: closing the database is the standard, cheap way to force
+// a real driver error (sql.ErrConnDone) without a fault-injection seam, and
+// proves none of these mistake it for ErrNotFound/ErrConflict.
+func TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-closed-sender", "mrq-closed-recipient")
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
+		t.Fatalf("CreateMessageRequest: %v", err)
+	}
+	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+	if err != nil {
+		t.Fatalf("GetMessageRequestByPair: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	notFoundLike := func(label string, err error) {
+		t.Helper()
+		if err == nil || errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrConflict) {
+			t.Errorf("%s on a closed db = %v, want a generic driver error, not nil/ErrNotFound/ErrConflict", label, err)
+		}
+	}
+
+	if _, err := database.IsTrustedSender(ctx, recipient, sender); err == nil {
+		t.Error("IsTrustedSender on a closed db = nil, want a driver error")
+	}
+	notFoundLike("TrustSender", database.TrustSender(ctx, recipient, sender, "accepted"))
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err == nil {
+		t.Error("CreateMessageRequest on a closed db = nil, want a driver error")
+	}
+	if _, err := database.GetMessageRequest(ctx, req.ID, recipient); err == nil {
+		t.Error("GetMessageRequest on a closed db = nil, want a driver error")
+	} else {
+		notFoundLike("GetMessageRequest", err)
+	}
+	if _, err := database.GetMessageRequestByPair(ctx, sender, recipient); err == nil {
+		t.Error("GetMessageRequestByPair on a closed db = nil, want a driver error")
+	} else {
+		notFoundLike("GetMessageRequestByPair", err)
+	}
+	if _, err := database.ListPendingMessageRequests(ctx, recipient); err == nil {
+		t.Error("ListPendingMessageRequests on a closed db = nil, want a driver error")
+	}
+	if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, "ignored"); err == nil {
+		t.Error("TransitionMessageRequest on a closed db = nil, want a driver error")
+	}
+	notFoundLike("AcceptMessageRequest", func() error { _, err := database.AcceptMessageRequest(ctx, req.ID, recipient); return err }())
 }

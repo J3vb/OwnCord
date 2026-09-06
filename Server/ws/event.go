@@ -108,10 +108,14 @@ type BroadcastAllEvent interface {
 // VoiceVisibilityEvent routes to Hub.broadcastVoiceEvent: server-wide in scope,
 // but delivered only to clients whose role may READ the named channel, and
 // tagged with it so reconnect replay filters it the same way. MUST be checked
-// before BroadcastAllEvent, which it would otherwise satisfy.
+// before BroadcastAllEvent, which it would otherwise satisfy. UserID is the
+// event's subject (whose voice state changed) — B5-6's sender-aware DM
+// audience needs it to filter a one-to-one DM voice call the same way chat
+// does; every other channel type ignores it.
 type VoiceVisibilityEvent interface {
 	Event
 	VisibleChannelID() int64
+	UserID() int64
 	Payload() []byte
 }
 
@@ -348,11 +352,13 @@ func (e ReactionDMEvent) Payload() []byte { return e.payload }
 // may READ the voice channel it describes. Satisfies VoiceVisibilityEvent.
 type VoiceStateEvent struct {
 	voiceChannelID int64
+	userID         int64
 	payload        []byte
 }
 
 func (e VoiceStateEvent) EventType() string       { return MsgTypeVoiceState }
 func (e VoiceStateEvent) VisibleChannelID() int64 { return e.voiceChannelID }
+func (e VoiceStateEvent) UserID() int64           { return e.userID }
 func (e VoiceStateEvent) Payload() []byte         { return e.payload }
 
 // PluginBroadcastEvent is a plugin slash-command result broadcast to a channel
@@ -366,6 +372,27 @@ type PluginBroadcastEvent struct {
 func (e PluginBroadcastEvent) EventType() string { return MsgTypePluginBroadcast }
 func (e PluginBroadcastEvent) ChannelID() int64  { return e.channelID }
 func (e PluginBroadcastEvent) Payload() []byte   { return e.payload }
+
+// PluginBroadcastDMEvent is PluginBroadcastEvent's DM sibling (B5-6, Codex
+// P1-2): a plugin command invoked inside a DM must reach the sender-aware
+// DM audience (participantIDs), never the plain per-channel-topic fan-out
+// PluginBroadcastEvent uses — an untrusted recipient can be subscribed to a
+// DM channel's topic (channel_focus is participant-gated, not trust-gated)
+// even though they are excluded from every other DM frame from that channel.
+type PluginBroadcastDMEvent struct {
+	channelID      int64
+	participantIDs []int64
+	payload        []byte
+}
+
+func (e PluginBroadcastDMEvent) EventType() string { return MsgTypePluginBroadcast }
+func (e PluginBroadcastDMEvent) ChannelID() int64  { return e.channelID }
+func (e PluginBroadcastDMEvent) ParticipantIDs() []int64 {
+	dst := make([]int64, len(e.participantIDs))
+	copy(dst, e.participantIDs)
+	return dst
+}
+func (e PluginBroadcastDMEvent) Payload() []byte { return e.payload }
 
 // VoiceE2EEAnnounceEvent relays an ECDH public key to other voice channel participants.
 type VoiceE2EEAnnounceEvent struct {

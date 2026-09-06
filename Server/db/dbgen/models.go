@@ -165,13 +165,14 @@ type MessageMention struct {
 }
 
 type MessageRequest struct {
-	ID          int64   `json:"id"`
-	SenderID    int64   `json:"senderId"`
-	RecipientID int64   `json:"recipientId"`
-	ChannelID   int64   `json:"channelId"`
-	State       string  `json:"state"`
-	CreatedAt   string  `json:"createdAt"`
-	DecidedAt   *string `json:"decidedAt"`
+	ID             int64   `json:"id"`
+	SenderID       int64   `json:"senderId"`
+	RecipientID    int64   `json:"recipientId"`
+	ChannelID      int64   `json:"channelId"`
+	FirstMessageID *int64  `json:"firstMessageId"`
+	State          string  `json:"state"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
 }
 
 type MessagesFt struct {

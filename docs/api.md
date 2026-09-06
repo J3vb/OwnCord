@@ -1661,13 +1661,16 @@ B5-6: the first message from a sender the recipient does not yet trust, in a
 Group DMs are untouched. Existing one-to-one DM pairs were grandfathered as
 trusted when `046` applied, so no live conversation broke on upgrade.
 
-**The sender's side is byte-identical regardless of the recipient's
-decision** (decision 5, `docs/architecture/community-services.md` section
+**The sender's side is byte-identical across `pending`, `ignored` and
+`deleted`** (decision 5, `docs/architecture/community-services.md` section
 S1): `chat_send_ok`, `chat_message`, `GET /api/v1/dms` and
 `GET /channels/{id}/messages` are the same whether the request ends up
-pending, ignored, deleted or blocked. A sender can never distinguish the
-three terminal non-accepted states from one another, or from a request
-nobody has looked at yet — silence, not a rejection.
+pending, ignored or deleted. A sender can never distinguish those three
+states from one another, or from a request nobody has looked at yet —
+silence, not a rejection. `block` is not part of this claim: a blocked
+sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
+the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
+and it is visible to the sender by design.
 
 Transitions are **recipient-only** and legal **only from `pending`**:
 

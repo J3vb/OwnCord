@@ -1646,6 +1646,142 @@ service-level gate will not break the fixture — and the green fixture
 therefore **proves nothing** about the gate. Write the coverage; do not read
 the fixture as evidence.
 
+**Evidence, 2026-09-06** — branch `feature/b5-6-message-requests` from `dev`
+`a504d61e`, **behind HP-5**: draft PR to `dev` #1549, never merged before
+the owner signs the scorecard; commits `4b7635b8` (the feature), `be48ff25`
+(the independent review round) and `61d9696c` (its verification round). The premise the plan corrected held at the
+base: first contact happens at `sendMessageDMSideEffects`' `OpenDM`
+accumulation in `message_crud.go`, not in `CreateDM` — and the review found
+that `CreateDM` itself was a second door (below). The two gates already there,
+`IsEffectivelyBanned` and `IsEitherBlocked`, sit untouched in front of the new
+one.
+
+- **The tables.** Migration `046_message_requests.sql` is the HP-5 draft plus
+  one column, `message_requests.first_message_id` (nullable, `ON DELETE SET
+NULL`), so the socket frame and the REST inbox preview the same message
+  under concurrent first sends — the review found the two transports could
+  disagree. `trusted_senders(recipient, sender, source)` with `accepted`,
+  `sent_first` and `grandfathered`; every existing one-to-one pair is
+  grandfathered in both directions and group DMs are left alone
+  (`TestMigration046_GrandfathersEveryOneToOnePair`). Reversal first in
+  `rollback.Order` with its cost row; both tables in `erasureStatements` and
+  `SubjectInventory` (`14c`, `14d`), both principals, with survivors seeded —
+  the explicit statements are redundant with the cascades, which is why the
+  inventory's zero is the proof, not the statement.
+- **The gate, and where it sits.** For a one-to-one DM whose recipient does
+  not trust the sender, `sendMessageDMSideEffects` calls no `OpenDM` for the
+  recipient, sends no `dm_channel_open`, and excludes the recipient from the
+  delivery audience; it creates the request (or finds the pair's existing row
+  in any state and does nothing) and writes `trusted_senders(sender,
+recipient, sent_first)` in the **same transaction**, so the reply is not a
+  request back (`TestMessageRequest_SentFirstMeansTheReplyIsNotARequest`,
+  `TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically`). The
+  recipient receives exactly one `dm_request` frame, on creation
+  (`TestMessageRequest_ResendAfterIgnoreCreatesNothing`,
+  `TestMessageRequest_ConcurrentFirstSendsProduceOneRequest`). A banned
+  recipient gets no row and no frame — that is what "cannot receive DMs" is
+  today; no finer predicate exists (`TestMessageRequest_BannedRecipientGetsNoRequest`);
+  a blocked sender is refused by the existing gate before any of this runs
+  (`TestMessageRequest_BlockedSenderCreatesNoRequest`).
+- **One audience, every path.** `DMAudience` — the sender plus every
+  participant who trusts the sender, or everyone for a group — feeds the
+  `chat_message`, edit, delete, reaction and typing paths
+  (`TestMessageRequest_UntrustedRecipientHearsNothingButTheRequest`), and,
+  after the review, `RingTargets` (`TestCallRing_UntrustedRecipientDoesNotRing`),
+  DM `voice_state` (`TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient`),
+  plugin command broadcasts
+  (`TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient`) and
+  reconnect replay. An audience lookup error fails **closed**, to the actor
+  alone, never to a channel broadcast
+  (`TestEditMessage_DMAudienceErrorFailsClosedToEditor`,
+  `TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter`).
+- **The second door.** `CreateDM` opened both sides and `handleCreateDM`
+  sent the recipient `dm_channel_open` at once, so the recipient's DM list
+  showed the channel — with `last_message` and unread fields — before a first
+  message ever reached the gate. Now the recipient's visibility is decided
+  **inside the creation transaction** (`GetOrCreateDMChannelGated` reads the
+  trust row on the same handle before the open-state insert; the first fix
+  closed the recipient's side afterwards, and the verification round found
+  that a failure between the two left it open): when the creator is not
+  trusted, only the creator's side opens and no frame goes to the recipient;
+  their side opens at acceptance, exactly once (`TestCreateDM_Untrusted_DoesNotNotifyRecipientOrOpenTheirSide`,
+  `TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay`, end to end
+  through creation, a first send and a reconnect).
+- **Transitions.** Recipient only, from `pending` only, a guarded `UPDATE`;
+  the loser of a race gets `409` (`TestMessageRequest_OnlyPendingTransitions`,
+  `TestMessageRequest_OnlyRecipientDecides`,
+  `TestMessageRequest_ConcurrentDecisionsOneWins` — forced through a guard
+  hook that holds the writer between the check and the write, so the test
+  cannot pass sequentially). `accept` writes the trust row, opens the
+  recipient's side and transitions in one transaction, then sends
+  `dm_channel_open` (`TestMessageRequest_AcceptOpensAndDelivers`,
+  `TestMessageRequest_AcceptDoesNotResurrectDeletedContent`). `ignore` and
+  `delete` are the same server-side: nothing shown, nothing sent, later
+  messages accumulate silently. `block` runs `BlockService.BlockUser` and the
+  same voice eviction the blocks endpoint performs, even when the transition
+  loses a race (`TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice`,
+  `_EvictsEvenWhenTransitionLosesRace`). Every transition reaches the
+  recipient's live socket as `dm_request` with the new state
+  (`TestNewRouter_DMRequestTransition_ReachesLiveConnection`).
+- **Decision 5, measured.** The sender's `chat_send_ok`, `chat_message`,
+  `GET /api/v1/dms` and message history are compared across `pending`,
+  `ignored`, `deleted` and a trusted control, with only ids and timestamps
+  normalised and the DM list's content and unread fields compared
+  (`TestMessageRequest_SenderViewIsByteIdentical`,
+  `TestMessageRequest_SenderRESTViewIsByteIdentical`). `blocked` is outside
+  the claim: a blocked sender's later sends fail on the pre-existing gate, and
+  that denial is visible by design.
+- **The preview.** `first_message_id` joined with `deleted = 0`: a deleted
+  original yields `preview: null` on both transports
+  (`TestListPendingMessageRequests_DeletedOriginalHasNoPreview`). The frame
+  carries the sender's profile, and `docs/protocol.md` tells the client to
+  suppress every automatic fetch when rendering it — avatar included, since
+  `sender.avatar` can be an external URL.
+- **Protocol.** One new server→client type, `dm_request`, unsequenced and
+  not replayed; no client→server command (every mutation is REST). Two new
+  epoch-1 journeys, `dm-request` and `dm-request-ignored`, record the
+  recipient's one frame and then its silence and the sender's sameness;
+  `dm-send.json` is byte-identical — its journey now trusts its pair
+  explicitly, because it creates its DM below the service and would otherwise
+  have started recording a different journey. As the plan warned, that
+  fixture proved nothing about the gate and proves nothing now.
+- **An independent review**, briefed on S1's abuse table, found four P1s and
+  six P2/P3s, fixed in `be48ff25`, and its verification round five partials
+  fixed in `61d9696c` — the creation transaction above, ring and voice-state
+  audiences that fell open to every participant on a lookup error, a socket
+  preview built from the cached send rather than the deleted-aware lookup
+  REST uses, and two concurrency tests that could pass without overlapping
+  (now forced through acknowledged barriers, the hook moved off the shipped
+  surface into the `db` package's own tests). The first round: the creation door above; the ring,
+  voice-state and plugin fan-out bypasses; block without voice eviction; a
+  deleted original surviving in the preview; audience errors falling open to a
+  channel broadcast; a non-atomic first contact and a non-canonical preview;
+  identity tests that measured before deciding; a concurrency test that could
+  pass sequentially; and the `blocked` state wrongly inside the silence claim.
+- **Revert-proof, eleven mutations**: the trust check, the `sent_first` row,
+  the typing filter, the `pending` guard, the accept transaction split, the
+  `INSERT OR IGNORE` made plain (caught at the db layer, not the service
+  layer, and said so), creation opening both sides, the ring filter, the
+  deleted-preview clause, the fail-open fallback. The `trusted_senders`
+  erasure statement is the one mutation with no red test: the cascade covers
+  it, as it does `user_blocks`.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs`, `check-migrations` (046 extends `dev`'s 045 in order),
+  prettier from the worktree root, the coverage floor (`db` lifted by direct
+  wrapper tests; `ws` reads under floor on Windows by the documented gap).
+
+**What B5-7 inherits.** `DMAudience` is the one DM delivery helper — a
+content gate for labelled channels composes with it rather than beside it.
+`MessageService.messageRequests == nil` disables the gate for the many tests
+that build the service by hand; production wiring is `service.New` and a
+test proves it.
+
+**Not included, deliberately.** Group-DM invitations (decision 4), guild
+mentions from an untrusted stranger (a different surface), a distinguishable
+rejection of any kind (decision 5), a `Client/` file, a findings-ledger row.
+
 ## B5-7 — NSFW label and per-user acknowledgement, enforced server-side
 
 **Closes:** BPR-063; BG-18's server half. **Blocked by:** HP-5. **Decisions:** decision 13 — settled. **Size:** **6–8 days** — the first draft said two, and a
@@ -1872,6 +2008,68 @@ meet:
 
 Each amendment is dated, carries the owner's ruling, and goes in this step's
 PR — not silently into a later one.
+
+**Evidence, 2026-09-05** — branch `docs/b5-12-register-roadmap` from `dev`
+`123b07d8`; PR to `dev` #1546.
+
+- **The five `OC-*` rows.** Before: each carried only its original acceptance
+  criteria, with nothing in the row itself showing rule 2 was already
+  satisfied. Now: each cell opens `**Fixed** — ledger `fixed`, closed by
+<step> (#pr, `sha`), test <fix.test>.`, ledger fields verbatim. OC-0323 and
+  OC-0357 share `fix.commit` `074aea0`, confirmed inside PR #1483's commit
+  list, squashed to `dev` as B3-8's `4585d52c`. OC-0327, OC-0349 and OC-0351
+  all share `fix.commit` `0c610f61`; `git log --grep` alone found it only for
+  OC-0351 (`#1530`), but `gh pr view 1530 --json commits` lists `0c610f61` in
+  its commit set, so all three close there, squashed as `1edd777f` — resolving
+  the plan's "check #1436/#1471" note: neither PR's commit list actually
+  contains it. The ledger's `fix.test` for those three is the placeholder
+  string "per-group tests added alongside each fix; see the commit", so their
+  rows cite the PR instead: "tests: the per-finding tests in #1530 (the ledger
+  records no path)".
+- **SEC-02.** Before: closure text cited "B5 item 11" (SEC-03's item, not
+  SEC-02's). Now: text names B2-5 (#1440) for the landed server half and
+  re-tags the UI remainder to B9 (Moderation Center, BPR-071's client half,
+  "no B5 step touches client UI"); Phase `B5` → `B9`, State unchanged.
+- **SEC-03.** Before: Phase `B5`, one closure line. Now: Phase `B5/B7`; the
+  closure line splits per decisions 1 and 2 — server boundary closed by B5-1
+  (#1541, `Server/safefetch`), aggregate cross-caller budgets, cache eviction
+  and the desktop broker (C-09 clauses 1, 7, 8) deferred to B7.
+  `docs/trust-model.md`'s C-09 `Status:` line gets the matching
+  cross-reference appended so it names the same split back.
+- **SEC-04.** Before: Phase `B3/B6`. Now: Phase `B3/B5` per decision 12;
+  closure text records B5-2 (#1543, `123b07d8`) as closing the server half and
+  flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`.
+- **BG-18 / BG-19.** Before: Phase `B5/B9`, plain exit evidence. Now: each row
+  prepends its own decision-14 split sentence. BG-18 names B5-7 as its server
+  half and exit condition 3, B9 the client half. BG-19's client remainder
+  is not B9 alone — decision 14 splits exit condition 2 into the desktop
+  broker's bounded retrieval (C-09, B7) and the journeys (BPR-061, B9) — so
+  BG-19's Phase becomes `B5/B7/B9` and its sentence names B5-1 + B5-5 (#1541,
+  #1544) for the server half, B7 for bounded retrieval, and B9 for the
+  journeys, exit condition 2.
+- **S-03.** Before: State `confirmed`. Now: State `resolved/superseded` — the
+  file's defined values have no bare `resolved`, and `resolved/superseded` is
+  the value SEC-02 already uses for the same shape (server half landed,
+  remainder tracked elsewhere); closure text names B3-8's shared rune
+  contract and the group-DM writer B5-5 pins, merged as `1311fee9` (#1544,
+  `TestS03_GroupDMNameCountsRunesNotBytes`).
+- **BG-01.** Before: only the generic exit-evidence cell. Now: prepends B5-3's
+  landed posture (#1542, `5c7a0f4a`) and leaves the B8 build/smoke half named.
+- **BG-05.** Before: only the generic exit-evidence cell, and "beside `data/`"
+  overstated the VAPID key's location. Now: prepends B5-4's storage landing,
+  merged as `a504d61e` (#1545), and corrects the key path to
+  `<server.data_dir>/push_vapid.key` (`Server/auth/push_vapid_key.go:14`).
+- **Roadmap amendments.** Workstream 2 reworded to point at a new item 12
+  (inventory plus the server path — `rich-content-inventory.md`, B5-5; the GIF
+  proxy, B5-1); item 11 gets an amendment pointing at the one place the
+  server/B7 split now lives; exit conditions 2 and 3 are both narrowed to
+  server-side paths with the identical HP-5-acceptance caveat, matching
+  decision 14's "one standard" requirement.
+
+**Not included:** no `.superpowers/findings-ledger.json` row was touched — the
+ledger stays the sole authority for `OC-*` status, and this step only records
+what it and `git`/`gh` already say. No production code changed. SEC-04's
+advisory ID remains the owner's to fill at the B5 exit.
 
 ## Exit gate
 

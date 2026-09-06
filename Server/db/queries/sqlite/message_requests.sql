@@ -9,15 +9,15 @@ SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?;
 INSERT OR IGNORE INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, ?);
 
 -- name: InsertMessageRequest :execrows
-INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id) VALUES (?, ?, ?);
+INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id) VALUES (?, ?, ?, ?);
 
 -- name: GetMessageRequestForRecipient :one
-SELECT id, sender_id, recipient_id, channel_id, state, created_at, decided_at
+SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
 WHERE id = ? AND recipient_id = ?;
 
 -- name: GetMessageRequestByPair :one
-SELECT id, sender_id, recipient_id, channel_id, state, created_at, decided_at
+SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
 WHERE sender_id = ? AND recipient_id = ?;
 
@@ -38,9 +38,7 @@ SELECT
     COALESCE(pm.timestamp, '')    AS preview_timestamp
 FROM message_requests mr
 JOIN users u ON u.id = mr.sender_id
-LEFT JOIN messages pm ON pm.id = (
-    SELECT MIN(id) FROM messages WHERE channel_id = mr.channel_id
-)
+LEFT JOIN messages pm ON pm.id = mr.first_message_id AND pm.deleted = 0
 WHERE mr.recipient_id = ? AND mr.state = 'pending'
 ORDER BY mr.id DESC;
 

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -145,6 +146,66 @@ func TestHandleChatCommandV2_BroadcastFansOutWhenAllowed(t *testing.T) {
 	}
 	if env.Payload.Command != "/roll" || env.Payload.Text != "rolled a 6" {
 		t.Errorf("payload = %+v, want command=/roll text=rolled a 6", env.Payload)
+	}
+}
+
+// TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient is B5-6's
+// Codex P1-2 fix: a plugin command invoked inside a one-to-one DM must use
+// the sender-aware DM audience (PluginBroadcastDMEvent), not the plain
+// per-channel-topic PluginBroadcastEvent — channel_focus subscribes any DM
+// participant to the topic regardless of message-request trust, so the
+// plain shape would leak the broadcast to a recipient who has not accepted.
+func TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	ctx := context.Background()
+	senderID, err := database.CreateUser(ctx, "dmcmd-sender", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser sender: %v", err)
+	}
+	recipientID, err := database.CreateUser(ctx, "dmcmd-recipient", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser recipient: %v", err)
+	}
+	ch, _, err := database.GetOrCreateDMChannel(ctx, senderID, recipientID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	svc := service.New(database, auth.NewRateLimiter())
+	deps := PluginDeps{
+		Registry: func() CommandDispatcher {
+			return stubDispatcher{result: &plugin.CommandResult{Broadcast: "rolled a 6"}, handled: true}
+		},
+		MessageSvc: svc.Messages,
+	}
+	cmd := ChatCommandCmd{userID: senderID, channelID: ch.ID, command: "/roll", reqID: "req-dm-cmd"}
+
+	result := handleChatCommandV2(ctx, cmd, ClientInfo{UserID: senderID}, deps)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("expected 1 broadcast event, got %d", len(result.Events))
+	}
+	ev, ok := result.Events[0].(PluginBroadcastDMEvent)
+	if !ok {
+		t.Fatalf("expected PluginBroadcastDMEvent, got %T", result.Events[0])
+	}
+	participants := ev.ParticipantIDs()
+	if slices.Contains(participants, recipientID) {
+		t.Errorf("participants %v include the untrusted recipient %d", participants, recipientID)
+	}
+	if !slices.Contains(participants, senderID) {
+		t.Errorf("participants %v must include the sender %d", participants, senderID)
 	}
 }
 

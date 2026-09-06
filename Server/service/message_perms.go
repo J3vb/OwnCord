@@ -118,6 +118,22 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 	return s.checkSendPermission(ctx, userID, ch)
 }
 
+// ChannelIsDM reports whether channelID is a DM channel. Used by the plugin
+// broadcast path (ws/handlers_command.go, Codex B5-6 P1-2) to pick between a
+// plain topic-based ChannelEvent and the sender-aware DM audience — a plugin
+// slash command's broadcast is a DM interaction like any other and must not
+// bypass the first-contact gate via unrestricted channel fan-out.
+func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
+	ch, err := s.st.GetChannel(ctx, channelID)
+	if err != nil {
+		return false, err
+	}
+	if ch == nil {
+		return false, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	return ch.Type == "dm", nil
+}
+
 // checkSendPermission is permissions.CanSendMessage over the resolved subject:
 // READ|SEND in the channel, MANAGE_MESSAGES on top for announcement channels,
 // never into an archive; DM membership and no block. Every caller —

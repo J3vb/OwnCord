@@ -474,8 +474,8 @@ func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 // tests so a load/soak test can drive the channelReadAudience-resolved
 // voice_state/voice_leave fan-out directly, without a full LiveKit join
 // round-trip.
-func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
-	h.broadcastVoiceEvent(context.Background(), channelID, msg)
+func (h *Hub) BroadcastVoiceEventForTest(channelID, subjectID int64, msg []byte) {
+	h.broadcastVoiceEvent(context.Background(), channelID, subjectID, msg)
 }
 
 // MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed

@@ -113,7 +113,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// Server-wide, but never to a client that cannot read the channel.
 			// ctx is threaded from the dispatching connection so the audience
 			// lookup dies with it rather than outliving the request.
-			h.broadcastVoiceEvent(ctx, e.VisibleChannelID(), e.Payload())
+			h.broadcastVoiceEvent(ctx, e.VisibleChannelID(), e.UserID(), e.Payload())
 		case BroadcastAllEvent:
 			// Normal priority for everything, including presence: connect and
 			// disconnect presence for the same user already go out via

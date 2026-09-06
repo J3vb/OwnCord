@@ -330,3 +330,31 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 			bobStatus, db.StatusOffline, db.StatusDND)
 	}
 }
+
+// erroringIsGroupDMStore forces RingTargets' IsGroupDM call to fail.
+type erroringIsGroupDMStore struct {
+	*db.DB
+}
+
+func (s *erroringIsGroupDMStore) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
+	return false, errors.New("simulated IsGroupDM failure")
+}
+
+// TestRingTargets_GroupLookupErrorFailsClosedToNoTargets is Codex review
+// round 2, P2: a failed IsGroupDM lookup used to skip the trust filter
+// entirely and ring every participant unfiltered, one-to-one DM or not.
+// Fail closed instead: no ring targets at all, and no error surfaced to the
+// ringer either — their own call_ring attempt still succeeds, nobody is
+// rung (mirrors decision 5's "the actor's own action always succeeds").
+func TestRingTargets_GroupLookupErrorFailsClosedToNoTargets(t *testing.T) {
+	database, _ := newDMFixture(t)
+	svc := NewDMService(&erroringIsGroupDMStore{DB: database})
+
+	targets, err := svc.RingTargets(context.Background(), 1, 50)
+	if err != nil {
+		t.Fatalf("RingTargets = %v, want nil", err)
+	}
+	if len(targets) != 0 {
+		t.Errorf("targets = %v, want none", targets)
+	}
+}
