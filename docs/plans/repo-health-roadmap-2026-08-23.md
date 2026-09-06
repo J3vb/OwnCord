@@ -10,7 +10,12 @@
 2026-09-01 to 2026-09-03**, all twelve steps merged to `dev`; its **exit was
 accepted 2026-09-03** — the "B4 exit" section of
 [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md), measured at
-`dev` `1133a26` and accepted at `0a14554`. **B5 is next**: its execution plan
+`dev` `1133a26` and accepted at `0a14554`. **Audit update, 2026-09-06, at
+`dev` `61ac2b959cc4592ee5291637ac36f22acab89631`: B5 is in progress.** B5-0
+through B5-9, B5-11, and B5-12's initial reconciliation are merged; HP-5 was
+accepted 2026-09-06. B5-10 is being finished and is not assessed as complete
+in this audit. B5's exit remains open, including the acceptance follow-ups
+and final reconciliation recorded in its existing exit gate. Its execution plan
 is
 [b5-community-content-moderation-2026-09-04.md](b5-community-content-moderation-2026-09-04.md),
 drafted 2026-09-04 at `e1781086`, which schedules **HP-5 as B5's mid-phase
@@ -398,10 +403,13 @@ BPR-080 through BPR-083.
 
 ### Workstreams
 
-1. Define explicit protocol-epoch and capability negotiation. The upgraded
-   server accepts epochs N, N-1, and N-2 and rejects older epochs with a safe
-   actionable response. Patch releases within an epoch remain compatible, and
-   prerelease/release metadata declares its epoch.
+1. Define explicit protocol-epoch negotiation. _(Reconciled 2026-09-06 to
+   the owner-approved B2-2 decision of 2026-08-29 and amended BPR-032.)_
+   The server accepts the current epoch and rejects unsupported epochs with
+   a safe actionable response; legacy epoch-1 authentication follows the
+   captured fixture contract. Patch releases within an epoch remain
+   compatible, and prerelease/release metadata declares its epoch. A wider
+   compatibility window is introduced only by a later explicit decision.
 2. Define server-first update ordering and signed update metadata contracts.
    A new client is not required to speak to an old server.
 3. Add version fixtures and compatibility tests that survive later code
@@ -432,11 +440,12 @@ service expansion. Security details remain in private review.
 
 ### Exit gate
 
-- Clients from epochs N, N-1, and N-2 pass the server compatibility matrix;
-  N-3 fails safely and actionably. The server-bundled browser client matches
-  the server epoch rather than becoming an independent generation. _(HP-2
-  accepted this condition at the slim one-epoch scope — owner decision
-  2026-08-29, formalized 2026-08-31 in BPR-032 as amended.)_
+- Accepted-epoch fixtures pass and unsupported epochs fail safely and
+  actionably. The server-bundled browser client matches the server epoch
+  rather than becoming an independent generation. _(Reconciled 2026-09-06:
+  HP-2 accepted the slim one-epoch scope — owner decision 2026-08-29,
+  formalized 2026-08-31 in BPR-032 as amended. This does not add a new
+  compatibility window or reopen HP-2.)_
 - Protocol and update metadata changes are generated, documented, and
   downgrade-tested.
 - Effective permission and resource-existence sibling cases have parity tests.
@@ -783,12 +792,27 @@ service.
    origin/path contract. B8 supplies the final signed client bundle.
 7. Rehearse alpha-to-beta database, attachment, configuration, credential, and
    backup upgrade/rollback on Docker and standalone deployments.
+   _(Audit carryover, 2026-09-06, B3-7.)_ Complete the metadata-only alpha
+   snapshot with matching attachment bytes and representative configuration
+   and credential fixtures. Prove authenticated downloads and recovery after
+   upgrade/restore; attachment-row counts alone do not qualify the deployment.
 8. Publish hardware-specific measurements proving at least 250 registered
    users, 100 simultaneous connections, and 25 concurrent voice participants.
 9. Measure reconnect storms, database waits, message fan-out, voice control,
    upload/download pressure, TLS overhead, and graceful shutdown.
+   _(Audit carryover, 2026-09-06, B3 performance evidence.)_ Distinguish sender
+   acknowledgement latency from actual recipient delivery, assert recipient
+   receipt under fan-out, report database-pool wait count/duration deltas, and
+   measure authenticated upload admission through quota and storage. Keep
+   filename/MIME microbenchmarks labelled as such; these measurements close
+   the existing capacity promise, not a new performance target.
 10. Exercise backup/restore, deletion-marker restore, disk-full, low-headroom,
     corrupt input, unhealthy dependency, interrupted migration, and rollback.
+    _(Audit carryover, 2026-09-06, B4-9.)_ Qualify the declared physical-erasure
+    boundary with database/WAL byte-level evidence under active readers,
+    failed checkpoints and restart. Record pending-completion/retry behavior
+    or an explicit limitation, and align privacy claims with the measured
+    result before HP-6. Logical row/FTS absence is a separate assertion.
 11. Pin or automatically review containers and build inputs; produce signed
     SBOM, provenance, checksums, and source-snapshot evidence.
 12. Document local logs, support-bundle generation, capacity limits, ports,
@@ -809,6 +833,18 @@ service.
     hosting switch, so one endpoint answers "what is this server, and is
     the browser client on". B2-2's slim decision (2026-08-29) dropped the
     endpoint from B2 — this workstream introduces it, it does not extend it.
+17. _(Audit carryover, 2026-09-06, B3-0/B3-8.)_ Reconcile direct database-handle
+    use as well as imports with the service-boundary inventory. Give each
+    access an explicit service, adapter or transaction-boundary owner, and
+    extend the guard to reject unclassified handle access. Preserve replay
+    locking and persister ordering when assigning ownership; an import-only
+    pass is insufficient evidence that later phases preserved B3's boundary.
+18. _(Audit carryover, 2026-09-06, B4-10.)_ Before HP-6, reconcile BPR-053,
+    requirement traceability and privacy acceptance evidence with the
+    HP-4-approved retained audit-token design and the disclosure in
+    `docs/trust-model.md`. Record the accepted correlation/key-holder limits
+    consistently. Do not silently substitute a different erasure design;
+    changing the agreed guarantee requires an explicit owner decision.
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -916,6 +952,12 @@ without regressing the current application.
     `lib/` and `stores/` are transitional — shrink them, never bulk-move.
     Do not create `Client/src/platform/` before this phase's entry gate is
     met. The plan's Phase 7 change map lands its client rows here.
+17. _(Audit carryover, 2026-09-06, B1-2.)_ Reconcile the supported Node/npm
+    version policy across all three package roots, runtime pins, CI and
+    contributor documentation. Verify both an admitted version and a refused
+    unsupported major; `engine-strict` alone does not turn an open-ended
+    `>=` range into the documented major-version pin. Settle the intended
+    support range rather than choosing a new runtime during this audit.
 
 ### Hold point HP-7 — Desktop parity before browser behavior
 
@@ -1150,6 +1192,11 @@ re-verifies every BPR.
 ### Qualification work
 
 1. Run the complete required matrix on the exact release-candidate SHA.
+   _(Audit carryover, 2026-09-06, B1/G-04.)_ Preserve dated baseline and signed
+   scorecard measurements independently of live ledger totals. Restrict live
+   count enforcement to explicitly current summaries, and recover altered
+   B0/B1/HP-0/HP-1 observations from their recorded source commits with a
+   dated correction. A green count check must not require rewriting history.
 2. Require 30 consecutive green integration runs, excluding only documented
    external infrastructure cancellations.
 3. Hold a 14-day release-candidate soak with long sessions, reconnects,
@@ -1289,6 +1336,12 @@ The actual values and links belong in phase evidence, not as optimistic edits
 to this plan.
 
 ## Current implementation slice
+
+_Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
+and B5-11 are merged, with B5-12's initial reconciliation also merged.
+B5-10 is in progress. Complete the existing B5 exit follow-ups and final
+reconciliation before B6 entry. The 2026-08-29 sequence below is retained
+as historical execution evidence, not today's instruction to start B3.
 
 _Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
 accepted 2026-08-27). The active slice is B2, executed from
