@@ -289,9 +289,15 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 
 	// First hook: force the full-ready fallback WITHOUT touching the role,
 	// so the auth-hint promotion into c.channelID survives into
-	// handleFreshConnect.
+	// handleFreshConnect. bumpVisibilityWatermark directly, not
+	// MarkVisibilityChanged: that method now takes h.seqMu (Codex round 4,
+	// item A) to serialize with reconnectRegister's own check-then-register,
+	// and this hook fires from inside that very critical section — calling
+	// the locking entry point here would deadlock on itself. This test
+	// doesn't care which unlocked internal writer trips mustFullResync, only
+	// that it does.
 	handleReconnectPreRegisterRaceHook = func() {
-		hub.MarkVisibilityChanged()
+		hub.bumpVisibilityWatermark()
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 

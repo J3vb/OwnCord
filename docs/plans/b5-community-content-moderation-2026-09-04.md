@@ -1290,6 +1290,155 @@ standing proof that **nothing dispatches yet**, so
 `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` stay green
 unchanged.
 
+**Evidence, 2026-09-05** — branch `feature/b5-4-push-subscriptions` from
+`dev` `123b07d8`; PR to `dev` #1545, commits `3157e304` (the feature) and
+`3ef5bfc6` (the independent review round). The premise held at the base:
+zero hits for `webpush`, `web_push` or `vapid` under `Server/`, and the one
+thing that resembles it — the desktop's local notification (B5-0, S7) — sends
+nothing off the machine. Everything B5-2 left for this step was there and was
+used as left: one row in `config.boundedKeys`, one method plus one row in
+`maintenance.steps()` with its place declared in
+`TestMaintenance_StepOrderIsPinned`, and the two erasure lists.
+
+- **The table.** Migration `045_push_subscriptions.sql`: one row per
+  `(user_id, endpoint)` (`UNIQUE`), `user_id → users ON DELETE CASCADE`, the
+  credential (`p256dh`, `auth`), a `device_name`, `vapid_key_id`, and
+  `created_at` / `last_seen_at`. Its reversal is the first entry in
+  `rollback.Order`, with its cost row in the README (every device
+  re-subscribes; nothing was in flight). The class joins `erasureStatements`
+  right after `sessions` — the `users` delete would cascade it, but a
+  surviving endpoint is a live channel to a person who left, so the
+  inventory's zero is proved against an explicit statement (class `2a`,
+  `TestEraseAccount_EveryInventoryClassIsZero`, the fixture seeding one row
+  for the subject and one for the survivor). Removing the statement **and**
+  the cascade together turned that test red harder than expected: the foreign
+  key aborted the whole erasure transaction.
+- **The key, and why a file.** A P-256 private scalar in
+  `data/push_vapid.key` (env `OWNCORD_PUSH_VAPID_KEY`, hex, 32 bytes), loaded
+  by `auth.LoadOrGeneratePushVAPIDKey` through the same fail-closed
+  `loadOrGenerateKeyFile` as `totp.key` and `erasure.key` — a read error
+  refuses rather than replaces (OC-0321), because every stored row's
+  `vapid_key_id` is checked against it. The loader gained one optional
+  field, `valid`, consulted only on the generate branch: a uniform 32-byte
+  scalar falls outside the curve order with probability about 2^-32, and the
+  loop discards such bytes rather than writing a file the next boot cannot
+  decode (`TestPushVAPIDKey_IsGeneratedOnceAndStable` — two loads, one public
+  point; a corrupt file is an error, not a new key). It has its own lifecycle
+  stage, `push-vapid-key`, after `erasure-markers` and **unconditional** —
+  the sweep needs the key id even while the feature is off — and `startHub`
+  installs it on `svc.Push` once the service layer exists, the two-phase
+  shape the erasure key already uses. B5-0 offered a file or a database row;
+  the file keeps a push credential out of every database backup an
+  administrator downloads. `key_id` is the hex of the first eight bytes of
+  SHA-256 over the 65-byte public point.
+- **Rotation is an operator action, not an endpoint.** Replace the file (or
+  the env var) and restart. Every row carries the key id it was created
+  under; a row under any other key is invisible to `List` the instant the new
+  key is installed and is deleted by the sweep, which runs once at start-up
+  (`m.loop`, beside the storage recount) and on every tick — so a rotation
+  takes effect on the first boot with the new key, and a device learns of it
+  from `GET /api/v1/push/vapid`, whose `key_id` no longer matches the one it
+  subscribed under (`TestPushSweep_RotationInvalidatesAndRecollects`,
+  `TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation`, which drives the
+  real `loop` with a pre-closed stop channel). An endpoint is additive later;
+  a filesystem write plus a restart is the strongest owner gate the server
+  has.
+- **The routes and the gate.** `GET /api/v1/push/vapid`,
+  `GET|POST /api/v1/push/subscriptions`, `DELETE /api/v1/push/subscriptions/{id}`,
+  always mounted (`MountPushRoutes`), so they appear in the generated route
+  index. `pushDisabledMiddleware` sits **after** `AuthMiddleware` and before
+  the body limit and the handlers: with `push.enabled` false every route
+  answers `503 PUSH_DISABLED` — the `GIF_DISABLED` shape — having
+  authenticated the caller and read nothing
+  (`TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing`: anonymous
+  is 401, authenticated is 503, and the table stays empty). The listing
+  returns `endpoint_host` only — never the endpoint, never the keys
+  (`TestPushSubscriptions_LifecycleCreateListRevoke` asserts the raw endpoint
+  and both key strings are absent from the body). There is no user id in the
+  request; the owner is the session's, and another user lists nothing and
+  deletes nothing (`TestPushSubscriptions_VisibleOnlyToOwner`, the delete
+  scoped by `user_id` in the SQL itself). Validation, all in
+  `service.validatePushSubscription`: `https` with a hostname and no
+  userinfo, at most 2048 bytes; `p256dh` decoding (padded or unpadded
+  base64url) to a 65-byte point starting `0x04`; `auth` to 16 bytes;
+  `device_name` at most 64 runes with no control characters; the body at
+  most 8 KiB (`TestPushSubscriptions_RejectsMalformed`, ten cases).
+- **The cap, in one transaction.** Ten devices per user, a constant
+  (`maxPushSubscriptionsPerUser`, marked as the knob to promote when an
+  operator asks); the eleventh evicts the oldest by `last_seen_at`
+  (`TestPushSubscriptions_DeviceCapEvictsOldest`). The upsert, the ranking and
+  the eviction run inside **one** writer transaction — the review round
+  found that as three statements a concurrent refresh could revive a row an
+  interleaved trim had chosen, and a cancellation after the upsert could
+  leave eleven rows. Re-subscribing the same endpoint is the refresh path:
+  one row, the same id, a strictly later `last_seen_at`
+  (`TestPushSubscriptions_RefreshIsAnUpsert`), and that is how a client keeps
+  a subscription alive with no dispatch failure to prompt it.
+- **The window.** `push.subscription_ttl_days`, default 90, a row in
+  `boundedKeys` (1..3650; below the minimum falls back to the default, so an
+  operator cannot write the sweep off by accident). The sweep is one
+  statement: `last_seen_at < cutoff OR (key_id <> '' AND vapid_key_id <> key_id)`,
+  the cutoff formatted `2006-01-02 15:04:05` UTC so it compares
+  lexicographically with `datetime('now')`, and an empty key id (no key
+  installed) sweeps by time alone (`TestPushSweep_UsesTheConfiguredWindow`
+  with a 30-day window, `TestPushSweep_NoKeyInstalledSweepsByTimeOnly`). Its
+  step sits right after the second-factor sweep, declared in
+  `TestMaintenance_StepOrderIsPinned`.
+- **Configuration.** `push.enabled` (bool, false) and
+  `push.subscription_ttl_days` under a new `push` section: `PushConfig`,
+  `defaults()`, a commented block in `defaultYAML`, a prose table in
+  `docs/server-configuration.md` with the rotation procedure, the generated
+  key index (62 keys), the environment-variable table, and the example
+  file. `TestLoadPushDisabledByDefault` loads the written template and scans
+  it for a live key; `TestLoadPushEnvOverride` proves `OWNCORD_PUSH_ENABLED`
+  and `OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS` bind by running them, not by
+  reading `envKeyToKoanf`.
+- **Revert-proof, nine mutations.** The delete without its `user_id` scope
+  (owner test red); the disabled gate ahead of auth (anonymous answered 503,
+  red); the raw endpoint in the listing (red); the eviction removed from the
+  transaction (eleven rows, red); the key clause dropped from the sweep
+  (rotation test red); the erasure statement and the cascade removed together
+  (the foreign key aborts the erasure, red). After the review round, three
+  more: the body limit removed (the 9 KiB body with valid fields was
+  accepted, red), the start-up sweep call removed from `loop` (red), and the
+  refresh assertion against an unchanged timestamp (red). Each restored,
+  each green.
+- **An independent review** was briefed to find cross-user access, a bypass
+  of the disabled gate, a credential in a response, a private key anywhere
+  but its file, and controls whose tests would pass without them. It found
+  no P1 and six items, all fixed in `3ef5bfc6`: `u.Host` accepting
+  `https://:443/x` and userinfo (`Hostname()`, and `User == nil`); the
+  three-statement eviction race; and four tests that passed without their
+  control — the body-limit case (the oversized device name produced its 400
+  first), the start-up sweep (called directly rather than through `loop`),
+  the refresh timestamp (`<=` accepted no change), and the window test (set
+  to the default it was meant to override).
+- **Gates.** `ci-check`, all of it: four build-tag variants, `go vet`, `go
+test -race ./...`, the deadlock leg on `ws`, the untagged `admin` leg,
+  `golangci-lint` clean, `dbgen` in step by regeneration, protocol in step,
+  `gendocs` idempotent by hash, `dbinventory` regenerated (the handler's
+  `db.User` context read is a new adapter row in `db_import_boundary.go`),
+  `check:docs`, `check:hygiene`, `check-migrations`. Of the six generated
+  surfaces, five moved: `dbgen`, the schema index (43 tables), the route
+  index (139 routes), the config index (62 keys) and the `dbinventory`
+  block; the protocol did not.
+
+**What B5-11 inherits.** The private key lives on `svc.Push`; expose a
+signer for VAPID JWTs there rather than the key. `vapid_key_id` says which
+key a row expects. A `404`/`410` from a push service should delete the row —
+add an unscoped delete by id beside the user-scoped one, do not widen the
+user-scoped one. `CountPushSubscriptions` is the operator's count for the
+metrics surface. The `egress_sites.go` row, the generic-content payload, the
+dispatch-time permission check and **its own configuration key** are HP-5's
+rulings (scorecard, Question 6), not this step's.
+
+**Not included, deliberately.** No dispatch and no outbound HTTP anywhere in
+the change. No rotate endpoint, no admin count surface (one line when B5-11
+needs it), no `Client/` file, no protocol change, no findings-ledger row.
+`GET /vapid` before a key is installed answers `503`, a state production
+cannot reach because the stage is unconditional. Whether dispatch reuses
+`push.enabled` was left to HP-5, which gave it its own key.
+
 ## B5-5 — Rich-content inventory and the S-03 rune contract
 
 **Closes:** BPR-061; BG-19's server half; S-03. **Decisions:** decisions 1 and 3 — settled. **Size:** 1–2 days. **Protocol effects:** none.
@@ -1497,6 +1646,146 @@ service-level gate will not break the fixture — and the green fixture
 therefore **proves nothing** about the gate. Write the coverage; do not read
 the fixture as evidence.
 
+**Evidence, 2026-09-06** — branch `feature/b5-6-message-requests` from `dev`
+`a504d61e`, **behind HP-5**: draft PR to `dev` #1549, never merged before
+the owner signs the scorecard; commits `4b7635b8` (the feature), `be48ff25`
+(the independent review round), `61d9696c` (its verification round) and
+`edce6567` (B5-11's marked follow-up, wired once `dev`'s B5-11 was merged
+in: a one-to-one DM push reaches only participants who trust the author,
+checked before the coalescing window is reserved and again before every
+attempt). The premise the plan corrected held at the
+base: first contact happens at `sendMessageDMSideEffects`' `OpenDM`
+accumulation in `message_crud.go`, not in `CreateDM` — and the review found
+that `CreateDM` itself was a second door (below). The two gates already there,
+`IsEffectivelyBanned` and `IsEitherBlocked`, sit untouched in front of the new
+one.
+
+- **The tables.** Migration `046_message_requests.sql` is the HP-5 draft plus
+  one column, `message_requests.first_message_id` (nullable, `ON DELETE SET
+NULL`), so the socket frame and the REST inbox preview the same message
+  under concurrent first sends — the review found the two transports could
+  disagree. `trusted_senders(recipient, sender, source)` with `accepted`,
+  `sent_first` and `grandfathered`; every existing one-to-one pair is
+  grandfathered in both directions and group DMs are left alone
+  (`TestMigration046_GrandfathersEveryOneToOnePair`). Reversal first in
+  `rollback.Order` with its cost row; both tables in `erasureStatements` and
+  `SubjectInventory` (`14c`, `14d`), both principals, with survivors seeded —
+  the explicit statements are redundant with the cascades, which is why the
+  inventory's zero is the proof, not the statement.
+- **The gate, and where it sits.** For a one-to-one DM whose recipient does
+  not trust the sender, `sendMessageDMSideEffects` calls no `OpenDM` for the
+  recipient, sends no `dm_channel_open`, and excludes the recipient from the
+  delivery audience; it creates the request (or finds the pair's existing row
+  in any state and does nothing) and writes `trusted_senders(sender,
+recipient, sent_first)` in the **same transaction**, so the reply is not a
+  request back (`TestMessageRequest_SentFirstMeansTheReplyIsNotARequest`,
+  `TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically`). The
+  recipient receives exactly one `dm_request` frame, on creation
+  (`TestMessageRequest_ResendAfterIgnoreCreatesNothing`,
+  `TestMessageRequest_ConcurrentFirstSendsProduceOneRequest`). A banned
+  recipient gets no row and no frame — that is what "cannot receive DMs" is
+  today; no finer predicate exists (`TestMessageRequest_BannedRecipientGetsNoRequest`);
+  a blocked sender is refused by the existing gate before any of this runs
+  (`TestMessageRequest_BlockedSenderCreatesNoRequest`).
+- **One audience, every path.** `DMAudience` — the sender plus every
+  participant who trusts the sender, or everyone for a group — feeds the
+  `chat_message`, edit, delete, reaction and typing paths
+  (`TestMessageRequest_UntrustedRecipientHearsNothingButTheRequest`), and,
+  after the review, `RingTargets` (`TestCallRing_UntrustedRecipientDoesNotRing`),
+  DM `voice_state` (`TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient`),
+  plugin command broadcasts
+  (`TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient`) and
+  reconnect replay. An audience lookup error fails **closed**, to the actor
+  alone, never to a channel broadcast
+  (`TestEditMessage_DMAudienceErrorFailsClosedToEditor`,
+  `TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter`).
+- **The second door.** `CreateDM` opened both sides and `handleCreateDM`
+  sent the recipient `dm_channel_open` at once, so the recipient's DM list
+  showed the channel — with `last_message` and unread fields — before a first
+  message ever reached the gate. Now the recipient's visibility is decided
+  **inside the creation transaction** (`GetOrCreateDMChannelGated` reads the
+  trust row on the same handle before the open-state insert; the first fix
+  closed the recipient's side afterwards, and the verification round found
+  that a failure between the two left it open): when the creator is not
+  trusted, only the creator's side opens and no frame goes to the recipient;
+  their side opens at acceptance, exactly once (`TestCreateDM_Untrusted_DoesNotNotifyRecipientOrOpenTheirSide`,
+  `TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay`, end to end
+  through creation, a first send and a reconnect).
+- **Transitions.** Recipient only, from `pending` only, a guarded `UPDATE`;
+  the loser of a race gets `409` (`TestMessageRequest_OnlyPendingTransitions`,
+  `TestMessageRequest_OnlyRecipientDecides`,
+  `TestMessageRequest_ConcurrentDecisionsOneWins` — forced through a guard
+  hook that holds the writer between the check and the write, so the test
+  cannot pass sequentially). `accept` writes the trust row, opens the
+  recipient's side and transitions in one transaction, then sends
+  `dm_channel_open` (`TestMessageRequest_AcceptOpensAndDelivers`,
+  `TestMessageRequest_AcceptDoesNotResurrectDeletedContent`). `ignore` and
+  `delete` are the same server-side: nothing shown, nothing sent, later
+  messages accumulate silently. `block` runs `BlockService.BlockUser` and the
+  same voice eviction the blocks endpoint performs, even when the transition
+  loses a race (`TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice`,
+  `_EvictsEvenWhenTransitionLosesRace`). Every transition reaches the
+  recipient's live socket as `dm_request` with the new state
+  (`TestNewRouter_DMRequestTransition_ReachesLiveConnection`).
+- **Decision 5, measured.** The sender's `chat_send_ok`, `chat_message`,
+  `GET /api/v1/dms` and message history are compared across `pending`,
+  `ignored`, `deleted` and a trusted control, with only ids and timestamps
+  normalised and the DM list's content and unread fields compared
+  (`TestMessageRequest_SenderViewIsByteIdentical`,
+  `TestMessageRequest_SenderRESTViewIsByteIdentical`). `blocked` is outside
+  the claim: a blocked sender's later sends fail on the pre-existing gate, and
+  that denial is visible by design.
+- **The preview.** `first_message_id` joined with `deleted = 0`: a deleted
+  original yields `preview: null` on both transports
+  (`TestListPendingMessageRequests_DeletedOriginalHasNoPreview`). The frame
+  carries the sender's profile, and `docs/protocol.md` tells the client to
+  suppress every automatic fetch when rendering it — avatar included, since
+  `sender.avatar` can be an external URL.
+- **Protocol.** One new server→client type, `dm_request`, unsequenced and
+  not replayed; no client→server command (every mutation is REST). Two new
+  epoch-1 journeys, `dm-request` and `dm-request-ignored`, record the
+  recipient's one frame and then its silence and the sender's sameness;
+  `dm-send.json` is byte-identical — its journey now trusts its pair
+  explicitly, because it creates its DM below the service and would otherwise
+  have started recording a different journey. As the plan warned, that
+  fixture proved nothing about the gate and proves nothing now.
+- **An independent review**, briefed on S1's abuse table, found four P1s and
+  six P2/P3s, fixed in `be48ff25`, and its verification round five partials
+  fixed in `61d9696c` — the creation transaction above, ring and voice-state
+  audiences that fell open to every participant on a lookup error, a socket
+  preview built from the cached send rather than the deleted-aware lookup
+  REST uses, and two concurrency tests that could pass without overlapping
+  (now forced through acknowledged barriers, the hook moved off the shipped
+  surface into the `db` package's own tests). The first round: the creation door above; the ring,
+  voice-state and plugin fan-out bypasses; block without voice eviction; a
+  deleted original surviving in the preview; audience errors falling open to a
+  channel broadcast; a non-atomic first contact and a non-canonical preview;
+  identity tests that measured before deciding; a concurrency test that could
+  pass sequentially; and the `blocked` state wrongly inside the silence claim.
+- **Revert-proof, eleven mutations**: the trust check, the `sent_first` row,
+  the typing filter, the `pending` guard, the accept transaction split, the
+  `INSERT OR IGNORE` made plain (caught at the db layer, not the service
+  layer, and said so), creation opening both sides, the ring filter, the
+  deleted-preview clause, the fail-open fallback. The `trusted_senders`
+  erasure statement is the one mutation with no red test: the cascade covers
+  it, as it does `user_blocks`.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs`, `check-migrations` (046 extends `dev`'s 045 in order),
+  prettier from the worktree root, the coverage floor (`db` lifted by direct
+  wrapper tests; `ws` reads under floor on Windows by the documented gap).
+
+**What B5-7 inherits.** `DMAudience` is the one DM delivery helper — a
+content gate for labelled channels composes with it rather than beside it.
+`MessageService.messageRequests == nil` disables the gate for the many tests
+that build the service by hand; production wiring is `service.New` and a
+test proves it.
+
+**Not included, deliberately.** Group-DM invitations (decision 4), guild
+mentions from an untrusted stranger (a different surface), a distinguishable
+rejection of any kind (decision 5), a `Client/` file, a findings-ledger row.
+
 ## B5-7 — NSFW label and per-user acknowledgement, enforced server-side
 
 **Closes:** BPR-063; BG-18's server half. **Blocked by:** HP-5. **Decisions:** decision 13 — settled. **Size:** **6–8 days** — the first draft said two, and a
@@ -1560,6 +1849,160 @@ moderator viewing reported content, and the plugin sink. Plus the
 retention/deletion integration test for the acknowledgement rows. The client
 half — blur, gate and consent UI — is B9.
 
+**Evidence, 2026-09-06** — branch `feature/b5-7-nsfw-acknowledgement`, stacked
+on B5-6 (`4b7635b8`, then B5-6's `32eb9c28` and its final `96098bef` merged
+in, the latter carrying `dev`'s B5-11): built behind HP-5, which the owner
+accepted on 2026-09-06 (#1547, signature recorded in #1550); PR to `dev`
+#1551, stacked on #1549. Commits `d4baf5da` (the feature), `6c4282e5`
+(the independent review round), `040a8a4d` and `65d70ca4` (its two
+verification rounds), `2d238899` (the race test made to instrument the lock
+rather than the clock), `1e2710de` (the merge of B5-6's tip) and `ac9d25cd`
+(B5-11's marked NSFW follow-up, wired once that merge brought B5-11 into
+this tree).
+The premise held at the base: migration `025` stores the label, `ready` and the
+channel broadcasts ship it, the admin edit audits it, and nothing server-side
+reads it — the gate lived in the desktop's `sessionStorage`. The four leak paths
+the plan named were all real, and the socket one had no test bearing on it.
+
+- **The row.** Migration `047_nsfw_acknowledgements.sql`, the HP-5 draft
+  verbatim: `(user_id, channel_id)` primary key, both halves cascading, so a
+  new device inherits the acknowledgement
+  (`TestNSFW_NewSessionInheritsTheAcknowledgement`) and channel deletion needs
+  no code (`TestNSFW_ChannelDeletionCascades`). Reversal first in
+  `rollback.Order` with its cost row; the class joins `erasureStatements` and
+  `SubjectInventory` (`18a`), with a survivor seeded — the explicit statement
+  is redundant with the cascade, as `user_storage`'s is, and the inventory's
+  zero is the proof.
+- **One predicate.** `permissions.CanReadContent` = `CanViewChannel`, then
+  `ErrNSFWUnacknowledged` when `Channel.NSFW` and not `Subject.NSFWAcknowledged`
+  (`TestCanReadContent`). The acknowledgement is resolved **live on every read
+  path**, not through the 30-second permission cache — filling the cached
+  `Subject` would have made "revocation takes effect on the next read" false
+  (`TestNSFW_RevokeTakesEffectOnTheNextRead`). Archived channels keep their
+  documented readable history: the read subject does not carry `Archived`
+  into this predicate, a considered exception rather than an oversight.
+  `authz_chokepoint` lists the predicate and gained no residue.
+- **Path 1, REST.** `requireChannelRead` refuses history, around, pins and
+  reaction users with `403 NSFW_ACKNOWLEDGEMENT_REQUIRED`, a code and nothing
+  else; single-channel search likewise; global search runs over
+  `ReadableChannelIDs`, the visible set minus labelled-unacknowledged channels,
+  so a hit is silently absent — the path the plan said would ship silently
+  (`TestNSFW_UnacknowledgedGetsNoContentOnAnyPath`).
+- **Path 2, the socket.** A classification table names every server→client
+  type as content-bearing or metadata, and its completeness guard reads the
+  registry from `protocol/schema.json`, so a type classified nowhere fails
+  (`TestNSFW_EveryServerFrameKindIsClassified`; B5-8..B5-10's frames must
+  choose). Content kinds — `chat_message`, `chat_edited`, `reaction_update`,
+  the plugin broadcast — travel through the same rate-limited topic publish
+  metadata always used, with a per-subscriber filter evaluated fresh under the
+  sequencing lock (`PublishFiltered`), so the audience is read at the same
+  serialisation point as reconnect registration and the channel rate limiter
+  always runs (`TestDeliverBroadcast_ContentFilterStillRateLimited`). Metadata
+  kinds — `channel_update` above all, including the one that turns the label
+  on — reach every viewer. A channel lookup failure denies every socket
+  recipient rather than filtering none
+  (`TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient`). Reconnect
+  replay asks the database **immediately before each content frame** whether
+  the channel is still readable — no set is computed ahead, and no answer
+  outlives the one frame it gates — failing closed on a lookup error, so a
+  revocation between two frames of one batch drops the later ones and nothing
+  more (`TestReconnect_ReplaySkipsUnacknowledgedLabelledContent`,
+  `TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes`). The
+  visibility parity test stays green and gains a readability sibling
+  (`TestChannelReadability_RESTWSReplayAgreement`). DM frames never meet this
+  filter: `EmitEvents` routes them through B5-6's sender-aware audience first,
+  which the pre-existing interface-ordering tests pin.
+- **Path 3, attachments.** `AttachmentAccess` carries the channel's label;
+  `UploadService.Authorize` runs DM participation → channel visibility →
+  **consent → the administrator early return** → unlinked ownership, so a
+  non-member learns nothing from the label
+  (`TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot`) and an
+  administrator acknowledges like anyone else — decision 13
+  (`TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel`,
+  `TestNSFW_AdministratorAcknowledgesLikeAnyoneElse`).
+- **Path 4, the plugin sink.** Both directions exist; the one that matters is
+  hub → plugin (`deliverBroadcast` → `Dispatch`). Labelled content is withheld
+  from it, and an unknown label (lookup error, nil channel) withholds too;
+  the test asserts on the sink's own dispatch count, not the gate's boolean
+  (`TestNSFW_PluginSinkGetsNoLabelledContent`). No production code subscribes
+  a guest today, so this is a proof about code that cannot yet run.
+- **Path 5, Web Push — B5-11's marked follow-up.** B5-11 shipped with "no
+  push at all for a labelled channel" as a stub because this row did not
+  exist in its tree. Once B5-6's tip brought B5-11 into this branch, push
+  eligibility became the same `CanReadContent` predicate, with the
+  acknowledgement resolved live, run before the coalescing window is
+  reserved and again before every attempt — a labelled channel pushes only
+  to viewers who acknowledged, a revoke between attempts drops the retry,
+  and a lookup error fails closed
+  (`TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient`,
+  `TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked`;
+  `TestPushDispatch_LabelledChannelSendsNothingUnacknowledged` keeps its
+  name and its meaning).
+- **Acknowledge and revoke.** `PUT`/`DELETE /api/v1/channels/{id}/nsfw-acknowledgement`
+  (`204`; `404` invisible; `409 NOT_NSFW`;
+  `TestNSFW_AcknowledgeRequiresVisibilityAndALabel`). The acknowledge reads
+  the label and inserts inside **one writer transaction** — the writer pool
+  holds a single connection, so a concurrent revoke or unlabel lands wholly
+  before or wholly after it — so an unlabel between the check and the insert
+  cannot leave stale consent for a later re-label, and a duplicate acknowledge
+  racing a revoke never reports `NOT_NSFW`
+  (`TestNSFWAcknowledge_UnlabelBetweenCheckAndInsertIsNotTrusted`,
+  `TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled`).
+  It is hand-rolled through the exec escape hatch rather than one
+  `INSERT ... SELECT`, because sqlc v1.30.0's SQLite engine mis-slices that
+  form and corrupts the next query in the file (a new `db-change` trap,
+  recorded). Both bump the visibility watermark **and then** send `nsfw_ack`
+  to the user's own sockets, in that order, so a socket registering between
+  the two sees the bumped state (`TestNSFW_SecondDeviceGetsTheSignal`,
+  `TestNSFW_WatermarkBumpsBeforeTheNotifySend`); a warm resume past a missed
+  frame takes the full-`ready` path and `ready`'s new per-channel
+  `nsfw_acknowledged` carries the truth
+  (`TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume`).
+- **The label lifecycle.** Clearing a channel's label deletes its
+  acknowledgement rows in the same transaction whenever the resulting flag is
+  false — not only on an observed 1→0, which a stale read could miss — so a
+  re-label re-prompts everyone
+  (`TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts`,
+  `TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead`).
+  The existing audit suffix on the flip is unchanged.
+- **An independent review**, briefed on S4's abuse table, found one P1 and
+  nine P2/P3s, all fixed in `6c4282e5`, and its verification round four more,
+  fixed in `040a8a4d`: the replay re-check still taken once per batch rather
+  than per frame; the socket filter meaning "no filter" on a lookup failure;
+  the watermark bumped after the signal instead of before; and an acknowledge
+  whose outcome a racing revoke could misreport. The first round: replay checking readability once per
+  reconnect; a non-atomic acknowledge; the clear keyed on a stale read; a
+  precomputed audience outside the sequencing lock that also bypassed the
+  channel rate limiter; consent checked before visibility on attachments; the
+  sink defaulting open on an unknown label; an unrecoverable missed
+  `nsfw_ack`; a completeness guard checking its own count; and the docs.
+- **Revert-proof, thirteen mutations**: the NSFW clause, the global-search set,
+  the attachment check after the admin return, `chat_message` reclassified,
+  replay on the visible set, the clear removed, the per-frame replay
+  re-check, the atomic insert split (both layers — splitting one alone stays
+  atomic), the clear made conditional again, the sink suppression removed,
+  the per-frame check collapsed back to one answer per batch, the socket
+  filter's lookup failure returned to "no filter".
+  The erasure statement is the one mutation with no red test: the cascade
+  covers it.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (046 and 047 extend `dev` in order once stacked), prettier
+  from the worktree root, the coverage floor (`ws` reads under floor on
+  Windows by the documented gap, unchanged by this branch).
+
+**What B5-8..B5-10 inherit.** Every new server→client frame must be placed in
+the kind table or the guard fails the build. `CanReadContent` is the read
+predicate for anything that returns a message body from a channel — a
+moderation surface that shows reported content acknowledges like anyone else
+(decision 13; the report queue shows a snapshot, not the channel, and that is
+S5's call).
+
+**Not included, deliberately.** The client's blur, prompt and consent UI
+(B9); a DB constraint against labelling a DM (no exposed write can); a
+per-device prompt (decision 13 chose per-account); a findings-ledger row.
+
 ## B5-8 — Local report intake and queue service
 
 **Closes:** BPR-070; **BPR-071's server half**; BG-14's server half, part a.
@@ -1602,6 +2045,164 @@ report existed. Write both, and write the negative control for (b).
 **Absence-contract trap:** `TestAbsenceContract_NoFederationDirectoryOrListingWireTypes`
 fails any new wire name matching `(?i)federat|directory|discover|listing`. A
 "report **listing**" frame or config key trips it — name it `queue`.
+
+**Evidence, 2026-09-06** — branch `feature/b5-8-reports` from `dev`
+`1311fee9`, then B5-7's final `9016707a` merged in (carrying `dev` through
+the B5-6 squash and the signed scorecard) so the stack reads
+B5-6 → B5-7 → B5-8: built behind HP-5, which the owner accepted on
+2026-09-06 (#1547, signature recorded in #1550); PR to `dev` #1552,
+after B5-7's #1551; commits `120bfaab` (the
+feature), `83602340` (the independent review round), `f8722464` (its
+verification round), `36b812a0` (the S5-d rows of `community-services.md`
+brought in line with what shipped), `d6e98d5a` (the merge of B5-7's tip,
+fifteen conflicts resolved by keeping both sides and regenerating every
+generated surface; `mod_queue` classified as metadata in B5-7's frame-kind
+table) and `d6497c0e` (the router's report and DM mounts split into helpers
+after the merge pushed `NewRouter` past the function-length lint). Greenfield, as the plan said: no table, no service, no
+route. Built in parallel with B5-6/B5-7 from `dev` because the hot-file table
+showed no overlap, and stacked at PR time.
+
+- **The tables.** Migration `048_reports.sql` is the HP-5 draft plus what
+  two reviews earned: `reports` (now with an opaque `public_id`, sixteen
+  random bytes, the only id any response, route parameter or frame carries,
+  resolved at the API and socket boundary only, so a subject cannot count
+  filings from a sequence), `report_evidence` (rows by **reference** —
+  message ids, an attachment's id, never `stored_as`;
+  `TestReport_FileAttachmentByReference`), `report_notes`, and
+  `report_events`, the report's own history — `created`, `assigned`,
+  `noted`, `closed` — exposed nowhere but inside one report's queue detail,
+  so `VIEW_AUDIT_LOG` alone reads none of it and a subject holding that bit
+  cannot even count reports (`TestReportEvents_EveryMutationWritesOne`
+  asserts the four rows in order and zero `audit_log` rows naming a report).
+  `idx_reports_active_unique` is a partial unique index over the reporter,
+  target and the open/assigned states — the race-proof half of "duplicate is
+  `409`", with the `SELECT` pre-check kept as a fast path
+  (`TestReportQueries_FileReportUniqueConstraintIsConflict`,
+  `TestReport_ConcurrentFilingExactlyOneSucceeds`). Reversal first in
+  `rollback.Order` with its cost row; six classes join `erasureStatements`
+  and `SubjectInventory` (`22a`–`22f`).
+- **The bit.** `MODERATE_MEMBERS` is bit 22, landed here rather than in B5-9
+  because the queue is the first gate that needs it; `CanModerate` is the one
+  predicate, outside the administrator perimeter
+  (`TestModerateMembersIsOutsideTheAdminPerimeter`), and the four surfaces
+  that enumerate bits — the admin grid, the client enum, `docs/schema.md`,
+  the epoch-1 `fresh-connect` fixture — each gained a guard or a
+  re-recording (`TestSchemaDocBitMapCoversEveryPermissionBit`,
+  `TestClientPermissionEnumHasModerateMembers`). Migration `048` grants it
+  to the seeded Moderator role only when that role is untouched
+  (`id = 3 AND name = 'Moderator' AND permissions = 3145727` — the seed
+  value after migration `022`'s own grant, not `001`'s); a customised role
+  gets the bit by hand, and `docs/api.md` says so.
+- **Intake.** `POST /api/v1/reports` for a message, a user or an attachment;
+  the subject is derived from the target, never supplied
+  (`TestReport_SubjectIsDerivedNeverSupplied`); the target must be visible to
+  the reporter, and a missing target and an invisible one return
+  byte-identical errors (`TestReport_TargetMustBeVisibleToReporter`,
+  `TestReport_MessageTargetErrorsAreIndistinguishable`); five filings per
+  reporter per ten minutes (`TestReport_RateLimited`). A message report
+  snapshots the surrounding context — five either side, eleven rows — by
+  reference, in **one writer transaction** that re-validates both principals
+  and every context author at write time, so an erasure racing the filing
+  leaves nothing half-written
+  (`TestReportQueries_FileReportRollsBackOnEvidenceFailure`,
+  `TestReportQueries_FileReportRefusesAGoneReporterOrSubject`,
+  `TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor`). The snapshot
+  survives the original's edit and deletion
+  (`TestReport_SnapshotSurvivesEditAndDelete`); a report about a user
+  carries no evidence at all (`TestReport_FileUserHasNoEvidence`).
+- **The queue.** `GET /api/v1/moderation/queue`, `/{id}`, `/{id}/assign`,
+  `/{id}/notes`, `/{id}/close`, every one behind `CanModerate` **before** the
+  public id is resolved, so a non-holder gets the same `403` for an unknown
+  id and a real one (`TestModerationQueue_AuthorizationBeforeExistence`,
+  one subtest per route). States `open → assigned → resolved | dismissed`,
+  transitions guarded (`TestModerationQueue_StateMachine`,
+  `TestModerationQueue_ConcurrentCloseOneWins`); assignment is an
+  optimistic update on the observed assignee, and a forced re-assignment
+  reads the current assignee's rank **inside the write's transaction**
+  (`TestModerationQueue_ConcurrentUnforcedAssignOneWins`,
+  `TestReportQueries_AssignReportForced`); a note on a closed report is
+  refused at the row (`TestReportQueries_InsertReportNoteRefusesOnClosedReport`).
+  The reporter's own view is `GET /api/v1/reports/mine`: state and outcome,
+  never a note, never a moderator's name
+  (`TestReport_ReporterSeesOnlyTheirOwnStatus`,
+  `TestModerationQueue_NotesNeverReachEitherParty`); a moderator who is a
+  report's reporter or subject can neither read nor act on it
+  (`TestReport_SubjectSeesNothing`,
+  `TestReport_ModeratorReporterCannotActOnOwnReport`).
+- **Protocol.** One new server→client type, `mod_queue`, unsequenced and not
+  replayed, sent to connected holders of the bit minus the report's two
+  principals even when they hold it, failing closed when the report cannot be
+  read (`TestModerationAudience_OnlyBitHoldersOrAdmin`,
+  `TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit`). No
+  client→server command. It is named `queue`, not `listing`, and the
+  absence-contract regex stays green; B5-7's frame-kind table classifies it
+  as metadata (a public id and a state, never message content), so its
+  completeness guard stays green too.
+- **Absence proof, BPR-070.** The router is walked: every route under
+  `/api/v1/reports` and `/api/v1/moderation` is one of the seven above and
+  none matches a relay, store or federation name; no `moderation.*` config
+  key is string-shaped, so no URL can arrive through configuration; and the
+  egress inventory carries no row for any report or moderation file, so a
+  dial placed in one fails the invariant scanner
+  (`TestAbsenceContract_NoCentralOrCrossServerReportDelivery`,
+  `TestServerInvariants`). There is no delivery target to configure.
+- **Decision 7, both halves.** Erasing the subject hard-deletes every
+  evidence row and note about them and every filing's free text, and closes
+  each open report as `subject_erased`; the outcome row stands — action,
+  time, order, marker token, no content, no identity
+  (`TestReport_SubjectErasureKeepsTheOutcomeRow`, with the negative control
+  that a `DELETE FROM reports` fails it, and an unrelated report's evidence as
+  the positive control). Erasing the reporter keeps the report and clears
+  their `detail` (`TestReport_ReporterErasureKeepsTheReport`); erasing a
+  moderator unlinks their notes, assignment and events
+  (`TestReport_ModeratorErasureUnlinksNotesAndAssignment`);
+  `TestEraseAccount_EveryInventoryClassIsZero` reads zero across all six
+  classes. A restore of an older backup loses the outcome row: documented in
+  `community-services.md`'s S5-d rows, not defended — the plan's own call.
+- **Retention.** `moderation.report_retention_days` (default 180, bounded
+  0..3650, 0 means never) prunes evidence, notes and detail of closed reports
+  on the maintenance tick and leaves the row
+  (`TestMaintenance_ReportRetentionPrunesOnlyAgedContent`,
+  `TestMaintenance_ReportRetentionZeroDaysNeverPrunes`, both through the real
+  tick; `TestMaintenance_StepOrderIsPinned` re-pinned).
+- **Two independent reviews**, briefed on S5's abuse table. The first found
+  four P1s and seven P2s, fixed in `83602340`: the queue frame reaching a
+  report's own principals when they held the bit; `report_create` audited
+  under the reporter's id; the Moderator grant firing on a customised role;
+  intake as two autocommits; distinguishable not-found errors; a moderator
+  acting on their own report; a dedupe that lost the race; an unguarded
+  re-assignment; sequential ids on the wire; a thin erasure fixture; two
+  vacuous retention tests. Its verification round found one new P1 and three
+  partials, fixed in `f8722464`: authorization after id resolution on every
+  `{id}` route; report history still in `audit_log`; principals validated
+  outside the intake transaction; the forced-assign rank check outside the
+  write's transaction.
+- **Revert-proof, fourteen mutations**: the visibility check, the raw
+  permission bit in place of the predicate (caught by the chokepoint
+  invariant), the confidentiality guard, `DELETE` in place of the erasure
+  `UPDATE`, `stored_as` in the evidence, the audience widened, the bit
+  inside the admin perimeter, the principals back in the audience, the
+  partial index dropped, the observed-assignee guard dropped, intake split
+  into autocommits, authorization after resolution, events back into
+  `audit_log`, the unconditional insert. Each red for its named test, each
+  green restored.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (`048` extends `047` in order once stacked), prettier from the
+  worktree root, the coverage floor (`db` lifted by direct wrapper tests
+  twice; `ws` reads under floor on Windows by the documented gap).
+
+**What B5-9 and B5-10 inherit.** `CanModerate` and bit 22 exist; the queue's
+`close` takes an `outcome` and B5-9's actions link to a report through
+`report_events` and their own `report_id`. `public_id` is the shape every
+later moderation surface follows. The reporter and the subject are excluded
+from every moderation frame by `moderationAudience`; reuse it.
+
+**Not included, deliberately.** The Moderation Center UI (B9); a defence
+against restoring a backup older than an erasure (documented, not defended,
+as the plan directed); any delivery, relay or escalation target; a
+findings-ledger row.
 
 ## B5-9 — Narrowly permissioned moderator actions
 
@@ -1683,6 +2284,114 @@ plus `TestNoAutomaticTelemetry_Capture` still green on compiled defaults and
 `TestEgressAllowIsLive` green with the new row. There is no OwnCord relay and
 the tests must make that unfalsifiable.
 
+**Evidence, 2026-09-06** — branch `feature/b5-11-push-dispatch` from `dev`
+`a504d61e`, **behind HP-5**: draft PR to `dev` #1548, never merged before
+the owner signs the scorecard; commits `5bdba8df` (the feature), `fa741ff7`
+(the independent review round) and `b7f638c5` (its verification round). Premise held at the base: B5-4's storage was
+on `dev`, with the private scalar on `svc.Push` and no dispatch anywhere; B5-6's
+and B5-7's tables were not (both behind the hold), so the two gates that read
+them are stubbed as the plan allows and say so in a comment (no push at all
+for a labelled channel; DM trust left to the participant check).
+
+- **Its own key.** `push.dispatch_enabled` (bool, false) beside `push.enabled`;
+  dispatch runs only when both are true, so an operator who enabled storage in
+  the B5-4 era acquires nothing by upgrade (`TestPushDispatchGate_RequiresBothKeys`,
+  `TestLoadPushDispatchDisabledByDefault`, `TestLoadPushDispatchEnvOverride`).
+  `push.contact` (string, empty) is the VAPID `sub`, omitted when empty.
+  `TestNoAutomaticTelemetry_Capture` is untouched: compiled defaults open
+  nothing.
+- **What is sent, and to whom.** Exactly `{"t":"activity"}`
+  (`TestPushDispatch_PayloadIsGenericAlways` decrypts it with the subscriber's
+  key). Audience: direct `@mentions` in a guild channel, the other participant
+  in a one-to-one DM; never the author, never a group DM
+  (`TestPushDispatch_GroupDMExcluded`, failing closed on a lookup error), never
+  a user who blocked the author (`TestPushDispatch_BlockedByAuthorExcluded`,
+  the same exclusion the mention bookkeeping applies), only offline
+  subscribers, and — re-evaluated **immediately before every attempt**, first
+  and retries alike — only while `CanViewChannel` still holds and the channel
+  is not labelled (`TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline`,
+  `_LosesAccess`, `TestPushDispatch_LabelledChannelSendsNothingUnacknowledged`).
+  One push per user per channel per 60 seconds, the coalescer sweeping
+  expired entries and capped at 10 000
+  (`TestPushDispatch_CoalescesPerUserPerChannel`,
+  `_CoalesceMapEvictsExpiredAndCapsSize`). `@everyone`/`@here` are not
+  expanded: with a payload that says nothing, a ping to every viewer is noise.
+- **The crypto, in stdlib.** RFC 8291 aes128gcm (ephemeral P-256 key and salt
+  per message, HKDF-SHA256 through the auth secret, one record, the `0x02`
+  delimiter) and RFC 8292 VAPID (ES256, raw `r||s`, `aud` the RFC 6454 origin,
+  `exp` twelve hours) — no new module; `crypto/hkdf` is stdlib now. The
+  encryptor takes its key and salt by injection so
+  `TestPushCrypto_RFC8291KnownAnswer` pins the RFC's own header and ciphertext
+  bytes, not a round trip through our decryptor;
+  `TestPushCrypto_SaltAndEphemeralKeyAreFresh` is the revert-proof the
+  known-answer test cannot be. The private scalar never leaves `PushService`:
+  `vapidAuthorization` signs inside it (`TestPushVAPID_JWTVerifiesAndClaims`,
+  `_AudIsRFC6454Origin`, `_EmptyContactOmitsSub`).
+- **Through `safefetch`, with one relaxation.** One `Fetcher`: https on 443,
+  `POST`, no redirects, 10 s, 64 KiB both ceilings, eight concurrent; the
+  production `Policy` shape `TestProductionPolicyShape` requires. A hostile
+  endpoint resolving to a private address is refused before any dial
+  (`TestPushDispatch_HostileEndpointResolvingPrivateIsRefused`, with a `Dial`
+  spy asserting zero dials, and its positive control
+  `_ClassificationRemovedWouldDial`). The relaxation: `checkContentType` now
+  accepts an **empty** body with no `Content-Type` — a bare `201` from a push
+  service was being refused, counted failed and retried, so a delivered push
+  could be sent three times (`TestFetch_EmptyBodyWithoutContentTypeIsAccepted`,
+  its negative control for a non-empty body, and
+  `TestPushDispatch_Empty201IsSuccessNotRetry` through the production policy).
+  Nothing changes for a body with bytes in it.
+- **Failure handling, nothing persisted.** `201` counts; `404`/`410` deletes
+  the row through a new unscoped delete reachable only from dispatch
+  (`TestPushDispatch_410PrunesTheRow`); `429`, `5xx` and network errors get
+  two retries — three attempts — then drop (`TestPushDispatch_RetryBudgetThenDrop`);
+  any other status drops at once. Fan-out is bounded (four at a time) so one
+  stalled endpoint cannot starve the rest
+  (`TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall`); a restart forgets
+  the queue, by design (`push_dispatch_state.md`). Three aggregate counters —
+  `push_dispatched`, `push_failed`, `push_pruned` — join the metrics surface
+  (`TestHandleMetrics_PushCounters`); no per-user delivery history exists.
+- **No relay, inventoried.** Every URL is a stored `endpoint`
+  (`TestPushDispatch_EndpointsAreOnlyStoredOnes`,
+  `TestAbsenceContract_NoPushRelay`: no string key under `push.`, no route
+  matching `relay`, the request set equals the stored set). The egress row
+  lives in `docs/architecture/diagnostics.md`, gated on both keys, destination
+  "the push service named in each stored subscription endpoint" — a code-level
+  row on `service/push_dispatch.go` is refused by `TestEgressAllowIsLive`
+  because the file itself dials nothing: the dial rides `safefetch`'s two
+  listed rows, and the scanner still covers the file, so a `net/http` call
+  placed there fails `TestServerInvariants`.
+- **The hook.** One call in `MessageService`'s existing background side
+  effects, nil when dispatch is off; `TestPushDispatch_ThroughSendMessageHook`
+  drives the real `SendMessage`.
+- **An independent review**, briefed on S7's abuse table, found one P1 and
+  seven P2s, all fixed in `fa741ff7`, and its verification round four more
+  (an IPv6 or IDN host in the VAPID `aud`, retries occupying pool slots before
+  every first attempt had run, the coalescer reserving a window for an
+  ineligible recipient, and capacity eviction dropping live windows), fixed in
+  `b7f638c5`. The first round: eligibility evaluated once before a
+  sequential fan-out (now per attempt); a non-canonical VAPID `aud`; group DMs
+  and blocked authors not excluded; a coalescer that never evicted; a shared
+  60 s budget two slow endpoints could exhaust; a hostile-endpoint test that
+  passed without classification; and no test through the production hook.
+- **Revert-proof, eleven mutations**: the permission re-check, the offline
+  filter, the `410` prune, a payload carrying the channel id, the egress row,
+  a reused salt, `dispatch_enabled` ignored, the per-attempt re-check, the
+  group-DM exclusion, the blocker exclusion, classification removed (the spy
+  sees dials). Each red for its named test, each green restored.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs`, prettier from the worktree root, the coverage floor (`db`,
+  `service`, `auth`, `permissions`, aggregate over their floors on this
+  machine; `ws` reads under floor on Windows by the documented measurement
+  gap and is untouched by this branch).
+
+**Not included, deliberately.** No per-message or per-channel payload option;
+no persisted dispatch state; no admin surface; no `Client/` file; no protocol
+change; no findings-ledger row. The B5-6 trust check and the B5-7
+acknowledgement check are one-line follow-ups once those steps are in the
+same tree, each marked where it goes.
+
 ## B5-12 — Register and roadmap reconciliation
 
 **Size:** 1 day. **Protocol effects:** none. **Parallel with:** everything
@@ -1723,6 +2432,68 @@ meet:
 
 Each amendment is dated, carries the owner's ruling, and goes in this step's
 PR — not silently into a later one.
+
+**Evidence, 2026-09-05** — branch `docs/b5-12-register-roadmap` from `dev`
+`123b07d8`; PR to `dev` #1546.
+
+- **The five `OC-*` rows.** Before: each carried only its original acceptance
+  criteria, with nothing in the row itself showing rule 2 was already
+  satisfied. Now: each cell opens `**Fixed** — ledger `fixed`, closed by
+<step> (#pr, `sha`), test <fix.test>.`, ledger fields verbatim. OC-0323 and
+  OC-0357 share `fix.commit` `074aea0`, confirmed inside PR #1483's commit
+  list, squashed to `dev` as B3-8's `4585d52c`. OC-0327, OC-0349 and OC-0351
+  all share `fix.commit` `0c610f61`; `git log --grep` alone found it only for
+  OC-0351 (`#1530`), but `gh pr view 1530 --json commits` lists `0c610f61` in
+  its commit set, so all three close there, squashed as `1edd777f` — resolving
+  the plan's "check #1436/#1471" note: neither PR's commit list actually
+  contains it. The ledger's `fix.test` for those three is the placeholder
+  string "per-group tests added alongside each fix; see the commit", so their
+  rows cite the PR instead: "tests: the per-finding tests in #1530 (the ledger
+  records no path)".
+- **SEC-02.** Before: closure text cited "B5 item 11" (SEC-03's item, not
+  SEC-02's). Now: text names B2-5 (#1440) for the landed server half and
+  re-tags the UI remainder to B9 (Moderation Center, BPR-071's client half,
+  "no B5 step touches client UI"); Phase `B5` → `B9`, State unchanged.
+- **SEC-03.** Before: Phase `B5`, one closure line. Now: Phase `B5/B7`; the
+  closure line splits per decisions 1 and 2 — server boundary closed by B5-1
+  (#1541, `Server/safefetch`), aggregate cross-caller budgets, cache eviction
+  and the desktop broker (C-09 clauses 1, 7, 8) deferred to B7.
+  `docs/trust-model.md`'s C-09 `Status:` line gets the matching
+  cross-reference appended so it names the same split back.
+- **SEC-04.** Before: Phase `B3/B6`. Now: Phase `B3/B5` per decision 12;
+  closure text records B5-2 (#1543, `123b07d8`) as closing the server half and
+  flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`.
+- **BG-18 / BG-19.** Before: Phase `B5/B9`, plain exit evidence. Now: each row
+  prepends its own decision-14 split sentence. BG-18 names B5-7 as its server
+  half and exit condition 3, B9 the client half. BG-19's client remainder
+  is not B9 alone — decision 14 splits exit condition 2 into the desktop
+  broker's bounded retrieval (C-09, B7) and the journeys (BPR-061, B9) — so
+  BG-19's Phase becomes `B5/B7/B9` and its sentence names B5-1 + B5-5 (#1541,
+  #1544) for the server half, B7 for bounded retrieval, and B9 for the
+  journeys, exit condition 2.
+- **S-03.** Before: State `confirmed`. Now: State `resolved/superseded` — the
+  file's defined values have no bare `resolved`, and `resolved/superseded` is
+  the value SEC-02 already uses for the same shape (server half landed,
+  remainder tracked elsewhere); closure text names B3-8's shared rune
+  contract and the group-DM writer B5-5 pins, merged as `1311fee9` (#1544,
+  `TestS03_GroupDMNameCountsRunesNotBytes`).
+- **BG-01.** Before: only the generic exit-evidence cell. Now: prepends B5-3's
+  landed posture (#1542, `5c7a0f4a`) and leaves the B8 build/smoke half named.
+- **BG-05.** Before: only the generic exit-evidence cell, and "beside `data/`"
+  overstated the VAPID key's location. Now: prepends B5-4's storage landing,
+  merged as `a504d61e` (#1545), and corrects the key path to
+  `<server.data_dir>/push_vapid.key` (`Server/auth/push_vapid_key.go:14`).
+- **Roadmap amendments.** Workstream 2 reworded to point at a new item 12
+  (inventory plus the server path — `rich-content-inventory.md`, B5-5; the GIF
+  proxy, B5-1); item 11 gets an amendment pointing at the one place the
+  server/B7 split now lives; exit conditions 2 and 3 are both narrowed to
+  server-side paths with the identical HP-5-acceptance caveat, matching
+  decision 14's "one standard" requirement.
+
+**Not included:** no `.superpowers/findings-ledger.json` row was touched — the
+ledger stays the sole authority for `OC-*` status, and this step only records
+what it and `git`/`gh` already say. No production code changed. SEC-04's
+advisory ID remains the owner's to fill at the B5 exit.
 
 ## Exit gate
 

@@ -76,10 +76,12 @@ const (
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
 	MsgTypeDMChannelClose      = "dm_channel_close"
+	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client
 	MsgTypePluginBroadcast     = "plugin_broadcast"    // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+	MsgTypeNSFWAck             = "nsfw_ack"            // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 )

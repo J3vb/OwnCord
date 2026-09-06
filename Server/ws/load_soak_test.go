@@ -229,7 +229,7 @@ func TestTheLoadTest(t *testing.T) {
 					hub.BroadcastToChannel(chID, msg)
 				case 1:
 					msg := fmt.Appendf(nil, `{"type":"voice_state","payload":{"channel_id":%d,"user_id":%d}}`, chID, idx)
-					hub.BroadcastVoiceEventForTest(chID, msg)
+					hub.BroadcastVoiceEventForTest(chID, int64(idx), msg)
 				case 2:
 					anchorUser := anchors[idx%len(anchors)].user
 					status := []string{"online", "idle", "dnd", "invisible"}[i%4]

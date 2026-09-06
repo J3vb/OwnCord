@@ -22,6 +22,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	ctx := context.Background()
 	other := seedUser(t, database, "other-user")
 	setRole(t, database, other, 2)
+	third := seedUser(t, database, "third-user")
 	uid := seedUser(t, database, "Subject_User")
 	chID := seedChannel(t, database, "general-erase")
 	exec := func(query string, args ...any) {
@@ -61,6 +62,8 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('avatar-subject', 'me.png', 'stored-avatar.png', 'image/png', 1, ?)`, uid)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-other', ?, 'o.png', 'stored-other.png', 'image/png', 1, ?)`, otherMsg.ID, other)
 	exec(`INSERT INTO user_storage (user_id, bytes_used) VALUES (?, 2)`, uid)
+	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/subject', 'p', 'a', 'key1')`, uid)
+	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/other', 'p', 'a', 'key1')`, other)
 	exec(`INSERT INTO invites (code, created_by) VALUES ('subject-invite', ?)`, uid)
 	exec(`INSERT INTO invites (code, created_by, redeemed_by) VALUES ('other-invite', ?, ?)`, other, uid)
 	exec(`INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('wave', 'emoji-wave', ?)`, uid)
@@ -69,6 +72,18 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
 	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
+	// Message requests and trusted senders (migration 046, B5-6, classes 14c
+	// and 14d): one row of each naming the subject, plus one of each between
+	// two OTHER users that must survive the subject's erasure untouched.
+	exec(`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'pending')`, uid, other, chID)
+	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, other, uid)
+	exec(`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'pending')`, other, third, chID)
+	exec(`INSERT INTO trusted_senders (recipient_id, sender_id, source) VALUES (?, ?, 'sent_first')`, third, other)
+	// NSFW acknowledgements (migration 047, B5-7, class 18a): one row naming
+	// the subject, plus one for another user on the same channel that must
+	// survive the subject's erasure untouched.
+	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, uid, chID)
+	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, other, chID)
 	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
@@ -268,6 +283,18 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	if untouchedReporter != witness || untouchedSubject != sub.other || untouchedDetail != "untouched detail" {
 		t.Errorf("unrelated report 902 changed by the subject's erasure: reporter=%d subject=%d detail=%q",
 			untouchedReporter, untouchedSubject, untouchedDetail)
+	}
+	if n := count(`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, sub.other); n != 1 {
+		t.Errorf("other user's push subscription left = %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM message_requests`); n != 1 {
+		t.Errorf("message requests left = %d, want 1 (the one between two other users)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM trusted_senders`); n != 1 {
+		t.Errorf("trusted senders left = %d, want 1 (the one between two other users)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM nsfw_acknowledgements`); n != 1 {
+		t.Errorf("nsfw acknowledgements left = %d, want 1 (the other user's)", n)
 	}
 }
 

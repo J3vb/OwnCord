@@ -138,6 +138,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
 	}
 
+	// Web Push subscription storage (B5-4) — nothing dispatches yet.
+	// Mounted unconditionally; with push.enabled false every route answers
+	// 503 PUSH_DISABLED after authentication.
+	MountPushRoutes(r, svc.Sessions, svc.Push, cfg.Push.Enabled)
+
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
 
@@ -176,13 +181,15 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
-	// DM (direct message) REST routes — mounted after hub creation so the
-	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, svc, hub)
+	// DM (direct message) REST routes, and the message request inbox (B5-6)
+	// beside them — mounted after hub creation so real-time
+	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
+	// clients.
+	routerDMRoutes(r, database, svc, hub)
 
-	// Channel and message REST routes — mounted after hub creation so a
-	// message purge can broadcast chat_bulk_deleted to the channel.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
+	// creation so a message purge or an nsfw_ack can broadcast through it.
+	routerChannelRoutes(r, database, svc, limiter, cfg, hub)
 
 	// Custom emoji REST routes — mounted after hub creation so an upload or a
 	// delete can fan the new set out as an emoji_update. Requires the same file
@@ -196,8 +203,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// queue (B5-8) — mounted after hub creation so a filed report, an
 	// assignment or a close can notify connected MODERATE_MEMBERS/
 	// Administrator holders via mod_queue.
-	MountReportRoutes(r, svc, hub)
-	MountModerationQueueRoutes(r, svc, hub)
+	routerReportRoutes(r, svc, hub)
 	// Warning, timeout and the notice acknowledgement (B5-9) — mounted
 	// alongside the queue since both gate on the same MODERATE_MEMBERS bit
 	// and both can notify a connected target.
@@ -427,6 +433,27 @@ func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) 
 	})
 }
 
+// routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
+// acknowledgement toggle beside it — both need the hub to fan out real-time
+// events (chat_bulk_deleted, nsfw_ack).
+func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub) {
+	MountDMRoutes(r, database, svc, hub)
+	MountDMRequestRoutes(r, svc, hub)
+}
+
+func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	MountNSFWRoutes(r, svc, hub)
+}
+
+// routerReportRoutes mounts report intake, the reporter's own status view,
+// and the moderation queue (B5-8) — the hub is the mod_queue broadcaster for
+// a filed report, an assignment, or a close.
+func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
+	MountReportRoutes(r, svc, hub)
+	MountModerationQueueRoutes(r, svc, hub)
+}
+
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
 // routes. voiceEnabled is internal/app's report that the LiveKit client was
 // built (StartRuntime); voice is disabled — and none of these routes are
@@ -487,6 +514,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
 			DiskMinFree:    cfg.Server.MinFreeDiskBytes(),
 			UploadBytes:    database.TotalAttachmentBytes,
+			PushCounters:   pushCountersSource(svc),
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
@@ -497,6 +525,17 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
+}
+
+// pushCountersSource returns nil when dispatch was never constructed (both
+// push.enabled and push.dispatch_enabled were not true at start-up — the
+// compiled default), so handleMetrics leaves the three push_* fields at
+// zero rather than calling into a nil *service.PushDispatcher.
+func pushCountersSource(svc *service.Services) func() (dispatched, failed, pruned uint64) {
+	if svc == nil || svc.PushDispatch == nil {
+		return nil
+	}
+	return svc.PushDispatch.Counters
 }
 
 // serverStartTime records when the process started; used for uptime in /health.

@@ -118,6 +118,62 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	return audience
 }
 
+// channelNSFWFilter is broadcastChannelEvent's B5-7 gate for a content-bearing
+// kind (chat_message, chat_edited, reaction_update, plugin_broadcast — see
+// contentBearingKinds): who among a channel's CURRENT topic subscribers may
+// receive it. Deliberately does NOT resolve a candidate list itself — unlike
+// channelReadAudienceImpl, which is used for direct-recipient delivery of
+// low-frequency metadata (channel_create/update), content stays on the
+// ordinary topic-Publish path (PublishFiltered) so it keeps that path's
+// existing guarantees: the topic limiter runs first, and the subscriber list
+// is read fresh at delivery time, under the same seqMu section that
+// serializes against a concurrent reconnect's registration (P2-4/P2-5 —
+// a precomputed recipient list evaluated before that lock would go stale
+// exactly in the reconnect window, and would skip the limiter entirely).
+//
+// allow is nil for a CONFIRMED unlabelled channel (Publish, unfiltered —
+// unlabelled channels pay nothing beyond this one GetChannel read);
+// otherwise it checks membership in ONE batch ListNSFWAcknowledgedUserIDs
+// query, taken only because the channel is actually labelled — or, on a
+// lookup failure that leaves the label unconfirmed, denies every recipient
+// rather than defaulting to nil/unfiltered. labelled also gates the plugin
+// sink (decision 13: a plugin has no acknowledgement, so it never receives a
+// labelled channel's content).
+func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow func(userID int64) bool, labelled bool) {
+	if h.db == nil {
+		return nil, false
+	}
+	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+	if err != nil || ch == nil {
+		// P2-7 / Codex round 2 P1: the label is UNKNOWN, not "not labelled".
+		// A nil allow means "unfiltered" to deliverBroadcast — that would
+		// leak the frame to every topic subscriber, unacknowledged or not,
+		// which is exactly the disclosure decision 13 exists to prevent when
+		// the label itself cannot even be confirmed off. Fail closed for
+		// BOTH the socket path (deny-all filter, not nil) and the plugin
+		// sink (labelled=true).
+		if err != nil {
+			slog.Error("ws: channelNSFWFilter GetChannel failed, denying all recipients",
+				"channel_id", channelID, "err", err)
+		}
+		return func(int64) bool { return false }, true
+	}
+	if !ch.NSFW {
+		return nil, false
+	}
+	ids, err := h.readers.Visibility.ListNSFWAcknowledgedUserIDs(ctx, channelID)
+	if err != nil {
+		slog.Error("ws: channelNSFWFilter ListNSFWAcknowledgedUserIDs failed, denying",
+			"channel_id", channelID, "err", err)
+		return func(int64) bool { return false }, true // fail closed
+	}
+	ackSet := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		ackSet[id] = true
+	}
+	return func(uid int64) bool { return ackSet[uid] }, true
+}
+
 // channelReadAudienceDM resolves the audience of a DM channel: the DM's
 // participants, intersected with the connected userIDs. Split verbatim out of
 // channelReadAudienceImpl; the reason a DM must not fall through to the role
@@ -482,6 +538,25 @@ func (h *Hub) bumpVisibilityWatermark() {
 // guarantee for an unsequenced, targeted DM event that the WS-side emitter of
 // the same event (emit.go DMChannelOpenEvent) already gets via
 // bumpVisibilityWatermark directly.
+//
+// Codex round 4, item A: takes h.seqMu — the SAME lock reconnectRegister
+// (replay.go) holds across its own check-then-register — rather than
+// bumping via the internal, lock-free bumpVisibilityWatermark other callers
+// use (RefreshChannelVisibility, revokeUnreadableChannels, emit.go's
+// DMChannelOpenEvent branch already have their own, separately-tested
+// timing guarantees; this entry point is the one api/nsfw_handler.go and
+// api/dm_handler.go's broadcastDMOpen reach, and it is the one that raced
+// reconnectRegister's window). A call landing strictly between
+// reconnectRegister's watermark re-check and its registerNow can no longer
+// happen: it either completes, and is visible to that check, before
+// reconnectRegister's critical section starts, or it blocks until that
+// section ends — by which point the socket is already registered, so
+// whatever the caller sends right after this call (notifyNSFWAck,
+// broadcastDMOpen's SendToUser loop) reaches it directly instead of missing
+// a not-yet-registered client. Do not call this while already holding
+// seqMu — nothing in the hub's own broadcast/purge/reconnect paths does.
 func (h *Hub) MarkVisibilityChanged() {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
 	h.bumpVisibilityWatermark()
 }

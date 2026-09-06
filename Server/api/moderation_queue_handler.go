@@ -239,87 +239,6 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleModerationQueueAct performs a moderator action against a report's
-// subject (or its reported message, for removal), with report_id set (plan
-// item 7). svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
-// confidentiality, self-review) and resolves the subject/target this
-// dispatches against.
-func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
-		if !ok {
-			return
-		}
-		var req actOnReportRequest
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
-			return
-		}
-		detail, err := svc.Reports.Get(r.Context(), actorID, id)
-		if err != nil {
-			writeReportServiceError(r.Context(), w, err)
-			return
-		}
-		// Get allows the report's own REPORTER to read it (it is their own
-		// filing, already visible via Mine()), but acting on it is the same
-		// conflict of interest Assign/Note/Close already refuse (P2-6, Codex
-		// review): without this a moderator could act on a report they
-		// themselves filed.
-		if err := service.GuardSelfReviewFor(actorID, &detail.Report); err != nil {
-			writeReportServiceError(r.Context(), w, err)
-			return
-		}
-		params := service.ActOnReportParams{
-			ActorID: actorID, Kind: req.Kind, Reason: req.Reason,
-			DurationSeconds: req.DurationSeconds, TargetID: detail.Report.SubjectID, ReportID: id,
-		}
-		if req.Kind == "removal" {
-			msgIDStr := req.MessageID
-			if msgIDStr == "" && detail.Report.TargetType == service.TargetMessage {
-				msgIDStr = detail.Report.TargetRef
-			}
-			msgID, perr := strconv.ParseInt(msgIDStr, 10, 64)
-			if perr != nil || msgID <= 0 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "message_id is required for removal"})
-				return
-			}
-			params.MessageID = msgID
-		}
-		result, err := svc.Moderation.ActOnReport(r.Context(), params)
-		if err != nil {
-			writeServiceError(r.Context(), w, err)
-			return
-		}
-		// Dispatch the SAME transport broadcasts the direct routes send after
-		// their own commit (P2-7, Codex review: this used to be a bare 204,
-		// silently dropping chat_deleted for removal and member_ban/disconnect
-		// for ban — only Warn/Timeout's own ModActionNotifier reaches a live
-		// target through this path, since ModerationService owns that one).
-		if hub != nil {
-			switch result.Kind {
-			case "ban":
-				hub.BroadcastMemberBan(result.TargetID)
-			case "removal":
-				hub.BroadcastChatBulkDeleted(result.ChannelID, []int64{result.MessageID})
-			}
-		}
-		if result.Kind == "timeout" {
-			writeJSON(w, http.StatusOK, actOnReportResponse{Voice: result.Voice})
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
 func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
@@ -401,6 +320,87 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 		}
 		if hub != nil {
 			hub.BroadcastModQueue(context.WithoutCancel(r.Context()), id, state)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleModerationQueueAct performs a moderator action against a report's
+// subject (or its reported message, for removal), with report_id set (plan
+// item 7). svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
+// confidentiality, self-review) and resolves the subject/target this
+// dispatches against.
+func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := currentUserID(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			return
+		}
+		if !requireModerateOrWrite(w, r, svc, actorID) {
+			return
+		}
+		id, ok := resolveReportIDParam(w, r, svc)
+		if !ok {
+			return
+		}
+		var req actOnReportRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+			return
+		}
+		detail, err := svc.Reports.Get(r.Context(), actorID, id)
+		if err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
+		// Get allows the report's own REPORTER to read it (it is their own
+		// filing, already visible via Mine()), but acting on it is the same
+		// conflict of interest Assign/Note/Close already refuse (P2-6, Codex
+		// review): without this a moderator could act on a report they
+		// themselves filed.
+		if err := service.GuardSelfReviewFor(actorID, &detail.Report); err != nil {
+			writeReportServiceError(r.Context(), w, err)
+			return
+		}
+		params := service.ActOnReportParams{
+			ActorID: actorID, Kind: req.Kind, Reason: req.Reason,
+			DurationSeconds: req.DurationSeconds, TargetID: detail.Report.SubjectID, ReportID: id,
+		}
+		if req.Kind == "removal" {
+			msgIDStr := req.MessageID
+			if msgIDStr == "" && detail.Report.TargetType == service.TargetMessage {
+				msgIDStr = detail.Report.TargetRef
+			}
+			msgID, perr := strconv.ParseInt(msgIDStr, 10, 64)
+			if perr != nil || msgID <= 0 {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "message_id is required for removal"})
+				return
+			}
+			params.MessageID = msgID
+		}
+		result, err := svc.Moderation.ActOnReport(r.Context(), params)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		// Dispatch the SAME transport broadcasts the direct routes send after
+		// their own commit (P2-7, Codex review: this used to be a bare 204,
+		// silently dropping chat_deleted for removal and member_ban/disconnect
+		// for ban — only Warn/Timeout's own ModActionNotifier reaches a live
+		// target through this path, since ModerationService owns that one).
+		if hub != nil {
+			switch result.Kind {
+			case "ban":
+				hub.BroadcastMemberBan(result.TargetID)
+			case "removal":
+				hub.BroadcastChatBulkDeleted(result.ChannelID, []int64{result.MessageID})
+			}
+		}
+		if result.Kind == "timeout" {
+			writeJSON(w, http.StatusOK, actOnReportResponse{Voice: result.Voice})
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

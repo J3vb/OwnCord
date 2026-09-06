@@ -85,6 +85,32 @@ type SendMessageResult struct {
 	// this bit to tell that case apart from a plain @everyone, which reaches
 	// every reader regardless (OC-0271).
 	MentionsHere bool
+
+	// RequestCreatedFor lists the message_requests rows freshly created by
+	// this send (B5-6 decision 4's first-contact gate,
+	// service/message_request.go): one entry per untrusted one-to-one
+	// recipient who had no existing request in any state. The ws layer sends
+	// one dm_request frame per entry; RequestPreview is what every one of
+	// those frames carries. Empty for a group DM, a trusted recipient, or a
+	// resend while a request already exists (decision 5 — there is only ever
+	// one row to create).
+	RequestCreatedFor []*db.MessageRequest
+	// RequestPreview names this send's own message — a request can only ever
+	// be created by the pair's first-ever message, since a resend finds the
+	// row already there and creates nothing. Read fresh from the DB right
+	// before use (canonicalRequestPreview), not copied from this result's
+	// own Content/Timestamp above, so it agrees with the REST inbox's
+	// deleted = 0 preview even if a delete races the frame; nil if the
+	// message was already gone by the time of that read.
+	RequestPreview *DMRequestPreview
+}
+
+// DMRequestPreview is the message preview a dm_request frame carries on
+// creation (docs/protocol.md's dm_request section).
+type DMRequestPreview struct {
+	MessageID int64
+	Content   string
+	Timestamp string
 }
 
 // EditMessageResult contains the output of a successful message edit.
@@ -157,6 +183,40 @@ type MessageService struct {
 	// means "no live-connection information available" and applies no extra
 	// narrowing, preserving prior behavior.
 	online func(userID int64) bool
+	// messageRequests is B5-6's first-contact gate and delivery-audience
+	// filter (service/message_request.go), wired by service.New(). nil (the
+	// zero value — every test and any caller built via NewMessageService
+	// directly instead of service.New()) disables the gate entirely: every
+	// one-to-one DM behaves exactly as it did before B5-6, which is what
+	// keeps the large existing body of DM tests that construct
+	// *MessageService directly green without themselves wiring it.
+	messageRequests *MessageRequestService
+	// afterFirstContactTrustCheck is a test seam (Codex review round 2,
+	// P2-8): called from dmFirstContactGate right after the trust read comes
+	// back false, before firstContact's insert — same package as its test,
+	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
+	// production.
+	afterFirstContactTrustCheck func()
+	// beforeRequestPreviewLookup is a test seam (Codex review round 2, P1):
+	// called from dmFirstContactGate right before canonicalRequestPreview's
+	// DB read, with the message id about to be looked up, so a test can
+	// delete the held message in that exact window and confirm the frame's
+	// preview comes back nil rather than the deleted content. Nil in
+	// production.
+	beforeRequestPreviewLookup func(messageID int64)
+	// pushNotifier is the Web Push dispatch hook (B5-11, behind HP-5). nil
+	// (the zero value) means dispatch is off — either push.enabled or
+	// push.dispatch_enabled is false — and SendMessage's hook call is
+	// skipped entirely. The composition root installs a *PushDispatcher
+	// here only when both keys are true.
+	pushNotifier PushNotifier
+}
+
+// SetMessageRequests wires the first-contact gate and delivery-audience
+// filter (service.New() calls this once at startup). See messageRequests'
+// doc comment for what leaving it nil means.
+func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
+	s.messageRequests = mr
 }
 
 // SetOnlineChecker wires the live-connection predicate @here's offline
@@ -165,6 +225,14 @@ type MessageService struct {
 // the Services) or from a test.
 func (s *MessageService) SetOnlineChecker(online func(userID int64) bool) {
 	s.online = online
+}
+
+// SetPushNotifier installs the Web Push dispatch hook. The composition root
+// calls this once, only when both push.enabled and push.dispatch_enabled
+// are true; passing nil (or never calling it) leaves dispatch off, which is
+// the compiled default (TestPushDispatch_OffByDefaultSendsNothing).
+func (s *MessageService) SetPushNotifier(n PushNotifier) {
+	s.pushNotifier = n
 }
 
 // NewMessageService creates a MessageService.

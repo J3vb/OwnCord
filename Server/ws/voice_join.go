@@ -481,7 +481,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// above, existing states, peer keys, voice_config) — the async queue gave
 	// it no fixed position relative to them, depending on how backed up the
 	// dispatch goroutine was.
-	h.sendVoiceEventSync(ctx, channelID, buildVoiceState(*state))
+	h.sendVoiceEventSync(ctx, channelID, c.userID, buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
 	//

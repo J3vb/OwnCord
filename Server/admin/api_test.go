@@ -157,6 +157,15 @@ CREATE TABLE IF NOT EXISTS channels (
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 
+-- Per-user NSFW acknowledgement (migration 047, B5-7): unlabelling a channel
+-- clears it in the same transaction as the flag write.
+CREATE TABLE IF NOT EXISTS nsfw_acknowledgements (
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    acknowledged_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,

@@ -14,7 +14,10 @@ const (
 	modBits    = memberBits | ManageMessages | MuteMembers
 )
 
-func text(archived bool) ChannelRef        { return ChannelRef{Type: "text", Archived: archived} }
+func text(archived bool) ChannelRef { return ChannelRef{Type: "text", Archived: archived} }
+func nsfwText(archived bool) ChannelRef {
+	return ChannelRef{Type: "text", Archived: archived, NSFW: true}
+}
 func announcement() ChannelRef             { return ChannelRef{Type: "announcement"} }
 func voice(archived bool) ChannelRef       { return ChannelRef{Type: "voice", Archived: archived} }
 func dm() ChannelRef                       { return ChannelRef{Type: "dm"} }
@@ -193,6 +196,25 @@ func TestTimedOutSubject(t *testing.T) {
 	runPredicate(t, "CanJoinVoice/timedOut", CanJoinVoice, []predicateCase{
 		{"timed out refused before CONNECT_VOICE is even checked", Subject{Channel: voice(false), TimedOut: true}, ErrTimedOut},
 		{"timed out refused in a dm call", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+	})
+}
+
+func TestCanReadContent(t *testing.T) {
+	runPredicate(t, "CanReadContent", CanReadContent, []predicateCase{
+		{"unlabelled channel needs no ack", Subject{RolePerms: memberBits, Channel: text(false)}, nil},
+		{"labelled and acknowledged", Subject{RolePerms: memberBits, Channel: nsfwText(false), NSFWAcknowledged: true}, nil},
+		{"labelled and not acknowledged", Subject{RolePerms: memberBits, Channel: nsfwText(false)}, ErrNSFWUnacknowledged},
+		// Decision 13: no bit and no admin bypass skips the consent gate — an
+		// administrator without a row is refused exactly like anyone else.
+		{"admin without a row is refused", Subject{RolePerms: Administrator, Channel: nsfwText(false)}, ErrNSFWUnacknowledged},
+		{"admin with a row is allowed", Subject{RolePerms: Administrator, Channel: nsfwText(false), NSFWAcknowledged: true}, nil},
+		// Visibility is checked first: an unauthorized caller learns nothing
+		// about the label, and archived still hides content entirely.
+		{"no role fails closed before the label is even consulted", Subject{Channel: nsfwText(false)}, ErrPermissionDenied},
+		{"archived labelled channel is ErrArchived, not the NSFW sentinel", Subject{RolePerms: memberBits, Channel: nsfwText(true)}, ErrArchived},
+		// DMs cannot be labelled; a participant with no ack sees no gate.
+		{"dm participant needs no ack", Subject{Channel: dm(), DMParticipant: true}, nil},
+		{"dm non-participant learns nothing", Subject{Channel: dm()}, ErrNotDMParticipant},
 	})
 }
 

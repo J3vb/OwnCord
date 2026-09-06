@@ -35,6 +35,19 @@ type broadcastMsg struct {
 	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
 	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
 	enqueuedAt time.Time
+	// skipPluginSink withholds this broadcast from the plugin event sink
+	// (B5-7 decision 13): set for a content-bearing frame from a labelled
+	// channel, because a plugin has no acknowledgement — treated as never
+	// acknowledged, regardless of who is in recipients. Every other
+	// broadcast still reaches the sink exactly as before.
+	skipPluginSink bool
+	// contentFilter narrows a channel-scoped topic Publish (recipients nil,
+	// channelID != 0) to the subset of the topic's subscribers it approves
+	// (B5-7): nil means unfiltered, the pre-B5-7 behaviour. Evaluated inside
+	// deliverBroadcast against the LIVE subscriber list, after the topic
+	// limiter and the seq allocation — see channelNSFWFilter for why it must
+	// not be a precomputed recipient list.
+	contentFilter func(userID int64) bool
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -412,7 +425,14 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// conceptually — but since seqMu is still held here, the call MUST NOT
 		// re-enter the hub. The default build is safe; the wazero build should
 		// dispatch asynchronously once the runtime is real.
-		if sink := h.pluginSink.Load(); sink != nil {
+		//
+		// skipPluginSink (B5-7 decision 13) withholds a labelled channel's
+		// content-bearing frame here: a plugin has no acknowledgement, so it
+		// is treated as never acknowledged regardless of who is in
+		// bm.recipients. No production Subscribe call exists yet (see
+		// EventSink.Dispatch's own doc), so this is a proof against the sink's
+		// decision, not yet an observable guest-delivery effect.
+		if sink := h.pluginSink.Load(); sink != nil && !bm.skipPluginSink {
 			eventType := extractEventType(msg)
 			if eventType == "" {
 				eventType = "broadcast"
@@ -436,8 +456,16 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq
-			// was allocated.
-			delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
+			// was allocated. contentFilter (B5-7) narrows delivery to the
+			// subset of THIS LIVE subscriber list it approves, resolved here
+			// rather than by the caller so a concurrent reconnect's
+			// registration (also under seqMu) can never land in a gap
+			// between "who was asked" and "who actually got it".
+			if bm.contentFilter != nil {
+				delivered = h.pubsub.PublishFiltered(ChannelTopic(bm.channelID), msg, bm.contentFilter)
+			} else {
+				delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
+			}
 			channelSend = true
 		}
 		return seq, delivered, channelSend

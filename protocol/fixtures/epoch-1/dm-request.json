@@ -1,0 +1,108 @@
+{
+  "journey": "dm-request",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 3,
+            "content": "hi, stranger"
+          },
+          "type": "chat_send"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>",
+            "timestamp": "<ts:string>"
+          },
+          "type": "chat_send_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "attachments": [],
+            "channel_id": 3,
+            "content": "hi, stranger",
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 3,
+            "created_at": "<ts:string>",
+            "decided_at": "<ts:null>",
+            "id": "<id:number>",
+            "preview": {
+              "content": "hi, stranger",
+              "message_id": "<id:number>",
+              "timestamp": "<ts:string>"
+            },
+            "sender": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "username": "alice"
+            },
+            "state": "pending"
+          },
+          "type": "dm_request"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

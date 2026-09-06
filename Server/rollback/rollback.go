@@ -42,6 +42,9 @@ var FS embed.FS
 var Order = []string{
 	"049_moderation_actions.down.sql",
 	"048_reports.down.sql",
+	"047_nsfw_acknowledgements.down.sql",
+	"046_message_requests.down.sql",
+	"045_push_subscriptions.down.sql",
 	"044_user_storage.down.sql",
 	"043_setup_completed.down.sql",
 	"042_audit_actor_token_backfill.down.sql",

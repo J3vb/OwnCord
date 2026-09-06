@@ -156,5 +156,5 @@ func (h *Hub) broadcastVoiceMuteState(ctx context.Context, userID, channelID int
 		return
 	}
 	state.ServerMuted = muted
-	h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
+	h.broadcastVoiceEvent(ctx, channelID, userID, buildVoiceState(*state))
 }

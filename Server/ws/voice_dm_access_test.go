@@ -216,6 +216,47 @@ func TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser(t *testing.T) 
 	}
 }
 
+// TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient is B5-6's
+// Codex P1-2 fix: unlike TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser
+// above (a non-participant), bob here IS a participant of the DM (so
+// IsDMParticipant alone would pass him through) but does not yet trust
+// alice — the same first-contact gate that withholds chat_message, typing
+// and reactions from him must withhold her voice_state too.
+func TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "dmvoiceuntrusted-alice")
+	bob := seedMemberUser(t, database, "dmvoiceuntrusted-bob")
+	dmID := untrustedDMChannel(t, database, alice.ID, bob.ID)
+
+	aliceSend := make(chan []byte, 32)
+	bobSend := make(chan []byte, 32)
+	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
+	bobClient := ws.NewTestClientWithUser(hub, bob, 0, bobSend)
+	hub.Register(aliceClient)
+	hub.Register(bobClient)
+	waitRegistered(t, hub, bobClient)
+
+	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
+
+	aliceMsgs := drainChanTimeout(aliceSend, 300*time.Millisecond)
+	foundVoiceState := false
+	for _, m := range aliceMsgs {
+		if extractType(t, m) == "voice_state" {
+			foundVoiceState = true
+		}
+	}
+	if !foundVoiceState {
+		t.Error("alice must still receive her own voice_state on join")
+	}
+
+	bobMsgs := drainChanTimeout(bobSend, 300*time.Millisecond)
+	for _, m := range bobMsgs {
+		if extractType(t, m) == "voice_state" {
+			t.Fatal("voice_state leaked to a DM participant who does not yet trust the joiner")
+		}
+	}
+}
+
 // OC-0018: voice_join into a 1:1 DM had no block gate. Every other 1:1-DM
 // interaction sink (send, edit, react, pin, typing, call_ring) routes through
 // service.requireDMNotBlocked; voice was the one gap. Blocking never touches

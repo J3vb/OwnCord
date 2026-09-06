@@ -259,6 +259,7 @@ type Store interface {
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
@@ -274,12 +275,30 @@ type Store interface {
 	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
+	// ── Message requests (migration 046, B5-6) ──
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error)
+	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
+	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)
+	TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error)
+	AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
 	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
 	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
+
+	// ── NSFW acknowledgements (migration 047, B5-7) ──
+	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
+	RevokeNSFW(ctx context.Context, userID, channelID int64) error
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error
+	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
 	// ── Attachments ──
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
@@ -374,6 +393,21 @@ type Store interface {
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
+
+	// ── Push (migration 045, B5-4) ──
+	// UpsertPushSubscription's keep is the per-user device cap; the upsert,
+	// the eviction ranking and the eviction delete run in one transaction.
+	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
+	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
+	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
+	CountPushSubscriptions(ctx context.Context) (int64, error)
+	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
+	// dispatch-only (B5-11): the former returns the push credential for a
+	// caller-narrowed audience, the latter prunes by id alone on a push
+	// service's 404/410.
+	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
+	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

@@ -290,6 +290,13 @@ func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map
 	return h.computeAllowedChannels(context.Background(), database, user)
 }
 
+// ComputeReadableChannelsForTest exposes Hub.computeReadableChannels for
+// external tests (the REST/WS/replay READABILITY agreement test, B5-7's
+// parallel to the visibility one above).
+func (h *Hub) ComputeReadableChannelsForTest(database *db.DB, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
+	return h.computeReadableChannels(context.Background(), database, user, allowed)
+}
+
 // GetCachedSettingsForTest exposes Hub.getCachedSettings for external tests.
 func (h *Hub) GetCachedSettingsForTest() (string, string) {
 	return h.getCachedSettings(context.Background())
@@ -468,8 +475,8 @@ func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 // tests so a load/soak test can drive the channelReadAudience-resolved
 // voice_state/voice_leave fan-out directly, without a full LiveKit join
 // round-trip.
-func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
-	h.broadcastVoiceEvent(context.Background(), channelID, msg)
+func (h *Hub) BroadcastVoiceEventForTest(channelID, subjectID int64, msg []byte) {
+	h.broadcastVoiceEvent(context.Background(), channelID, subjectID, msg)
 }
 
 // MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed
@@ -529,7 +536,7 @@ func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg 
 // as handleReconnect runs it. ok=false means the ring no longer covers lastSeq
 // and production would fall through to a full ready.
 func (h *Hub) ReconnectRegisterForTest(c *Client, lastSeq uint64, allowed map[int64]bool) ([][]byte, bool) {
-	return h.reconnectRegister(context.Background(), c, lastSeq, allowed, "buffer", nil, 0)
+	return h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
 }
 
 // UnregisterNowForTest exposes unregisterNow; the return is its "replaced"

@@ -24,6 +24,7 @@ func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
 	{"2 sessions", `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, inventoryByUID},
+	{"2a push subscriptions", `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, inventoryByUID},
 	{"3 api tokens", `SELECT COUNT(*) FROM api_tokens WHERE user_id = ?`, inventoryByUID},
 	{"4a totp secret", `SELECT COUNT(*) FROM users WHERE id = ? AND totp_secret IS NOT NULL`, inventoryByUID},
 	{"4b second-factor rows", `SELECT (SELECT COUNT(*) FROM partial_auth_challenges WHERE user_id = ?1)
@@ -44,10 +45,13 @@ var SubjectInventory = []InventoryClass{
 	{"12a upload byte counter", `SELECT COUNT(*) FROM user_storage WHERE user_id = ?`, inventoryByUID},
 	{"14a dm participation", `SELECT COUNT(*) FROM dm_participants WHERE user_id = ?`, inventoryByUID},
 	{"14b dm open state", `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ?`, inventoryByUID},
+	{"14c message requests", `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? OR recipient_id = ?`, inventoryBothIDs},
+	{"14d trusted senders", `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? OR sender_id = ?`, inventoryBothIDs},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
 	{"17 blocks", `SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?`, inventoryBothIDs},
 	{"18 channel user overrides", `SELECT COUNT(*) FROM channel_user_overrides WHERE user_id = ?`, inventoryByUID},
+	{"18a nsfw acknowledgements", `SELECT COUNT(*) FROM nsfw_acknowledgements WHERE user_id = ?`, inventoryByUID},
 	{"19 voice state", `SELECT COUNT(*) FROM voice_states WHERE user_id = ?`, inventoryByUID},
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},
