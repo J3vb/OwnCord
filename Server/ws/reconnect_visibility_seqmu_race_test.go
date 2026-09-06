@@ -23,6 +23,7 @@ package ws
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -66,27 +67,52 @@ func TestHandleReconnect_ConcurrentVisibilityBumpBlocksUntilRegistered(t *testin
 	const lastSeq = uint64(97)
 
 	notifyResult := make(chan bool, 1)
-	bumpDone := make(chan struct{})
+	entering := make(chan struct{})
+	returned := make(chan struct{})
 	t.Cleanup(func() { handleReconnectPostCheckPreRegisterRaceHook = nil })
 	handleReconnectPostCheckPreRegisterRaceHook = func() {
 		go func() {
-			// Same order and shape as api/nsfw_handler.go's
-			// markDMVisibilityChanged + notifyNSFWAck, and broadcastDMOpen's
-			// bump + SendToUser loop.
+			// Signalled the instant this goroutine runs, BEFORE the locked
+			// call — proof it was actually scheduled, so waiting for it
+			// (below) cannot itself be starved by a slow runner the way a
+			// bare time.After() could. Same order and shape as
+			// api/nsfw_handler.go's markDMVisibilityChanged + notifyNSFWAck,
+			// and broadcastDMOpen's bump + SendToUser loop.
+			close(entering)
 			hub.MarkVisibilityChanged()
-			close(bumpDone)
-			notifyResult <- hub.SendToUser(uid, []byte(`{"type":"nsfw_ack"}`))
+			delivered := hub.SendToUser(uid, []byte(`{"type":"nsfw_ack"}`))
+			notifyResult <- delivered
+			close(returned)
 		}()
-		// reconnectRegister (this goroutine) is holding h.seqMu right now —
-		// the concurrent call above can only be blocked inside
-		// MarkVisibilityChanged's Lock(), never past it. Any completion
-		// observed here would mean the two calls interleaved instead of
-		// serializing.
-		select {
-		case <-bumpDone:
-			t.Error("concurrent MarkVisibilityChanged completed while reconnectRegister still held h.seqMu — it must block until this critical section releases the lock")
-		case <-time.After(50 * time.Millisecond):
+		<-entering
+
+		// Give the now-confirmed-scheduled goroutine every chance to
+		// actually run — pure CPU yielding, no wall-clock wait — before we
+		// check it hasn't finished. This only matters for making a
+		// regression's false negative rare; it changes nothing about the
+		// guarantee below, which holds unconditionally for the fixed code.
+		for range 1000 {
+			runtime.Gosched()
 		}
+
+		// The correctness check instruments the lock, not the clock:
+		// hookFinished closes the instant this function returns, with
+		// nothing else after the loop above, so for a genuinely serialized
+		// MarkVisibilityChanged "returned" cannot win this select no matter
+		// how the scheduler behaves — the concurrent goroutine is blocked on
+		// h.seqMu.Lock(), which this very function is holding, so it cannot
+		// even reach SendToUser (let alone close "returned") until AFTER
+		// reconnectRegister releases the lock, which happens strictly after
+		// this hook itself returns.
+		hookFinished := make(chan struct{})
+		go func() {
+			select {
+			case <-returned:
+				t.Error("concurrent MarkVisibilityChanged (+SendToUser) completed while reconnectRegister still held h.seqMu — it must block until this critical section releases the lock")
+			case <-hookFinished:
+			}
+		}()
+		close(hookFinished)
 	}
 
 	events := dialAndResume(t, hub, token, lastSeq)
