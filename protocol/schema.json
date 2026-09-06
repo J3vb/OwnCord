@@ -108,6 +108,12 @@
       "go": "MsgTypePluginBroadcast",
       "ts": "PLUGIN_BROADCAST",
       "note": "plugin channel broadcast, gated by the sender's SEND_MESSAGES"
+    },
+    {
+      "wire": "nsfw_ack",
+      "go": "MsgTypeNSFWAck",
+      "ts": "NSFW_ACK",
+      "note": "second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)"
     }
   ]
 }

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 144 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 146 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -114,6 +114,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
 | POST    | `/api/v1/channels/{id}/messages/purge`                               |
 | GET     | `/api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users` |
+| DELETE  | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
+| PUT     | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
 | GET     | `/api/v1/channels/{id}/pins`                                         |
 | DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
@@ -217,6 +219,8 @@ endpoints return plain-text errors — see their section):
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
+| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 
 ---
 
@@ -1359,10 +1363,12 @@ channel, or every other participant of a one-to-one DM who trusts the
 author (the same `trusted_senders` row Message Requests gates on — see
 "Message Requests" below; a first-contact message from someone not yet
 trusted rings no one's phone). Within that set, only offline subscribers
-are pushed to (a connected client already has the message), permission is
-re-checked at dispatch time (`CanViewChannel`, not whatever it was when the
-subscription was created), and a channel labelled `nsfw` gets no push at
-all. At most one push per user per channel per 60
+are pushed to (a connected client already has the message), and permission
+is re-checked at dispatch time (`CanReadContent`, not whatever it was when
+the subscription was created) — the same predicate every content read path
+resolves, so a channel labelled `nsfw` pushes only to a recipient who has
+acknowledged it (see "NSFW Acknowledgement" below); a revoke between the
+first attempt and a retry drops the retry. At most one push per user per channel per 60
 seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
 (or a network error) gets two retries — three attempts total — before being
 dropped, and any other failure status drops immediately. Nothing is written
@@ -1768,6 +1774,54 @@ Decide a pending request. `block` additionally blocks the sender.
 | ------ | ----------- | -------------------------------------------------- |
 | 404    | `NOT_FOUND` | Not this recipient's request, or it does not exist |
 | 409    | `CONFLICT`  | The request is no longer pending                   |
+
+---
+
+## NSFW Acknowledgement
+
+B5-7: a channel's `nsfw` label (`docs/schema.md`, migration `025`) is
+enforced server-side (migration `047`, decision 13). A member with no
+acknowledgement row for a labelled channel gets no content from it on any
+path — history, around, pins, reaction users, search, live/replayed socket
+delivery, or attachment bytes — regardless of role; an administrator
+acknowledges like anyone else. Revoking takes effect on the caller's very
+next read, with no client-side cache to invalidate.
+
+### PUT /api/v1/channels/{id}/nsfw-acknowledgement
+
+Record the caller's own consent to the channel's labelled content.
+Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
+(`docs/protocol.md`) with `"acknowledged": true`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+
+---
+
+### DELETE /api/v1/channels/{id}/nsfw-acknowledgement
+
+Revoke the caller's own acknowledgement, if any. Idempotent — revoking a row
+that does not exist (never acknowledged, or the channel was since unlabelled)
+still answers 204. Sends the caller's other live sockets an `nsfw_ack` frame
+with `"acknowledged": false`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
 
 ---
 

@@ -189,14 +189,12 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	if err != nil || ch == nil {
 		return
 	}
-	// B5-7: nsfw_acknowledgements does not exist on this branch (B5-7 is
-	// behind HP-5 too and may not have merged yet). Once it does, a
-	// subscriber with an acknowledgement row for this channel should still
-	// receive the (generic) push; until then, gate on the label alone --
-	// no push at all for a labelled channel.
-	if ch.NSFW {
-		return
-	}
+	// B5-7: a labelled channel still pushes -- to a recipient who has
+	// acknowledged the label. eligibleFor (via coalesceAudience below, and
+	// again in stillEligible's per-attempt recheck) resolves that per
+	// candidate through permissions.CanReadContent, the same predicate every
+	// content read path uses; there is no whole-channel early return here
+	// because acknowledgement is per user, not per channel.
 	// Only one-to-one DMs are in scope (plan decision 4's Message Requests
 	// boundary and this step's own audience rule) -- a group DM has
 	// Type == "dm" too, so it needs its own check. Fail closed: a lookup
@@ -418,9 +416,16 @@ func (d *PushDispatcher) trustsAuthor(ctx context.Context, ch *db.Channel, uid, 
 
 // eligibleFor reports whether userID may be pushed to for ch right now:
 // not currently connected (their client already has the message), and
-// permitted to view ch. ch is the caller's already-resolved channel; a
-// caller that needs it re-fetched fresh (because time may have passed)
-// uses stillEligible instead.
+// permitted to READ ch's content -- CanReadContent (permissions/predicates.go),
+// the same predicate every content read path resolves, so a labelled channel
+// is decided exactly the way REST/search/socket/attachments decide it: no
+// push at all to a non-viewer, and no push to a viewer who has not
+// acknowledged the label (decision 13 -- no bit and no admin bypass skips
+// this). NSFWAcknowledged is read live from the db, only when ch.NSFW is
+// set, never re-implementing the rule itself. Fails closed: any lookup
+// error is treated as unacknowledged. ch is the caller's already-resolved
+// channel; a caller that needs it re-fetched fresh (because time may have
+// passed) uses stillEligible instead.
 func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID int64) bool {
 	if d.online != nil && d.online(userID) {
 		return false
@@ -429,20 +434,27 @@ func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID
 	if err != nil {
 		return false
 	}
-	return permissions.CanViewChannel(sub) == nil
+	if ch.NSFW {
+		sub.Channel.NSFW = true
+		ok, ackErr := d.st.HasNSFWAcknowledgement(ctx, userID, ch.ID)
+		sub.NSFWAcknowledged = ackErr == nil && ok
+	}
+	return permissions.CanReadContent(sub) == nil
 }
 
 // stillEligible re-resolves, immediately before one delivery attempt, the
 // things that can change while a bounded dispatch is in flight: the
-// recipient came online, the channel was labelled nsfw, the recipient lost
-// CanViewChannel, or -- for a one-to-one DM -- the recipient no longer
-// trusts the author (they blocked them, or ignored/deleted the pending
-// request between attempts: see trustsAuthor). Called before every attempt,
-// first and retry alike, so a revoke mid-dispatch drops the remaining
-// retries rather than delivering one anyway.
+// recipient came online, the channel was labelled nsfw (or their
+// acknowledgement of an already-labelled channel was revoked -- eligibleFor's
+// CanReadContent call covers both), the recipient lost CanViewChannel, or --
+// for a one-to-one DM -- the recipient no longer trusts the author (they
+// blocked them, or ignored/deleted the pending request between attempts: see
+// trustsAuthor). Called before every attempt, first and retry alike, so a
+// revoke mid-dispatch drops the remaining retries rather than delivering one
+// anyway.
 func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID, userID int64) bool {
 	ch, err := d.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil || ch.NSFW {
+	if err != nil || ch == nil {
 		return false
 	}
 	if !d.trustsAuthor(ctx, ch, userID, authorID) {

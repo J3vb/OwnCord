@@ -401,10 +401,9 @@ func TestPushDispatch_SkipsAuthorOnlineAndUnauthorized(t *testing.T) {
 	}
 }
 
-// TestPushDispatch_LabelledChannelSendsNothingUnacknowledged: B5-7's
-// nsfw_acknowledgements table does not exist on this branch, so a labelled
-// channel gets no push at all — not even to a subscriber who would
-// otherwise pass every other check.
+// TestPushDispatch_LabelledChannelSendsNothingUnacknowledged: a labelled
+// channel gets no push for a subscriber with no acknowledgement row — the
+// same CanReadContent verdict every content read path reaches for them.
 func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
@@ -420,7 +419,85 @@ func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if urls := fetch.urls(); len(urls) != 0 {
-		t.Errorf("fetch calls = %v, want none for a labelled channel", urls)
+		t.Errorf("fetch calls = %v, want none for an unacknowledged subscriber", urls)
+	}
+}
+
+// TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient is the
+// B5-11/B5-7 merge follow-up push_dispatch.go itself named: nsfw_acknowledgements
+// now exists, so a labelled channel pushes to a recipient who has
+// acknowledged it and withholds from one who has not — decided through
+// permissions.CanReadContent (eligibleFor), the same predicate every content
+// read path resolves, not a re-implementation of the rule.
+func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
+	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
+		t.Fatal(err)
+	}
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4) // acknowledges
+	seedUserRole(t, f.database, 3, 4) // does not
+	f.subscribe(t, 2, "https://push.example.net/nsfw-acked")
+	f.subscribe(t, 3, "https://push.example.net/nsfw-unacked")
+	if _, err := f.database.AcknowledgeNSFW(context.Background(), 2, 10); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2, 3})
+
+	urls := fetch.urls()
+	if len(urls) != 1 || urls[0] != "https://push.example.net/nsfw-acked" {
+		t.Errorf("fetch calls = %v, want exactly the acknowledged recipient's endpoint", urls)
+	}
+}
+
+// TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked is the NSFW half
+// of TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked: a recipient who
+// revokes their acknowledgement between the first (transiently failing)
+// attempt and the retry gets no retry — stillEligible's per-attempt
+// eligibleFor call re-resolves NSFWAcknowledged live, so it is not trusted
+// from the round's start.
+func TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
+	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
+		t.Fatal(err)
+	}
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	if _, err := f.database.AcknowledgeNSFW(context.Background(), 2, 10); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+	f.subscribe(t, 2, "https://push.example.net/nsfw-ack-revoked")
+
+	fetch := newRecordingPushFetcher()
+	var calls atomic.Int32
+	fetch.onFetch("https://push.example.net/nsfw-ack-revoked", func(ctx context.Context) (*safefetch.Response, error) {
+		n := calls.Add(1)
+		if n > 1 {
+			t.Error("a second attempt reached the fetcher after the acknowledgement was revoked")
+			return &safefetch.Response{StatusCode: 201}, nil
+		}
+		// Revoke between the first attempt and the retry.
+		if err := f.database.RevokeNSFW(ctx, 2, 10); err != nil {
+			t.Fatal(err)
+		}
+		return &safefetch.Response{StatusCode: 503}, nil
+	})
+
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.sleep = noSleep
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
+	}
+	d, fl, p := dispatcher.Counters()
+	if d != 0 || fl != 0 || p != 0 {
+		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
 	}
 }
 

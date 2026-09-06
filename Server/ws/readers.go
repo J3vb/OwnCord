@@ -28,6 +28,13 @@ type VisibilityReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
+	// HasNSFWAcknowledgement and ListNSFWAcknowledgedUserIDs back B5-7's
+	// content gate: the ready payload's per-channel nsfw_acknowledged field,
+	// reconnect replay's readable-set filter, and the hub's per-broadcast
+	// content audience (hub_visibility.go). Taken live, never cached, and
+	// only when a channel is actually labelled.
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
 	// IsGroupDM and IsTrustedSender back the B5-6 sender-aware DM voice
 	// audience (voice_broadcast.go's filterDMAudience): a one-to-one DM's
 	// voice_state/voice_leave fan-out must not reach a recipient who does

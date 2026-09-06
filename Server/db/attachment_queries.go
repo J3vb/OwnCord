@@ -26,10 +26,12 @@ type Attachment struct {
 // AttachmentAccess holds attachment metadata plus the channel context needed
 // for access control. ChannelID and ChannelType are empty when the attachment
 // is unlinked (message_id IS NULL or the message/channel was deleted).
+// ChannelNSFW is meaningless in that case too (always false).
 type AttachmentAccess struct {
 	Attachment
 	ChannelID   *int64
 	ChannelType string
+	ChannelNSFW bool
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
@@ -97,6 +99,7 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		},
 		ChannelID:   r.ChannelID,
 		ChannelType: derefString(r.Type),
+		ChannelNSFW: r.Nsfw != nil && *r.Nsfw != 0,
 	}, nil
 }
 

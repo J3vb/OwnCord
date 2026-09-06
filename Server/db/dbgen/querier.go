@@ -11,6 +11,10 @@ import (
 )
 
 type Querier interface {
+	// Per-user, per-channel NSFW acknowledgement (migration 047, B5-7). See the
+	// migration's own comment for the shape and Server/permissions/predicates.go
+	// (CanReadContent) for the gate these back.
+	AcknowledgeNSFW(ctx context.Context, arg AcknowledgeNSFWParams) error
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
 	ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error)
@@ -98,6 +102,7 @@ type Querier interface {
 	// exactly that layout -- a space-separated cutoff would compare wrong.
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteLockout(ctx context.Context, key string) error
+	DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error
 	// Avatars are attachments that are never linked to a message on purpose: the
 	// users.avatar URL is what keeps them alive and authorizes serving them
 	// (migration 027). Excluding them here is what stops the sweep from destroying
@@ -177,6 +182,9 @@ type Querier interface {
 	GetAllSettings(ctx context.Context) ([]Setting, error)
 	GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error)
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
+	// c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
+	// NULL when the attachment is unlinked or its message/channel is gone, same
+	// as c.type, so both are read through the caller's nil-safe mapping.
 	GetAttachmentWithChannel(ctx context.Context, id string) (GetAttachmentWithChannelRow, error)
 	GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]GetAuditLogRow, error)
 	GetChannel(ctx context.Context, id int64) (GetChannelRow, error)
@@ -256,6 +264,7 @@ type Querier interface {
 	GetUserStorage(ctx context.Context, userID int64) (int64, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
+	HasNSFWAcknowledgement(ctx context.Context, arg HasNSFWAcknowledgementParams) (int64, error)
 	// Erasure jobs (migration 037, B4-9): the durable file half of an account
 	// erasure. The row is written inside the erasure transaction with the
 	// stored_as names of every file the subject owned; the runner removes them
@@ -305,6 +314,7 @@ type Querier interface {
 	// signal, leaving those users unrenderable and unmentionable on the client
 	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
 	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]ListPendingMessageRequestsRow, error)
 	ListPendingUsers(ctx context.Context, arg ListPendingUsersParams) ([]ListPendingUsersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
@@ -390,6 +400,7 @@ type Querier interface {
 	RevokeAPIToken(ctx context.Context, id int64) (sql.Result, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error)
 	RevokeInvite(ctx context.Context, code string) error
+	RevokeNSFW(ctx context.Context, arg RevokeNSFWParams) error
 	SetChannelSlowMode(ctx context.Context, arg SetChannelSlowModeParams) error
 	SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error
 	SetDMChannelName(ctx context.Context, arg SetDMChannelNameParams) error

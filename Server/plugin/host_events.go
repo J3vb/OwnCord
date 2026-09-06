@@ -10,6 +10,7 @@ package plugin
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // Broadcaster is a function that sends a raw JSON payload to a WS channel.
@@ -24,6 +25,11 @@ type EventSink struct {
 	mu          sync.Mutex
 	subs        map[string][]*Instance
 	broadcaster Broadcaster // set via SetBroadcaster; nil = no WS delivery
+	// DispatchCount counts every Dispatch call, delivered or not (subs is
+	// empty in every build today — see Dispatch's doc). Lets a test assert
+	// the hub actually withheld a call for a labelled channel's content
+	// (B5-7 decision 13) rather than only checking the gate's own verdict.
+	DispatchCount atomic.Int64
 }
 
 // NewEventSink returns a fresh sink. Used by the registry as the central
@@ -120,6 +126,7 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 //
 // Until then this stays inert on purpose.
 func (s *EventSink) Dispatch(ctx context.Context, topic string, payload []byte) {
+	s.DispatchCount.Add(1)
 	s.mu.Lock()
 	subs := append([]*Instance(nil), s.subs[topic]...)
 	s.mu.Unlock()

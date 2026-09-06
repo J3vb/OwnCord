@@ -349,13 +349,16 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
-`nsfw`, `voice_max_users` and `voice_max_video` are always present, with their
-column defaults on an unconfigured channel — `false`, `0`, and **`25`** for
-`voice_max_video`, which is `DEFAULT 25` rather than zero (migration 004) —
-never omitted, so "absent" never has to mean two different things. `nsfw` is a
-label the server never acts on (see below); the two voice limits are the values
+`nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
+present, with their column defaults on an unconfigured channel — `false`,
+`false`, `0`, and **`25`** for `voice_max_video`, which is `DEFAULT 25` rather
+than zero (migration 004) — never omitted, so "absent" never has to mean two
+different things. `nsfw` is a label the server enforces (see below);
+`nsfw_acknowledged` is whether the CALLER has their own consent row for it
+(migration `047`, B5-7) — always `false` for an unlabelled channel, where it
+means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
 
@@ -766,11 +769,24 @@ client is told about. Sent on every admin `PATCH`, so a client applies channel
 edits (rename, topic, category move, slow mode, `nsfw`, voice limits) without
 reconnecting.
 
-`nsfw` is shipped so clients can gate or label a channel; **the server applies
-no content behaviour of its own to a flagged channel** — no filtering, no age
-check, no restriction on who may read or post. The desktop client shows a
-one-time-per-session warning before rendering the channel and marks it in the
-sidebar; a client that ignores the field behaves exactly as before it existed.
+`nsfw` is shipped so clients can gate or label a channel, and **the server now
+enforces it** (migration `047`, B5-7): a member with no acknowledgement row
+for a labelled channel gets no content from it — no message history, around
+window, pins, reaction users, search hits, or live/replayed `chat_message` /
+`chat_edited` / `reaction_update` — and no attachment bytes from it either,
+regardless of client. `channel_create`/`channel_update` themselves still reach
+every viewer including the one that just turned the label on, since those
+frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
+only in `ready` (above), not in this broadcast, the same reason `can_send` is
+omitted from it. See `PUT`/`DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
+records or revokes consent, and the `nsfw_ack` frame below for the second-
+device signal. The desktop client's own gating UI (blur, consent prompt) is
+B9's; an account with no standing acknowledgement simply never satisfies the
+server-side gate and receives no content to render, on any device or client
+that ignores this UI — the row is per-user, not per-session or per-device, so
+a second device or a client that skips the gating UI inherits whatever the
+account has already acknowledged rather than bypassing consent.
 
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
@@ -793,6 +809,30 @@ into an archive that nobody can see or moderate.
   "payload": { "id": 8 }
 }
 ```
+
+### nsfw_ack (Server -> Client, direct)
+
+B5-7. Sent to the caller's OWN other live sockets after `PUT` or `DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`), so a second
+device converges without a reconnect.
+
+```json
+{
+  "type": "nsfw_ack",
+  "payload": { "channel_id": 8, "acknowledged": true }
+}
+```
+
+| Field          | Type    | Description                                         |
+| -------------- | ------- | --------------------------------------------------- |
+| `channel_id`   | integer | The channel the caller just acknowledged or revoked |
+| `acknowledged` | boolean | `true` after `PUT`, `false` after `DELETE`          |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_request`: a
+client that misses one (a dropped connection during the request) recovers on
+its next `ready`, whose per-channel `nsfw_acknowledged` field is the
+persisted source of truth — there is nothing here a resync needs to recover
+that `ready` does not already carry.
 
 ---
 
@@ -1708,6 +1748,7 @@ tables below add per-type behavioral notes.
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
 | `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
+| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                 |
 
 ### Plugin command types
 

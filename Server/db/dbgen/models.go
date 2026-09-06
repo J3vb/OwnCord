@@ -179,6 +179,12 @@ type MessagesFt struct {
 	Content string `json:"content"`
 }
 
+type NsfwAcknowledgement struct {
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	AcknowledgedAt string `json:"acknowledgedAt"`
+}
+
 type PartialAuthChallenge struct {
 	TokenHash string `json:"tokenHash"`
 	UserID    int64  `json:"userId"`

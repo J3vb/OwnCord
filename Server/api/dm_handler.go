@@ -44,7 +44,8 @@ var _ dmVisibilityMarker = (*ws.Hub)(nil)
 // never gets it redelivered by the ordinary seq-replay path — mirroring why
 // the WS emitter of the same event (ws/emit.go DMChannelOpenEvent) forces
 // this bump unconditionally, regardless of whether the send itself
-// succeeded.
+// succeeded. Also called by nsfw_handler.go (P2-8): nsfw_ack is the same
+// shape of unsequenced, targeted event.
 func markDMVisibilityChanged(broadcaster DMBroadcaster) {
 	if vm, ok := broadcaster.(dmVisibilityMarker); ok {
 		vm.MarkVisibilityChanged()

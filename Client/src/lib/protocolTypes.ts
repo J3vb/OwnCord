@@ -54,6 +54,7 @@ export const ServerMessageType = {
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
   PLUGIN_BROADCAST: "plugin_broadcast", // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+  NSFW_ACK: "nsfw_ack", // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 } as const;
 
 export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];

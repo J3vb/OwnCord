@@ -81,4 +81,5 @@ const (
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client
 	MsgTypePluginBroadcast     = "plugin_broadcast"    // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+	MsgTypeNSFWAck             = "nsfw_ack"            // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 )

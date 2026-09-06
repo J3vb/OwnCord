@@ -291,6 +291,12 @@ var erasureStatements = []struct {
 	// to catch, so they get their own explicit statements before it runs.
 	{"message_requests", `DELETE FROM message_requests WHERE sender_id = ?1 OR recipient_id = ?1`},
 	{"trusted_senders", `DELETE FROM trusted_senders WHERE recipient_id = ?1 OR sender_id = ?1`},
+	// NSFW acknowledgements (migration 047, B5-7, class 18a): a consent
+	// record naming the subject. The users delete below would cascade this
+	// too, but decision 13 binds it to decision 7's erasure rule, so it gets
+	// its own explicit statement the inventory's zero is proved against —
+	// the channel half needs none (ON DELETE CASCADE on channel_id).
+	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},

@@ -1849,6 +1849,160 @@ moderator viewing reported content, and the plugin sink. Plus the
 retention/deletion integration test for the acknowledgement rows. The client
 half — blur, gate and consent UI — is B9.
 
+**Evidence, 2026-09-06** — branch `feature/b5-7-nsfw-acknowledgement`, stacked
+on B5-6 (`4b7635b8`, then B5-6's `32eb9c28` and its final `96098bef` merged
+in, the latter carrying `dev`'s B5-11): built behind HP-5, which the owner
+accepted on 2026-09-06 (#1547, signature recorded in #1550); PR to `dev`
+#1551, stacked on #1549. Commits `d4baf5da` (the feature), `6c4282e5`
+(the independent review round), `040a8a4d` and `65d70ca4` (its two
+verification rounds), `2d238899` (the race test made to instrument the lock
+rather than the clock), `1e2710de` (the merge of B5-6's tip) and `ac9d25cd`
+(B5-11's marked NSFW follow-up, wired once that merge brought B5-11 into
+this tree).
+The premise held at the base: migration `025` stores the label, `ready` and the
+channel broadcasts ship it, the admin edit audits it, and nothing server-side
+reads it — the gate lived in the desktop's `sessionStorage`. The four leak paths
+the plan named were all real, and the socket one had no test bearing on it.
+
+- **The row.** Migration `047_nsfw_acknowledgements.sql`, the HP-5 draft
+  verbatim: `(user_id, channel_id)` primary key, both halves cascading, so a
+  new device inherits the acknowledgement
+  (`TestNSFW_NewSessionInheritsTheAcknowledgement`) and channel deletion needs
+  no code (`TestNSFW_ChannelDeletionCascades`). Reversal first in
+  `rollback.Order` with its cost row; the class joins `erasureStatements` and
+  `SubjectInventory` (`18a`), with a survivor seeded — the explicit statement
+  is redundant with the cascade, as `user_storage`'s is, and the inventory's
+  zero is the proof.
+- **One predicate.** `permissions.CanReadContent` = `CanViewChannel`, then
+  `ErrNSFWUnacknowledged` when `Channel.NSFW` and not `Subject.NSFWAcknowledged`
+  (`TestCanReadContent`). The acknowledgement is resolved **live on every read
+  path**, not through the 30-second permission cache — filling the cached
+  `Subject` would have made "revocation takes effect on the next read" false
+  (`TestNSFW_RevokeTakesEffectOnTheNextRead`). Archived channels keep their
+  documented readable history: the read subject does not carry `Archived`
+  into this predicate, a considered exception rather than an oversight.
+  `authz_chokepoint` lists the predicate and gained no residue.
+- **Path 1, REST.** `requireChannelRead` refuses history, around, pins and
+  reaction users with `403 NSFW_ACKNOWLEDGEMENT_REQUIRED`, a code and nothing
+  else; single-channel search likewise; global search runs over
+  `ReadableChannelIDs`, the visible set minus labelled-unacknowledged channels,
+  so a hit is silently absent — the path the plan said would ship silently
+  (`TestNSFW_UnacknowledgedGetsNoContentOnAnyPath`).
+- **Path 2, the socket.** A classification table names every server→client
+  type as content-bearing or metadata, and its completeness guard reads the
+  registry from `protocol/schema.json`, so a type classified nowhere fails
+  (`TestNSFW_EveryServerFrameKindIsClassified`; B5-8..B5-10's frames must
+  choose). Content kinds — `chat_message`, `chat_edited`, `reaction_update`,
+  the plugin broadcast — travel through the same rate-limited topic publish
+  metadata always used, with a per-subscriber filter evaluated fresh under the
+  sequencing lock (`PublishFiltered`), so the audience is read at the same
+  serialisation point as reconnect registration and the channel rate limiter
+  always runs (`TestDeliverBroadcast_ContentFilterStillRateLimited`). Metadata
+  kinds — `channel_update` above all, including the one that turns the label
+  on — reach every viewer. A channel lookup failure denies every socket
+  recipient rather than filtering none
+  (`TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient`). Reconnect
+  replay asks the database **immediately before each content frame** whether
+  the channel is still readable — no set is computed ahead, and no answer
+  outlives the one frame it gates — failing closed on a lookup error, so a
+  revocation between two frames of one batch drops the later ones and nothing
+  more (`TestReconnect_ReplaySkipsUnacknowledgedLabelledContent`,
+  `TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes`). The
+  visibility parity test stays green and gains a readability sibling
+  (`TestChannelReadability_RESTWSReplayAgreement`). DM frames never meet this
+  filter: `EmitEvents` routes them through B5-6's sender-aware audience first,
+  which the pre-existing interface-ordering tests pin.
+- **Path 3, attachments.** `AttachmentAccess` carries the channel's label;
+  `UploadService.Authorize` runs DM participation → channel visibility →
+  **consent → the administrator early return** → unlinked ownership, so a
+  non-member learns nothing from the label
+  (`TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot`) and an
+  administrator acknowledges like anyone else — decision 13
+  (`TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel`,
+  `TestNSFW_AdministratorAcknowledgesLikeAnyoneElse`).
+- **Path 4, the plugin sink.** Both directions exist; the one that matters is
+  hub → plugin (`deliverBroadcast` → `Dispatch`). Labelled content is withheld
+  from it, and an unknown label (lookup error, nil channel) withholds too;
+  the test asserts on the sink's own dispatch count, not the gate's boolean
+  (`TestNSFW_PluginSinkGetsNoLabelledContent`). No production code subscribes
+  a guest today, so this is a proof about code that cannot yet run.
+- **Path 5, Web Push — B5-11's marked follow-up.** B5-11 shipped with "no
+  push at all for a labelled channel" as a stub because this row did not
+  exist in its tree. Once B5-6's tip brought B5-11 into this branch, push
+  eligibility became the same `CanReadContent` predicate, with the
+  acknowledgement resolved live, run before the coalescing window is
+  reserved and again before every attempt — a labelled channel pushes only
+  to viewers who acknowledged, a revoke between attempts drops the retry,
+  and a lookup error fails closed
+  (`TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient`,
+  `TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked`;
+  `TestPushDispatch_LabelledChannelSendsNothingUnacknowledged` keeps its
+  name and its meaning).
+- **Acknowledge and revoke.** `PUT`/`DELETE /api/v1/channels/{id}/nsfw-acknowledgement`
+  (`204`; `404` invisible; `409 NOT_NSFW`;
+  `TestNSFW_AcknowledgeRequiresVisibilityAndALabel`). The acknowledge reads
+  the label and inserts inside **one writer transaction** — the writer pool
+  holds a single connection, so a concurrent revoke or unlabel lands wholly
+  before or wholly after it — so an unlabel between the check and the insert
+  cannot leave stale consent for a later re-label, and a duplicate acknowledge
+  racing a revoke never reports `NOT_NSFW`
+  (`TestNSFWAcknowledge_UnlabelBetweenCheckAndInsertIsNotTrusted`,
+  `TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled`).
+  It is hand-rolled through the exec escape hatch rather than one
+  `INSERT ... SELECT`, because sqlc v1.30.0's SQLite engine mis-slices that
+  form and corrupts the next query in the file (a new `db-change` trap,
+  recorded). Both bump the visibility watermark **and then** send `nsfw_ack`
+  to the user's own sockets, in that order, so a socket registering between
+  the two sees the bumped state (`TestNSFW_SecondDeviceGetsTheSignal`,
+  `TestNSFW_WatermarkBumpsBeforeTheNotifySend`); a warm resume past a missed
+  frame takes the full-`ready` path and `ready`'s new per-channel
+  `nsfw_acknowledged` carries the truth
+  (`TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume`).
+- **The label lifecycle.** Clearing a channel's label deletes its
+  acknowledgement rows in the same transaction whenever the resulting flag is
+  false — not only on an observed 1→0, which a stale read could miss — so a
+  re-label re-prompts everyone
+  (`TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts`,
+  `TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead`).
+  The existing audit suffix on the flip is unchanged.
+- **An independent review**, briefed on S4's abuse table, found one P1 and
+  nine P2/P3s, all fixed in `6c4282e5`, and its verification round four more,
+  fixed in `040a8a4d`: the replay re-check still taken once per batch rather
+  than per frame; the socket filter meaning "no filter" on a lookup failure;
+  the watermark bumped after the signal instead of before; and an acknowledge
+  whose outcome a racing revoke could misreport. The first round: replay checking readability once per
+  reconnect; a non-atomic acknowledge; the clear keyed on a stale read; a
+  precomputed audience outside the sequencing lock that also bypassed the
+  channel rate limiter; consent checked before visibility on attachments; the
+  sink defaulting open on an unknown label; an unrecoverable missed
+  `nsfw_ack`; a completeness guard checking its own count; and the docs.
+- **Revert-proof, thirteen mutations**: the NSFW clause, the global-search set,
+  the attachment check after the admin return, `chat_message` reclassified,
+  replay on the visible set, the clear removed, the per-frame replay
+  re-check, the atomic insert split (both layers — splitting one alone stays
+  atomic), the clear made conditional again, the sink suppression removed,
+  the per-frame check collapsed back to one answer per batch, the socket
+  filter's lookup failure returned to "no filter".
+  The erasure statement is the one mutation with no red test: the cascade
+  covers it.
+- **Gates.** Four build-tag variants, `go vet`, `go test -race ./...`, the
+  deadlock leg on `ws`, the untagged `admin` leg, `golangci-lint` clean,
+  `dbgen` and protocol in step, `gendocs` idempotent, `dbinventory` in step,
+  `check:docs` (046 and 047 extend `dev` in order once stacked), prettier
+  from the worktree root, the coverage floor (`ws` reads under floor on
+  Windows by the documented gap, unchanged by this branch).
+
+**What B5-8..B5-10 inherit.** Every new server→client frame must be placed in
+the kind table or the guard fails the build. `CanReadContent` is the read
+predicate for anything that returns a message body from a channel — a
+moderation surface that shows reported content acknowledges like anyone else
+(decision 13; the report queue shows a snapshot, not the channel, and that is
+S5's call).
+
+**Not included, deliberately.** The client's blur, prompt and consent UI
+(B9); a DB constraint against labelling a DM (no exposed write can); a
+per-device prompt (decision 13 chose per-account); a findings-ledger row.
+
 ## B5-8 — Local report intake and queue service
 
 **Closes:** BPR-070; **BPR-071's server half**; BG-14's server half, part a.

@@ -62,7 +62,12 @@ type Event interface {
 // each Event. The check order matters: SequencedDMEvent MUST be checked
 // before ChannelEvent because DM events implement both.
 
-// ChannelEvent routes to Hub.BroadcastToChannel (sequenced, replayable).
+// ChannelEvent routes through Hub.broadcastChannelEvent (sequenced,
+// replayable): a metadata kind still goes straight to BroadcastToChannel, but
+// a content-bearing kind (contentBearingKinds, ws/nsfw_content.go) is
+// narrowed to channelContentAudience — CanReadContent over today's actual
+// topic subscribers, so a labelled channel's content withholds from an
+// unacknowledged member even though they are subscribed (B5-7).
 type ChannelEvent interface {
 	Event
 	ChannelID() int64

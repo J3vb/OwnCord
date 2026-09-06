@@ -277,6 +277,14 @@ type Store interface {
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
+	// ── NSFW acknowledgements (migration 047, B5-7) ──
+	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
+	RevokeNSFW(ctx context.Context, userID, channelID int64) error
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error
+	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
+
 	// ── Attachments ──
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentByID(ctx context.Context, id string) (*db.Attachment, error)
