@@ -18,7 +18,12 @@ import (
 // every Allow call, which already knows it) lets one sweep retire a
 // short-window key within its own few minutes while a 24h key's history
 // survives until it is genuinely 24h stale, with no shared constant to keep
-// in sync with the longest caller.
+// in sync with the longest caller. window only ever grows for a given key
+// (round 4 review, P3) — Allow ratchets it up to the largest window it has
+// ever seen for that key, never down, so a key whose configured window
+// shrinks and later grows again (message_crud.go's per-channel slow mode)
+// cannot have its history evicted by Cleanup using a since-superseded
+// smaller horizon.
 type entry struct {
 	timestamps []time.Time
 	window     time.Duration
@@ -165,7 +170,23 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 		e = &entry{}
 		s.windows[key] = e
 	}
-	e.window = window // Cleanup's own per-key horizon; see entry's doc comment.
+	// Cleanup's own per-key horizon (see entry's doc comment), ratcheted to
+	// the LARGEST window ever observed for this key rather than overwritten
+	// by whichever call happens to run last (round 4 review, P3: a
+	// channel's slow-mode window, message_crud.go, is admin-configurable —
+	// the same key can be checked under a short window at one point and a
+	// much longer one later). Overwriting unconditionally let a transient
+	// call with a smaller window than one already recorded downgrade the
+	// horizon Cleanup uses to decide the WHOLE entry is stale, discarding a
+	// timestamp a since-restored longer window still needed to enforce
+	// against — a key rate-limited under a loosened-then-retightened
+	// window could lose its history to a Cleanup sweep landing in that
+	// gap. Only ever growing costs a few keys' entries a slightly longer
+	// stay in memory (until stale under the largest window they were ever
+	// checked against); it never discards enforcement history early.
+	if window > e.window {
+		e.window = window
+	}
 
 	// Prune timestamps outside the current window.
 	valid := e.timestamps[:0]

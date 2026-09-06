@@ -319,3 +319,41 @@ func TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory(t *testing.T)
 		t.Fatal("Allow(appealKey) after Cleanup = true, want false — a 7h-old submission is still within the real 24h window and must not have been forgotten")
 	}
 }
+
+// TestRateLimiter_AllowNeverShrinksAKeysRecordedWindow is P3 item 6, round
+// 4's test-strengthening review of the per-key window itself: Cleanup used
+// (before this fix) to evict a key's whole entry once every timestamp was
+// stale under WHATEVER window the LAST Allow call happened to pass — and
+// message_crud.go's slow mode is a per-channel, admin-configurable window
+// on the very same key shape (auth.Key("slow", userID), channelID). A
+// channel briefly turned down to a short slow mode and then back up to a
+// long one downgraded the key's recorded Cleanup horizon on the short call
+// alone, so a sweep landing in that gap could discard a timestamp the
+// restored long window still needed to enforce against — a key rate-
+// limited under a loosened-then-retightened window losing its history.
+// Ratcheting window to the MAXIMUM ever observed for a key, never down,
+// removes the gap entirely: this pins that a later Allow call with a
+// SMALLER window never regresses what an earlier, larger-window call
+// already recorded.
+func TestRateLimiter_AllowNeverShrinksAKeysRecordedWindow(t *testing.T) {
+	const key = "slow:1:100"
+	rl := auth.NewRateLimiter()
+
+	if !rl.Allow(key, 1, 6*time.Hour) {
+		t.Fatal("first Allow under the 6h window: want true (the key's first request)")
+	}
+	if got, ok := rl.WindowForTest(key); !ok || got != 6*time.Hour {
+		t.Fatalf("recorded window after a 6h Allow = (%v, %v), want (6h, true)", got, ok)
+	}
+
+	// Slow mode is (briefly) turned down to 60s: a second Allow call for
+	// the SAME key with a SHORTER window. Refused — the first call's
+	// timestamp is still within even this much shorter window — but the
+	// recorded Cleanup horizon must not be downgraded by this call.
+	if rl.Allow(key, 1, 60*time.Second) {
+		t.Fatal("second Allow under the 60s window: want false (refused — the first timestamp is still within 60s)")
+	}
+	if got, ok := rl.WindowForTest(key); !ok || got != 6*time.Hour {
+		t.Fatalf("recorded window after a 60s Allow call on the same key = (%v, %v), want (6h, true) — the max ever observed must not be downgraded", got, ok)
+	}
+}

@@ -227,11 +227,63 @@ func (d *DB) AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeI
 	return n == 1, nil
 }
 
-// appealAssignPreBeginTxHook, when non-nil, runs immediately before
-// AssignAppealTx's BeginTx — the same test barrier shape as
-// forceReassignPreBeginTxHook, for the plain (non-forced) assign path.
+// DecideAppeal is the guarded decide UPDATE alone (Claim 5's observed
+// state/assignee guard, EXISTS(users) for decidedBy) — no precheck and no
+// transaction of its own, the low-level primitive DecideAppealTx wraps.
+// Exposed directly (round 4 test-strengthening review) so a test can prove
+// the UPDATE's OWN guard refuses a stale write, independent of
+// AppealObservedRowExists — a separate query with the identical
+// predicates, run first inside DecideAppealTx for the P3 stale-reject-
+// before-count optimization — which would otherwise refuse the write
+// first and mask whether the UPDATE's own guard would have caught it too.
+func (d *DB) DecideAppeal(ctx context.Context, id int64, observedState string, observedAssigneeID int64, newState string, decidedBy int64, note string) (bool, error) {
+	n, err := d.q.DecideAppeal(ctx, dbgen.DecideAppealParams{
+		NewState: newState, DecidedBy: decidedBy, DecisionNote: note, ID: id,
+		ObservedState: observedState, ObservedAssigneeID: observedAssigneeID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("DecideAppeal: %w", err)
+	}
+	return n == 1, nil
+}
+
+// appealAssignInTxHook, when non-nil, runs INSIDE AssignAppealTx's own
+// transaction — immediately after BeginTx, before the fresh
+// authority/eligibility reads it guards — via q, the same transaction-
+// scoped Queries those reads use, never a separate connection. Round 4
+// test-strengthening: a func() hook fired merely "immediately before
+// BeginTx" could not tell a genuinely fresh in-transaction read apart from
+// one moved to just-before-BeginTx (both would observe an external
+// mutation identically, since nothing here is actually concurrent).
+// Requiring q as a parameter makes the hook impossible to invoke before
+// BeginTx exists at all, and because the mutation lands on the SAME tx, a
+// read that used a separate, non-tx connection instead of q would not see
+// it either (an open transaction's writes are invisible outside it until
+// commit) — so the test now distinguishes "reads fresh, via this tx" from
+// both "reads before BeginTx" and "reads via the wrong connection".
 // Test-only (nil in production).
-var appealAssignPreBeginTxHook func()
+var appealAssignInTxHook func(ctx context.Context, q *dbgen.Queries) error
+
+// appealSelfReviewCheck builds the closure both AssignAppealTx and
+// forceReassignGuarded's appeal path call inside their own transaction to
+// evaluate decision 8's deciding-moderator eligibility test fresh (round 4
+// review: this used to be evaluated by the caller BEFORE either
+// transaction). checkSelfReview false (the actor did not take the appealed
+// action) means "always skip" — the closure itself is only ever called
+// when the caller already knows it applies, so this only guards a
+// nil-vs-non-nil decision at the call site, never a second copy of that
+// predicate.
+func appealSelfReviewCheck(ctx context.Context, actorID, appellantID, permBit, adminBit int64) func(q *dbgen.Queries) (bool, error) {
+	return func(q *dbgen.Queries) (bool, error) {
+		eligible, err := q.EligibleModeratorExists(ctx, dbgen.EligibleModeratorExistsParams{
+			ExcludeActorID: actorID, ExcludeAppellantID: appellantID, PermBit: permBit, AdminBit: adminBit,
+		})
+		if err != nil {
+			return false, err
+		}
+		return eligible > 0, nil
+	}
+}
 
 // AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
 // transaction (P2 review, mirrors DecideAppealTx): the acting moderator's
@@ -239,12 +291,14 @@ var appealAssignPreBeginTxHook func()
 // inside the SAME transaction as the guarded write, never trusted from the
 // service's earlier (now possibly stale) requireModerate check. A revoked
 // bit or a ban that landed before this transaction began refuses with
-// ErrForbidden, before the write ever runs.
+// ErrForbidden, before the write ever runs. checkSelfReview (round 4
+// review): when true, decision 8's deciding-moderator eligibility test also
+// runs fresh inside this same transaction — another eligible moderator
+// appearing between the caller's earlier (non-transactional) view and this
+// write is caught here, not missed.
 func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+	checkSelfReview bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error) {
-	if appealAssignPreBeginTxHook != nil {
-		appealAssignPreBeginTxHook()
-	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("AssignAppealTx begin tx: %w", err)
@@ -252,10 +306,25 @@ func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigne
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
 
+	if appealAssignInTxHook != nil {
+		if err := appealAssignInTxHook(ctx, q); err != nil {
+			return false, fmt.Errorf("AssignAppealTx test hook: %w", err)
+		}
+	}
+
 	if checkAuthority != nil {
 		rolePerms, banned, banExpires, ok := deciderAuthority(ctx, tx, actorID)
 		if !ok || checkAuthority(rolePerms, banned, banExpires) != nil {
 			return false, fmt.Errorf("AssignAppealTx: %w", ErrForbidden)
+		}
+	}
+	if checkSelfReview {
+		refuse, err := appealSelfReviewCheck(ctx, actorID, appellantID, permBit, adminBit)(q)
+		if err != nil {
+			return false, fmt.Errorf("AssignAppealTx self-review: %w", err)
+		}
+		if refuse {
+			return false, ErrSelfReview
 		}
 	}
 
@@ -274,11 +343,19 @@ func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigne
 
 // AssignAppealForced is the appeal queue's force-reassign path. See
 // forceReassignGuarded (report_queries.go) for the shared mechanics.
-// checkAuthority is P2's fresh actor-authority re-check, run inside the
-// same transaction as the target's fresh rank read.
+// checkAuthority is P2's fresh actor-authority re-check; checkSelfReview
+// (round 4 review) is decision 8's deciding-moderator eligibility test,
+// both run inside the same transaction as the target's fresh rank read —
+// pass checkSelfReviewNeeded=false to skip it (the actor did not take the
+// appealed action, so it never applies).
 func (d *DB) AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+	checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error) {
-	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, checkAuthority, func(q *dbgen.Queries) (int64, error) {
+	var selfReview func(q *dbgen.Queries) (bool, error)
+	if checkSelfReviewNeeded {
+		selfReview = appealSelfReviewCheck(ctx, actorID, appellantID, permBit, adminBit)
+	}
+	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, checkAuthority, selfReview, func(q *dbgen.Queries) (int64, error) {
 		return q.AssignAppeal(ctx, dbgen.AssignAppealParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
 	})
 }
@@ -463,12 +540,13 @@ type AppealedAction struct {
 	TargetID int64
 }
 
-// appealDecidePreBeginTxHook, when non-nil, runs immediately before
-// DecideAppealTx's BeginTx — the barrier a test uses to revoke the
-// decider's bit or ban them in the exact gap between the service's earlier
-// requireModerate check and this transaction's own fresh authority read
-// (P2 review). Test-only (nil in production).
-var appealDecidePreBeginTxHook func()
+// appealDecideInTxHook, when non-nil, runs INSIDE DecideAppealTx's own
+// transaction — immediately after BeginTx, before the fresh
+// authority/eligibility reads it guards — via q, the same transaction-
+// scoped Queries those reads use. See appealAssignInTxHook's doc comment
+// for why this must take q rather than fire as a bare func() before
+// BeginTx (round 4 test-strengthening). Test-only (nil in production).
+var appealDecideInTxHook func(ctx context.Context, q *dbgen.Queries) error
 
 // DecideAppealTx decides appealID in ONE transaction: a fresh authority
 // re-check (checkAuthority, P2), the self-review eligibility test (when
@@ -499,15 +577,18 @@ func (d *DB) DecideAppealTx(
 	action AppealedAction,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error,
 ) (result AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error) {
-	if appealDecidePreBeginTxHook != nil {
-		appealDecidePreBeginTxHook()
-	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return AppealWriteConflict, false, false, fmt.Errorf("DecideAppealTx begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
+
+	if appealDecideInTxHook != nil {
+		if err := appealDecideInTxHook(ctx, q); err != nil {
+			return AppealWriteConflict, false, false, fmt.Errorf("DecideAppealTx test hook: %w", err)
+		}
+	}
 
 	// P2: the decider's own authority, re-read fresh — never trusted from
 	// before this transaction began.

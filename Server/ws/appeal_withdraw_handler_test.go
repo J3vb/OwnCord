@@ -65,7 +65,7 @@ func TestHandleWithdrawAppeal_BroadcastsToModeratorNotToAppellant(t *testing.T) 
 	waitRegistered(t, hub, otherModClient)
 
 	r := chi.NewRouter()
-	api.MountAppealRoutes(r, svc, hub)
+	api.MountAppealRoutes(r, svc)
 	api.MountModerationAppealRoutes(r, svc)
 
 	token, err := auth.GenerateToken()

@@ -343,13 +343,19 @@ func (d *DB) AssignReport(ctx context.Context, id, assigneeID, observedAssigneeI
 // the actor's fresh position does not outrank the assignee's fresh
 // position — the caller maps that to a 403, distinctly from the 409 the
 // plain conflict gets.
-// forceReassignPreBeginTxHook, when non-nil, runs immediately before
-// forceReassignGuarded's BeginTx — the barrier a test uses to promote or
-// demote a principal in the exact gap between the caller's earlier
-// authorization and this transaction's own fresh reads, proving the
-// transaction boundary (not merely "eventually consistent") is what the
-// guard actually depends on. Test-only (nil in production).
-var forceReassignPreBeginTxHook func()
+// forceReassignInTxHook, when non-nil, runs INSIDE forceReassignGuarded's
+// own transaction — immediately after BeginTx, before the fresh
+// authority/eligibility/rank reads it guards — via q, the same
+// transaction-scoped Queries those reads use. Round 4 test-strengthening:
+// a func() hook fired merely "immediately before BeginTx" could not tell a
+// genuinely fresh in-transaction read apart from one moved to
+// just-before-BeginTx (both observe an external mutation identically here,
+// since nothing is actually concurrent). Requiring q as a parameter makes
+// the hook impossible to invoke before BeginTx exists at all, and because
+// the mutation lands on the SAME tx, a read via a separate, non-tx
+// connection would not see it either (an open transaction's writes are
+// invisible outside it until commit). Test-only (nil in production).
+var forceReassignInTxHook func(ctx context.Context, q *dbgen.Queries) error
 
 // checkAuthority, when non-nil, is a fresh in-transaction re-check of
 // actorID's own moderation authority (CanModerate bit, effective ban) —
@@ -357,12 +363,17 @@ var forceReassignPreBeginTxHook func()
 // bit revoked or a ban landed on the ACTOR between the caller's earlier
 // authorization and this write went uncaught. nil preserves the pre-P2
 // behavior exactly (reports' force-reassign never asked for this).
+// checkSelfReview, when non-nil, is decision 8's deciding-moderator
+// eligibility test (round 4 review: this used to run BEFORE the assign
+// transaction even for the forced path, only the actor's own authority
+// moved inside in round 3) — refuse=true means another eligible moderator
+// exists and self-assignment must be refused with ErrSelfReview. nil
+// preserves the pre-round-4 behavior exactly (reports never asked for
+// this either).
 func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observedAssigneeID int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error,
+	checkSelfReview func(q *dbgen.Queries) (refuse bool, err error),
 	doUpdate func(*dbgen.Queries) (int64, error)) (bool, error) {
-	if forceReassignPreBeginTxHook != nil {
-		forceReassignPreBeginTxHook()
-	}
 	tx, err := writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("forceReassignGuarded begin tx: %w", err)
@@ -370,10 +381,25 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observed
 	defer tx.Rollback() //nolint:errcheck
 	q := dbgen.New(tx)
 
+	if forceReassignInTxHook != nil {
+		if err := forceReassignInTxHook(ctx, q); err != nil {
+			return false, fmt.Errorf("forceReassignGuarded test hook: %w", err)
+		}
+	}
+
 	if checkAuthority != nil {
 		rolePerms, banned, banExpires, ok := deciderAuthority(ctx, tx, actorID)
 		if !ok || checkAuthority(rolePerms, banned, banExpires) != nil {
 			return false, fmt.Errorf("forceReassignGuarded: %w", ErrForbidden)
+		}
+	}
+	if checkSelfReview != nil {
+		refuse, err := checkSelfReview(q)
+		if err != nil {
+			return false, fmt.Errorf("forceReassignGuarded self-review: %w", err)
+		}
+		if refuse {
+			return false, ErrSelfReview
 		}
 	}
 
@@ -408,7 +434,7 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observed
 // AssignReportForced is the report queue's force-reassign path. See
 // forceReassignGuarded for the shared mechanics.
 func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error) {
-	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, nil, func(q *dbgen.Queries) (int64, error) {
+	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, nil, nil, func(q *dbgen.Queries) (int64, error) {
 		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
 	})
 }

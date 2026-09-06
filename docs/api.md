@@ -2324,8 +2324,14 @@ Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
 The appellant's own appeal rule applies here too: a moderator requesting
 their OWN appeal's detail gets `403 SELF_REVIEW`, not the row — it would
-otherwise show them who is assigned, who decided, and the acting
-moderator's identity, none of which they can otherwise see.
+otherwise show them who is assigned and who decided, neither of which is
+visible on the appeal surfaces any other way. The acting moderator's
+identity is a narrower case: this response would be the first appeal
+surface to show it, but a moderator (holding `MODERATE_MEMBERS`) can
+already see it via the moderation ledger (`GET
+/api/v1/moderation/users/{id}/actions`), so the 403 does not newly hide
+that fact from them — only from a non-moderator appellant, who cannot
+reach the ledger either way.
 
 #### Errors
 

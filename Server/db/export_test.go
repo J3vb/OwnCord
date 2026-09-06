@@ -1,5 +1,11 @@
 package db
 
+import (
+	"context"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
+)
+
 // SetModerationActionPreInsertHookForTest installs (or, with nil, clears)
 // the barrier moderationActionPreInsertHook runs inside recordModerationAction's
 // transaction, after the rank check and before the insert. Exported for
@@ -19,26 +25,26 @@ func SetAppealReversalHookForTest(fn func() error) {
 	appealReversalHookForTest = fn
 }
 
-// SetAppealDecidePreBeginTxHookForTest installs (or, with nil, clears) the
-// barrier DecideAppealTx runs immediately before its own BeginTx — round 3's
-// seam for proving the decider's authority is re-read fresh INSIDE the
-// transaction, not trusted from before it began. Exported for db_test;
-// production code never calls this.
-func SetAppealDecidePreBeginTxHookForTest(fn func()) {
-	appealDecidePreBeginTxHook = fn
+// SetAppealDecideInTxHookForTest installs (or, with nil, clears) the
+// barrier DecideAppealTx runs INSIDE its own transaction, right after
+// BeginTx — round 4's seam (replacing round 3's bare func() one) for
+// proving the decider's authority is re-read fresh via THIS transaction's
+// own connection, not merely at some point after an external mutation.
+// Exported for db_test; production code never calls this.
+func SetAppealDecideInTxHookForTest(fn func(ctx context.Context, q *dbgen.Queries) error) {
+	appealDecideInTxHook = fn
 }
 
-// SetAppealAssignPreBeginTxHookForTest is AssignAppealTx's twin of
-// SetAppealDecidePreBeginTxHookForTest, for the plain (non-forced) assign
-// path.
-func SetAppealAssignPreBeginTxHookForTest(fn func()) {
-	appealAssignPreBeginTxHook = fn
+// SetAppealAssignInTxHookForTest is AssignAppealTx's twin of
+// SetAppealDecideInTxHookForTest, for the plain (non-forced) assign path.
+func SetAppealAssignInTxHookForTest(fn func(ctx context.Context, q *dbgen.Queries) error) {
+	appealAssignInTxHook = fn
 }
 
-// SetForceReassignPreBeginTxHookForTest is forceReassignGuarded's twin,
-// shared by reports' and appeals' force-reassign paths.
-func SetForceReassignPreBeginTxHookForTest(fn func()) {
-	forceReassignPreBeginTxHook = fn
+// SetForceReassignInTxHookForTest is forceReassignGuarded's twin, shared by
+// reports' and appeals' force-reassign paths.
+func SetForceReassignInTxHookForTest(fn func(ctx context.Context, q *dbgen.Queries) error) {
+	forceReassignInTxHook = fn
 }
 
 // SetAppealInsertPreHookForTest installs (or, with nil, clears) the barrier

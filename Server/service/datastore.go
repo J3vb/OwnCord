@@ -377,10 +377,14 @@ type Store interface {
 	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
 	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
 	// AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
-	// transaction with a fresh authority re-check (P2) — see db.AssignAppealTx.
+	// transaction with a fresh authority re-check (P2) and, when
+	// checkSelfReview is true, decision 8's deciding-moderator eligibility
+	// test (round 4) — both inside the same transaction — see db.AssignAppealTx.
 	AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkSelfReview bool, appellantID, permBit, adminBit int64,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
 	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
+		checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
 	// DecideAppealTx runs a fresh authority re-check (P2), the stale/terminal
 	// row rejection (P3), the self-review eligibility test, the guarded

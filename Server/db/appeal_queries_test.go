@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -69,7 +70,7 @@ func TestAppealQueries_AssignAppealTx(t *testing.T) {
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
-	ok, err := database.AssignAppealTx(ctx, appealID, modID, 0, modID, simpleAuthorityCheck)
+	ok, err := database.AssignAppealTx(ctx, appealID, modID, 0, modID, false, 0, 0, 0, simpleAuthorityCheck)
 	if err != nil {
 		t.Fatalf("AssignAppealTx: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestAppealQueries_AssignAppealTx(t *testing.T) {
 		t.Fatalf("InsertAppeal (2nd): %v", err)
 	}
 	alwaysFails := func(int64, bool, *string) error { return errors.New("no authority") }
-	if _, err := database.AssignAppealTx(ctx, appealID2, modID, 0, modID, alwaysFails); !errors.Is(err, db.ErrForbidden) {
+	if _, err := database.AssignAppealTx(ctx, appealID2, modID, 0, modID, false, 0, 0, 0, alwaysFails); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealTx with a failing authority check: want db.ErrForbidden, got %v", err)
 	}
 	unchanged, err := database.GetAppeal(ctx, appealID2)
@@ -364,12 +365,10 @@ func TestDecideAppealTx_BitRevokedBeforeTxRefuses(t *testing.T) {
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
-	db.SetAppealDecidePreBeginTxHookForTest(func() {
-		if err := database.UpdateUserRole(ctx, modID, 4); err != nil { // demote to plain Member
-			t.Fatalf("UpdateUserRole: %v", err)
-		}
+	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 4, ID: modID}) // demote to plain Member
 	})
-	defer db.SetAppealDecidePreBeginTxHookForTest(nil)
+	defer db.SetAppealDecideInTxHookForTest(nil)
 
 	action, err := database.GetModerationAction(ctx, actionID)
 	if err != nil {
@@ -409,12 +408,11 @@ func TestDecideAppealTx_BanLandedBeforeTxRefuses(t *testing.T) {
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
-	db.SetAppealDecidePreBeginTxHookForTest(func() {
-		if err := database.BanUser(ctx, modID, "spam", nil); err != nil { // permanent ban
-			t.Fatalf("BanUser: %v", err)
-		}
+	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		reason := "spam"
+		return q.BanUser(ctx, dbgen.BanUserParams{BanReason: &reason, ID: modID}) // permanent ban
 	})
-	defer db.SetAppealDecidePreBeginTxHookForTest(nil)
+	defer db.SetAppealDecideInTxHookForTest(nil)
 
 	action, err := database.GetModerationAction(ctx, actionID)
 	if err != nil {
@@ -461,14 +459,12 @@ func TestAssignAppealForced_BitRevokedBeforeTxRefuses(t *testing.T) {
 		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
 	}
 
-	db.SetForceReassignPreBeginTxHookForTest(func() {
-		if err := database.UpdateUserRole(ctx, modID, unprivilegedButHighRank.ID); err != nil {
-			t.Fatalf("UpdateUserRole: %v", err)
-		}
+	db.SetForceReassignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: unprivilegedButHighRank.ID, ID: modID})
 	})
-	defer db.SetForceReassignPreBeginTxHookForTest(nil)
+	defer db.SetForceReassignInTxHookForTest(nil)
 
-	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, simpleAuthorityCheck); !errors.Is(err, db.ErrForbidden) {
+	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, false, 0, 0, 0, simpleAuthorityCheck); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced after the actor's bit was revoked pre-tx (rank alone would still outrank): want db.ErrForbidden, got %v", err)
 	}
 }
@@ -508,15 +504,13 @@ func TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction(t *testing.T
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
-	db.SetAppealDecidePreBeginTxHookForTest(func() {
+	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		// Promote the second user to Moderator in the exact gap between the
 		// caller's earlier (sole-moderator) view and this transaction's own
 		// fresh count.
-		if err := database.UpdateUserRole(ctx, secondModID, 3); err != nil {
-			t.Fatalf("UpdateUserRole: %v", err)
-		}
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
 	})
-	defer db.SetAppealDecidePreBeginTxHookForTest(nil)
+	defer db.SetAppealDecideInTxHookForTest(nil)
 
 	action, err := database.GetModerationAction(ctx, actionID)
 	if err != nil {
@@ -533,6 +527,114 @@ func TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction(t *testing.T
 	}
 	if soleModerator {
 		t.Fatal("soleModerator = true, want false — a second eligible moderator exists per the fresh count")
+	}
+}
+
+// TestAssignAppealTx_EligibilityCheckIsFreshInsideTheTransaction is round
+// 4's plain-assign twin of TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction:
+// the acting moderator (who also took the appealed action) tries to assign
+// the appeal to themself; a second eligible moderator is promoted in the
+// exact pre-BeginTx gap. If the eligibility test still ran before either
+// assignment transaction opened, this self-assign would wrongly succeed.
+func TestAssignAppealTx_EligibilityCheckIsFreshInsideTheTransaction(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	modID, err := database.CreateUser(ctx, "assigntx-sole-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser(mod): %v", err)
+	}
+	memberID, err := database.CreateUser(ctx, "assigntx-member", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(member): %v", err)
+	}
+	secondModID, err := database.CreateUser(ctx, "assigntx-second-mod", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(second mod, starts unprivileged): %v", err)
+	}
+
+	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
+	if err != nil {
+		t.Fatalf("WarnUser: %v", err)
+	}
+	appealID, err := database.InsertAppeal(ctx, "pub-assigntx-fresh", actionID, memberID, "please")
+	if err != nil {
+		t.Fatalf("InsertAppeal: %v", err)
+	}
+
+	db.SetAppealAssignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
+	})
+	defer db.SetAppealAssignInTxHookForTest(nil)
+
+	// modID assigns to itself (the plain path): assigneeID == actorID == modID.
+	ok, err := database.AssignAppealTx(ctx, appealID, modID, 0, modID, true, memberID, permissions.ModerateMembers, permissions.Administrator, nil)
+	if !errors.Is(err, db.ErrSelfReview) {
+		t.Fatalf("AssignAppealTx self-assign with a moderator promoted pre-tx: want db.ErrSelfReview, got (%v, %v)", ok, err)
+	}
+	if ok {
+		t.Fatal("AssignAppealTx reported success, want refused")
+	}
+}
+
+// TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction is
+// round 4's forced-assign twin: the acting moderator force-reassigns the
+// appeal (already assigned to a low-rank member) to themself; a second
+// eligible moderator is promoted in the exact pre-BeginTx gap
+// (forceReassignPreBeginTxHook).
+// TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction uses a
+// bare database (openMigratedMemory, no default Owner/Administrator user)
+// so the eligible-moderator count genuinely starts at zero — with
+// newAppealQueriesTestDB's own seeded Administrator owner present, that
+// owner would always count as a second eligible moderator regardless of
+// secondModID, and the test would pass for the wrong reason (masking
+// exactly the bug this test exists to catch).
+func TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	modID, err := database.CreateUser(ctx, "assignforced-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser(mod): %v", err)
+	}
+	memberID, err := database.CreateUser(ctx, "assignforced-member", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(member): %v", err)
+	}
+	otherMemberID, err := database.CreateUser(ctx, "assignforced-other-member", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(other member): %v", err)
+	}
+	secondModID, err := database.CreateUser(ctx, "assignforced-second-mod", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser(second mod, starts unprivileged): %v", err)
+	}
+
+	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
+	if err != nil {
+		t.Fatalf("WarnUser: %v", err)
+	}
+	appealID, err := database.InsertAppeal(ctx, "pub-assignforced-fresh", actionID, memberID, "please")
+	if err != nil {
+		t.Fatalf("InsertAppeal: %v", err)
+	}
+	// Assigned to a low-rank, uninvolved member first, so modID
+	// force-reassigning to itself outranks the observed assignee.
+	if ok, err := database.AssignAppeal(ctx, appealID, otherMemberID, 0); err != nil || !ok {
+		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
+	}
+
+	db.SetForceReassignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
+	})
+	defer db.SetForceReassignInTxHookForTest(nil)
+
+	ok, err := database.AssignAppealForced(ctx, appealID, modID, otherMemberID, modID, true, memberID, permissions.ModerateMembers, permissions.Administrator, nil)
+	if !errors.Is(err, db.ErrSelfReview) {
+		t.Fatalf("AssignAppealForced self-assign with a moderator promoted pre-tx: want db.ErrSelfReview, got (%v, %v)", ok, err)
+	}
+	if ok {
+		t.Fatal("AssignAppealForced reported success, want refused")
 	}
 }
 
@@ -746,6 +848,16 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 // is defense-in-depth for this scenario, not the sole guard. Kept for
 // explicitness, and in case the blanket IN clause is ever loosened without
 // this line being revisited.
+//
+// Round 4 test-strengthening: the stale write is issued via the low-level
+// db.DecideAppeal primitive, not DecideAppealTx — DecideAppealTx runs
+// AppealObservedRowExists as a precheck ahead of the guarded UPDATE, and
+// that precheck alone would already refuse a stale write with these same
+// observed values, so a test that only calls DecideAppealTx never proves
+// the guarded UPDATE's OWN predicate is what's catching it. Calling
+// db.DecideAppeal directly, with the precheck's conditions satisfied (the
+// same observed values the precheck itself would accept), isolates the
+// UPDATE's guard.
 func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t *testing.T) {
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
@@ -787,14 +899,15 @@ func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t
 	}
 
 	// The stale decide observed the OLD state ("assigned") but the CURRENT
-	// (unchanged) assignee — only the state predicate can catch this.
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, observed.State, observed.AssigneeID, "overturned", modID, "stale",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+	// (unchanged) assignee — only the state predicate on the guarded UPDATE
+	// itself can catch this; the precheck is bypassed by calling
+	// db.DecideAppeal directly.
+	landed, err := database.DecideAppeal(ctx, appealID, observed.State, observed.AssigneeID, "overturned", modID, "stale")
 	if err != nil {
-		t.Fatalf("stale DecideAppealTx: %v", err)
+		t.Fatalf("stale db.DecideAppeal: %v", err)
 	}
-	if result != db.AppealWriteConflict {
-		t.Fatalf("stale DecideAppealTx (state changed, assignee unchanged): result = %v, want AppealWriteConflict", result)
+	if landed {
+		t.Fatal("stale db.DecideAppeal (state changed, assignee unchanged) landed, want the guarded UPDATE to refuse it")
 	}
 }
 
@@ -806,6 +919,11 @@ func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t
 // without changing state (still "assigned"), so a second, stale decide
 // that observed the PRE-reassign assignee (but the still-correct state)
 // must still be refused.
+//
+// Round 4 test-strengthening: as with its state-predicate sibling above,
+// the stale write goes through the low-level db.DecideAppeal primitive
+// (not DecideAppealTx), so AppealObservedRowExists's precheck cannot mask
+// whether the guarded UPDATE's own assignee predicate is load-bearing.
 func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t *testing.T) {
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
@@ -829,7 +947,7 @@ func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t
 
 	// A REAL force-reassign lands: assignee_id changes, state does NOT
 	// (AssignAppeal's own UPDATE sets state = 'assigned' unconditionally).
-	if ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, nil); err != nil || !ok {
+	if ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, false, 0, 0, 0, nil); err != nil || !ok {
 		t.Fatalf("AssignAppealForced: (%v, %v)", ok, err)
 	}
 	after, err := database.GetAppeal(ctx, appealID)
@@ -843,22 +961,16 @@ func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t
 		t.Fatal("assignee_id did not actually change — the reassign did not do its job")
 	}
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-
 	// The stale decide observed the OLD assignee (modID) but the CURRENT
-	// (unchanged) state ("assigned") — only the assignee predicate can
-	// catch this.
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, observed.State, observed.AssigneeID, "upheld", modID, "stale",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+	// (unchanged) state ("assigned") — only the assignee predicate on the
+	// guarded UPDATE itself can catch this; the precheck is bypassed by
+	// calling db.DecideAppeal directly.
+	landed, err := database.DecideAppeal(ctx, appealID, observed.State, observed.AssigneeID, "upheld", modID, "stale")
 	if err != nil {
-		t.Fatalf("stale DecideAppealTx: %v", err)
+		t.Fatalf("stale db.DecideAppeal: %v", err)
 	}
-	if result != db.AppealWriteConflict {
-		t.Fatalf("stale DecideAppealTx (assignee changed, state unchanged): result = %v, want AppealWriteConflict", result)
+	if landed {
+		t.Fatal("stale db.DecideAppeal (assignee changed, state unchanged) landed, want the guarded UPDATE to refuse it")
 	}
 }
 
@@ -961,7 +1073,7 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 	// force-reassign. Both principals' positions are now read fresh inside
 	// the write's own transaction (inherited-P2 review), so the caller
 	// passes actorID, not a pre-read position.
-	ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, nil)
+	ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, false, 0, 0, 0, nil)
 	if err != nil {
 		t.Fatalf("AssignAppealForced: %v", err)
 	}
@@ -991,13 +1103,13 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 	if ok, err := database.AssignAppeal(ctx, appealID2, ownerID, 0); err != nil || !ok {
 		t.Fatalf("AssignAppeal (2nd): (%v, %v)", ok, err)
 	}
-	if _, err := database.AssignAppealForced(ctx, appealID2, modID, ownerID, modID, nil); !errors.Is(err, db.ErrForbidden) {
+	if _, err := database.AssignAppealForced(ctx, appealID2, modID, ownerID, modID, false, 0, 0, 0, nil); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced without outranking: want db.ErrForbidden, got %v", err)
 	}
 
 	// A forced reassignment naming an assignee who no longer resolves to any
 	// role (erased) reports (false, nil) rather than an error.
-	if ok, err := database.AssignAppealForced(ctx, appealID2, modID, 999999, modID, nil); err != nil || ok {
+	if ok, err := database.AssignAppealForced(ctx, appealID2, modID, 999999, modID, false, 0, 0, 0, nil); err != nil || ok {
 		t.Fatalf("AssignAppealForced with a nonexistent observed assignee = (%v, %v), want (false, nil)", ok, err)
 	}
 }
@@ -1031,7 +1143,7 @@ func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *te
 	if err := database.UpdateUserRole(ctx, modID, 4); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, nil); !errors.Is(err, db.ErrForbidden) {
+	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, false, 0, 0, 0, nil); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced with a freshly-demoted actor (now equal rank): want db.ErrForbidden, got %v", err)
 	}
 }
@@ -1067,7 +1179,7 @@ func TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank(t *
 	if err := database.UpdateUserRole(ctx, memberID, 3); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, nil); !errors.Is(err, db.ErrForbidden) {
+	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, false, 0, 0, 0, nil); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced against a freshly-promoted target (now equal rank): want db.ErrForbidden, got %v", err)
 	}
 }
@@ -1183,23 +1295,104 @@ func TestAppealQueries_CountEligibleModerators_ExcludesBannedModerators(t *testi
 	_ = memberID
 }
 
+// sameDayLapsedBanExpiry returns midnight UTC of "today" (by the wall
+// clock, which is what SQLite's own datetime('now')/strftime('now') reads
+// from too — same process, same OS clock, no meaningful skew). Round 4
+// test-strengthening: the original test used time.Now().Add(-time.Hour),
+// which crosses into YESTERDAY's date whenever the test happens to run
+// between 00:00 and 01:00 UTC — and a DIFFERENT-date comparison gives the
+// "correct" (lapsed) answer by coincidence regardless of whether the
+// 'T'-vs-' ' format normalisation is even present, because the date digits
+// alone already decide the lexical ordering before the separator character
+// is ever compared. Midnight of TODAY guarantees the same calendar date as
+// whatever SQLite's 'now' will resolve to, and a time component (00:00:00)
+// that is <= any other time that same day — deterministically forcing the
+// SAME-DATE comparison branch where the format mismatch actually bites,
+// regardless of what wall-clock time the test happens to run at.
+func sameDayLapsedBanExpiry() time.Time {
+	now := time.Now().UTC()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 // TestAppealQueries_CountEligibleModerators_LapsedBanCountsAsEligible is
 // item 3: BanUser stores an ISO-8601 'Z' expiry ("2006-01-02T15:04:05Z"), and
 // a raw lexical "ban_expires <= datetime('now')" compares that against
 // SQLite's own space-form "now" -- a bare ' ' sorts BELOW 'T', so a ban that
 // expired earlier TODAY would compare as still-active until midnight and
-// wrongly exclude an otherwise-eligible moderator. A ban that expired an
-// hour ago must count as eligible regardless of the wall-clock date.
+// wrongly exclude an otherwise-eligible moderator. A ban that expired
+// earlier today (see sameDayLapsedBanExpiry) must count as eligible.
 func TestAppealQueries_CountEligibleModerators_LapsedBanCountsAsEligible(t *testing.T) {
 	database, ownerID, modID, _, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	expired := time.Now().Add(-time.Hour)
+	expired := sameDayLapsedBanExpiry()
 	if err := database.BanUser(ctx, modID, "spam", &expired); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 	if n, err := database.CountEligibleModerators(ctx, ownerID, member2ID, permissions.ModerateMembers, permissions.Administrator); err != nil || n != 1 {
 		t.Fatalf("CountEligibleModerators with a lapsed ban = (%d, %v), want (1, nil) -- the lapsed-ban moderator still counts", n, err)
+	}
+}
+
+// TestDecideAppealTx_LapsedBanOnSecondModeratorCountsAsEligibleForSelfReview
+// is CountEligibleModerators' sibling covering the OTHER ban-expiry
+// comparison the appeals queries make: EligibleModeratorExists, the EXISTS
+// query checkSelfReview runs (not the COUNT one above). A second moderator
+// whose ban lapsed earlier today must be recognised as eligible here too,
+// so the sole-moderator self-review escape must NOT apply when a real
+// decide's decider took the appealed action themself.
+//
+// Uses openMigratedMemory (no seeded Owner/Administrator user), the same
+// reason TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction
+// does: newAppealQueriesTestDB's own Administrator owner would always count
+// as a second eligible moderator regardless of secondModID's ban, masking
+// exactly the bug this test exists to catch.
+func TestDecideAppealTx_LapsedBanOnSecondModeratorCountsAsEligibleForSelfReview(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	modID, err := database.CreateUser(ctx, "lapsed-sole-mod", "hash", 3) // Moderator: MODERATE_MEMBERS
+	if err != nil {
+		t.Fatalf("CreateUser(mod): %v", err)
+	}
+	memberID, err := database.CreateUser(ctx, "lapsed-member", "hash", 4) // Member: no bit
+	if err != nil {
+		t.Fatalf("CreateUser(member): %v", err)
+	}
+	secondModID, err := database.CreateUser(ctx, "lapsed-second-mod", "hash", 3) // Moderator, will be banned
+	if err != nil {
+		t.Fatalf("CreateUser(second mod): %v", err)
+	}
+
+	expired := sameDayLapsedBanExpiry()
+	if err := database.BanUser(ctx, secondModID, "spam", &expired); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
+	if err != nil {
+		t.Fatalf("WarnUser: %v", err)
+	}
+	appealID, err := database.InsertAppeal(ctx, "pub-lapsed-ban-exists", actionID, memberID, "please")
+	if err != nil {
+		t.Fatalf("InsertAppeal: %v", err)
+	}
+	action, err := database.GetModerationAction(ctx, actionID)
+	if err != nil {
+		t.Fatalf("GetModerationAction: %v", err)
+	}
+	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+
+	result, soleModerator, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "self-serving",
+		true, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+	if err != nil {
+		t.Fatalf("DecideAppealTx: %v", err)
+	}
+	if result != db.AppealWriteSelfReview {
+		t.Fatalf("DecideAppealTx with a lapsed-ban second moderator: result = %v, want AppealWriteSelfReview (the EXISTS check must see the lapsed-ban moderator as eligible)", result)
+	}
+	if soleModerator {
+		t.Fatal("soleModerator = true, want false — a lapsed-ban moderator counts as a second eligible moderator via EligibleModeratorExists")
 	}
 }
 

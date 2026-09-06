@@ -11,15 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// AppealQueueBroadcaster is the hub capability the appeal routes need:
-// notify connected moderation-bit holders of a queue change, the appeal
-// twin of ModQueueBroadcaster. Satisfied by *ws.Hub. Takes the INTERNAL
-// appeal id — the hub resolves the public id itself (db.Appeal.PublicID) so
-// every caller stays oblivious to the distinction.
-type AppealQueueBroadcaster interface {
-	BroadcastAppealQueue(ctx context.Context, appealID int64, state string)
-}
-
 // fileAppealRequest is POST /api/v1/appeals' body.
 type fileAppealRequest struct {
 	ActionID int64  `json:"action_id"`
@@ -75,10 +66,10 @@ type decideAppealRequest struct {
 
 // MountAppealRoutes registers appeal submission and the appellant's own
 // status view. The moderation queue itself is MountModerationAppealRoutes.
-func MountAppealRoutes(r chi.Router, svc *service.Services, hub AppealQueueBroadcaster) {
+func MountAppealRoutes(r chi.Router, svc *service.Services) {
 	r.Route("/api/v1/appeals", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
-		r.Post("/", handleFileAppeal(svc, hub))
+		r.Post("/", handleFileAppeal(svc))
 		r.Get("/mine", handleMyAppeals(svc))
 		r.Post("/{id}/withdraw", handleWithdrawAppeal(svc))
 	})
@@ -98,7 +89,12 @@ func MountModerationAppealRoutes(r chi.Router, svc *service.Services) {
 	})
 }
 
-func handleFileAppeal(svc *service.Services, hub AppealQueueBroadcaster) http.HandlerFunc {
+// handleFileAppeal: the mod_queue "open" broadcast is issued by
+// AppealService.Submit itself (round 4 review), under the same per-appeal
+// lock the other three transitions already use — it used to run here,
+// after Submit returned, so it could arrive after a withdraw/assign frame
+// for the same appeal filed moments later.
+func handleFileAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -115,11 +111,6 @@ func handleFileAppeal(svc *service.Services, hub AppealQueueBroadcaster) http.Ha
 		if err != nil {
 			writeAppealServiceError(r.Context(), w, err)
 			return
-		}
-		if hub != nil {
-			if id, rerr := svc.Appeals.ResolveAppealID(context.WithoutCancel(r.Context()), publicID); rerr == nil {
-				hub.BroadcastAppealQueue(context.WithoutCancel(r.Context()), id, "open")
-			}
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"id": publicID})
 	}

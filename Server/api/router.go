@@ -406,7 +406,7 @@ func mountModerationRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 	MountReportRoutes(r, svc, hub)
 	MountModerationQueueRoutes(r, svc, hub)
 	MountModerationRoutes(r, svc)
-	MountAppealRoutes(r, svc, hub)
+	MountAppealRoutes(r, svc)
 	MountModerationAppealRoutes(r, svc)
 }
 

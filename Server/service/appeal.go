@@ -41,36 +41,62 @@ type AppealService struct {
 // atomic unit from that appeal's own point of view, or a delayed transition
 // can notify AFTER a later one already has — a stale Assign's "assigned"
 // frame trailing behind a Decide's "overturned" one that the appellant
-// already received. Assign, Decide and Withdraw all hold the appeal's own
-// lock from just before touching the database through their own notify
-// call, so no two transitions on the SAME appeal can ever have their
-// notifies race each other out of commit order. Keyed by public id — every
-// entry point already has it before touching the database.
+// already received. Submit, Assign, Decide and Withdraw all hold the
+// appeal's own lock from just before touching the database through their
+// own notify call, so no two transitions on the SAME appeal can ever have
+// their notifies race each other out of commit order.
 //
-// ponytail: an unbounded map guarded by one mutex, entries never removed —
-// about 40 bytes per appeal ever touched, for the process lifetime.
-// Acceptable at decision 8's rate-limited scale (3 submissions/day/user);
-// switch to an LRU if appeal volume ever makes that a real cost.
+// Entries are reference-counted and evicted once nobody holds or is
+// waiting on them (round 4 review, the same shape ws/voice_mod_lock.go's
+// own round 5 took for the identical reason): every caller acquires the
+// lock only AFTER the appeal is confirmed to exist and the caller is
+// authorized to touch it (Submit: after its own insert commits; Withdraw:
+// after resolveOwn confirms ownership; Assign/Decide: after the public id
+// resolves to a real row), so an invented public id — reachable by any
+// authenticated member calling withdraw in a loop, without ever touching
+// decision 8's submission quota — never allocates an entry at all, and a
+// real one does not linger once its writer is done with it.
 type appealLocker struct {
 	mu    syncutil.Mutex
-	locks map[string]*syncutil.Mutex
+	locks map[string]*appealLockEntry
+}
+
+// appealLockEntry is one appeal's lock plus how many callers currently
+// hold it or are waiting to. refs is guarded by appealLocker.mu, not the
+// entry's own lock — it must be adjusted at the same time as the map
+// lookup so a concurrent lock() and the unlocking eviction check can never
+// race each other into deleting an entry someone is about to wait on.
+type appealLockEntry struct {
+	mu   syncutil.Mutex
+	refs int
 }
 
 func newAppealLocker() *appealLocker {
-	return &appealLocker{locks: make(map[string]*syncutil.Mutex)}
+	return &appealLocker{locks: make(map[string]*appealLockEntry)}
 }
 
-// lock acquires publicID's own mutex and returns the func that releases it.
+// lock acquires publicID's own lock, blocking until held, and returns the
+// func that releases it — `defer s.locks.lock(publicID)()`.
 func (l *appealLocker) lock(publicID string) func() {
 	l.mu.Lock()
-	m, ok := l.locks[publicID]
+	e, ok := l.locks[publicID]
 	if !ok {
-		m = &syncutil.Mutex{}
-		l.locks[publicID] = m
+		e = &appealLockEntry{}
+		l.locks[publicID] = e
 	}
+	e.refs++
 	l.mu.Unlock()
-	m.Lock()
-	return m.Unlock
+
+	e.mu.Lock()
+	return func() {
+		e.mu.Unlock()
+		l.mu.Lock()
+		e.refs--
+		if e.refs == 0 {
+			delete(l.locks, publicID)
+		}
+		l.mu.Unlock()
+	}
 }
 
 // AppealStatusNotifier delivers a live appeal_status frame to the
@@ -108,9 +134,14 @@ func (s *AppealService) notify(userID int64, publicID, state string, decisionNot
 	}
 }
 
+// notifyQueue broadcasts a mod_queue frame. round 4 review: detaches the
+// caller's context (context.WithoutCancel) the same way the old
+// handler-level broadcast did before F4 moved it here — the write already
+// committed, so a client disconnecting right after must not cancel the
+// moderator queue's own broadcast.
 func (s *AppealService) notifyQueue(ctx context.Context, appealID int64, state string) {
 	if s.queue != nil {
-		s.queue.BroadcastAppealQueue(ctx, appealID, state)
+		s.queue.BroadcastAppealQueue(context.WithoutCancel(ctx), appealID, state)
 	}
 }
 
@@ -203,7 +234,8 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	if _, err := s.st.InsertAppeal(ctx, publicID, actionID, appellantID, body); err != nil {
+	appealID, err := s.st.InsertAppeal(ctx, publicID, actionID, appellantID, body)
+	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrConflict):
 			// The UNIQUE(action_id) race-proof half of decision 8: a second
@@ -221,11 +253,25 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 		}
 	}
 
+	// round 4 review: the "open" mod_queue broadcast used to run in the API
+	// handler, AFTER Submit returned — so it could arrive after a withdraw
+	// or assign frame for the SAME appeal, submitted moments later. The
+	// insert has already committed, and publicID now names a real row, so
+	// it is safe to acquire this appeal's own lock here (never before a row
+	// exists to lock) and hold it across the notify, exactly like Withdraw/
+	// Assign/Decide do.
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+	if appealPostWriteHookForTest != nil {
+		appealPostWriteHookForTest(publicID)
+	}
+
 	// Audit rows must survive a request canceled after the appeal committed.
 	// The detail is the action kind word only, never the appeal body.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, appellantID, "appeal_submit", "moderation_action", actionID, action.Kind)
 
 	slog.Info("appeal submitted", "appellant_id", appellantID, "action_id", actionID, "kind", action.Kind)
+	s.notifyQueue(ctx, appealID, "open")
 	return publicID, nil
 }
 
@@ -286,15 +332,18 @@ func (s *AppealService) resolveOwn(ctx context.Context, appellantID int64, publi
 // state. F4 review: the write and both live notifies (appeal_status,
 // mod_queue) run under this appeal's own lock, so a withdrawal racing an
 // in-flight Assign or Decide can never have its notify land out of order
-// relative to theirs.
+// relative to theirs. round 4 review: the lock is acquired AFTER resolveOwn
+// confirms the appeal exists and belongs to the caller — locking on the raw
+// publicID first let any authenticated member pin unbounded memory by
+// calling withdraw with invented ids in a loop, never touching decision 8's
+// submission quota (which only Submit enforces).
 func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicID string) error {
-	unlock := s.locks.lock(publicID)
-	defer unlock()
-
 	a, err := s.resolveOwn(ctx, appellantID, publicID)
 	if err != nil {
 		return err
 	}
+	unlock := s.locks.lock(publicID)
+	defer unlock()
 	ok, err := s.st.WithdrawAppeal(ctx, a.ID, appellantID)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInternal, err)
@@ -422,13 +471,15 @@ func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string)
 
 // guardAppellantSelfReview refuses a moderator acting on their own filed
 // appeal — the mirror of report.go's guardSelfReview, and a DIFFERENT rule
-// from checkSelfReview's acting-moderator check: an appellant who happens to
-// also hold MODERATE_MEMBERS must never assign or decide the very appeal
-// they filed, with NO sole-moderator escape (unlike checkSelfReview, there
-// is no honest "forced to judge your own case" argument for the appellant —
-// on a one-moderator install their appeal simply waits for a second
-// moderator to exist, which is a governance gap, not a bug this service
-// papers over).
+// from the deciding-moderator's own eligibility test (the in-transaction
+// EligibleModeratorExists check DecideAppealTx/AssignAppealTx/
+// AssignAppealForced all run): an appellant who happens to also hold
+// MODERATE_MEMBERS must never assign or decide the very appeal they filed,
+// with NO sole-moderator escape (unlike the acting-moderator's own check,
+// there is no honest "forced to judge your own case" argument for the
+// appellant — on a one-moderator install their appeal simply waits for a
+// second moderator to exist, which is a governance gap, not a bug this
+// service papers over).
 func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appeal) error {
 	if appeal.AppellantID != 0 && appeal.AppellantID == actorID {
 		return ErrSelfReview
@@ -441,23 +492,23 @@ func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appea
 // assignee (the same rule ban/kick/timeout and the report queue use).
 // Claim 6 review: symmetric with Decide's self-review rule — the moderator
 // who took the appealed action may not assign it to themself either, where
-// another eligible reviewer exists. Unlike Decide (F2/F3), this eligibility
-// check is NOT run inside the assign write's own transaction: assigning is
-// reversible (a later force-reassign, or simply deciding, both still apply
-// their own guards), so the narrower TOCTOU window a non-transactional
-// check leaves here does not carry the same "irreversible decision landed
-// on stale data" risk Decide's does.
+// another eligible reviewer exists. round 4 review: this eligibility test
+// now runs INSIDE both assignment transactions (plain and forced,
+// AssignAppealTx/AssignAppealForced), the same way Decide's already does —
+// it used to run once, non-transactionally, before either transaction
+// opened, so a second eligible moderator appearing in the gap between that
+// check and the write went uncaught.
 func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID string, force bool) error {
 	if err := s.requireModerate(ctx, actorID); err != nil {
 		return err
 	}
-	unlock := s.locks.lock(publicID)
-	defer unlock()
-
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
 		return fmt.Errorf("%w: appeal not found", ErrNotFound)
 	}
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+
 	if err := s.guardAppellantSelfReview(actorID, appeal); err != nil {
 		return err
 	}
@@ -465,18 +516,17 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	if _, err := s.checkSelfReview(ctx, actorID, action.ActorID, appeal.AppellantID); err != nil {
-		return err
-	}
+	needsSelfReviewCheck := action.ActorID != 0 && action.ActorID == actorID
+
 	observed := appeal.AssigneeID
 	if observed != 0 && observed != actorID {
 		if !force {
 			return fmt.Errorf("%w: already assigned", ErrConflict)
 		}
-		if err := s.assignAppealForced(ctx, appeal.ID, actorID, observed); err != nil {
+		if err := s.assignAppealForced(ctx, appeal.ID, actorID, observed, needsSelfReviewCheck, appeal.AppellantID); err != nil {
 			return err
 		}
-	} else if err := s.assignAppealPlain(ctx, appeal.ID, actorID, observed); err != nil {
+	} else if err := s.assignAppealPlain(ctx, appeal.ID, actorID, observed, needsSelfReviewCheck, appeal.AppellantID); err != nil {
 		return err
 	}
 	if appealPostWriteHookForTest != nil {
@@ -490,12 +540,19 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 
 // assignAppealForced is Assign's force-reassign branch: actorID must
 // outrank the observed assignee's fresh position, read inside the write's
-// own transaction (see forceReassignGuarded).
-func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorID, observed int64) error {
-	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, actorID, s.checkModeratorAuthority)
+// own transaction (see forceReassignGuarded). checkSelfReview (round 4
+// review) runs decision 8's deciding-moderator eligibility test inside
+// that SAME transaction — it used to run once, before either assignment
+// branch, non-transactionally.
+func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorID, observed int64, checkSelfReview bool, appellantID int64) error {
+	ok, err := s.st.AssignAppealForced(ctx, appealID, actorID, observed, actorID, checkSelfReview, appellantID,
+		permissions.ModerateMembers, permissions.Administrator, s.checkModeratorAuthority)
 	if err != nil {
 		if errors.Is(err, db.ErrForbidden) {
 			return fmt.Errorf("%w: cannot moderate this appeal", ErrForbidden)
+		}
+		if errors.Is(err, db.ErrSelfReview) {
+			return ErrSelfReview
 		}
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
@@ -508,12 +565,18 @@ func (s *AppealService) assignAppealForced(ctx context.Context, appealID, actorI
 // assignAppealPlain is Assign's ordinary branch: no current assignee, or the
 // caller re-assigning to themselves. P2 review: wrapped in its own
 // transaction (AssignAppealTx) with a fresh authority re-check, the same
-// property Decide's own transaction already has.
-func (s *AppealService) assignAppealPlain(ctx context.Context, appealID, actorID, observed int64) error {
-	ok, err := s.st.AssignAppealTx(ctx, appealID, actorID, observed, actorID, s.checkModeratorAuthority)
+// property Decide's own transaction already has. checkSelfReview (round 4
+// review): decision 8's deciding-moderator eligibility test also runs
+// inside this same transaction.
+func (s *AppealService) assignAppealPlain(ctx context.Context, appealID, actorID, observed int64, checkSelfReview bool, appellantID int64) error {
+	ok, err := s.st.AssignAppealTx(ctx, appealID, actorID, observed, actorID, checkSelfReview, appellantID,
+		permissions.ModerateMembers, permissions.Administrator, s.checkModeratorAuthority)
 	if err != nil {
 		if errors.Is(err, db.ErrForbidden) {
 			return fmt.Errorf("%w: cannot moderate this appeal", ErrForbidden)
+		}
+		if errors.Is(err, db.ErrSelfReview) {
+			return ErrSelfReview
 		}
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
@@ -531,30 +594,6 @@ var validAppealOutcomes = map[string]bool{"upheld": true, "overturned": true}
 // whole decision was rolled back with it, so the appellant was never told
 // "overturned" while the sanction it named stayed in effect.
 var ErrReversalFailed = fmt.Errorf("%w: could not apply the decision's effect", ErrConflict)
-
-// checkSelfReview is decision 8's deciding-moderator rule (Assign's
-// non-transactional pre-check only — Decide runs the equivalent count
-// inside its own write transaction via db.DecideAppealTx, F2/F3 review):
-// the moderator who took the action may not decide (or, Claim 6, assign)
-// its own appeal WHERE ANOTHER eligible moderator exists — eligible meaning
-// a different, non-appellant, non-banned user holding CanModerate. When the
-// acting moderator is the only eligible one, they may proceed, and the
-// caller must record that in the audit detail ("sole moderator").
-// actionActorID == 0 (the action's actor already erased) never triggers
-// self-review — there is no "self" left to protect against.
-func (s *AppealService) checkSelfReview(ctx context.Context, actorID, actionActorID, appellantID int64) (soleModerator bool, err error) {
-	if actionActorID == 0 || actionActorID != actorID {
-		return false, nil
-	}
-	eligible, err := s.st.CountEligibleModerators(ctx, actorID, appellantID, permissions.ModerateMembers, permissions.Administrator)
-	if err != nil {
-		return false, fmt.Errorf("%w: %w", ErrInternal, err)
-	}
-	if eligible > 0 {
-		return false, ErrSelfReview
-	}
-	return true, nil
-}
 
 // Decide records outcome ("upheld" or "overturned") against appeal
 // publicID. The self-review eligibility count, the guarded write (on the
@@ -578,13 +617,13 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		return fmt.Errorf("%w: decision note contains control characters", ErrBadRequest)
 	}
 
-	unlock := s.locks.lock(publicID)
-	defer unlock()
-
 	appeal, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
 		return fmt.Errorf("%w: appeal not found", ErrNotFound)
 	}
+	unlock := s.locks.lock(publicID)
+	defer unlock()
+
 	if err := s.guardAppellantSelfReview(actorID, appeal); err != nil {
 		return err
 	}

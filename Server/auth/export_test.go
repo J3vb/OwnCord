@@ -21,3 +21,19 @@ func (r *RateLimiter) SeedTimestampForTest(key string, ts time.Time, window time
 	e.window = window
 	e.timestamps = append(e.timestamps, ts)
 }
+
+// WindowForTest returns the Cleanup horizon currently recorded for key (the
+// entry's window field), and whether key has an entry at all. Exported for
+// auth_test only — production code has no reason to read this back; it
+// only ever feeds Cleanup's own staleness check. Round 4 review: the seam
+// a test uses to prove Allow's per-key window ratchets up and never down.
+func (r *RateLimiter) WindowForTest(key string) (window time.Duration, ok bool) {
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.windows[key]
+	if !ok {
+		return 0, false
+	}
+	return e.window, true
+}

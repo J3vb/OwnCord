@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +87,121 @@ func (f *fakeAppealNotifier) NotifyAppealStatus(userID int64, publicID, state st
 		state        string
 		decisionNote *string
 	}{userID, publicID, state, decisionNote})
+}
+
+// ── appealLocker (round 4, P2 review) ───────────────────────────────────
+
+// TestAppealLocker_UnknownIDNeverCreatesAnEntry: Withdraw resolves ownership
+// (resolveOwn) BEFORE acquiring the appeal's lock — an invented public id,
+// reachable by any authenticated member calling withdraw in a loop without
+// ever touching decision 8's submission quota, must never allocate a lock
+// entry at all.
+func TestAppealLocker_UnknownIDNeverCreatesAnEntry(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	for i := range 20 {
+		if err := f.appeals.Withdraw(ctx, fixtureMember, fmt.Sprintf("invented-id-%d", i)); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Withdraw(invented id %d): want ErrNotFound, got %v", i, err)
+		}
+	}
+	f.appeals.locks.mu.Lock()
+	n := len(f.appeals.locks.locks)
+	f.appeals.locks.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("appealLocker has %d entries after %d invented-id withdraws, want 0", n, 20)
+	}
+}
+
+// TestAppealLocker_EvictsAfterRealTransitionsFinish: a genuine transition on
+// a REAL appeal must leave no trace in the lock map once it (and the lock's
+// only other real holder) is done — reference-counted eviction, not an
+// unbounded map, and never an LRU that could evict a lock still in use.
+func TestAppealLocker_EvictsAfterRealTransitionsFinish(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "fine"); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	f.appeals.locks.mu.Lock()
+	n := len(f.appeals.locks.locks)
+	f.appeals.locks.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("appealLocker has %d entries after every transition finished, want 0 (evicted)", n)
+	}
+}
+
+// ── Authority wiring (round 4 test-strengthening item 2) ────────────────
+
+// authCallbackRecorderStore wraps a real *db.DB (the established fake-store
+// shape, e.g. errDMChannelIDsStore in message_perms_test.go) and records
+// whether the checkAuthority argument DecideAppealTx receives is non-nil,
+// then delegates to the real implementation unchanged.
+type authCallbackRecorderStore struct {
+	*db.DB
+	sawNonNilCheckAuthority bool
+}
+
+func (r *authCallbackRecorderStore) DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string,
+	checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction,
+	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error,
+) (db.AppealWriteOutcome, bool, bool, error) {
+	r.sawNonNilCheckAuthority = checkAuthority != nil
+	return r.DB.DecideAppealTx(ctx, appealID, observedState, observedAssigneeID, outcome, decidedBy, note, checkSelfReview, appellantID, permBit, adminBit, action, checkAuthority)
+}
+
+// noPrecheckStore wraps a real *db.DB but always reports "no existing
+// appeal" from FindAppealForAction, disabling Submit's dedupe fast-path
+// precheck (round 4 test-strengthening item 6) so a second Submit for the
+// same action is forced past it and into the real UNIQUE(action_id)
+// constraint InsertAppeal hits.
+type noPrecheckStore struct {
+	*db.DB
+}
+
+func (noPrecheckStore) FindAppealForAction(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+// TestAppeal_ServiceWiresANonNilAuthorityCallbackIntoDecideAppealTx proves
+// s.checkModeratorAuthority actually reaches DecideAppealTx's checkAuthority
+// parameter in PRODUCTION — not just that db/appeal_queries_test.go's own
+// hook tests exercise a hand-supplied callback, which says nothing about
+// what the service itself wires at the call site.
+func TestAppeal_ServiceWiresANonNilAuthorityCallbackIntoDecideAppealTx(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	recorder := &authCallbackRecorderStore{DB: f.database}
+	appeals := NewAppealService(recorder, f.mod.perms, f.mod, auth.NewRateLimiter())
+	if err := appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if !recorder.sawNonNilCheckAuthority {
+		t.Fatal("AppealService.Decide called DecideAppealTx with a nil checkAuthority — the production service is not wiring its authority re-check")
+	}
 }
 
 // ── Submission ───────────────────────────────────────────────────────────
@@ -240,6 +357,31 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 		}
 		if successes != 1 {
 			t.Fatalf("concurrent submits succeeded = %d, want exactly 1", successes)
+		}
+	})
+
+	// "UNIQUE constraint alone" is round 4's test-strengthening ask: every
+	// other subtest here goes through FindAppealForAction's own pre-check
+	// first, so none of them actually prove Submit's db.ErrConflict ->
+	// ErrAlreadyAppealed mapping (the InsertAppeal-side half of decision 8's
+	// "one appeal per action, ever") — a broken mapping there would still
+	// pass every subtest above, because the pre-check refuses first every
+	// time. noPrecheckStore always reports "no existing appeal" from
+	// FindAppealForAction, forcing the SECOND Submit past the pre-check and
+	// into the real UNIQUE(action_id) constraint InsertAppeal hits.
+	t.Run("UNIQUE constraint alone maps to ErrAlreadyAppealed with the pre-check disabled", func(t *testing.T) {
+		f := newAppealFixture(t)
+		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+		if err != nil {
+			t.Fatalf("Warn: %v", err)
+		}
+		if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "first"); err != nil {
+			t.Fatalf("first submit: %v", err)
+		}
+
+		appeals := NewAppealService(noPrecheckStore{f.database}, f.mod.perms, f.mod, auth.NewRateLimiter())
+		if _, err := appeals.Submit(ctx, fixtureMember, actionID, "second"); !errors.Is(err, ErrAlreadyAppealed) {
+			t.Fatalf("second submit with the dedupe pre-check disabled: want ErrAlreadyAppealed (the UNIQUE(action_id) constraint's own db.ErrConflict must still map here), got %v", err)
 		}
 	})
 
@@ -1024,13 +1166,24 @@ func TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder(t *testing.T) {
 
 	reached := make(chan struct{})
 	release := make(chan struct{})
-	var once sync.Once
+	var armed atomic.Bool
 	appealPostWriteHookForTest = func(pid string) {
 		if pid != publicID {
 			return
 		}
-		once.Do(func() { close(reached) })
-		<-release
+		// Only the FIRST call (Assign's) parks here. A second transition's
+		// call (Decide's, if it ever reaches this same hook) must return
+		// immediately, with NO blocking of its own — sync.Once would be the
+		// obvious tool here, but Once.Do blocks EVERY caller until the
+		// winning call's function returns, which would make Decide's call
+		// block on Assign's in-flight <-release for the exact same reason a
+		// shared release channel does: proving nothing about the appeal's
+		// own lock. CompareAndSwap lets exactly one caller run the blocking
+		// body while every other caller falls through instantly.
+		if armed.CompareAndSwap(false, true) {
+			close(reached)
+			<-release
+		}
 	}
 	defer func() { appealPostWriteHookForTest = nil }()
 
@@ -1044,16 +1197,27 @@ func TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Assign never reached the post-write hook — the barrier never armed")
 	}
+	// Assign's write has committed and it is now parked in the hook, still
+	// holding the appeal's own lock (it has not notified or unlocked yet).
 
 	decideDone := make(chan error, 1)
 	go func() {
 		decideDone <- f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine")
 	}()
-	// Best-effort: give Decide's goroutine a moment to actually queue behind
-	// the appeal's own lock before releasing Assign's hook — the correctness
-	// claim holds regardless (the lock, not timing, is what orders them),
-	// this only makes the race more likely to be genuinely in flight.
-	time.Sleep(20 * time.Millisecond)
+
+	// The parking pattern (round 4 test-strengthening): PROVE Decide is
+	// actually blocked on the appeal's lock while Assign holds it, rather
+	// than hoping a fixed sleep gave it enough time to queue. If the lock
+	// were a no-op, Decide's whole transaction (an in-memory sqlite write)
+	// would essentially always complete within this window; it can only
+	// still be empty here because something is genuinely holding it up.
+	select {
+	case err := <-decideDone:
+		t.Fatalf("Decide completed (err=%v) while Assign was still holding the appeal's lock — the lock is not actually blocking", err)
+	case <-time.After(100 * time.Millisecond):
+		// Still parked, as the lock requires.
+	}
+
 	close(release)
 
 	if err := <-assignDone; err != nil {
@@ -1064,6 +1228,91 @@ func TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder(t *testing.T) {
 	}
 
 	want := []string{"status:assigned", "queue:assigned", "status:overturned", "queue:overturned"}
+	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notify order = %v, want %v", got, want)
+	}
+}
+
+// TestAppeal_SubmitThenWithdrawNotifyOrderMatchesCommitOrder is P3 item 4,
+// Submit's twin of TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder:
+// Submit's own "open" mod_queue broadcast used to run in the API handler
+// AFTER Submit returned, so it could arrive after a withdraw (or assign)
+// frame for the SAME appeal filed moments later. Submit now broadcasts
+// under the same per-appeal lock as every other transition — this proves
+// it the same way F4's test proves Assign/Decide: park Submit inside the
+// post-write hook (write committed, lock held, not yet notified), prove a
+// concurrent Withdraw is genuinely blocked on the lock rather than merely
+// slower, then release and check commit order held: open before withdrawn.
+func TestAppeal_SubmitThenWithdrawNotifyOrderMatchesCommitOrder(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+
+	rec := &appealOrderRecorder{}
+	f.appeals.SetQueueBroadcaster(&orderedQueueBroadcaster{rec: rec})
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	publicIDCh := make(chan string, 1)
+	var armed atomic.Bool
+	appealPostWriteHookForTest = func(pid string) {
+		select {
+		case publicIDCh <- pid:
+		default:
+		}
+		if armed.CompareAndSwap(false, true) {
+			close(reached)
+			<-release
+		}
+	}
+	defer func() { appealPostWriteHookForTest = nil }()
+
+	type submitResult struct {
+		publicID string
+		err      error
+	}
+	submitDone := make(chan submitResult, 1)
+	go func() {
+		pid, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+		submitDone <- submitResult{pid, err}
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Submit never reached the post-write hook — the barrier never armed")
+	}
+	publicID := <-publicIDCh
+	// Submit's insert has committed and it is now parked in the hook, still
+	// holding the appeal's own lock (it has not notified or unlocked yet).
+
+	withdrawDone := make(chan error, 1)
+	go func() {
+		withdrawDone <- f.appeals.Withdraw(ctx, fixtureMember, publicID)
+	}()
+
+	select {
+	case err := <-withdrawDone:
+		t.Fatalf("Withdraw completed (err=%v) while Submit was still holding the appeal's lock — the lock is not actually blocking", err)
+	case <-time.After(100 * time.Millisecond):
+		// Still parked, as the lock requires.
+	}
+
+	close(release)
+
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("Submit: %v", result.err)
+	}
+	if err := <-withdrawDone; err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+
+	want := []string{"queue:open", "queue:withdrawn"}
 	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("notify order = %v, want %v", got, want)
 	}
@@ -1100,6 +1349,62 @@ func TestAppeal_DelayedAssignAfterDecisionDoesNotBroadcast(t *testing.T) {
 	}
 	if len(notifier.calls) != 0 {
 		t.Fatalf("appeal_status notify calls = %d, want 0 — a refused assign must never broadcast", len(notifier.calls))
+	}
+}
+
+// recordingQueueBroadcaster records whether it was called and the exact
+// context it was handed, for TestAppeal_NotifyQueueSurvivesCallerContextCancellation.
+type recordingQueueBroadcaster struct {
+	called bool
+	gotCtx context.Context
+}
+
+func (r *recordingQueueBroadcaster) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
+	r.called = true
+	r.gotCtx = ctx
+}
+
+// TestAppeal_NotifyQueueSurvivesCallerContextCancellation is P3 item 3:
+// notifyQueue used to forward the caller's own request context straight to
+// the broadcaster, so a client disconnecting right after the write commits
+// (canceling ctx) could suppress the mod_queue frame every OTHER
+// moderator's queue view depends on. The postWriteHook fires exactly
+// between the commit and notifyQueue's call, the same seam F4's ordering
+// tests use — canceling the caller's context there proves notifyQueue must
+// detach via context.WithoutCancel, not merely that it happens to run
+// before some later cancellation.
+func TestAppeal_NotifyQueueSurvivesCallerContextCancellation(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	broadcaster := &recordingQueueBroadcaster{}
+	f.appeals.SetQueueBroadcaster(broadcaster)
+
+	appealPostWriteHookForTest = func(pid string) {
+		if pid == publicID {
+			cancel() // the client "disconnects" right after the write commits.
+		}
+	}
+	defer func() { appealPostWriteHookForTest = nil }()
+
+	if err := f.appeals.Withdraw(ctx, fixtureMember, publicID); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+	if !broadcaster.called {
+		t.Fatal("BroadcastAppealQueue was never called — the caller's context cancellation must not suppress the mod_queue broadcast")
+	}
+	if broadcaster.gotCtx.Err() != nil {
+		t.Fatalf("BroadcastAppealQueue's context was already canceled (err=%v) — notifyQueue must detach via context.WithoutCancel", broadcaster.gotCtx.Err())
 	}
 }
 
