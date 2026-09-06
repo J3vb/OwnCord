@@ -15,6 +15,7 @@
 -- the tracker before the schema change lands.
 UPDATE roles SET permissions = permissions & ~4194304 WHERE id = 3 OR name = 'Moderator';
 
+DROP TABLE IF EXISTS report_events;
 DROP TABLE IF EXISTS report_notes;
 DROP TABLE IF EXISTS report_evidence;
 DROP TABLE IF EXISTS reports;

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -165,21 +166,26 @@ func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, er
 		if errors.Is(err, db.ErrConflict) {
 			return 0, ErrDuplicateReport
 		}
+		if errors.Is(err, db.ErrNotFound) {
+			// The reporter or subject was erased between resolveTarget's read
+			// and this transaction's commit (Codex review, P1-4 widened) — the
+			// same refusal a target that never existed gets, no existence
+			// oracle for this vanishingly rare race either.
+			return 0, errTargetNotFound
+		}
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 
-	// Actor 0 (the system actor, the scheduled-backup convention): the
-	// reporter's identity must not reach anyone who can read the audit log
-	// (VIEW_AUDIT_LOG) but not the queue (MODERATE_MEMBERS) — those are two
-	// different bits. Detail is the reason word only — no names, no content
-	// (AssertSafeDetails and the confidentiality tests both read this).
-	// Residual, recorded rather than fixed here: a VIEW_AUDIT_LOG holder who
-	// is ALSO the report's subject can still count report_create rows
-	// against the queue they can separately see and infer that one of them
-	// names them — not who reported, not which content, but a count. P2-9's
-	// public_id closes the id-correlation half of that; the count itself is
-	// accepted, not defended.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, "report_create", "report", id, p.Reason)
+	// The opening report_events row is written inside FileReport's own
+	// transaction (db/report_queries.go), not here — a second Codex review
+	// moved every report lifecycle event off the shared audit_log entirely
+	// (see report_events, migration 048 (12)): a VIEW_AUDIT_LOG holder who
+	// lacks MODERATE_MEMBERS could still read a system-actor report_create
+	// row's timestamp and reason there, and one who is ALSO the report's
+	// subject could diff it against the queue they separately cannot see.
+	// report_events is exposed nowhere except inside one report's own queue
+	// detail (Get, gated exactly like the rest of it), so that channel no
+	// longer exists at all.
 	return id, nil
 }
 
@@ -391,6 +397,18 @@ func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.Report
 	return rows, nil
 }
 
+// RequireModerate is requireModerate exported for a caller that must
+// authorize BEFORE resolving anything else about the request — a route
+// handler that translates a public id to the internal one, in particular
+// (Codex review, P1): running that resolution first turns "unknown id" vs
+// "real id, no permission" into two different status codes, an existence
+// oracle through the handler's own order of operations. Call this before
+// resolveReportIDParam, not after.
+func (s *ReportService) RequireModerate(ctx context.Context, actorID int64) error {
+	_, err := s.requireModerate(ctx, actorID)
+	return err
+}
+
 // requireModerate loads actorID's role and checks the canonical predicate
 // (permissions.CanModerate), returning the role for a follow-up hierarchy
 // check. Runs before any report lookup, so an actor without the bit sees
@@ -464,21 +482,24 @@ func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) 
 	return out, nil
 }
 
-// ReportDetail is GET .../queue/{id}'s payload: the report, its evidence and
-// its notes.
+// ReportDetail is GET .../queue/{id}'s payload: the report, its evidence,
+// its notes and its immutable history (report_events — second Codex
+// review).
 type ReportDetail struct {
 	Report   db.Report
 	Evidence []db.ReportEvidenceRow
 	Notes    []db.ReportNoteRow
+	Events   []db.ReportEvent
 }
 
-// Get returns one report with its evidence and notes. 404s — never 403 —
-// both for a missing id and for the caller's own report as its SUBJECT, so
-// the two are indistinguishable even if the subject holds the bit. A
-// moderator who is the report's REPORTER may read it (it is their own
+// Get returns one report with its evidence, notes and history. 404s — never
+// 403 — both for a missing id and for the caller's own report as its
+// SUBJECT, so the two are indistinguishable even if the subject holds the
+// bit. A moderator who is the report's REPORTER may read it (it is their own
 // filing, already visible via Mine()) but never its internal notes: Notes
 // is always empty for them, and they may not act on it (guardSelfReview,
-// Assign/Note/Close).
+// Assign/Note/Close). report_events is exposed here and nowhere else — the
+// same bit-plus-confidentiality gate this method already runs, no new one.
 func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*ReportDetail, error) {
 	if _, err := s.requireModerate(ctx, actorID); err != nil {
 		return nil, err
@@ -494,24 +515,31 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
+	events, err := s.st.ListReportEvents(ctx, reportID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
 	if report.ReporterID != 0 && report.ReporterID == actorID {
-		return &ReportDetail{Report: *report, Evidence: evidence}, nil
+		return &ReportDetail{Report: *report, Evidence: evidence, Events: events}, nil
 	}
 	notes, err := s.st.ListReportNotes(ctx, reportID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	return &ReportDetail{Report: *report, Evidence: evidence, Notes: notes}, nil
+	return &ReportDetail{Report: *report, Evidence: evidence, Notes: notes, Events: events}, nil
 }
 
 // Assign assigns reportID to actorID. 409 if it is already assigned to
 // someone else, unless force is set and the caller outranks the current
-// assignee (requireOutranksRole — the same rule ban/kick/timeout use). The
-// write is guarded on the observed assignee (P2-8): a concurrent
-// reassignment invalidates the outrank verdict computed against the stale
-// value, so it can never be applied — zero rows affected covers that race,
-// a state that already left open/assigned, and a moderator erased between
-// requirePerm and the write, all as 409.
+// assignee (the same rule ban/kick/timeout use). The plain write is guarded
+// on the observed assignee (P2-8): a concurrent reassignment invalidates a
+// stale verdict, so it can never be applied. The force path's outrank
+// comparison runs INSIDE the same transaction as the write (Codex review,
+// AssignReportForced): reading the assignee's role and writing the new one
+// as two separate statements left a gap a role change could race; zero rows
+// (or ErrForbidden, force only) covers a state that already left
+// open/assigned, a moderator erased between requirePerm and the write, and
+// (force only) failing to outrank, all as 409 except the last, which is 403.
 func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, force bool) error {
 	actorRole, err := s.requireModerate(ctx, actorID)
 	if err != nil {
@@ -532,9 +560,18 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 		if !force {
 			return fmt.Errorf("%w: already assigned", ErrConflict)
 		}
-		if err := s.moderation.requireOutranksRole(ctx, actorRole, observed); err != nil {
-			return err
+		ok, err := s.st.AssignReportForced(ctx, reportID, actorID, observed, int64(actorRole.Position))
+		if err != nil {
+			if errors.Is(err, db.ErrForbidden) {
+				return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
+			}
+			return fmt.Errorf("%w: %w", ErrInternal, err)
 		}
+		if !ok {
+			return fmt.Errorf("%w: report is no longer open", ErrConflict)
+		}
+		s.logReportEvent(ctx, reportID, actorID, "assigned", "")
+		return nil
 	}
 	ok, err := s.st.AssignReport(ctx, reportID, actorID, observed)
 	if err != nil {
@@ -543,7 +580,7 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 	if !ok {
 		return fmt.Errorf("%w: report is no longer open", ErrConflict)
 	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "report_assign", "report", reportID, "")
+	s.logReportEvent(ctx, reportID, actorID, "assigned", "")
 	return nil
 }
 
@@ -575,10 +612,13 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: moderator account no longer exists", ErrConflict)
+		// Zero rows now covers two causes (Codex review widened the guard to
+		// the report's state too): the moderator account was erased, or the
+		// report closed, between requirePerm's read and this write.
+		return fmt.Errorf("%w: report is closed, or the moderator account no longer exists", ErrConflict)
 	}
-	// Never the body — "note added" is the whole detail, everywhere.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "report_note", "report", reportID, "note added")
+	// Never the body — action alone is the whole detail, everywhere.
+	s.logReportEvent(ctx, reportID, actorID, "noted", "")
 	return nil
 }
 
@@ -611,10 +651,23 @@ func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outc
 	if !ok {
 		return "", fmt.Errorf("%w: report is already closed", ErrConflict)
 	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "report_close", "report", reportID, outcome)
+	s.logReportEvent(ctx, reportID, actorID, "closed", outcome)
 	return state, nil
 }
 
 // ErrDuplicateReport is a 409: the same reporter already has an open or
 // assigned report against this exact target.
 var ErrDuplicateReport = fmt.Errorf("%w: a report for this target is already open or assigned", ErrConflict)
+
+// logReportEvent appends one report_events row (second Codex review), never
+// the shared audit_log. detail is the state or outcome word only — never
+// free text, the same rule report_notes.body is exempt from. A write
+// failure is logged and swallowed, the same fire-and-forget contract
+// db.WriteAudit gives every other caller in this package: the mutation
+// itself already succeeded, and a lost history row is not worth failing the
+// caller's request over.
+func (s *ReportService) logReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) {
+	if err := s.st.InsertReportEvent(context.WithoutCancel(ctx), reportID, actorID, action, detail); err != nil {
+		slog.Warn("report event not recorded", "report_id", reportID, "action", action, "error", err)
+	}
+}

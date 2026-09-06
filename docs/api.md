@@ -1918,9 +1918,16 @@ subject's usernames but never the report's free-text detail or its notes.
 
 ### GET /api/v1/moderation/queue/{id}
 
-One report, its evidence snapshot and its internal notes. `{id}` is the
-opaque public id, resolved to the internal id server-side before any lookup.
-**Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+One report, its evidence snapshot, its internal notes and its immutable
+history (`events`: `created`, `assigned`, `noted`, `closed`, each with an
+actor id and a state-or-outcome-word detail — never free text). `{id}` is
+the opaque public id, resolved to the internal id server-side before any
+lookup. **Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`).
+
+The history lives in its own table (`report_events`), never the shared
+audit log — `VIEW_AUDIT_LOG` grants no route to any of it, only the same bit
+and confidentiality gate this endpoint already enforces.
 
 `404 NOT_FOUND` both for a missing id and for a report whose SUBJECT is the
 caller — indistinguishable, even when the caller holds the bit: the subject
@@ -1958,7 +1965,9 @@ hierarchy rule ban/kick/timeout use).
 Add an internal note, visible to `MODERATE_MEMBERS` holders only — never to
 the reporter, never to the subject. `{id}` is the opaque public id. **Auth:**
 Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`). `403
-SELF_REVIEW` if the caller is the report's own reporter.
+SELF_REVIEW` if the caller is the report's own reporter; `409 CONFLICT` if
+the report is not open or assigned (a note may not land on a report a
+concurrent close just closed) or if the moderator account no longer exists.
 
 #### Request
 

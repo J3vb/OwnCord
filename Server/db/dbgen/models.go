@@ -268,6 +268,16 @@ type Report struct {
 	ClosedAt      *string `json:"closedAt"`
 }
 
+type ReportEvent struct {
+	ID         int64   `json:"id"`
+	ReportID   int64   `json:"reportId"`
+	ActorID    int64   `json:"actorId"`
+	ActorToken *string `json:"actorToken"`
+	Action     string  `json:"action"`
+	Detail     string  `json:"detail"`
+	CreatedAt  string  `json:"createdAt"`
+}
+
 type ReportEvidence struct {
 	ReportID    int64   `json:"reportId"`
 	Seq         int64   `json:"seq"`

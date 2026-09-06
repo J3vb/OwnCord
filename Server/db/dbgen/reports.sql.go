@@ -154,7 +154,10 @@ func (q *Queries) GetReportByPublicID(ctx context.Context, publicID string) (Rep
 const insertReport = `-- name: InsertReport :one
 
 INSERT INTO reports (public_id, reporter_id, subject_id, target_type, target_ref, channel_id, reason, detail)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+SELECT ?1, ?2, ?3, ?4,
+       ?5, ?6, ?7, ?8
+ WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = ?2)
+   AND (?3 = 0 OR EXISTS (SELECT 1 FROM users u WHERE u.id = ?3))
 RETURNING id
 `
 
@@ -177,6 +180,14 @@ type InsertReportParams struct {
 // (migration 048) is the constraint expected to fire here on a race: two
 // simultaneous filings of the same (reporter, target) both reach this
 // INSERT, and the loser's violates that partial unique index.
+// Re-validated inside the transaction (Codex review, P1-4 widened): the
+// evidence snapshot is built and the reporter/subject resolved before the
+// transaction opens, so an erasure landing between that resolution and this
+// INSERT must not restore a since-erased reporter or subject id -- the
+// INSERT ... SELECT ... WHERE EXISTS guard turns that race into zero rows
+// (mapped to db.ErrNotFound) rather than a row naming an erased account.
+// subject_id = 0 is a valid, principal-less target (an attachment with no
+// resolvable uploader) and skips the EXISTS check for it.
 func (q *Queries) InsertReport(ctx context.Context, arg InsertReportParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, insertReport,
 		arg.PublicID,
@@ -193,9 +204,35 @@ func (q *Queries) InsertReport(ctx context.Context, arg InsertReportParams) (int
 	return id, err
 }
 
+const insertReportEvent = `-- name: InsertReportEvent :exec
+INSERT INTO report_events (report_id, actor_id, action, detail)
+VALUES (?, ?, ?, ?)
+`
+
+type InsertReportEventParams struct {
+	ReportID int64  `json:"reportId"`
+	ActorID  int64  `json:"actorId"`
+	Action   string `json:"action"`
+	Detail   string `json:"detail"`
+}
+
+// report_events is this feature's own immutable history, never the shared
+// audit_log (second Codex review): detail is the state or outcome word
+// only, never free text.
+func (q *Queries) InsertReportEvent(ctx context.Context, arg InsertReportEventParams) error {
+	_, err := q.db.ExecContext(ctx, insertReportEvent,
+		arg.ReportID,
+		arg.ActorID,
+		arg.Action,
+		arg.Detail,
+	)
+	return err
+}
+
 const insertReportEvidence = `-- name: InsertReportEvidence :exec
 INSERT INTO report_evidence (report_id, seq, message_id, author_id, content, attachments)
-VALUES (?, ?, ?, ?, ?, ?)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6
+ WHERE ?4 = 0 OR EXISTS (SELECT 1 FROM users u WHERE u.id = ?4)
 `
 
 type InsertReportEvidenceParams struct {
@@ -207,6 +244,10 @@ type InsertReportEvidenceParams struct {
 	Attachments string `json:"attachments"`
 }
 
+// Guarded (Codex review, P1-4 widened): an evidence row's author erased
+// between the snapshot's capture and this transaction's commit must not
+// land -- the row is silently dropped (0 = a valid author-less context row,
+// e.g. a system message, and skips the check).
 func (q *Queries) InsertReportEvidence(ctx context.Context, arg InsertReportEvidenceParams) error {
 	_, err := q.db.ExecContext(ctx, insertReportEvidence,
 		arg.ReportID,
@@ -223,6 +264,7 @@ const insertReportNote = `-- name: InsertReportNote :execrows
 INSERT INTO report_notes (report_id, author_id, body)
 SELECT ?1, ?2, ?3
  WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = ?2)
+   AND EXISTS (SELECT 1 FROM reports r WHERE r.id = ?1 AND r.state IN ('open', 'assigned'))
 `
 
 type InsertReportNoteParams struct {
@@ -232,14 +274,56 @@ type InsertReportNoteParams struct {
 }
 
 // INSERT ... SELECT ... WHERE EXISTS, not a bare INSERT: a moderator erased
-// between requirePerm and this write must not land as a note's author.
-// Zero rows affected means the caller answers 409.
+// between requirePerm and this write must not land as a note's author, and
+// (Codex review) the report must still be open/assigned -- a note added
+// between GetReport's read and this write, on a report a concurrent Close
+// just closed, must not land either. Both guards are in the one INSERT's
+// WHERE clause, so there is no read-then-write gap between them. Zero rows
+// affected means the caller answers 409, for either cause.
 func (q *Queries) InsertReportNote(ctx context.Context, arg InsertReportNoteParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, insertReportNote, arg.ReportID, arg.AuthorID, arg.Body)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const listReportEvents = `-- name: ListReportEvents :many
+SELECT id, report_id, actor_id, actor_token, action, detail, created_at
+  FROM report_events
+ WHERE report_id = ?
+ ORDER BY id
+`
+
+func (q *Queries) ListReportEvents(ctx context.Context, reportID int64) ([]ReportEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listReportEvents, reportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportEvent{}
+	for rows.Next() {
+		var i ReportEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.ActorID,
+			&i.ActorToken,
+			&i.Action,
+			&i.Detail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReportEvidence = `-- name: ListReportEvidence :many

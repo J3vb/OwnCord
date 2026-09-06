@@ -299,13 +299,24 @@ type Store interface {
 	// AssignReport is guarded on state, the caller's last-observed assignee
 	// (optimistic concurrency) and EXISTS(users) — see db/report_queries.go.
 	AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
+	// AssignReportForced is the force-reassign path: the outrank comparison
+	// runs inside the same transaction as the write (Codex review) —
+	// ErrForbidden means the caller does not outrank the current assignee.
+	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorRolePosition int64) (bool, error)
 	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
 	InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
-	// InsertReportNote is guarded on EXISTS(users); false means the caller
-	// answers 409 (the author was erased between requirePerm and the write).
+	// InsertReportNote is guarded on EXISTS(users) and the report's state
+	// (Codex review widened); false means the caller answers 409 — either
+	// the author was erased, or the report closed, between requirePerm and
+	// the write.
 	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error)
 	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
+	// InsertReportEvent and ListReportEvents are report_events (second Codex
+	// review): this feature's own immutable history, never the shared
+	// audit_log — exposed only inside the queue detail.
+	InsertReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) error
+	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
 
 	// ── Moderation actions (migration 049, B5-9) ──

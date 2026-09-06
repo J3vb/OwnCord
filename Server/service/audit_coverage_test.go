@@ -230,68 +230,6 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			}
 			return rec, []string{body}
 		}},
-		{"report create", "report_create", func(t *testing.T) (*audittest.Recorder, []string) {
-			svc, database := newTestReportService(t)
-			seedChannel(t, database, &db.Channel{ID: 1300, Name: "general"})
-			msgID := seedReportMessage(t, database, 1300, 11, "hi")
-			rec := audittest.Install(t, database)
-			// The detail is password-shaped and carries a bcrypt hash: the
-			// audit row's detail is the reason word only, so neither the
-			// denylist regexes nor these literal secrets should ever reach
-			// it — proving detail never becomes audit content, not just
-			// that it happens to be clean this time.
-			const detail = "password: hunter2, hash $2a$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
-			if _, err := svc.File(context.Background(), FileReportParams{
-				ReporterID: 10, TargetType: TargetMessage, TargetID: fmt.Sprintf("%d", msgID),
-				Reason: "harassment", Detail: detail,
-			}); err != nil {
-				t.Fatalf("File: %v", err)
-			}
-			return rec, []string{detail, "hunter2", "$2a$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"}
-		}},
-		{"report assign", "report_assign", func(t *testing.T) (*audittest.Recorder, []string) {
-			svc, database := newTestReportService(t)
-			seedChannel(t, database, &db.Channel{ID: 1301, Name: "general"})
-			msgID := seedReportMessage(t, database, 1301, 11, "hi")
-			id, err := svc.File(context.Background(), FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: fmt.Sprintf("%d", msgID), Reason: "spam"})
-			if err != nil {
-				t.Fatalf("File: %v", err)
-			}
-			rec := audittest.Install(t, database)
-			if err := svc.Assign(context.Background(), 2, id, false); err != nil {
-				t.Fatalf("Assign: %v", err)
-			}
-			return rec, nil
-		}},
-		{"report note", "report_note", func(t *testing.T) (*audittest.Recorder, []string) {
-			svc, database := newTestReportService(t)
-			seedChannel(t, database, &db.Channel{ID: 1302, Name: "general"})
-			msgID := seedReportMessage(t, database, 1302, 11, "hi")
-			id, err := svc.File(context.Background(), FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: fmt.Sprintf("%d", msgID), Reason: "spam"})
-			if err != nil {
-				t.Fatalf("File: %v", err)
-			}
-			rec := audittest.Install(t, database)
-			const body = "moderator note mentioning password: hunter2secret"
-			if err := svc.Note(context.Background(), 2, id, body); err != nil {
-				t.Fatalf("Note: %v", err)
-			}
-			return rec, []string{body}
-		}},
-		{"report close", "report_close", func(t *testing.T) (*audittest.Recorder, []string) {
-			svc, database := newTestReportService(t)
-			seedChannel(t, database, &db.Channel{ID: 1303, Name: "general"})
-			msgID := seedReportMessage(t, database, 1303, 11, "hi")
-			id, err := svc.File(context.Background(), FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: fmt.Sprintf("%d", msgID), Reason: "spam"})
-			if err != nil {
-				t.Fatalf("File: %v", err)
-			}
-			rec := audittest.Install(t, database)
-			if _, err := svc.Close(context.Background(), 2, id, "actioned"); err != nil {
-				t.Fatalf("Close: %v", err)
-			}
-			return rec, nil
-		}},
 	}
 
 	var corpus []db.AuditEntry

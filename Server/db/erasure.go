@@ -438,6 +438,14 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 		`UPDATE reports SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink report assignment: %w", err)
 	}
+	// 22f: report_events (second Codex review) is metadata, not content — an
+	// action word, a time, an actor link — so unlinking the actor is the
+	// whole job, the same shape audit_log gets, and there is no row to
+	// delete or rewrite otherwise.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE report_events SET actor_id = 0, actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
+		return fmt.Errorf("EraseAccount unlink report events: %w", err)
+	}
 	return nil
 }
 

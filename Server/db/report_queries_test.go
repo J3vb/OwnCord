@@ -374,6 +374,240 @@ func TestReportQueries_InsertReportNoteRefusesAnErasedModerator(t *testing.T) {
 	}
 }
 
+// TestReportQueries_FileReportRefusesAGoneReporterOrSubject pins the
+// re-validation Codex review widened P1-4 to: the caller resolved the
+// reporter/subject before this transaction opened, so an erasure racing
+// that resolution must not let a since-erased principal's id land in the
+// new row — the guarded INSERT ... SELECT ... WHERE EXISTS turns that into
+// a zero-row RETURNING, mapped to db.ErrNotFound, and no report is created.
+func TestReportQueries_FileReportRefusesAGoneReporterOrSubject(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	const noSuchUser = int64(999999)
+	realUser := seedUser(t, database, "rq-revalidate-real")
+
+	if _, err := database.FileReport(ctx, testPublicID(), noSuchUser, realUser, "user", "revalidate-reporter", nil, "spam", "", nil); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("FileReport with a gone reporter: err = %v, want ErrNotFound", err)
+	}
+	if _, err := database.FileReport(ctx, testPublicID(), realUser, noSuchUser, "user", "revalidate-subject", nil, "spam", "", nil); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("FileReport with a gone subject: err = %v, want ErrNotFound", err)
+	}
+	var rows int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE target_ref LIKE 'revalidate-%'`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Errorf("reports rows from the refused filings = %d, want 0", rows)
+	}
+}
+
+// TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor pins the other
+// half of the same widening: an evidence row whose author was erased in that
+// same race window is silently dropped, not an abort of the whole report —
+// the snapshot is simply short one context row.
+func TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-drop-reporter")
+	subject := seedUser(t, database, "rq-drop-subject")
+	const noSuchAuthor = int64(999999)
+
+	id, err := database.FileReport(ctx, testPublicID(), reporter, subject, "message", "drop-ref", nil, "spam", "", []db.ReportEvidenceInput{
+		{Seq: 0, AuthorID: subject, Content: "centre, real author", AttachmentsJSON: "[]"},
+		{Seq: -1, AuthorID: noSuchAuthor, Content: "context from a gone author", AttachmentsJSON: "[]"},
+	})
+	if err != nil {
+		t.Fatalf("FileReport: %v", err)
+	}
+	evidence, err := database.ListReportEvidence(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportEvidence: %v", err)
+	}
+	if len(evidence) != 1 {
+		t.Fatalf("evidence rows = %d, want 1 (the gone author's row silently dropped)", len(evidence))
+	}
+	if evidence[0].AuthorID != subject {
+		t.Errorf("surviving evidence author = %d, want %d", evidence[0].AuthorID, subject)
+	}
+}
+
+// TestReportQueries_InsertReportNoteRefusesOnClosedReport pins the second
+// half of the review's InsertReportNote widening: a note may not land on a
+// report that is not open/assigned, guarded atomically in the same INSERT
+// as the EXISTS(users) check — not a separate read-then-write that a
+// concurrent Close could slip between.
+func TestReportQueries_InsertReportNoteRefusesOnClosedReport(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-note-closed-reporter")
+	subject := seedUser(t, database, "rq-note-closed-subject")
+	mod := seedUser(t, database, "rq-note-closed-mod")
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || !ok {
+		t.Fatalf("CloseReport: %v, %v", ok, err)
+	}
+	ok, err := database.InsertReportNote(ctx, id, mod, "too late")
+	if err != nil {
+		t.Fatalf("InsertReportNote: %v", err)
+	}
+	if ok {
+		t.Error("InsertReportNote on a closed report = true, want false")
+	}
+	notes, err := database.ListReportNotes(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportNotes: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("notes on a closed report = %d, want 0", len(notes))
+	}
+}
+
+// TestReportQueries_AssignReportForced covers the tx-scoped outrank check
+// (Codex review): success when the actor genuinely outranks the current
+// assignee (read fresh, inside the same transaction as the write), and
+// ErrForbidden when they do not.
+func TestReportQueries_AssignReportForced(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-forced-reporter")
+	subject := seedUser(t, database, "rq-forced-subject")
+	lowMod := seedUser(t, database, "rq-forced-lowmod")
+	highMod := seedUser(t, database, "rq-forced-highmod")
+	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5001, 'rq-forced-low-role', 0, 10)`); err != nil {
+		t.Fatalf("seed low role: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5002, 'rq-forced-high-role', 0, 90)`); err != nil {
+		t.Fatalf("seed high role: %v", err)
+	}
+	setRole(t, database, lowMod, 5001)
+	setRole(t, database, highMod, 5002)
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.AssignReport(ctx, id, lowMod, 0); err != nil || !ok {
+		t.Fatalf("first assign: %v, %v", ok, err)
+	}
+
+	// lowMod (position 10) cannot force-take it from... itself is moot; try
+	// the actual failing direction: a caller who does NOT outrank lowMod.
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 5); !errors.Is(err, db.ErrForbidden) || ok {
+		t.Errorf("AssignReportForced without outranking = %v, %v, want false, ErrForbidden", ok, err)
+	}
+	report, err := database.GetReport(ctx, id)
+	if err != nil {
+		t.Fatalf("GetReport: %v", err)
+	}
+	if report.AssigneeID != lowMod {
+		t.Errorf("assignee after a refused force = %d, want %d (unchanged)", report.AssigneeID, lowMod)
+	}
+
+	// A caller who genuinely outranks the current (fresh-read) assignee
+	// succeeds.
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 90); err != nil || !ok {
+		t.Errorf("AssignReportForced outranking = %v, %v, want true, nil", ok, err)
+	}
+	report, err = database.GetReport(ctx, id)
+	if err != nil {
+		t.Fatalf("GetReport: %v", err)
+	}
+	if report.AssigneeID != highMod {
+		t.Errorf("assignee after a successful force = %d, want %d", report.AssigneeID, highMod)
+	}
+}
+
+// TestReportQueries_AssignReportForcedRefusesAnErasedCurrentAssignee covers
+// AssignReportForced's other branch: the observed assignee no longer
+// resolves to a role at all (erased mid-race) — nothing to outrank, so the
+// call refuses rather than erroring.
+func TestReportQueries_AssignReportForcedRefusesAnErasedCurrentAssignee(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-forced-ghost-reporter")
+	subject := seedUser(t, database, "rq-forced-ghost-subject")
+	newMod := seedUser(t, database, "rq-forced-ghost-newmod")
+	const erasedAssignee = int64(999999)
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.AssignReportForced(ctx, id, newMod, erasedAssignee, 90); err != nil || ok {
+		t.Errorf("AssignReportForced with a gone current assignee = %v, %v, want false, nil", ok, err)
+	}
+}
+
+// TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed covers the
+// n != 1 branch: the actor genuinely outranks, but the report is no longer
+// open/assigned by the time the guarded UPDATE runs.
+func TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-forced-closed-reporter")
+	subject := seedUser(t, database, "rq-forced-closed-subject")
+	lowMod := seedUser(t, database, "rq-forced-closed-lowmod")
+	highMod := seedUser(t, database, "rq-forced-closed-highmod")
+	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5003, 'rq-forced-closed-low-role', 0, 10)`); err != nil {
+		t.Fatalf("seed low role: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO roles (id, name, permissions, position) VALUES (5004, 'rq-forced-closed-high-role', 0, 90)`); err != nil {
+		t.Fatalf("seed high role: %v", err)
+	}
+	setRole(t, database, lowMod, 5003)
+	setRole(t, database, highMod, 5004)
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.AssignReport(ctx, id, lowMod, 0); err != nil || !ok {
+		t.Fatalf("first assign: %v, %v", ok, err)
+	}
+	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || !ok {
+		t.Fatalf("close: %v, %v", ok, err)
+	}
+	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, 90); err != nil || ok {
+		t.Errorf("AssignReportForced on a closed report = %v, %v, want false, nil", ok, err)
+	}
+}
+
+// TestReportQueries_InsertAndListReportEvents exercises report_events
+// directly at the db-package level (second Codex review) — the
+// service-level test drives the same calls through a real *db.DB, but
+// per-package coverage only counts a package's own tests.
+func TestReportQueries_InsertAndListReportEvents(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-events-reporter")
+	subject := seedUser(t, database, "rq-events-subject")
+	mod := seedUser(t, database, "rq-events-mod")
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	// FileReport already wrote the "created" row; add the rest directly.
+	if err := database.InsertReportEvent(ctx, id, mod, "assigned", ""); err != nil {
+		t.Fatalf("InsertReportEvent(assigned): %v", err)
+	}
+	if err := database.InsertReportEvent(ctx, id, mod, "closed", "actioned"); err != nil {
+		t.Fatalf("InsertReportEvent(closed): %v", err)
+	}
+
+	events, err := database.ListReportEvents(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportEvents: %v", err)
+	}
+	wantActions := []string{"created", "assigned", "closed"}
+	if len(events) != len(wantActions) {
+		t.Fatalf("events = %d rows, want %d", len(events), len(wantActions))
+	}
+	for i, action := range wantActions {
+		if events[i].Action != action {
+			t.Errorf("event[%d].Action = %q, want %q", i, events[i].Action, action)
+		}
+	}
+	if events[0].ActorID != 0 {
+		t.Errorf("created event actor = %d, want 0", events[0].ActorID)
+	}
+	if events[1].ActorID != mod || events[2].ActorID != mod {
+		t.Error("assigned/closed events must carry the acting moderator")
+	}
+	if events[2].Detail != "actioned" {
+		t.Errorf("closed event detail = %q, want %q", events[2].Detail, "actioned")
+	}
+}
+
 func TestReportQueries_EvidenceAndNotes(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
