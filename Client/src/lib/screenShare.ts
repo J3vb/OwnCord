@@ -205,15 +205,23 @@ export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | null;
 }
 
+/** Unpublishing can reject later during WebRTC renegotiation. Track cleanup
+ *  must proceed immediately and contain that asynchronous failure too. */
+function unpublishManualTrack(room: Room, track: LocalTrack): void {
+  try {
+    void room.localParticipant.unpublishTrack(track.mediaStreamTrack).catch((err: unknown) => {
+      log.warn("Failed to unpublish stopped video track (non-fatal)", err);
+    });
+  } catch {
+    /* already unpublished */
+  }
+}
+
 export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
-  try {
-    void room.localParticipant.unpublishTrack(track.mediaStreamTrack);
-  } catch {
-    /* already unpublished */
-  }
+  unpublishManualTrack(room, track);
   track.stop();
 }
 
@@ -257,11 +265,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       // may have landed after its unpublish, so undo it again, and stay silent:
       // announcing voice_camera(true) now would override the disable's final
       // word on the server.
-      try {
-        void room.localParticipant.unpublishTrack(videoTrack.mediaStreamTrack);
-      } catch {
-        /* already unpublished */
-      }
+      unpublishManualTrack(room, videoTrack);
       videoTrack.stop();
       if (state.manualCameraTrack === videoTrack) state.manualCameraTrack = null;
       return;
@@ -301,17 +305,22 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
   // Bump first: a concurrent enableCamera that is still awaiting device
   // acquisition captured the pre-bump value and will detect it changed.
   bumpGeneration(state);
+  const generation = state.generation ?? 0;
   const room = deps.getRoom();
+  const ws = deps.getWs();
   try {
     stopManualCameraTrack(state, room);
     if (room !== null) await room.localParticipant.setCameraEnabled(false);
   } catch (err) {
     log.warn("Failed to disable camera track (non-fatal)", err);
   } finally {
-    setLocalCamera(false);
-    const ws = deps.getWs();
-    if (ws !== null) ws.send({ type: "voice_camera", payload: { enabled: false } });
-    log.info("Camera disabled");
+    // Leaving/rejoining can finish before the SDK's old disable does. Its
+    // completion must not clear or announce the new session's camera state.
+    if ((state.generation ?? 0) === generation && deps.getRoom() === room && deps.getWs() === ws) {
+      setLocalCamera(false);
+      if (ws !== null) ws.send({ type: "voice_camera", payload: { enabled: false } });
+      log.info("Camera disabled");
+    }
   }
 }
 
@@ -322,18 +331,16 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 /** Mutable state for the manually published screenshare tracks. */
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
+  screenTrackEndedCleanup?: () => void;
 }
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
+  state.screenTrackEndedCleanup?.();
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
   for (const track of tracks) {
-    try {
-      void room.localParticipant.unpublishTrack(track.mediaStreamTrack);
-    } catch {
-      /* already unpublished */
-    }
+    unpublishManualTrack(room, track);
     track.stop();
   }
 }
@@ -355,6 +362,7 @@ export async function enableScreenshare(
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
   const generation = state.generation ?? 0;
+  let removeEndedListener: (() => void) | undefined;
   try {
     stopManualScreenTracks(state, room);
     const screenTracks = await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
@@ -366,6 +374,37 @@ export async function enableScreenshare(
       return;
     }
     state.manualScreenTracks = screenTracks;
+    // The OS may stop capture while a publication is still awaiting the
+    // server. Observe it before publishing, so remaining tracks (including
+    // screen audio) cannot start after the user has already stopped sharing.
+    const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
+    if (videoTrack !== undefined) {
+      const onEnded = (): void => {
+        if (
+          (state.generation ?? 0) !== generation ||
+          state.manualScreenTracks !== screenTracks ||
+          deps.getRoom() !== room ||
+          deps.getWs() !== ws
+        ) {
+          return;
+        }
+        log.info("Screen track ended externally (OS stop-sharing)");
+        void disableScreenshare(state, deps);
+      };
+      const cleanup = (): void => {
+        videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
+        if (state.screenTrackEndedCleanup === cleanup) {
+          state.screenTrackEndedCleanup = undefined;
+        }
+      };
+      removeEndedListener = cleanup;
+      state.screenTrackEndedCleanup = cleanup;
+      videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
+      if (videoTrack.mediaStreamTrack.readyState === "ended") {
+        await disableScreenshare(state, deps);
+        return;
+      }
+    }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
@@ -382,6 +421,7 @@ export async function enableScreenshare(
           : {}),
       });
       if ((state.generation ?? 0) !== generation) {
+        removeEndedListener?.();
         // A disableScreenshare ran to completion while that publish was in
         // flight — it already reset localScreenshare, sent voice_screenshare
         // (false) and emptied state.manualScreenTracks, so the tracks still
@@ -391,34 +431,19 @@ export async function enableScreenshare(
         // voice_screenshare(true) now would override the disable's final
         // word on the server.
         for (const t of screenTracks) {
-          try {
-            void room.localParticipant.unpublishTrack(t.mediaStreamTrack);
-          } catch {
-            /* already unpublished */
-          }
+          unpublishManualTrack(room, t);
           t.stop();
         }
         if (state.manualScreenTracks === screenTracks) state.manualScreenTracks = [];
         return;
       }
     }
-    // BUG-101: Listen for OS "Stop sharing" so the app runs the full disable path.
-    const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
-    if (videoTrack) {
-      videoTrack.mediaStreamTrack.addEventListener(
-        "ended",
-        () => {
-          log.info("Screen track ended externally (OS stop-sharing)");
-          void disableScreenshare(state, deps);
-        },
-        { once: true },
-      );
-    }
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
     deps.reapplyAudioPipeline();
     log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
   } catch (err) {
+    removeEndedListener?.();
     if ((state.generation ?? 0) !== generation) {
       // A disableScreenshare (and possibly a newer enableScreenshare) already
       // ran to completion while this attempt's capture/publish was in
@@ -453,17 +478,20 @@ export async function disableScreenshare(
   // Bump first: a concurrent enableScreenshare still awaiting the OS picker
   // captured the pre-bump value and will detect it changed.
   bumpGeneration(state);
+  const generation = state.generation ?? 0;
   const room = deps.getRoom();
+  const ws = deps.getWs();
   try {
     stopManualScreenTracks(state, room);
     if (room !== null) await room.localParticipant.setScreenShareEnabled(false);
   } catch (err) {
     log.warn("Failed to disable screenshare track (non-fatal)", err);
   } finally {
-    setLocalScreenshare(false);
-    const ws = deps.getWs();
-    if (ws !== null) ws.send({ type: "voice_screenshare", payload: { enabled: false } });
-    log.info("Screenshare disabled");
+    if ((state.generation ?? 0) === generation && deps.getRoom() === room && deps.getWs() === ws) {
+      setLocalScreenshare(false);
+      if (ws !== null) ws.send({ type: "voice_screenshare", payload: { enabled: false } });
+      log.info("Screenshare disabled");
+    }
   }
 }
 

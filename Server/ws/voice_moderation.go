@@ -238,10 +238,9 @@ func clearPendingModFlags(mod VoiceModerator, targetID int64) {
 }
 
 // handleVoiceModMuteV2 processes a voice_mod_mute command. The DB row is the
-// authority for the UI; the SFU mute is what makes it more than cosmetic, so a
-// LiveKit failure is logged but does not fail the action — the persisted
-// server_muted still blocks the target's own unmute and is re-applied whenever
-// the moderator retries.
+// authority for the UI; SFU permissions enforce the microphone restriction.
+// A failed media update leaves the desired state available for reconciliation
+// and tells the moderator that enforcement has not completed.
 func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	c := cmd.(VoiceModMuteCmd)
@@ -270,6 +269,11 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	if err != nil {
 		slog.Error("ws handleVoiceModMuteV2 SetServerMute", "err", err, "target_id", c.TargetID())
+		if errors.Is(err, errVoiceMediaPending) {
+			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID(),
+				fmt.Sprintf("server mute %s in channel %d; media update pending", onOff(c.Muted()), state.ChannelID))
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "server mute saved, but the media update failed; please retry"}}
+		}
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server mute"}}
 	}
 	if !matched {
@@ -352,6 +356,13 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	if err != nil || !muteMatched {
 		if err != nil {
 			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID())
+		}
+		if errors.Is(err, errVoiceMediaPending) {
+			// Both desired flags were saved. Keep them together so a retry or
+			// periodic reconciliation can finish the media update.
+			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID(),
+				fmt.Sprintf("server deafen %s in channel %d; media update pending", onOff(c.Deafened()), state.ChannelID))
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "server deafen saved, but the media update failed; please retry"}}
 		}
 		d.Voice.RollbackServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
 		if err != nil {
@@ -535,17 +546,15 @@ func onOff(v bool) string {
 // to assert against.
 var muteParticipantHookForTest func(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error
 
-// MuteParticipant mutes or unmutes the target's published audio at the SFU.
+// MuteParticipant reconciles the target's publication permissions at the SFU.
 // Satisfies VoiceModerator; reads h.livekit at call time so SetLiveKit's late
-// wiring is picked up (same reason as GenerateToken).
+// wiring is picked up (same reason as GenerateToken). Callers hold voiceMod
+// across their state write and this permission update.
 func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
 	if muteParticipantHookForTest != nil {
 		return muteParticipantHookForTest(ctx, channelID, userID, voiceJoinToken, muted)
 	}
-	if h.livekit == nil {
-		return fmt.Errorf("voice not configured")
-	}
-	return h.livekit.MuteParticipantAudio(ctx, channelID, userID, voiceJoinToken, muted)
+	return h.updateVoiceParticipantPermissions(ctx, userID, channelID, voiceJoinToken)
 }
 
 // SetServerMuteLocked applies or clears the manual moderator mute
@@ -557,11 +566,8 @@ func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voic
 // moved off channelID between authorization and this call, OC-0005), and
 // the session's join token for the caller's SFU/broadcast use.
 //
-// An SFU failure here is logged and does not fail the action, matching this
-// handler's existing tolerance (unlike the timeout path's P3-14, the manual
-// mute's persisted server_muted row IS the whole of this feature's
-// contract) — so it is not rolled back the way MuteForTimeout's fresh
-// ownership is.
+// An SFU failure is returned as errVoiceMediaPending. The persisted desired
+// state is retained for retry and periodic reconciliation.
 func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error) {
 	unlock := h.voiceMod.lock(userID)
 	defer unlock()
@@ -575,6 +581,11 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 	}
 	if mpErr := h.MuteParticipant(ctx, channelID, userID, joinedAt, muted); mpErr != nil {
 		slog.Warn("ws SetServerMuteLocked MuteParticipant failed", "err", mpErr, "user_id", userID, "channel_id", channelID)
+		// Publish the saved desired state even though the caller returns an
+		// error. Error results short-circuit ordinary handler events, and the
+		// client must know these flags while the SFU update awaits retry.
+		h.broadcastVoiceMuteState(ctx, userID, channelID, joinedAt, muted)
+		return matched, joinedAt, fmt.Errorf("%w: %w", errVoiceMediaPending, mpErr)
 	}
 	return matched, joinedAt, nil
 }

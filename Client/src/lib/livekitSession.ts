@@ -1,5 +1,5 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import { Room, RoomEvent } from "livekit-client";
+import { Room, RoomEvent, Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -151,6 +151,8 @@ export class LiveKitSession {
   private static readonly RECONNECT_DELAY_MS = 3000;
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
+  /** An explicit unmute waiting for this room's SFU publishing grant. */
+  private pendingMicrophoneRoom: Room | null = null;
 
   // ── Client-side E2EE (ECDH key exchange) — extracted to E2EEManager ──────
   /** Owns all E2EE state and the key-exchange protocol: ECDH keypair, room-key
@@ -247,12 +249,16 @@ export class LiveKitSession {
     return this._state.type === "reconnecting" ? this._state.ac : null;
   }
 
-  /** Helper to check state is "connected" for a specific channelId, reading
+  /** Helper to check state is "connected" for this exact room and channel, reading
    *  through a method call so TS control-flow narrowing cannot cache the result.
    *  Used in connectAndSetup() checkpoints after setState() transitions. */
-  private isStateConnected(channelId: number): boolean {
+  private isStateConnected(channelId: number, room: Room): boolean {
     const s: SessionState = this._state;
-    return s.type === "connected" && s.channelId === channelId;
+    return s.type === "connected" && s.channelId === channelId && s.room === room;
+  }
+
+  private ownsConnectAttempt(generation: number): boolean {
+    return this._state.type === "connecting" && this._state.joinGeneration === generation;
   }
 
   // --- Extracted modules (facade pattern) ---
@@ -333,6 +339,7 @@ export class LiveKitSession {
       },
       syncModuleRooms: () => this.syncModuleRooms(),
       teardownForReconnect: () => {
+        this.pendingMicrophoneRoom = null;
         this._audioPipeline.teardownAudioPipeline();
         this.clearTokenRefreshTimer();
         // The WS session is independent of the LiveKit drop, so tell the
@@ -444,6 +451,18 @@ export class LiveKitSession {
       this._eventHandlers.handleAudioPlaybackChanged,
     );
     newRoom.on(RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
+    newRoom.on(RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+      if (
+        participant !== newRoom.localParticipant ||
+        this._room !== newRoom ||
+        this.pendingMicrophoneRoom !== newRoom ||
+        !this.microphonePublishingAllowed(newRoom)
+      )
+        return;
+      this.pendingMicrophoneRoom = null;
+      if (isMicPolicyGated()) return;
+      this.applyMicMuteState(false).catch((err) => log.warn("Mic grant restoration failed", err));
+    });
     // OC-0002: the only SDK-level signal that the E2EE worker died after the
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
     newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
@@ -477,9 +496,16 @@ export class LiveKitSession {
    *  successful attempt), so the type check can never false-positive on a
    *  still-current attempt. Checked at every checkpoint in the loop, in the
    *  loop's own state-restore branch, and in the post-loop give-up path. */
-  private reconnectSuperseded(signal: AbortSignal, channelId: number): boolean {
+  private reconnectSuperseded(
+    signal: AbortSignal,
+    channelId: number,
+    owner: AbortController | null,
+  ): boolean {
     return (
-      signal.aborted || this._state.type !== "reconnecting" || this._currentChannelId !== channelId
+      signal.aborted ||
+      this._state.type !== "reconnecting" ||
+      this._currentChannelId !== channelId ||
+      this._state.ac !== owner
     );
   }
 
@@ -493,6 +519,8 @@ export class LiveKitSession {
     directUrl: string | undefined,
     signal: AbortSignal,
   ): Promise<void> {
+    const owner = this._reconnectAc;
+    const superseded = () => this.reconnectSuperseded(signal, channelId, owner);
     for (let attempt = 1; attempt <= LiveKitSession.MAX_RECONNECT_ATTEMPTS; attempt++) {
       log.info("Auto-reconnect attempt", {
         attempt,
@@ -501,7 +529,7 @@ export class LiveKitSession {
       // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
-      if (this.reconnectSuperseded(signal, channelId)) {
+      if (superseded()) {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
@@ -523,11 +551,16 @@ export class LiveKitSession {
           // nulling: by the time this runs, a newer attempt may already own
           // `_state` (and its room), and this attempt's own room is never the
           // one referenced there (we are aborting before reaching "connected").
-          // syncModuleRooms() derives from `_room`, so it correctly nulls the
-          // modules when nothing newer has connected yet, and correctly leaves
-          // a newer session's wiring alone when one has.
-          this.syncModuleRooms();
+          // A newer "connecting" attempt already wires its own room before
+          // that room appears in `_state`; preserve that wiring as well.
+          if (!superseded() || this._state.type === "idle" || this._state.type === "connected")
+            this.syncModuleRooms();
         };
+        if (superseded()) {
+          log.info("Auto-reconnect aborted after room creation");
+          await cleanupAbortedReconnect();
+          return;
+        }
         // Set state to reconnecting with the fresh room-less attempt info;
         // the actual room appears in "connected" state after connect succeeds.
         if (this._state.type === "reconnecting") {
@@ -538,16 +571,10 @@ export class LiveKitSession {
         this._deviceManager.setRoom(newRoom);
         this._deviceManager.setAudioPipeline(this._audioPipeline);
 
-        if (this.reconnectSuperseded(signal, channelId)) {
-          log.info("Auto-reconnect aborted after room creation");
-          await cleanupAbortedReconnect();
-          return;
-        }
-
         // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
 
-        if (this.reconnectSuperseded(signal, channelId)) {
+        if (superseded()) {
           log.info("Auto-reconnect aborted before room connect");
           await cleanupAbortedReconnect();
           return;
@@ -561,10 +588,15 @@ export class LiveKitSession {
         // oxlint-disable-next-line no-await-in-loop -- must set up E2EE before connect
         await this._e2ee.reannounceForReconnect();
 
+        if (superseded()) {
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await newRoom.connect(resolvedUrl, token);
 
-        if (this.reconnectSuperseded(signal, channelId)) {
+        if (superseded()) {
           log.info("Auto-reconnect aborted after room connect");
           await cleanupAbortedReconnect();
           return;
@@ -598,7 +630,7 @@ export class LiveKitSession {
         // A newer connectAndSetup()/attemptAutoReconnect() may have since
         // claimed `_state` for a different channel; isStateConnected() reads
         // through a method call so it always sees the live value.
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, newRoom)) {
           log.info("Auto-reconnect: superseded after restoreLocalVoiceState — aborting tail", {
             channelId,
           });
@@ -616,7 +648,7 @@ export class LiveKitSession {
           }
         }
 
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, newRoom)) {
           log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
             channelId,
           });
@@ -633,7 +665,7 @@ export class LiveKitSession {
           }
         }
 
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, newRoom)) {
           log.info("Auto-reconnect: superseded after audiooutput switch — aborting tail", {
             channelId,
           });
@@ -678,7 +710,8 @@ export class LiveKitSession {
         // See the matching comment in cleanupAbortedReconnect above: sync from
         // the current shared state rather than unconditionally nulling, so a
         // stale failed attempt cannot clobber a newer session's module wiring.
-        this.syncModuleRooms();
+        if (!superseded() || this._state.type === "idle" || this._state.type === "connected")
+          this.syncModuleRooms();
       }
     }
     // All attempts exhausted — give up and clean up. But first check this
@@ -692,7 +725,7 @@ export class LiveKitSession {
     // `_room` getter is null while "reconnecting", so its entry-point
     // leaveVoice(false) never runs), leaving both `signal.aborted` false and
     // `_currentChannelId` equal to ours once that join reaches "connected".
-    if (this.reconnectSuperseded(signal, channelId)) {
+    if (superseded()) {
       log.info("Auto-reconnect give-up skipped — superseded");
       return;
     }
@@ -909,6 +942,7 @@ export class LiveKitSession {
 
     try {
       await room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
+      if (this._room !== room) return;
       if (shouldEnableMicrophone) {
         log.info(
           mode === "join"
@@ -919,8 +953,10 @@ export class LiveKitSession {
           await this._audioPipeline.applyNoiseSuppressor();
         }
       }
+      if (this._room !== room) return;
       setListenOnly(false); // Mic acquired successfully
     } catch (micErr) {
+      if (this._room !== room) return;
       setListenOnly(true);
       if (mode === "reconnect") {
         log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
@@ -1071,6 +1107,10 @@ export class LiveKitSession {
     let localRoom: Room | null = null;
     try {
       localRoom = await this.createRoom();
+      if (!this.ownsConnectAttempt(myGeneration)) {
+        this.disconnectSupersededLocalRoom(localRoom);
+        return "superseded";
+      }
       this._audioPipeline.setRoom(localRoom);
       this._audioElements.setRoom(localRoom);
       this._deviceManager.setRoom(localRoom);
@@ -1212,6 +1252,10 @@ export class LiveKitSession {
             localRoom.removeAllListeners();
             // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
             localRoom = await this.createRoom();
+            if (!this.ownsConnectAttempt(myGeneration)) {
+              this.disconnectSupersededLocalRoom(localRoom);
+              return "superseded";
+            }
             this._audioPipeline.setRoom(localRoom);
             this._audioElements.setRoom(localRoom);
             this._deviceManager.setRoom(localRoom);
@@ -1248,7 +1292,7 @@ export class LiveKitSession {
         // Cast to SessionState to escape TS control-flow narrowing that incorrectly
         // assumes _state is still "connecting" (it was set to "connected" above, but
         // TS cannot see through the setState() opaque method call).
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, localRoom)) {
           log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
             channelId,
           });
@@ -1266,7 +1310,7 @@ export class LiveKitSession {
         }
 
         // Checkpoint 4: after audioinput switchActiveDevice.
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, localRoom)) {
           log.info("connectAndSetup: superseded after audioinput switch — aborting", {
             channelId,
           });
@@ -1284,7 +1328,7 @@ export class LiveKitSession {
         }
 
         // Checkpoint 5: after audiooutput switchActiveDevice.
-        if (!this.isStateConnected(channelId)) {
+        if (!this.isStateConnected(channelId, localRoom)) {
           log.info("connectAndSetup: superseded after audiooutput switch — aborting", {
             channelId,
           });
@@ -1486,6 +1530,7 @@ export class LiveKitSession {
     if (room === null) return;
     try {
       await room.localParticipant.setMicrophoneEnabled(true);
+      if (this._room !== room) return;
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
       // Also honor a moderator's server-mute, a genuine self-mute, and an
@@ -1497,6 +1542,7 @@ export class LiveKitSession {
       // this direct setMicrophoneEnabled call).
       if (isMicPolicyGated()) {
         await this.applyMicMuteState(true);
+        if (this._room !== room) return;
         log.info("Microphone acquired but muted (mute/deafen/server-mute/PTT gate active)");
       } else {
         setLocalMuted(false);
@@ -1508,12 +1554,14 @@ export class LiveKitSession {
         await this._audioPipeline.applyNoiseSuppressor();
       }
     } catch (err) {
+      if (this._room !== room) return;
       log.warn("Microphone retry failed — still in listen-only mode", err);
       this.onErrorCallback?.("Microphone still unavailable — check your browser permissions");
     }
   }
 
   leaveVoice(sendWs = true): void {
+    this.pendingMicrophoneRoom = null;
     // Cancel any pending auto-reconnect loop first.
     const ac = this._reconnectAc;
     if (ac !== null) {
@@ -1581,13 +1629,9 @@ export class LiveKitSession {
   }
 
   setMuted(muted: boolean): void {
-    // A moderator-imposed mute is not ours to lift. The server only mutes the
-    // track SIDs that exist at mute time and the LiveKit grant still carries
-    // the microphone publish source, so unmuting here would publish a fresh
-    // track the SFU happily forwards — server-side muting relies on the client
-    // refusing its own unmute. The guard lives here rather than in the callers
-    // because push-to-talk calls straight into this method (ptt.ts), bypassing
-    // the voice widget's own check. Muting is always permitted.
+    // Keep local state aligned with the moderator's SFU restriction. PTT
+    // calls this method directly, so it shares the widget's unmute refusal.
+    // Muting is always permitted.
     if (!muted && voiceStore.getState().localServerMuted === true) {
       log.debug("Ignoring unmute: server-muted by a moderator");
       return;
@@ -1613,28 +1657,48 @@ export class LiveKitSession {
     log.debug("Deafen state changed", { deafened });
   }
 
-  /** Nuclear mute: fully unpublish the mic track when muting and tear down
-   *  the audio pipeline. Re-publish and rebuild when unmuting. This guarantees
-   *  the SFU has no audio track to forward to other participants. */
+  private microphonePublishingAllowed(room: Room): boolean {
+    const permissions = room.localParticipant.permissions;
+    return (
+      permissions === undefined ||
+      (permissions.canPublish &&
+        (permissions.canPublishSources.length === 0 ||
+          permissions.canPublishSources.includes(Track.sourceToProto(Track.Source.Microphone))))
+    );
+  }
+
+  /** Mute the SDK microphone track and tear down processing; capture/publish
+   *  again when unmuting if the SFU withdrew the previous publication. */
   private async applyMicMuteState(muted: boolean): Promise<void> {
     const room = this._room;
     if (room === null) return;
     if (muted) {
+      this.pendingMicrophoneRoom = null;
       // Tear down pipeline first so it doesn't hold refs to the track
       this._audioPipeline.teardownAudioPipeline();
-      // Fully disable the mic — this unpublishes the track from the SFU
+      // Disable the mic through the SDK (an existing publication may remain).
       await room.localParticipant.setMicrophoneEnabled(false);
-      log.debug("Mic fully unpublished (muted)");
+      log.debug("Mic disabled (muted)");
     } else {
       // A push-to-talk gate (or, defensively, a moderator's server-mute) is
       // not this call's to lift — setMuted/setDeafened only guard their own
       // flag before calling here, so this is the one place every re-enable
       // path (present and future) shares the full policy check.
       if (isMicPolicyGated()) {
+        this.pendingMicrophoneRoom = null;
         log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute/PTT)");
         return;
       }
-      // Re-enable mic — this re-publishes the track to the SFU. Every caller
+      // Moderator unmute travels over OwnCord WS; the SFU grant arrives on
+      // LiveKit's separate signal socket. Wait for that grant instead of
+      // misreporting a publish refusal as a missing microphone. The intent
+      // belongs only to this room and is cleared by mute/leave/reconnect.
+      if (!this.microphonePublishingAllowed(room)) {
+        this.pendingMicrophoneRoom = room;
+        return;
+      }
+      this.pendingMicrophoneRoom = null;
+      // Re-enable mic, publishing a new track if needed. Every caller
       // (setMuted/setDeafened's unmute branches, ptt.ts, roomEventHandlers)
       // fires this forgetfully with only a `.catch(e => log.warn(...))`, so a
       // rejection here (permission revoked, device unplugged) must not
@@ -1647,10 +1711,16 @@ export class LiveKitSession {
       // reappears as the recovery path.
       try {
         await room.localParticipant.setMicrophoneEnabled(true);
+        if (this._room !== room) return;
         // Rebuild the audio pipeline on the fresh track
         this._audioPipeline.setupAudioPipeline();
-        log.debug("Mic re-published (unmuted)");
+        log.debug("Mic enabled (unmuted)");
       } catch (err) {
+        if (this._room !== room) return;
+        if (!this.microphonePublishingAllowed(room)) {
+          this.pendingMicrophoneRoom = room;
+          return;
+        }
         setListenOnly(true);
         setLocalMuted(true);
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);

@@ -20,10 +20,8 @@ import {
 
 const log = createLogger("voice-callbacks");
 
-/** Voice join/leave send over the WS socket; refuse when it's not live so we
- *  never fire voice_join/voice_leave into a down socket. The VoiceWidget freezes
- *  its controls with a visible reason (docs/architecture/ux/README.md §3); this
- *  is the defensive backstop for the sidebar join/leave path. */
+/** Gate signaling on a live WS socket. Leaving always tears down local media,
+ *  even when the separate chat connection is unavailable. */
 function socketLive(): boolean {
   return uiStore.getState().connectionStatus === "connected";
 }
@@ -61,11 +59,10 @@ export function createVoiceWidgetCallbacks(
   return {
     onDisconnect: () => {
       if (voiceStore.getState().currentChannelId === null) return;
-      if (!socketLive()) return;
       log.info("Leaving voice channel (widget disconnect)");
       voiceSessionLeave(false);
       leaveVoiceChannel();
-      ws.send({ type: "voice_leave", payload: {} });
+      if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },
     onMuteToggle: () => {
       if (!limiters.voice.tryConsume()) return;
@@ -193,11 +190,10 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       ws.send({ type: "voice_join", payload: { channel_id: channelId } });
     },
     onVoiceLeave: () => {
-      if (!socketLive()) return;
       log.info("Leaving voice channel");
       voiceSessionLeave(false);
       leaveVoiceChannel();
-      ws.send({ type: "voice_leave", payload: {} });
+      if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },
   };
 }

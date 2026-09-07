@@ -779,11 +779,11 @@ describe("VoiceWidget", () => {
 
   // --- Freeze controls during WS reconnect (docs/architecture/ux/README.md §3) ---
 
-  it("disables voice controls with a reason while the WS socket is reconnecting", () => {
+  it("keeps local hangup available while freezing WS controls during reconnect", () => {
     setVoiceChannel(1, []);
-
+    const onDisconnect = vi.fn();
     const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
+      onDisconnect,
       onMuteToggle: vi.fn(),
       onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
@@ -798,7 +798,9 @@ describe("VoiceWidget", () => {
     const disconnectBtn = container.querySelector('[aria-label="Disconnect"]') as HTMLButtonElement;
     expect(muteBtn.disabled).toBe(true);
     expect(muteBtn.title).toBe("Reconnecting…");
-    expect(disconnectBtn.disabled).toBe(true);
+    expect(disconnectBtn.disabled).toBe(false);
+    disconnectBtn.click();
+    expect(onDisconnect).toHaveBeenCalledOnce();
 
     widget.destroy?.();
   });

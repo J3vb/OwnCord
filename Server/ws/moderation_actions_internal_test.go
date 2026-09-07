@@ -481,7 +481,8 @@ func TestUnmuteForTimeout_ManualMuteNeverCleared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	h := newTestHub(t, database, nil, nil)
+	lk, _, _ := voicePermissionSFU(t)
+	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 	actionID := seedTimeoutActionForTest(t, database, uid)
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
 		t.Fatalf("Join: %v", err)

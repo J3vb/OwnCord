@@ -213,14 +213,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
   }
 
-  /** Freeze voice controls while the WS socket is not live — the controls would
-   *  otherwise send over a down socket (docs/architecture/ux/README.md §3).
-   *  LiveKit's own reconnect keeps retrying underneath; we only gate the UI. */
+  /** Freeze controls that need WS signaling, while keeping local hangup
+   *  available: the LiveKit call may still be live when chat is disconnected. */
   function updateFrozen(status: "connected" | "reconnecting" | "disconnected"): void {
     const frozen = status !== "connected";
     const reason = status === "reconnecting" ? "Reconnecting…" : "Not connected";
     controlsRow?.classList.toggle("vw-controls--frozen", frozen);
-    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn, grantMicBtn]) {
+    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, grantMicBtn]) {
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : "";

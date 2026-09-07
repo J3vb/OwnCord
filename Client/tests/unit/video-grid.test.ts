@@ -298,6 +298,29 @@ describe("VideoGrid", () => {
   // -----------------------------------------------------------------------
 
   describe("track lifecycle", () => {
+    it("hides a newly attached track that is already muted", () => {
+      const { track, stream } = fakeStreamWithTrack();
+      Object.defineProperty(track, "muted", { value: true });
+      grid.addStream(1, "Alice", stream);
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+      track.dispatchEvent("unmute");
+      expect(cell.classList.contains("track-muted")).toBe(false);
+    });
+
+    it("shows a replacement track after the previous stream was muted", () => {
+      const old = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", old.stream);
+      old.track.dispatchEvent("mute");
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+
+      const replacement = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", replacement.stream);
+      expect(cell.classList.contains("track-muted")).toBe(false);
+      expect(old.track.listeners["mute"]?.length ?? 0).toBe(0);
+    });
+
     it("removes tile when video track fires 'ended' event", () => {
       const { stream, track } = fakeStreamWithTrack();
       grid.addStream(1, "Alice", stream);

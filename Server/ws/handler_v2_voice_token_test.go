@@ -60,6 +60,9 @@ func tokenRefreshDeps(t *testing.T) (VoiceDeps, *db.DB) {
 	); execErr != nil {
 		t.Fatalf("seed channel: %v", execErr)
 	}
+	if err := database.JoinVoiceChannel(context.Background(), 1, 100); err != nil {
+		t.Fatalf("seed voice membership: %v", err)
+	}
 
 	return VoiceDeps{
 		Voice:       service.NewVoiceService(database),

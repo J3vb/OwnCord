@@ -98,6 +98,7 @@ import {
   importPublicKey,
   exportPublicKey,
   computeRawKeyFingerprint,
+  signEphemeralKey,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -342,15 +343,16 @@ describe("E2EEManager", () => {
     await mgr.setupKeyExchange(true, 1); // epoch 1, holder
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer key known
 
-    // Start a periodic rotation and stall it right after the epoch bump, at
-    // the keyProvider.setKey await — mirrors an in-flight become-holder
-    // rotation (same _rotatingKey guard).
-    let releaseRotationSetKey!: () => void;
-    const stall = new Promise<void>((resolve) => {
-      releaseRotationSetKey = resolve;
+    // Hold distribution open after the provider import so an offer can be
+    // applied while the original rotation still owns the rotation guard.
+    let releaseDistribution!: (offer: { encryptedKey: string; iv: string }) => void;
+    const stall = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
+      releaseDistribution = resolve;
     });
-    mockSetKey.mockImplementationOnce(() => stall);
+    vi.mocked(wrapRoomKey).mockClear();
+    vi.mocked(wrapRoomKey).mockReturnValueOnce(stall);
     const rotationPromise = mgr.rotateKeyPeriodically();
+    await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalled());
     expect(mgr.rotatingKey).toBe(true);
     expect(mgr.epoch).toBe(2);
 
@@ -364,7 +366,7 @@ describe("E2EEManager", () => {
     await mgr.handleParticipantLeft(99);
 
     // Let the original (stalled) rotation finish.
-    releaseRotationSetKey();
+    releaseDistribution({ encryptedKey: "enc", iv: "iv" });
     await rotationPromise;
 
     // The re-election's finally -> drainPendingRotationOrArmTimer must have
@@ -932,7 +934,7 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
-  it("[OC-0006] self-heals the shared key provider when a rotation's setKey resolves after clearState() tore the session down", async () => {
+  it("[OC-0006] serializes a new session's key after an unfinished rotation", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
@@ -951,25 +953,25 @@ describe("E2EEManager", () => {
       const rotationPromise = mgr.rotateKeyPeriodically();
       await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalledWith("key-9"));
 
-      // The session is torn down (user hit Disconnect) while that setKey
-      // call is still in flight, and a brand-new session becomes holder
-      // with its OWN key before the stale call resolves.
+      // The new session waits for the unfinished import before applying its key.
       mgr.clearState();
       vi.mocked(generateRoomKey).mockReturnValueOnce(new Uint8Array(32).fill(7)); // live session's key
       mockSetKey.mockClear();
-      await mgr.setupKeyExchange(true, 2);
-      expect(mockSetKey).toHaveBeenCalledWith("key-7");
-      mockSetKey.mockClear();
+      const newSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      expect(mockSetKey).not.toHaveBeenCalled();
 
       // The abandoned rotation's setKey call now resolves.
       releaseStale();
-      await rotationPromise;
+      await Promise.all([rotationPromise, newSetup]);
 
       // The shared key provider must end up on the LIVE session's key, not
       // silently left on the abandoned one — narrow race, but real: nothing
       // else re-applies the live key once the stale call lands.
       expect(mockSetKey).toHaveBeenCalledWith("key-7");
+      expect(mockSetKey).toHaveBeenCalledTimes(1);
     } finally {
+      mgr.clearState();
       vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
     }
   });
@@ -1117,12 +1119,14 @@ describe("E2EEManager", () => {
       publicKey: { type: "chan2-pub" } as unknown as CryptoKey,
       privateKey: { type: "chan2-priv" } as unknown as CryptoKey,
     });
-    await mgr.setupKeyExchange(true, 2);
-    expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+    const newSetup = mgr.setupKeyExchange(true, 2);
+    await vi.waitFor(() =>
+      expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true),
+    );
 
     // The stale (session-1) offer's setKey now resolves.
     releaseSetKey();
-    await offerPromise;
+    await Promise.all([offerPromise, newSetup]);
 
     // Channel 2's holder role must survive — the stale continuation must not
     // stand it down (it re-checks staleness before the setKey await, not
@@ -1507,6 +1511,7 @@ describe("E2EEManager", () => {
     await mgr.setupKeyExchange(true, 1);
     ws.send.mockClear();
     vi.mocked(setLocalSessionFingerprint).mockClear();
+    vi.mocked(computeRawKeyFingerprint).mockClear();
 
     // Attempt A stalls after publishing its keypair, while computing its own
     // session fingerprint.
@@ -1999,6 +2004,375 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
         async () => ({ type: "public" }) as unknown as CryptoKey,
       );
       vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+});
+
+describe("E2EE operation ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSetKey.mockResolvedValue(undefined);
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "unpinned" });
+    vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(mockIdentityKeyPair);
+    vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
+    mockMembers.clear();
+    mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
+    mockVoiceState.voiceUsers.clear();
+  });
+
+  it("commits the current session key after an unfinished offer import", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const appliedKeys: string[] = [];
+    let appliedKey: string | undefined;
+    const apply = (key: string) => {
+      appliedKey = key;
+      appliedKeys.push(key);
+    };
+    vi.mocked(roomKeyToBase64).mockImplementation((key) => `key-${key[0]}`);
+    vi.mocked(generateRoomKey)
+      .mockReturnValueOnce(new Uint8Array(32).fill(1))
+      .mockReturnValueOnce(new Uint8Array(32).fill(2));
+    vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+      roomKey: new Uint8Array(32).fill(3),
+      epoch: 9,
+    });
+    mockSetKey.mockImplementation(async (key: string) => apply(key));
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        (key: string) =>
+          new Promise<void>((resolve) => {
+            finishImport = () => {
+              apply(key);
+              resolve();
+            };
+          }),
+      );
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      mgr.clearState();
+      const newSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      expect(mockSetKey).not.toHaveBeenCalledWith("key-2");
+      finishImport();
+      await Promise.all([offer, newSetup]);
+      expect(appliedKeys).toEqual(["key-1", "key-3", "key-2"]);
+      expect(appliedKey).toBe("key-2");
+      expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+    } finally {
+      mgr.clearState();
+      vi.mocked(roomKeyToBase64).mockReturnValue("mock-room-key-base64");
+    }
+  });
+
+  it("skips a queued provider key when its session has already ended", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    vi.mocked(roomKeyToBase64).mockImplementation((key) => `key-${key[0]}`);
+    vi.mocked(generateRoomKey)
+      .mockReturnValueOnce(new Uint8Array(32).fill(1))
+      .mockReturnValueOnce(new Uint8Array(32).fill(2))
+      .mockReturnValueOnce(new Uint8Array(32).fill(3));
+    try {
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishImport = resolve;
+          }),
+      );
+      const firstSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      mgr.clearState();
+      const secondSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      mgr.clearState();
+      const thirdSetup = mgr.setupKeyExchange(true, 3);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      finishImport();
+      await expect(Promise.all([firstSetup, secondSetup, thirdSetup])).resolves.toEqual([
+        false,
+        false,
+        true,
+      ]);
+      expect(mockSetKey.mock.calls.map(([key]) => key)).toEqual(["key-1", "key-3"]);
+    } finally {
+      mgr.clearState();
+      vi.mocked(roomKeyToBase64).mockReturnValue("mock-room-key-base64");
+    }
+  });
+
+  it("allows a later provider import after an earlier import fails", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      mockSetKey.mockRejectedValueOnce(new Error("key import failed"));
+      await expect(mgr.setupKeyExchange(true, 1)).rejects.toThrow("key import failed");
+      mgr.clearState();
+      await expect(mgr.setupKeyExchange(true, 2)).resolves.toBe(true);
+      expect(mockSetKey).toHaveBeenCalledTimes(2);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("drains a deferred membership rotation when an offer supersedes a pending key", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const offeredKey = new Uint8Array(32).fill(4);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishImport = resolve;
+          }),
+      );
+      const rotation = mgr.rotateKeyPeriodically();
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      vi.mocked(unwrapRoomKey).mockResolvedValueOnce({ roomKey: offeredKey, epoch: 8 });
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      await vi.waitFor(() =>
+        expect((mgr as unknown as { _roomKey: Uint8Array })._roomKey).toBe(offeredKey),
+      );
+      await mgr.handleParticipantLeft(PEER_ID);
+      expect(mgr.rotationPending).toBe(true);
+      finishImport();
+      await Promise.all([rotation, offer]);
+      expect(mgr.epoch).toBe(3);
+      expect(mgr.rotationPending).toBe(false);
+      expect(mgr.rotatingKey).toBe(false);
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps an unfinished current rotation guarded when an older session finishes", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let finishOldImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishOldImport = resolve;
+          }),
+      );
+      const oldRotation = mgr.rotateKeyPeriodically();
+      await vi.waitFor(() => expect(finishOldImport).toBeDefined());
+      mgr.clearState();
+      ws.send.mockClear();
+      const newSetup = mgr.setupKeyExchange(false, 2);
+      await vi.waitFor(() => expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1));
+      let finishCurrentImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishCurrentImport = resolve;
+          }),
+      );
+      const currentRotation = mgr.handleParticipantLeft(99);
+      expect(mgr.rotatingKey).toBe(true);
+      finishOldImport();
+      await oldRotation;
+      await vi.waitFor(() => expect(finishCurrentImport).toBeDefined());
+      expect(mgr.rotatingKey).toBe(true);
+      finishCurrentImport();
+      await Promise.all([currentRotation, newSetup]);
+      expect(mgr.rotatingKey).toBe(false);
+      expect(mgr.epoch).toBe(1);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps queued announcements scoped to the call that received them", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const first = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      const second = mgr.handleAnnounce(99, "c2Vjb25k", "sig");
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      releasePin({ status: "unpinned" });
+      await Promise.all([first, second]);
+      expect([...mgr.peerPublicKeys.keys()]).toEqual([]);
+      expect(setPeerVerification).not.toHaveBeenCalled();
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps queued offers scoped to the call that received them", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const announce = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      await mgr.handleAnnounce(PEER_ID, "c2Vjb25k", "sig");
+      vi.mocked(unwrapRoomKey).mockClear();
+      releasePin({ status: "unpinned" });
+      await Promise.all([announce, offer]);
+      expect(unwrapRoomKey).not.toHaveBeenCalled();
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("stops an announcement drain when its call ends", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await mgr.handleAnnounce(99, "c2Vjb25k", "sig");
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const firstSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      releasePin({ status: "unpinned" });
+      await expect(firstSetup).resolves.toBe(false);
+      expect([...mgr.peerPublicKeys.keys()]).toEqual([]);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps verification scoped to the current membership and accepts a fresh rejoin", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const announce = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      await mgr.handleParticipantLeft(PEER_ID);
+      releasePin({ status: "unpinned" });
+      await announce;
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(setPeerVerification).not.toHaveBeenCalled();
+      await mgr.handleAnnounce(PEER_ID, "cmVqb2lu", "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("removes pre-keypair announcements when that membership ends", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      await mgr.handleParticipantLeft(PEER_ID);
+      expect(mgr.pendingAnnounces).toEqual([]);
+      await mgr.setupKeyExchange(true, 1);
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("retains the current host identity when a superseded load completes", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    let host = "old.example.com";
+    const mgr = new E2EEManager({
+      getWs: () => ws as never,
+      getServerHost: () => host,
+      getCurrentChannelId: () => 1,
+    });
+    const oldIdentity = {
+      publicKey: { type: "old-public" },
+      privateKey: { type: "old-private" },
+    } as unknown as CryptoKeyPair;
+    const newIdentity = {
+      publicKey: { type: "new-public" },
+      privateKey: { type: "new-private" },
+    } as unknown as CryptoKeyPair;
+    try {
+      let releaseIdentity!: (key: CryptoKeyPair) => void;
+      vi.mocked(getOrCreateIdentityKeyPair).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseIdentity = resolve;
+        }),
+      );
+      vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(newIdentity);
+      const oldSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(getOrCreateIdentityKeyPair).toHaveBeenCalledTimes(1));
+      mgr.clearState();
+      mgr.clearIdentityKeyPair();
+      host = "new.example.com";
+      await mgr.setupKeyExchange(true, 1);
+      releaseIdentity(oldIdentity);
+      await expect(oldSetup).resolves.toBe(false);
+      vi.mocked(signEphemeralKey).mockClear();
+      await mgr.reannounceForReconnect();
+      expect(signEphemeralKey).toHaveBeenCalledWith(
+        newIdentity.privateKey,
+        1,
+        expect.any(Uint8Array),
+      );
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("uses the current account identity on a shared host", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const secondIdentity = {
+      publicKey: { type: "second-public" },
+      privateKey: { type: "second-private" },
+    } as unknown as CryptoKeyPair;
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      mgr.clearState();
+      vi.mocked(authStore.getState).mockReturnValue({ user: { id: 2 } } as never);
+      vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValueOnce(secondIdentity);
+      await mgr.setupKeyExchange(true, 1);
+      expect(getOrCreateIdentityKeyPair).toHaveBeenLastCalledWith("localhost:7880", 2);
+      expect(signEphemeralKey).toHaveBeenLastCalledWith(
+        secondIdentity.privateKey,
+        2,
+        expect.any(Uint8Array),
+      );
+    } finally {
+      mgr.clearState();
+      vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
     }
   });
 });

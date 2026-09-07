@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
+	"github.com/twitchtv/twirp"
 )
 
 // webhookMaxBodyBytes bounds the webhook request body to prevent unbounded
@@ -62,7 +64,13 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 
 		switch event.Event {
 		case "participant_joined":
-			h.handleWebhookParticipantJoined(r.Context(), event)
+			if err := h.handleWebhookParticipantJoined(r.Context(), event); err != nil {
+				// LiveKit retries failed deliveries. Acknowledging a failed
+				// reconciliation loses the only record of a participant that has
+				// no voice_states row for the periodic DB sweep to discover.
+				http.Error(w, "voice reconciliation temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
 		case "participant_left":
 			h.handleWebhookParticipantLeft(r.Context(), event)
 		default:
@@ -98,7 +106,7 @@ func parseRoomChannelID(roomName string) (int64, error) {
 	return strconv.ParseInt(roomName[8:], 10, 64)
 }
 
-func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit.WebhookEvent) {
+func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit.WebhookEvent) error {
 	// Detach from the triggering HTTP request before doing any cleanup work,
 	// mirroring every sibling teardown path (readPump's defer and
 	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
@@ -113,21 +121,21 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
-		return
+		return nil
 	}
 
 	userID, joinToken, err := parseParticipantIdentity(p.Identity)
 	if err != nil {
 		slog.Warn("livekit webhook: participant_joined bad identity",
 			"identity", p.Identity, "error", err)
-		return
+		return nil
 	}
 
 	channelID, err := parseRoomChannelID(room.Name)
 	if err != nil {
 		slog.Warn("livekit webhook: participant_joined bad room",
 			"room", room.Name, "error", err)
-		return
+		return nil
 	}
 
 	slog.Info("livekit webhook: participant joined",
@@ -139,8 +147,9 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 	// A replayed token from a previous session will not have a matching row,
 	// so we remove the rogue participant from LiveKit.
 	if h.voice != nil {
-		h.webhookJoinedEnforceVoiceState(ctx, userID, channelID, joinToken)
+		return h.webhookJoinedEnforceVoiceState(ctx, userID, channelID, joinToken)
 	}
+	return nil
 }
 
 // webhookJoinedEnforceVoiceState is the voice_states reconciliation stage of
@@ -148,29 +157,30 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 // their DB row and removes them from the SFU when the row is missing, points
 // at another channel, or carries a different join token. Callers guarantee
 // h.voice != nil.
-func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channelID int64, joinToken string) {
+func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channelID int64, joinToken string) error {
 	state, stateErr := h.voice.State(ctx, userID)
 	if stateErr != nil {
 		// A transient read failure (I/O error, lock contention, a
 		// maintenance window) is not proof of a rogue participant —
 		// treating it as one would eject a legitimate participant from
-		// the SFU on a single bad read. Mirrors sweepStaleVoiceStates'
-		// hasChannelPermChecked guard: skip and let the participant be;
-		// a later webhook retry or sweep tick resolves it.
+		// the SFU on a single bad read. Leave them connected but make the
+		// webhook retryable: the DB sweep cannot discover SFU participants
+		// that have no matching persisted membership.
 		slog.Error("livekit webhook: GetVoiceState failed, skipping rogue-participant check",
 			"error", stateErr, "user_id", userID, "channel_id", channelID)
-		return
+		return stateErr
 	}
 	if state == nil || state.ChannelID != channelID {
 		slog.Warn("livekit webhook: rogue participant_joined — no matching voice state, removing",
 			"user_id", userID, "channel_id", channelID)
 		if h.livekit != nil {
-			if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil {
+			if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil && !liveKitParticipantMissing(rmErr) {
 				slog.Error("livekit webhook: failed to remove rogue participant",
 					"error", rmErr, "user_id", userID, "channel_id", channelID)
+				return rmErr
 			}
 		}
-		return
+		return nil
 	}
 	// Verify join token matches to prevent token replay from old sessions.
 	if joinToken != "" && state.JoinedAt != joinToken {
@@ -178,13 +188,30 @@ func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channe
 			"user_id", userID, "channel_id", channelID,
 			"expected_token", state.JoinedAt, "got_token", joinToken)
 		if h.livekit != nil {
-			if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil {
+			if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil && !liveKitParticipantMissing(rmErr) {
 				slog.Error("livekit webhook: failed to remove stale participant",
 					"error", rmErr, "user_id", userID, "channel_id", channelID)
+				return rmErr
 			}
 		}
-		return
+		return nil
 	}
+	// A reconnect can reuse a token issued before a mute or permission change.
+	// Reconcile current grants at the SFU even when the join identity still
+	// matches; the token's original publication rights are no longer authority.
+	if err := h.syncVoiceParticipantPermissions(ctx, userID, channelID, joinToken); err != nil && !liveKitParticipantMissing(err) {
+		slog.Error("livekit webhook: failed to reconcile participant permissions",
+			"error", err, "user_id", userID, "channel_id", channelID)
+		return err
+	}
+	return nil
+}
+
+// A participant (or room) that disappeared before an eviction or permission
+// update needs no further reconciliation. Other SDK errors remain retryable.
+func liveKitParticipantMissing(err error) bool {
+	var rpcErr twirp.Error
+	return errors.As(err, &rpcErr) && rpcErr.Code() == twirp.NotFound
 }
 
 func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.WebhookEvent) {

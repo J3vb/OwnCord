@@ -1274,3 +1274,291 @@ describe("ptt-error event listener", () => {
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 });
+
+describe("PTT binding lifecycle races", () => {
+  beforeEach(async () => {
+    resetAll();
+    await stopPtt();
+    resetAll();
+    mockCurrentChannelId = 7;
+    mockSetPttGated.mockImplementation((gated: boolean) => {
+      mockPttGated = gated;
+    });
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    vi.mocked(setMuted)
+      .mockReset()
+      .mockImplementation((muted: boolean) => {
+        mockLocalMuted = muted;
+      });
+  });
+
+  afterEach(async () => {
+    await stopPtt();
+  });
+
+  it("Clear cancels an unfinished bind without waiting for readiness or stranding the mic", async () => {
+    let finishSupport!: (supported: boolean) => void;
+    let nativeKey = 0;
+    mockInvoke.mockImplementation((command: string, args?: { vkCode: number }) => {
+      if (command === "ptt_set_key") nativeKey = args!.vkCode;
+      if (command === "ptt_polling_supported") {
+        return new Promise<boolean>((resolve) => {
+          finishSupport = resolve;
+        });
+      }
+      return Promise.resolve();
+    });
+    const pending = updatePttKey(0x20);
+    await vi.waitFor(() => expect(finishSupport).toBeTypeOf("function"));
+    await updatePttKey(0);
+    expect(nativeKey).toBe(0);
+    expect(testPrefs.get("pttVk")).toBe(0);
+    finishSupport(true);
+    await pending;
+    await vi.dynamicImportSettled();
+
+    expect(mockPttPollingLive).toBe(false);
+    expect(mockPttGated).toBe(false);
+    expect(mockLocalMuted).toBe(false);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
+  });
+
+  it("cleans up listeners that finish registering after Clear", async () => {
+    const removeError = vi.fn();
+    const removeState = vi.fn();
+    let finishListener!: (unlisten: () => void) => void;
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+    mockListen.mockImplementation((name: string) =>
+      name === "ptt-state"
+        ? new Promise<() => void>((resolve) => {
+            finishListener = resolve;
+          })
+        : Promise.resolve(removeError),
+    );
+    const pending = updatePttKey(0x20);
+    await vi.waitFor(() => expect(finishListener).toBeTypeOf("function"));
+    await updatePttKey(0);
+    finishListener(removeState);
+    await pending;
+
+    expect(removeError).toHaveBeenCalledTimes(1);
+    expect(removeState).toHaveBeenCalledTimes(1);
+    expect(capturedStoreListener).toBeNull();
+    expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
+    expect(mockPttPollingLive).toBe(false);
+  });
+
+  it("keeps the newest binding when an earlier readiness call finishes late", async () => {
+    let finishFirst!: (supported: boolean) => void;
+    let checks = 0;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "ptt_polling_supported") {
+        if (++checks === 1)
+          return new Promise<boolean>((resolve) => {
+            finishFirst = resolve;
+          });
+        return Promise.resolve(true);
+      }
+      return Promise.resolve();
+    });
+    const first = updatePttKey(0x20);
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf("function"));
+    await updatePttKey(0x70);
+    finishFirst(false);
+    await first;
+
+    expect(testPrefs.get("pttVk")).toBe(0x70);
+    expect(mockPttPollingLive).toBe(true);
+    expect(mockInvoke.mock.calls.filter(([name]) => name === "ptt_start")).toHaveLength(1);
+    expect(mockListen).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops a native start whose IPC response is still pending", async () => {
+    let finishStart!: () => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "ptt_start")
+        return new Promise<void>((resolve) => {
+          finishStart = resolve;
+        });
+      return Promise.resolve(command === "ptt_polling_supported" ? true : undefined);
+    });
+    const pending = updatePttKey(0x20);
+    await vi.waitFor(() => expect(finishStart).toBeTypeOf("function"));
+    await updatePttKey(0);
+    expect(mockInvoke).toHaveBeenCalledWith("ptt_stop");
+    finishStart();
+    await pending;
+
+    expect(mockPttPollingLive).toBe(false);
+    expect(mockPttGated).toBe(false);
+    expect(mockLocalMuted).toBe(false);
+  });
+
+  it("a repeated Clear cannot hide an earlier stop from the next start", async () => {
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+    await updatePttKey(0x20);
+    let finishStop!: () => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "ptt_stop")
+        return new Promise<void>((resolve) => {
+          finishStop = resolve;
+        });
+      return Promise.resolve(command === "ptt_polling_supported" ? true : undefined);
+    });
+    const stopping = stopPtt();
+    await vi.waitFor(() => expect(finishStop).toBeTypeOf("function"));
+    await updatePttKey(0);
+    mockInvoke.mockClear();
+    const restarting = updatePttKey(0x70);
+    await vi.dynamicImportSettled();
+    expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
+    finishStop();
+    await stopping;
+    await restarting;
+    expect(mockInvoke).toHaveBeenCalledWith("ptt_start");
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+  });
+
+  it("restarts polling when a key is rebound after a poller error", async () => {
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+    testPrefs.set("pttVk", 0x20);
+    await initPtt();
+    const onError = mockListen.mock.calls.find(([name]) => name === "ptt-error")![1];
+    onError({ payload: "PTT thread panicked" });
+    expect(mockPttPollingLive).toBe(false);
+    mockInvoke.mockClear();
+    await updatePttKey(0x70);
+
+    expect(mockInvoke).toHaveBeenCalledWith("ptt_start");
+    expect(mockPttPollingLive).toBe(true);
+  });
+
+  it.each(["clear", "error"])(
+    "preserves a PTT-owned mute through %s immediately followed by rebind",
+    async (reason) => {
+      mockInvoke.mockImplementation((command: string) =>
+        Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+      );
+      testPrefs.set("pttVk", 0x20);
+      await initPtt();
+      const oldStateHandler = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
+      oldStateHandler({ payload: false });
+      await vi.dynamicImportSettled();
+      expect(mockLocalMuted).toBe(true);
+      expect(mockPttGated).toBe(true);
+
+      let clearing: Promise<void> | undefined;
+      if (reason === "clear") clearing = updatePttKey(0);
+      else
+        mockListen.mock.calls.find(([name]) => name === "ptt-error")![1]({
+          payload: "poller stopped",
+        });
+      const rebound = updatePttKey(0x70);
+      await clearing;
+      await rebound;
+      const newStateHandler = mockListen.mock.calls
+        .filter(([name]) => name === "ptt-state")
+        .at(-1)![1];
+      newStateHandler({ payload: true });
+      await vi.dynamicImportSettled();
+
+      expect(mockPttGated).toBe(false);
+      expect(mockLocalMuted).toBe(false);
+    },
+  );
+
+  it("does not transfer a user-owned mute through Clear and immediate rebind", async () => {
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+    testPrefs.set("pttVk", 0x20);
+    await initPtt();
+    mockLocalMuted = true;
+    mockPttGated = true;
+    const clearing = updatePttKey(0);
+    const rebound = updatePttKey(0x70);
+    await clearing;
+    await rebound;
+    const onState = mockListen.mock.calls.filter(([name]) => name === "ptt-state").at(-1)![1];
+    onState({ payload: true });
+    await vi.dynamicImportSettled();
+
+    expect(mockLocalMuted).toBe(true);
+  });
+
+  it("preserves a press received before native startup's IPC response", async () => {
+    let finishStart!: () => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "ptt_start") {
+        const onState = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
+        onState({ payload: true });
+        return new Promise<void>((resolve) => {
+          finishStart = resolve;
+        });
+      }
+      return Promise.resolve(command === "ptt_polling_supported" ? true : undefined);
+    });
+    const pending = updatePttKey(0x20);
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
+    finishStart();
+    await pending;
+
+    expect(mockPttGated).toBe(false);
+    expect(mockLocalMuted).toBe(false);
+    expect(setMuted).not.toHaveBeenCalledWith(true);
+  });
+
+  it("gates an idle key when a call joins during startup readiness", async () => {
+    mockCurrentChannelId = null;
+    testPrefs.set("pttVk", 0x20);
+    let finishSupport!: (supported: boolean) => void;
+    mockInvoke.mockImplementation((command: string) =>
+      command === "ptt_polling_supported"
+        ? new Promise<boolean>((resolve) => {
+            finishSupport = resolve;
+          })
+        : Promise.resolve(),
+    );
+    const pending = initPtt();
+    await vi.waitFor(() => expect(finishSupport).toBeTypeOf("function"));
+    mockCurrentChannelId = 7;
+    finishSupport(true);
+    await pending;
+
+    expect(mockPttPollingLive).toBe(true);
+    expect(mockPttGated).toBe(true);
+    expect(mockLocalMuted).toBe(true);
+  });
+
+  it("ignores queued events from a removed binding and mic work for a previous call", async () => {
+    mockInvoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
+    );
+    testPrefs.set("pttVk", 0x20);
+    await initPtt();
+    const onState = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    onState({ payload: false });
+    mockCurrentChannelId = 8;
+    await vi.dynamicImportSettled();
+    expect(setMuted).not.toHaveBeenCalled();
+
+    await stopPtt();
+    await vi.dynamicImportSettled();
+    vi.mocked(setMuted).mockClear();
+    mockSetPttGated.mockClear();
+    onState({ payload: true });
+    await vi.dynamicImportSettled();
+    expect(mockSetPttGated).not.toHaveBeenCalled();
+    expect(setMuted).not.toHaveBeenCalled();
+  });
+});

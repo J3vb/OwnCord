@@ -497,11 +497,11 @@
   color: var(--text-muted);
 }
 /* Frozen while the WS socket is down: controls are visibly non-interactive. */
-.vw-controls--frozen button {
+.vw-controls--frozen button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.vw-controls--frozen button:hover {
+.vw-controls--frozen button:disabled:hover {
   background: var(--bg-active);
   color: var(--text-muted);
 }
