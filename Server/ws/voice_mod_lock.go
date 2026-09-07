@@ -47,13 +47,30 @@ func (v *voiceModLocks) lock(userID int64) func() {
 	v.mu.Unlock()
 
 	e.mu.Lock()
-	return func() {
-		e.mu.Unlock()
-		v.mu.Lock()
-		e.refs--
-		if e.refs == 0 {
-			delete(v.locks, userID)
-		}
-		v.mu.Unlock()
+	return func() { v.unlock(userID, e) }
+}
+
+// tryLock lets periodic reconciliation skip users with moderation in flight.
+// It never queues behind SFU work outside the sweep's time budget.
+func (v *voiceModLocks) tryLock(userID int64) (func(), bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, busy := v.locks[userID]; busy {
+		return nil, false
 	}
+	e := &voiceModLockEntry{refs: 1}
+	// The entry is private until it is inserted, so this lock cannot block.
+	e.mu.Lock()
+	v.locks[userID] = e
+	return func() { v.unlock(userID, e) }, true
+}
+
+func (v *voiceModLocks) unlock(userID int64, e *voiceModLockEntry) {
+	e.mu.Unlock()
+	v.mu.Lock()
+	e.refs--
+	if e.refs == 0 {
+		delete(v.locks, userID)
+	}
+	v.mu.Unlock()
 }

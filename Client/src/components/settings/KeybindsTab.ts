@@ -34,12 +34,14 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
 
   let capturing = false;
+  let captureGeneration = 0;
 
   pttValue.addEventListener(
     "click",
     () => {
       if (capturing) return;
       capturing = true;
+      const attempt = ++captureGeneration;
       pttValue.textContent = "Press a supported key...";
       pttValue.style.borderColor = "var(--accent)";
       pttValue.style.color = "var(--accent)";
@@ -48,6 +50,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       // Returns 0 on timeout (10s) if the user didn't press anything.
       void captureKeyPress()
         .then((vk) => {
+          if (signal.aborted || attempt !== captureGeneration) return;
           capturing = false;
           pttValue.style.borderColor = "";
           pttValue.style.color = "";
@@ -62,6 +65,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           void updatePttKey(vk);
         })
         .catch(() => {
+          if (signal.aborted || attempt !== captureGeneration) return;
           // Fallback: capture via JS keydown (dev mode without Tauri)
           capturing = false;
           pttValue.style.borderColor = "";
@@ -76,7 +80,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     "click",
     (e) => {
       e.stopPropagation();
+      ++captureGeneration;
+      capturing = false;
       currentVk = 0;
+      pttValue.style.borderColor = "";
+      pttValue.style.color = "";
       setText(pttValue, "Not set");
       pttClear.style.display = "none";
       void updatePttKey(0);

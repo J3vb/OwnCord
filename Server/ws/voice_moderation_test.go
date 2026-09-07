@@ -3,6 +3,8 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -45,10 +47,17 @@ func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 	}
 
 	limiter := auth.NewRateLimiter()
+	// Moderation must receive a successful SFU acknowledgement. An empty
+	// protobuf response also represents a participant with no current tracks.
+	sfu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/protobuf")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(sfu.Close)
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-api-key-12345",
 		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
+		LiveKitURL:       sfu.URL,
 	})
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)

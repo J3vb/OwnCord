@@ -117,18 +117,9 @@ func (c *LiveKitClient) GenerateToken(
 	// is only used as a hard deny when none of them grant anything, since
 	// LiveKit's GetCanPublishSource treats CanPublish=false as an override
 	// that blocks every source regardless of CanPublishSources.
-	var sources []string
-	if canPublish {
-		sources = append(sources, "microphone")
-	}
-	if canVideo {
-		sources = append(sources, "camera")
-	}
-	if canScreenShare {
-		sources = append(sources, "screen_share", "screen_share_audio")
-	}
+	sources := liveKitPublishSources(canPublish, canVideo, canScreenShare)
 	if len(sources) > 0 {
-		grant.CanPublishSources = sources
+		grant.SetCanPublishSources(sources)
 	} else {
 		grant.CanPublish = &canPublish
 	}
@@ -152,6 +143,44 @@ func (c *LiveKitClient) GenerateToken(
 		"can_screen_share", canScreenShare)
 
 	return token, nil
+}
+
+// liveKitPublishSources is shared by fresh tokens and active permissions.
+// Audio, camera and screenshare are independent grants.
+func liveKitPublishSources(microphone, camera, screenshare bool) []livekit.TrackSource {
+	var sources []livekit.TrackSource
+	if microphone {
+		sources = append(sources, livekit.TrackSource_MICROPHONE)
+	}
+	if camera {
+		sources = append(sources, livekit.TrackSource_CAMERA)
+	}
+	if screenshare {
+		sources = append(sources, livekit.TrackSource_SCREEN_SHARE, livekit.TrackSource_SCREEN_SHARE_AUDIO)
+	}
+	return sources
+}
+
+// updateParticipantPublishing applies current grants to an exact live join.
+// Updating permission also withdraws tracks whose source is no longer allowed.
+func (c *LiveKitClient) updateParticipantPublishing(ctx context.Context, channelID, userID int64, joinToken string, microphone, camera, screenshare bool) error {
+	sources := liveKitPublishSources(microphone, camera, screenshare)
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	_, err := c.roomSvc.UpdateParticipant(ctx, &livekit.UpdateParticipantRequest{
+		Room:     RoomName(channelID),
+		Identity: participantIdentity(userID, joinToken),
+		Permission: &livekit.ParticipantPermission{
+			CanSubscribe:      true,
+			CanPublish:        len(sources) > 0,
+			CanPublishData:    microphone,
+			CanPublishSources: sources,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("livekit: updating participant publishing: %w", err)
+	}
+	return nil
 }
 
 // URL returns the LiveKit WebSocket URL for client connections.

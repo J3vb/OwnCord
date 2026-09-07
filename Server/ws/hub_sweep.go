@@ -159,9 +159,13 @@ func (h *Hub) sweepRevokedSessions() {
 }
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-checks CONNECT_VOICE for every client currently in voice and evicts the
-// ones who no longer hold it.
+// re-checks CONNECT_VOICE for every client currently in voice, evicts the
+// ones who no longer hold it, and reconciles active media source permissions.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
+	// The whole SFU reconciliation pass shares a budget. An unavailable
+	// companion cannot hold the hub loop for one network timeout per user.
+	mediaCtx, cancelMedia := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelMedia()
 	// Revocation must evict a live session, not merely block the next join.
 	// Nothing else in ws re-validates voice permissions for a connection that
 	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
@@ -194,6 +198,14 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 			continue
 		}
 		if allowed {
+			if h.livekit != nil && mediaCtx.Err() == nil {
+				curChID, joinToken := c.getVoiceState()
+				if curChID == chID && joinToken != "" {
+					if syncErr := h.trySyncVoiceParticipantPermissions(mediaCtx, c.userID, chID, joinToken); syncErr != nil && !liveKitParticipantMissing(syncErr) {
+						slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", chID, "err", syncErr)
+					}
+				}
+			}
 			continue
 		}
 		// The permission check is a DB round-trip; a voice_join to a

@@ -506,11 +506,95 @@ describe("DeviceManager", () => {
       handler();
       await vi.advanceTimersByTimeAsync(600);
 
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
       expect(mockSavePref).toHaveBeenCalledWith("audioOutputDevice", "");
       expect(onToast).toHaveBeenCalledWith(
         "Audio output device disconnected — switched to default",
       );
     });
+
+    it("reports output fallback failure without claiming the speaker changed", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "audioOutputDevice" ? "removed-output" : defaultVal,
+      );
+      mockGetLocalDevices.mockResolvedValue([]);
+      mockRoom.switchActiveDevice.mockRejectedValue(new Error("sink unavailable"));
+      const onToast = vi.fn();
+      const onError = vi.fn();
+      dm.setRoom(mockRoom);
+      dm.setOnToast(onToast);
+      dm.setOnError(onError);
+
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(onError).toHaveBeenCalledWith("Failed to switch to default speaker");
+      expect(onToast).not.toHaveBeenCalled();
+      expect(mockSavePref).not.toHaveBeenCalledWith("audioOutputDevice", "");
+    });
+
+    it("ignores an old room's output fallback completion after leaving voice", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "audioOutputDevice" ? "removed-output" : defaultVal,
+      );
+      mockGetLocalDevices.mockResolvedValue([]);
+      let finishSwitch!: () => void;
+      mockRoom.switchActiveDevice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSwitch = resolve;
+        }),
+      );
+      const onToast = vi.fn();
+      dm.setRoom(mockRoom);
+      dm.setOnToast(onToast);
+
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+
+      dm.setRoom(null);
+      finishSwitch();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onToast).not.toHaveBeenCalled();
+      expect(mockSavePref).not.toHaveBeenCalledWith("audioOutputDevice", "");
+    });
+
+    it.each([false, true])(
+      "preserves a newer speaker selection while output fallback finishes (failure: %s)",
+      async (failed) => {
+        let selectedOutput = "removed-output";
+        mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+          key === "audioOutputDevice" ? selectedOutput : defaultVal,
+        );
+        mockGetLocalDevices.mockResolvedValue([]);
+        let finishSwitch!: () => void;
+        mockRoom.switchActiveDevice.mockReturnValueOnce(
+          new Promise<void>((resolve, reject) => {
+            finishSwitch = () => (failed ? reject(new Error("old sink failed")) : resolve());
+          }),
+        );
+        const onToast = vi.fn();
+        const onError = vi.fn();
+        dm.setRoom(mockRoom);
+        dm.setOnToast(onToast);
+        dm.setOnError(onError);
+
+        const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+        handler();
+        await vi.advanceTimersByTimeAsync(600);
+        selectedOutput = "new-speaker";
+        await dm.switchOutputDevice(selectedOutput);
+        finishSwitch();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mockRoom.switchActiveDevice).toHaveBeenLastCalledWith("audiooutput", "new-speaker");
+        expect(mockSavePref).not.toHaveBeenCalledWith("audioOutputDevice", "");
+        expect(onToast).not.toHaveBeenCalled();
+        expect(onError).not.toHaveBeenCalled();
+      },
+    );
 
     it("calls onError when mic fallback fails", async () => {
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {

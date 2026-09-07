@@ -157,8 +157,20 @@ export class DeviceManager {
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
-        savePref("audioOutputDevice", "");
-        this.onToast?.("Audio output device disconnected — switched to default");
+        try {
+          // Clearing the preference only affects a future join. Move the
+          // current room's attached audio away from the removed device too.
+          await room.switchActiveDevice("audiooutput", "");
+          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
+            return;
+          savePref("audioOutputDevice", "");
+          this.onToast?.("Audio output device disconnected — switched to default");
+        } catch (err) {
+          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
+            return;
+          log.error("Failed to fallback to default output device", err);
+          this.onErrorCallback?.("Failed to switch to default speaker");
+        }
       }
     } catch (err) {
       log.warn("Failed to enumerate devices after change", err);

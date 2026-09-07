@@ -374,6 +374,10 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 	// broadcast a spurious voice_leave for a join no other client ever saw.
 	if h.livekit != nil {
 		canPublish, canVideo, canScreenShare := h.voiceJoinPublishPerms(ctx, c.userID, channelID)
+		// Moderator mute/deafen follows the voice session across channel moves.
+		// Carry it into the SFU grant too: muting an existing track cannot stop
+		// a replacement microphone track from being published with this token.
+		canPublish = voiceMicrophoneAllowed(canPublish, state)
 		canSubscribe := true
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
 		if tokenErr != nil {
@@ -595,10 +599,19 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		return Result{Error: joinDenial(joinErr), LeaveVoice: true}
 	}
 
+	// A cached join token identifies the session; it does not capture a
+	// moderator's current mute/deafen. Always read the persisted flags before
+	// minting another credential, and refuse when its membership cannot be read.
+	state, stateErr := d.Voice.State(ctx, userID)
+	if stateErr != nil || state == nil || state.ChannelID != channelID {
+		slog.Error("ws handleVoiceTokenRefreshV2 GetVoiceState", "err", stateErr, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to refresh voice token"}}
+	}
+
 	// With a PermissionService these three are cache hits after the gate above
-	// populated the user's entry — the refresh drops from ~9 DB reads to at
-	// most one channel-row lookup.
-	canPublish := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice)
+	// populated the user's entry. Microphone moderation is independent of
+	// camera/screenshare permissions; deafen still leaves stream audio available.
+	canPublish := voiceMicrophoneAllowed(hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice), state)
 	canSubscribe := true
 	canVideo := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.UseVideo)
 	canScreenShare := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.ShareScreen)
@@ -606,11 +619,6 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	joinToken := info.VoiceJoinToken
 	var result Result
 	if joinToken == "" {
-		state, stateErr := d.Voice.State(ctx, userID)
-		if stateErr != nil || state == nil {
-			slog.Error("ws handleVoiceTokenRefreshV2 GetVoiceState", "err", stateErr, "user_id", userID)
-			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to refresh voice token"}}
-		}
 		joinToken = state.JoinedAt
 		result.SetVoiceJoinToken = &joinToken
 	}
@@ -629,6 +637,14 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	result.Reply = buildVoiceToken(channelID, token, "/livekit", d.TokenGen.URL(), isKeyHolder)
 	slog.Info("voice token refreshed (v2)", "user_id", userID, "channel_id", channelID)
 	return result
+}
+
+// voiceMicrophoneAllowed combines the role grant with the current session's
+// moderation flags for both token minting and active SFU permission updates.
+// Deafen only suppresses the microphone here: clients keep stream audio
+// available while deafened, so subscription and screen-share grants stay separate.
+func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
+	return canSpeak && state != nil && !state.ServerMuted && !state.ServerDeafened
 }
 
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the

@@ -144,6 +144,9 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     const track = stream.getVideoTracks()[0];
+    // A replacement can already be live without ever emitting `unmute`.
+    // Reset the old track's CSS state and seed it from this track instead.
+    prev?.el.classList.toggle("track-muted", track?.muted === true);
     if (track === undefined) return;
 
     const onTrackEnded = (): void => {

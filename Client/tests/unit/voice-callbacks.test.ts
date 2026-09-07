@@ -140,14 +140,15 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it("does not send over a down socket while reconnecting", () => {
+    it("hangs up locally without sending over a down socket while reconnecting", () => {
       mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
       const ws = makeWs();
       const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
 
       cbs.onDisconnect();
 
-      expect(mockVoiceSessionLeave).not.toHaveBeenCalled();
+      expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
+      expect(mockLeaveVoiceChannel).toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalled();
     });
   });
@@ -394,14 +395,15 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
-  it("onVoiceLeave does not send over a down socket", () => {
+  it("onVoiceLeave hangs up locally without sending over a down socket", () => {
     mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
     const ws = makeWs();
     const cbs = createSidebarVoiceCallbacks(ws);
 
     cbs.onVoiceLeave();
 
-    expect(mockVoiceSessionLeave).not.toHaveBeenCalled();
+    expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
+    expect(mockLeaveVoiceChannel).toHaveBeenCalled();
     expect(ws.send).not.toHaveBeenCalled();
   });
 });
