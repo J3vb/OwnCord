@@ -262,6 +262,9 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
+	// The emergency restart path must stop LiveKit even when an earlier
+	// shutdown step wedges before the hub's closer can run.
+	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)
 	// The routes' erasures record markers in the file start-up just replayed.
 	if rt.Services != nil && rt.Services.Erasure != nil {
 		rt.Services.Erasure.SetMarkers(a.markers)

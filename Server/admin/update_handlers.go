@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -105,18 +104,13 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
-		// Get current executable path.
-		exePath, err := os.Executable()
+		// Use the installation path captured before any update can rename
+		// the running image; restart handoff and cleanup use this same path.
+		exePath, err := updater.ExecutablePath()
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "cannot determine executable path")
 			return
 		}
-		exePath, err = filepath.EvalSymlinks(exePath)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "cannot resolve executable path")
-			return
-		}
-
 		newPath := exePath + ".new"
 		oldPath := exePath + ".old"
 
