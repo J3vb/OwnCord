@@ -88,6 +88,10 @@ const mockCheckForUpdate = vi.fn();
 vi.mock("@lib/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
+  subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
+    listener({ status: "idle" });
+    return vi.fn();
+  }),
 }));
 const mockApiState = { host: "" };
 vi.mock("@lib/api", () => ({
@@ -431,6 +435,21 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-c.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it.each([
+    ["2001:db8::1", "https://[2001:db8::1]"],
+    ["::1", "https://[::1]"],
+    ["[2001:db8::1]:8443", "https://[2001:db8::1]:8443"],
+  ])("offers a usable update URL after a protocol refusal from %s", async (host, expectedUrl) => {
+    mockCheckForUpdate.mockClear();
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost(host);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(mockCheckForUpdate).toHaveBeenCalledWith(expectedUrl);
+    expect(new URL(expectedUrl).protocol).toBe("https:");
     expect(uiStore.getState().updateRequiredHost).toBeNull();
   });
 

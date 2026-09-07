@@ -9,7 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
-import { createWsClient, normalizeHostForCertCompare } from "@lib/ws";
+import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.store";
@@ -651,7 +651,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // A later refusal (another server tried from this same page) replaces
       // the banner rather than being ignored.
       updateNotifier?.destroy?.();
-      const notifier = createUpdateNotifier({ serverUrl: `https://${host}` });
+      const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
       notifier.mount(appEl!);
       updateNotifier = notifier;
     };
