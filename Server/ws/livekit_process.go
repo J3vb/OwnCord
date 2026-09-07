@@ -170,6 +170,16 @@ func (p *LiveKitProcess) Start() error {
 	if p.cmd != nil {
 		return fmt.Errorf("livekit process already running")
 	}
+	if p.loopDone != nil {
+		select {
+		case <-p.loopDone:
+		default:
+			return fmt.Errorf("livekit process already running")
+		}
+	}
+	if p.stopped {
+		return nil
+	}
 
 	cfgPath, err := p.generateConfig()
 	if err != nil {
@@ -178,16 +188,11 @@ func (p *LiveKitProcess) Start() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	p.loopDone = make(chan struct{})
+	loopDone := make(chan struct{})
+	p.loopDone = loopDone
 
 	go func() {
-		defer func() {
-			p.mu.Lock()
-			if p.loopDone != nil {
-				close(p.loopDone)
-			}
-			p.mu.Unlock()
-		}()
+		defer close(loopDone)
 
 		binPath := p.cfg.LiveKitBinaryPath
 		if binPath == "" {
@@ -260,13 +265,14 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.WaitDelay = 6 * time.Second // bound Wait to prevent goroutine leak on Windows
-		if attr := liveKitSysProcAttr(); attr != nil {
-			// Linux: die with a parent that never ran its teardown (kill -9,
-			// OOM, restart-backstop force-exit) instead of orphaning with
-			// 7880/UDP still bound.
-			cmd.SysProcAttr = attr
-		}
+		// Give LiveKit a short graceful shutdown window, then let os/exec
+		// kill and reap it before Stop allows an updater to start a successor.
+		cmd.Cancel = func() error { return stopLiveKitProcess(cmd.Process) }
+		cmd.WaitDelay = 5 * time.Second
+		// Linux: die with a parent that never ran its teardown (kill -9,
+		// OOM, restart-backstop force-exit) instead of orphaning with
+		// 7880/UDP still bound. Other platforms use the default nil attrs.
+		cmd.SysProcAttr = liveKitSysProcAttr()
 
 		slog.Info("livekit: starting process",
 			"binary", binPath,
@@ -372,16 +378,15 @@ func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// Stop gracefully stops the companion process.
-// It cancels the context (which signals runLoop) and waits up to 5 seconds
-// for the process to exit. The actual cmd.Wait() is done by runLoop — we only
-// monitor the process here to avoid calling exec.Cmd.Wait() twice (which has
-// undefined behavior).
+// Stop stops the companion process and waits until it has actually exited.
+// On Unix, cancellation requests graceful shutdown before WaitDelay forces a
+// kill; on Windows it terminates the process immediately. Only runLoop calls
+// cmd.Wait, and every concurrent Stop joins that same completion. Returning
+// without reaping the child would let an updater launch over its bound ports.
 func (p *LiveKitProcess) Stop() {
 	p.mu.Lock()
 	p.stopped = true
 	cancel := p.cancel
-	cmd := p.cmd
 	done := p.runDone
 	loopDone := p.loopDone
 	p.mu.Unlock()
@@ -394,23 +399,13 @@ func (p *LiveKitProcess) Stop() {
 	// This avoids calling cmd.Wait() or cmd.Process.Wait() from a second
 	// goroutine, which is unsafe on Windows.
 	if done != nil {
-		select {
-		case <-done:
-			slog.Info("livekit: process exited cleanly")
-		case <-time.After(5 * time.Second):
-			slog.Warn("livekit: process did not exit in time, killing")
-			if cmd != nil && cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-		}
+		<-done
+		slog.Info("livekit: process exited")
 	}
 
 	// Wait for the entire runLoop goroutine to finish, ensuring no
 	// new iteration can start after Stop returns.
 	if loopDone != nil {
-		select {
-		case <-loopDone:
-		case <-time.After(5 * time.Second):
-		}
+		<-loopDone
 	}
 }

@@ -485,16 +485,28 @@ The server checks GitHub Releases for updates:
 - Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
 - Cross-checks the binary SHA256 against `checksums.sha256`
 
-Applying an update then runs in this order: the current binary is rotated to
-`chatserver.exe.old` and the verified download takes its place; connected
-clients get a "restarting in 5s" notice; the server drains completely
-(HTTP listeners, WebSocket hub, the companion `livekit-server`, queued
-event/audit writes, the database and its process lock); and only then does
-the handoff happen — the server either starts the new binary itself or, under
-a supervisor (systemd/NSSM/Docker, see `server.restart_mode` in
-[Server Configuration](server-configuration.md)), exits cleanly so the
-supervisor relaunches it. Because the old process is fully gone before the
-new one starts, the successor boots with no port or database-lock contention.
+Applying an update runs in this order:
+
+1. Download and verify the replacement beside the installed executable.
+2. Give connected clients a "restarting in 5s" notice, then rotate the current
+   binary to `.old` and put the verified download at the installation path.
+3. Drain HTTP requests, stop the WebSocket hub and the managed `livekit-server`,
+   flush queued event/audit writes, and close the database and its process lock.
+   LiveKit's process must finish exiting before the handoff can continue. Unix
+   companions receive SIGTERM with a five-second grace period before a forced
+   kill; Windows companions are terminated and waited on until they exit.
+4. Launch the replacement from the original installation path, or exit for
+   systemd/NSSM to relaunch it (see `server.restart_mode` in
+   [Server Configuration](server-configuration.md)). Normal teardown and the
+   emergency restart backstop share one handoff, so only one replacement is
+   launched. The backstop also waits for the managed LiveKit process to exit.
+5. The new process removes `.old`, retrying briefly while Windows finishes
+   releasing the predecessor's executable file.
+
+Externally managed LiveKit is left running. Containers use image upgrades as
+described above. Installing the first release with this handoff fix may require
+a manual stop/replacement/start: the version already running performs that
+first update's shutdown, so it cannot benefit from the fix until replaced.
 
 Set `github.token` in config for higher API rate limits (5000/hr vs 60/hr unauthenticated).
 

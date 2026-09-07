@@ -8,33 +8,36 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 // removeOldBinary deletes the binary a previous self-update left behind.
-// The data-dir stage's first act, before anything is opened.
 func removeOldBinary(log *slog.Logger) {
 	// Clean up old binary from a previous update. Bounded retry: in spawn
 	// mode the predecessor spawns this process as its very last act, so for
 	// the first few hundred milliseconds it may not have fully exited — and
 	// on Windows its image file (the .old after the swap) stays locked until
 	// it does.
-	exePath, exeErr := os.Executable()
+	exePath, exeErr := updater.ExecutablePath()
 	if exeErr != nil {
 		log.Warn("failed to determine executable path", "error", exeErr)
 		return
 	}
+	removeOldBinaryAt(exePath, log)
+}
 
+func removeOldBinaryAt(exePath string, log *slog.Logger) {
 	oldPath := exePath + ".old"
-	if _, statErr := os.Stat(oldPath); statErr != nil {
-		return
-	}
-
 	var rmErr error
-	for attempt := range 5 {
+	for attempt := range 21 {
 		if attempt > 0 {
 			time.Sleep(250 * time.Millisecond)
 		}
-		if rmErr = os.Remove(oldPath); rmErr == nil {
+		rmErr = os.Remove(oldPath)
+		if os.IsNotExist(rmErr) {
+			return
+		}
+		if rmErr == nil {
 			break
 		}
 	}

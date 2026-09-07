@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.uber.org/goleak"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 func TestRestartCoordinator_RequestIdempotent(t *testing.T) {
@@ -165,14 +167,97 @@ func TestPerformRestartHandoff(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("spawn handoff made %d spawn calls, want 1", len(calls))
 	}
-	if calls[0].exe == "" {
-		t.Error("spawn handoff passed an empty executable path")
+	wantExe, err := updater.ExecutablePath()
+	if err != nil || calls[0].exe != wantExe {
+		t.Errorf("spawn path = %q; want startup installation path %q (%v)", calls[0].exe, wantExe, err)
 	}
 
 	// A failing spawn must be survivable (logged, no panic) — there is no
 	// hub left to notify at this point.
 	spawnReplacement = func(string, []string) error { return fmt.Errorf("injected spawn failure") }
 	PerformRestartHandoff("update", restartModeSpawn, log)
+}
+
+func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
+	for _, mode := range []string{restartModeSpawn, restartModeSupervised} {
+		t.Run(mode, func(t *testing.T) {
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			listener, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			addr := listener.Addr().String()
+			var spawns, stops atomic.Int32
+			prev := spawnReplacement
+			spawnReplacement = func(string, []string) error {
+				spawns.Add(1)
+				// A replacement must be able to bind immediately, including
+				// when the backstop wins before normal teardown reaches LiveKit.
+				next, err := net.Listen("tcp4", addr)
+				if err != nil {
+					t.Errorf("replacement launched before companion released its port: %v", err)
+					return err
+				}
+				return next.Close()
+			}
+			defer func() { spawnReplacement = prev }()
+
+			stopStarted, releaseStop := make(chan struct{}), make(chan struct{})
+			backstopDone, normalDone := make(chan struct{}), make(chan struct{})
+			var rc *RestartCoordinator
+			rc = NewRestartCoordinator(time.Millisecond, func() {
+				rc.PerformHandoff(log)
+				close(backstopDone)
+			})
+			defer rc.Disarm()
+			rc.SetMode(mode)
+			rc.setCompanionStop(func() {
+				stops.Add(1)
+				close(stopStarted)
+				<-releaseStop
+				_ = listener.Close()
+			})
+			// Ordinary shutdown must never accidentally self-restart.
+			rc.PerformHandoff(log)
+			if stops.Load() != 0 || spawns.Load() != 0 {
+				t.Fatal("handoff ran without a restart request")
+			}
+			rc.Request("update")
+			select {
+			case <-stopStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("backstop did not stop the companion")
+			}
+			go func() {
+				rc.PerformHandoff(log)
+				close(normalDone)
+			}()
+			if spawns.Load() != 0 {
+				t.Error("handoff spawned while the companion was still exiting")
+			}
+			select {
+			case <-backstopDone:
+				t.Error("backstop returned before companion exit")
+			default:
+			}
+			close(releaseStop)
+			for _, done := range []chan struct{}{backstopDone, normalDone} {
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("concurrent handoff did not complete")
+				}
+			}
+			wantSpawns := int32(1)
+			if mode == restartModeSupervised {
+				wantSpawns = 0
+			}
+			if stops.Load() != 1 || spawns.Load() != wantSpawns {
+				t.Fatalf("stops=%d, spawns=%d; want one stop and %d spawns", stops.Load(), spawns.Load(), wantSpawns)
+			}
+		})
+	}
 }
 
 // TestRun_RestartRequest_DrainsCleanly drives Run end to end: boot on a
