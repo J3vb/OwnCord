@@ -59,8 +59,7 @@ func main() {
 	var rc *app.RestartCoordinator
 	rc = app.NewRestartCoordinator(app.RestartBackstopDelay, func() {
 		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
-		reason, _ := rc.Requested()
-		app.PerformRestartHandoff(reason, rc.Mode(), slog.Default())
+		rc.PerformHandoff(slog.Default())
 		os.Exit(0)
 	})
 
@@ -71,9 +70,7 @@ func main() {
 	// restart is only ever requested after a committed binary swap or a
 	// restore that closed the database, so not restarting is strictly worse
 	// than restarting into whatever the error was.
-	if reason, ok := rc.Requested(); ok {
-		app.PerformRestartHandoff(reason, rc.Mode(), log)
-	}
+	rc.PerformHandoff(log)
 
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)

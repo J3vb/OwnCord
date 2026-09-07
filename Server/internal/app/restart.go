@@ -10,7 +10,7 @@
 // LiveKit stopped, queues flushed, database closed and its process lock
 // released) does main() perform the handoff: spawn the replacement binary
 // when self-managed, or just exit and let the process supervisor relaunch
-// the service. The old process being completely gone before the successor
+// the service. Releasing the old process's resources before the successor
 // starts is what makes the handoff deterministic — the DB-lock and bind
 // retries in db/ and internal/app survive only as safety nets.
 
@@ -20,7 +20,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -31,12 +31,14 @@ const (
 	restartModeSpawn      = "spawn"
 	restartModeSupervised = "supervised"
 
-	// RestartBackstopDelay bounds how long a requested restart may drain
-	// before the process force-exits (performing the handoff first). Run's
+	// RestartBackstopDelay sets when a stalled drain enters the emergency
+	// handoff. Run's
 	// worst-case legitimate teardown is ≈55s — the 30s shutdown budget plus
 	// its sequential bounded defers — so 90s only ever fires on a genuinely
-	// wedged teardown. The successor's lock/bind retries absorb whatever a
-	// backstop exit leaves unreleased.
+	// wedged teardown. Even this path must join the managed LiveKit process
+	// before handing off: exiting OwnCord alone need not stop its child. A
+	// child the OS cannot reap keeps the handoff blocked rather than
+	// launching another server over ports it still owns.
 	RestartBackstopDelay = 90 * time.Second
 )
 
@@ -51,11 +53,13 @@ type RestartCoordinator struct {
 	backstopDelay time.Duration
 	onBackstop    func()
 
-	mu        syncutil.Mutex
-	requested bool
-	reason    string
-	mode      string
-	backstop  *time.Timer
+	mu            syncutil.Mutex
+	requested     bool
+	reason        string
+	mode          string
+	backstop      *time.Timer
+	stopCompanion func()
+	handoffOnce   sync.Once
 }
 
 // NewRestartCoordinator builds a coordinator whose Context() is the parent
@@ -136,6 +140,35 @@ func (rc *RestartCoordinator) Disarm() {
 	rc.mu.Unlock()
 }
 
+// setCompanionStop registers the owned child independently of the ordered
+// teardown. The backstop needs it when an earlier close step is stuck.
+func (rc *RestartCoordinator) setCompanionStop(stop func()) {
+	rc.mu.Lock()
+	rc.stopCompanion = stop
+	rc.mu.Unlock()
+}
+
+// PerformHandoff joins the managed companion and hands off exactly once.
+// Both main's normal return and the restart backstop use this method: stopping
+// a timer cannot recall a callback that already started. Concurrent callers
+// wait for the same handoff instead of spawning two replacement servers.
+func (rc *RestartCoordinator) PerformHandoff(log *slog.Logger) {
+	reason, requested := rc.Requested()
+	if !requested {
+		return
+	}
+	rc.handoffOnce.Do(func() {
+		rc.Disarm()
+		rc.mu.Lock()
+		stop, mode := rc.stopCompanion, rc.mode
+		rc.mu.Unlock()
+		if stop != nil {
+			stop()
+		}
+		PerformRestartHandoff(reason, mode, log)
+	})
+}
+
 // resolveRestartMode turns cfg.Server.RestartMode into the effective handoff
 // mode. Explicit "spawn"/"supervised" win; "auto" (or empty, or an unknown
 // value after a warning) detects: containers and supervised services exit
@@ -172,14 +205,11 @@ func PerformRestartHandoff(reason, mode string, log *slog.Logger) {
 		log.Info("restart: exiting for the supervisor to relaunch", "reason", reason, "mode", mode)
 		return
 	}
-	exePath, err := os.Executable()
+	exePath, err := updater.ExecutablePath()
 	if err != nil {
 		log.Error("restart: cannot determine executable path — manual restart required",
 			"reason", reason, "error", err)
 		return
-	}
-	if resolved, symErr := filepath.EvalSymlinks(exePath); symErr == nil {
-		exePath = resolved
 	}
 	if err := spawnReplacement(exePath, os.Args[1:]); err != nil {
 		log.Error("restart: spawning the replacement process FAILED — manual restart required",

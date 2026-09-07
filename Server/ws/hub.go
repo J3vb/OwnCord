@@ -286,6 +286,15 @@ func (h *Hub) Stop() {
 	h.stopOnce.Do(func() { close(h.stop) })
 }
 
+// StopLiveKit stops and reaps the owned companion before a restart handoff.
+// It is safe to call concurrently with GracefulStopContext, and deliberately
+// does not wait on hub/client teardown so the restart backstop can use it too.
+func (h *Hub) StopLiveKit() {
+	if h.lkProcess != nil {
+		h.lkProcess.Stop()
+	}
+}
+
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
 // Safe to call multiple times concurrently. Prefer GracefulStopContext where a
 // shutdown budget exists — this variant waits the full client-notice window.
@@ -309,9 +318,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 		}
 
 		// Stop LiveKit process.
-		if h.lkProcess != nil {
-			h.lkProcess.Stop()
-		}
+		h.StopLiveKit()
 
 		// Give clients the promised notice window to disconnect gracefully —
 		// the 5s matches the countdown BroadcastServerRestart told them.
