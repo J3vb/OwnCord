@@ -3,8 +3,8 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { checkForUpdate, downloadAndInstallUpdate } from "@lib/updater";
-import type { DownloadProgress } from "@lib/updater";
+import { checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
 
 const log = createLogger("update-notifier");
@@ -32,12 +32,21 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   let banner: HTMLDivElement | null = null;
   let dismissed = false;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribeInstall: (() => void) | null = null;
+  let installState: UpdateInstallState = { status: "idle" };
 
   async function performCheck(): Promise<void> {
-    if (dismissed) return;
+    if (dismissed || installState.status !== "idle") return;
 
     const result = await checkForUpdate(serverUrl);
-    if (!result.available || result.version === null) return;
+    if (
+      dismissed ||
+      installState.status !== "idle" ||
+      !result.available ||
+      result.version === null
+    ) {
+      return;
+    }
 
     showBanner(result.version, result.body ?? "");
   }
@@ -76,31 +85,41 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     container.prepend(banner);
   }
 
-  async function installUpdate(): Promise<void> {
-    if (banner === null) return;
-
-    // Replace banner content with progress indicator
-    while (banner.firstChild) banner.removeChild(banner.firstChild);
-    const progress = createElement("span", { class: "update-banner-text" }, "Downloading update…");
-    banner.appendChild(progress);
-
-    try {
-      await downloadAndInstallUpdate(serverUrl, (p) => {
-        progress.textContent = formatDownloadProgress(p);
-      });
-      // App will relaunch — this code won't execute after relaunch()
-    } catch (err) {
+  function installUpdate(): void {
+    void downloadAndInstallUpdate(serverUrl).catch((err: unknown) => {
       log.error("Update install failed", { error: String(err) });
-      // The component may have been destroyed while the download was in
-      // flight (page swap / logout) -- the banner it wanted to repaint is
-      // already gone, so there is nothing left to do.
-      if (banner === null) return;
-      while (banner.firstChild) banner.removeChild(banner.firstChild);
-      const errorText = createElement(
-        "span",
-        { class: "update-banner-text" },
-        "Update failed. Please try again later.",
-      );
+    });
+  }
+
+  function renderInstallState(state: UpdateInstallState): void {
+    installState = state;
+    if (container === null || state.status === "idle") return;
+    if (banner === null) {
+      banner = createElement("div", { class: "update-banner" });
+      container.prepend(banner);
+    }
+    const text =
+      state.status === "downloading"
+        ? state.progress === null
+          ? "Downloading update…"
+          : formatDownloadProgress(state.progress)
+        : state.status === "restarting"
+          ? "Update installed. Restarting…"
+          : state.restartRequired
+            ? "Update installed. Please restart OwnCord to finish."
+            : "Update failed. Please try again later.";
+    banner.replaceChildren(createElement("span", { class: "update-banner-text" }, text));
+
+    if (state.status === "failed") {
+      if (!state.restartRequired) {
+        const retryBtn = createElement(
+          "button",
+          { class: "update-banner-btn update-banner-install" },
+          "Retry",
+        );
+        retryBtn.addEventListener("click", installUpdate);
+        banner.appendChild(retryBtn);
+      }
       const dismissBtn = createElement(
         "button",
         { class: "update-banner-btn update-banner-later" },
@@ -110,7 +129,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
         dismissed = true;
         removeBanner();
       });
-      appendChildren(banner, errorText, dismissBtn);
+      banner.appendChild(dismissBtn);
     }
   }
 
@@ -123,6 +142,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
   function mount(target: Element): void {
     container = target;
+    unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
     // Delay the check slightly so the main UI renders first
     checkTimer = setTimeout(() => {
       checkTimer = null;
@@ -131,6 +151,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   function destroy(): void {
+    unsubscribeInstall?.();
+    unsubscribeInstall = null;
     if (checkTimer !== null) {
       clearTimeout(checkTimer);
       checkTimer = null;

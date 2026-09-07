@@ -20,6 +20,45 @@ export interface DownloadProgress {
   readonly total: number | null;
 }
 
+export type UpdateInstallState =
+  | { readonly status: "idle" }
+  | { readonly status: "downloading"; readonly progress: DownloadProgress | null }
+  | { readonly status: "restarting" }
+  | { readonly status: "failed"; readonly restartRequired: boolean };
+
+let installation: Promise<void> | null = null;
+let installState: UpdateInstallState = { status: "idle" };
+const installListeners = new Set<(state: UpdateInstallState) => void>();
+
+/** Observe the app-wide install, including when its original page has closed. */
+export function subscribeToUpdateInstall(
+  listener: (state: UpdateInstallState) => void,
+): () => void {
+  installListeners.add(listener);
+  notifyInstallListener(listener, installState);
+  return () => {
+    installListeners.delete(listener);
+  };
+}
+
+function publishInstallState(state: UpdateInstallState): void {
+  installState = state;
+  for (const listener of installListeners) {
+    notifyInstallListener(listener, state);
+  }
+}
+
+function notifyInstallListener(
+  listener: (state: UpdateInstallState) => void,
+  state: UpdateInstallState,
+): void {
+  try {
+    listener(state);
+  } catch (err) {
+    log.error("Update observer failed", { error: String(err) });
+  }
+}
+
 /** Check if a newer client version is available on the connected server. */
 export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
   try {
@@ -40,26 +79,40 @@ export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResu
 
 /**
  * Download and install a pending update, then relaunch the app.
- * `onProgress`, when given, is fed the Rust updater's `update-progress` events
- * so the caller can show download progress instead of a hung spinner.
+ * All callers join the same operation, even across page changes. Reserve it
+ * before registering the progress listener, which is itself asynchronous.
  */
-export async function downloadAndInstallUpdate(
-  serverUrl: string,
-  onProgress?: (progress: DownloadProgress) => void,
-): Promise<void> {
-  log.info("Downloading and installing update...");
-  let unlisten: (() => void) | undefined;
-  if (onProgress !== undefined) {
-    const { listen } = await import("@tauri-apps/api/event");
-    unlisten = await listen<DownloadProgress>("update-progress", (event) => {
-      onProgress({ received: event.payload.received, total: event.payload.total ?? null });
-    });
-  }
-  try {
-    await invoke("download_and_install_update", { serverUrl });
-  } finally {
-    unlisten?.();
-  }
-  log.info("Update installed, relaunching...");
-  await relaunch();
+export function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
+  if (installation !== null) return installation;
+
+  installation = Promise.resolve().then(async () => {
+    log.info("Downloading and installing update...");
+    let installed = false;
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      const unlisten = await listen<DownloadProgress>("update-progress", (event) => {
+        publishInstallState({
+          status: "downloading",
+          progress: { received: event.payload.received, total: event.payload.total ?? null },
+        });
+      });
+      try {
+        await invoke("download_and_install_update", { serverUrl });
+        installed = true;
+      } finally {
+        unlisten();
+      }
+      log.info("Update installed, relaunching...");
+      publishInstallState({ status: "restarting" });
+      await relaunch();
+    } catch (err) {
+      // A failed download may be retried. Once native installation succeeds,
+      // keep the guard: reinstalling cannot repair a failed app restart.
+      if (!installed) installation = null;
+      publishInstallState({ status: "failed", restartRequired: installed });
+      throw err;
+    }
+  });
+  publishInstallState({ status: "downloading", progress: null });
+  return installation;
 }
