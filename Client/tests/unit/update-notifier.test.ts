@@ -4,10 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockCheckForUpdate, mockDownloadAndInstall } = vi.hoisted(() => ({
-  mockCheckForUpdate: vi.fn(),
-  mockDownloadAndInstall: vi.fn(),
-}));
+const { mockCheckForUpdate, mockDownloadAndInstall, mockSubscribeToUpdateInstall } = vi.hoisted(
+  () => ({
+    mockCheckForUpdate: vi.fn(),
+    mockDownloadAndInstall: vi.fn(),
+    mockSubscribeToUpdateInstall: vi.fn(),
+  }),
+);
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -16,10 +19,24 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@lib/updater", () => ({
   checkForUpdate: mockCheckForUpdate,
   downloadAndInstallUpdate: mockDownloadAndInstall,
+  subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
 }));
 
 import { createUpdateNotifier, formatDownloadProgress } from "../../src/components/UpdateNotifier";
-import type { DownloadProgress } from "../../src/lib/updater";
+import type { UpdateInstallState } from "../../src/lib/updater";
+
+let onInstallState: (state: UpdateInstallState) => void;
+const unsubscribeInstall = vi.fn();
+
+beforeEach(() => {
+  mockSubscribeToUpdateInstall.mockImplementation(
+    (listener: (state: UpdateInstallState) => void) => {
+      onInstallState = listener;
+      listener({ status: "idle" });
+      return unsubscribeInstall;
+    },
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Pure formatter
@@ -72,29 +89,33 @@ describe("createUpdateNotifier download progress", () => {
     return host.querySelector(".update-banner-text")?.textContent;
   }
 
-  it("updates the banner from the updater progress callback", async () => {
-    let onProgress: ((p: DownloadProgress) => void) | undefined;
-    mockDownloadAndInstall.mockImplementation((_url: string, cb: (p: DownloadProgress) => void) => {
-      onProgress = cb;
+  it("updates the banner from the shared install subscription", async () => {
+    mockDownloadAndInstall.mockImplementation(() => {
+      onInstallState({ status: "downloading", progress: null });
       return new Promise<void>(() => {}); // never resolves — stays "downloading"
     });
 
-    await mountWithAvailableUpdate();
+    const notifier = await mountWithAvailableUpdate();
     (host.querySelector(".update-banner-install") as HTMLButtonElement).click();
 
     // Initial state before any progress event.
     expect(bannerText()).toBe("Downloading update…");
-    expect(mockDownloadAndInstall).toHaveBeenCalledWith("https://s.example", expect.any(Function));
+    expect(mockDownloadAndInstall).toHaveBeenCalledWith("https://s.example");
 
-    onProgress!({ received: 25, total: 100 });
+    onInstallState({ status: "downloading", progress: { received: 25, total: 100 } });
     expect(bannerText()).toBe("Downloading update… 25%");
 
-    onProgress!({ received: 2 * 1024 * 1024, total: null });
+    onInstallState({ status: "downloading", progress: { received: 2 * 1024 * 1024, total: null } });
     expect(bannerText()).toBe("Downloading update… 2.0 MB");
+    notifier.destroy?.();
+    expect(unsubscribeInstall).toHaveBeenCalledTimes(1);
   });
 
   it("shows a failure message when the download rejects", async () => {
-    mockDownloadAndInstall.mockRejectedValue(new Error("boom"));
+    mockDownloadAndInstall.mockImplementation(() => {
+      onInstallState({ status: "failed", restartRequired: false });
+      return Promise.reject(new Error("boom"));
+    });
 
     await mountWithAvailableUpdate();
     (host.querySelector(".update-banner-install") as HTMLButtonElement).click();
@@ -104,6 +125,33 @@ describe("createUpdateNotifier download progress", () => {
     await Promise.resolve();
 
     expect(bannerText()).toBe("Update failed. Please try again later.");
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+  });
+
+  it("shows an existing install immediately without offering another update", async () => {
+    mockSubscribeToUpdateInstall.mockImplementation(
+      (listener: (state: UpdateInstallState) => void) => {
+        listener({ status: "downloading", progress: { received: 60, total: 100 } });
+        return unsubscribeInstall;
+      },
+    );
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+    expect(bannerText()).toBe("Downloading update… 60%");
+    expect(host.querySelector(".update-banner-install")).toBeNull();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
+    notifier.destroy?.();
+  });
+
+  it("asks for a manual restart after installation succeeds but relaunch fails", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "restarting" });
+    expect(bannerText()).toBe("Update installed. Restarting…");
+    onInstallState({ status: "failed", restartRequired: true });
+    expect(bannerText()).toBe("Update installed. Please restart OwnCord to finish.");
+    expect(host.querySelector(".update-banner-install")).toBeNull();
+    notifier.destroy?.();
   });
 
   it("does not throw (unhandled rejection) when destroyed mid-download and the download later fails", async () => {

@@ -1,11 +1,8 @@
 /**
  * Tests for src/lib/updater.ts.
  *
- * Excluded from coverage in vitest.config.ts and only ever `vi.mock`ed by
- * update-notifier.test.ts, so none of it had run under test. It drives the
- * self-update path — a failed check must degrade to "no update" rather than
- * surface an error, and the progress listener must be detached even when the
- * install throws, or a failed update leaves a dangling Tauri event listener.
+ * Shared install ownership survives page changes. Failed downloads can be
+ * retried; successful native installations remain guarded through relaunch.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,11 +21,16 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => listen(...args) as unknown,
 }));
 
-const { checkForUpdate, downloadAndInstallUpdate } = await import("@lib/updater");
+let checkForUpdate: typeof import("@lib/updater").checkForUpdate;
+let downloadAndInstallUpdate: typeof import("@lib/updater").downloadAndInstallUpdate;
+let subscribeToUpdateInstall: typeof import("@lib/updater").subscribeToUpdateInstall;
 
 const unlisten = vi.fn();
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
+  ({ checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } =
+    await import("@lib/updater"));
   invoke.mockReset().mockResolvedValue(undefined);
   relaunch.mockReset().mockResolvedValue(undefined);
   unlisten.mockReset();
@@ -86,33 +88,59 @@ describe("downloadAndInstallUpdate", () => {
     expect(relaunch).toHaveBeenCalled();
   });
 
-  it("does not subscribe to progress when no callback is given", async () => {
+  it("subscribes to progress even before a replacement page joins the install", async () => {
     await downloadAndInstallUpdate("https://s.example");
-
-    expect(listen).not.toHaveBeenCalled();
-  });
-
-  it("subscribes to update-progress when a callback is given", async () => {
-    await downloadAndInstallUpdate("https://s.example", vi.fn());
 
     expect(listen).toHaveBeenCalledWith("update-progress", expect.any(Function));
   });
 
-  it("forwards progress events to the callback", async () => {
-    const onProgress = vi.fn();
-    await downloadAndInstallUpdate("https://s.example", onProgress);
+  it("forwards progress events to subscribers and remembers it for new subscribers", async () => {
+    const onState = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(onState);
+    let finish!: () => void;
+    invoke.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const installation = downloadAndInstallUpdate("https://s.example");
+    await vi.dynamicImportSettled();
 
     const handler = listen.mock.calls[0]?.[1] as (e: {
       payload: { received: number; total?: number | null };
     }) => void;
     handler({ payload: { received: 512, total: 2048 } });
 
-    expect(onProgress).toHaveBeenCalledWith({ received: 512, total: 2048 });
+    const progressState = { status: "downloading", progress: { received: 512, total: 2048 } };
+    expect(onState).toHaveBeenLastCalledWith(progressState);
+    const remounted = vi.fn();
+    const unsubscribeRemounted = subscribeToUpdateInstall(remounted);
+    expect(remounted).toHaveBeenCalledExactlyOnceWith(progressState);
+
+    unsubscribe();
+    onState.mockClear();
+    handler({ payload: { received: 1024, total: 2048 } });
+    expect(onState).not.toHaveBeenCalled();
+    expect(remounted).toHaveBeenLastCalledWith({
+      status: "downloading",
+      progress: { received: 1024, total: 2048 },
+    });
+    unsubscribeRemounted();
+    finish();
+    await installation;
   });
 
   it("normalises a missing total to null", async () => {
-    const onProgress = vi.fn();
-    await downloadAndInstallUpdate("https://s.example", onProgress);
+    const onState = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(onState);
+    let finish!: () => void;
+    invoke.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const installation = downloadAndInstallUpdate("https://s.example");
+    await vi.dynamicImportSettled();
 
     const handler = listen.mock.calls[0]?.[1] as (e: {
       payload: { received: number; total?: number | null };
@@ -121,11 +149,17 @@ describe("downloadAndInstallUpdate", () => {
     // needs a null it can branch on to show an indeterminate bar.
     handler({ payload: { received: 512 } });
 
-    expect(onProgress).toHaveBeenCalledWith({ received: 512, total: null });
+    expect(onState).toHaveBeenLastCalledWith({
+      status: "downloading",
+      progress: { received: 512, total: null },
+    });
+    unsubscribe();
+    finish();
+    await installation;
   });
 
   it("detaches the progress listener after a successful install", async () => {
-    await downloadAndInstallUpdate("https://s.example", vi.fn());
+    await downloadAndInstallUpdate("https://s.example");
 
     expect(unlisten).toHaveBeenCalled();
   });
@@ -133,9 +167,7 @@ describe("downloadAndInstallUpdate", () => {
   it("detaches the progress listener when the install fails", async () => {
     invoke.mockRejectedValue(new Error("download failed"));
 
-    await expect(downloadAndInstallUpdate("https://s.example", vi.fn())).rejects.toThrow(
-      "download failed",
-    );
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toThrow("download failed");
 
     // The finally block is what stops a failed update from leaking a listener
     // that keeps firing into a dead progress bar on the next attempt.
@@ -154,5 +186,105 @@ describe("downloadAndInstallUpdate", () => {
     relaunch.mockRejectedValue(new Error("relaunch blocked"));
 
     await expect(downloadAndInstallUpdate("https://s.example")).rejects.toThrow("relaunch blocked");
+  });
+
+  it("reserves the operation before progress-listener registration finishes", async () => {
+    let register!: (cleanup: () => void) => void;
+    listen.mockReturnValue(
+      new Promise<() => void>((resolve) => {
+        register = resolve;
+      }),
+    );
+    const first = downloadAndInstallUpdate("https://first.example");
+    const second = downloadAndInstallUpdate("https://second.example");
+    expect(second).toBe(first);
+    await vi.dynamicImportSettled();
+    expect(listen).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalled();
+
+    register(unlisten);
+    await Promise.all([first, second]);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("download_and_install_update", {
+      serverUrl: "https://first.example",
+    });
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    expect(downloadAndInstallUpdate("https://third.example")).toBe(first);
+  });
+
+  it("keeps one installation while relaunch is pending", async () => {
+    let finishRelaunch!: () => void;
+    relaunch.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishRelaunch = resolve;
+      }),
+    );
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+    const first = downloadAndInstallUpdate("https://first.example");
+    await vi.dynamicImportSettled();
+    expect(state).toHaveBeenLastCalledWith({ status: "restarting" });
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(downloadAndInstallUpdate("https://second.example")).toBe(first);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    finishRelaunch();
+    await first;
+    unsubscribe();
+  });
+
+  it("allows a new installation after a native failure", async () => {
+    invoke.mockRejectedValueOnce(new Error("download failed"));
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toThrow("download failed");
+    expect(state).toHaveBeenLastCalledWith({ status: "failed", restartRequired: false });
+    expect(relaunch).not.toHaveBeenCalled();
+
+    await downloadAndInstallUpdate("https://s.example");
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(listen).toHaveBeenCalledTimes(2);
+    expect(unlisten).toHaveBeenCalledTimes(2);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("allows a retry when progress-listener registration fails", async () => {
+    listen.mockRejectedValueOnce(new Error("events unavailable"));
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toThrow(
+      "events unavailable",
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    expect(relaunch).not.toHaveBeenCalled();
+    await downloadAndInstallUpdate("https://s.example");
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a manual restart after relaunch fails instead of reinstalling", async () => {
+    relaunch.mockRejectedValue(new Error("relaunch blocked"));
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+    const first = downloadAndInstallUpdate("https://s.example");
+    await expect(first).rejects.toThrow("relaunch blocked");
+    expect(state).toHaveBeenLastCalledWith({ status: "failed", restartRequired: true });
+    const second = downloadAndInstallUpdate("https://s.example");
+    expect(second).toBe(first);
+    await expect(second).rejects.toThrow("relaunch blocked");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("isolates observer failures from installation and relaunch", async () => {
+    const unsubscribeBroken = subscribeToUpdateInstall(() => {
+      throw new Error("view destroyed");
+    });
+    const observer = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(observer);
+    await expect(downloadAndInstallUpdate("https://s.example")).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    expect(observer).toHaveBeenLastCalledWith({ status: "restarting" });
+    unsubscribeBroken();
+    unsubscribe();
   });
 });
