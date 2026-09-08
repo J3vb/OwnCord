@@ -75,7 +75,15 @@ func newQuotaHarness(t *testing.T, store api.FileStore) *quotaHarness {
 
 func (h *quotaHarness) limits(t *testing.T, quota int64, minFree uint64, free func(string) (uint64, error)) {
 	t.Helper()
-	h.uploads.SetStorageLimits(service.StorageLimits{UserQuotaBytes: quota, MinFreeBytes: minFree, Dir: h.dir, FreeBytes: free})
+	h.limitsCapped(t, quota, minFree, free, 0)
+}
+
+// limitsCapped is limits plus upload.max_size_mb in bytes (0 falls back to
+// uploadMaxBodySize) — the bound an unknown-length request's envelope is
+// held to instead of the full request cap.
+func (h *quotaHarness) limitsCapped(t *testing.T, quota int64, minFree uint64, free func(string) (uint64, error), maxUpload int64) {
+	t.Helper()
+	h.uploads.SetStorageLimits(service.StorageLimits{UserQuotaBytes: quota, MinFreeBytes: minFree, Dir: h.dir, FreeBytes: free, MaxUploadBytes: maxUpload})
 }
 
 func (h *quotaHarness) used(t *testing.T) int64 {

@@ -51,6 +51,11 @@ type StorageLimits struct {
 	// FreeBytes probes free space; nil means diskutil.FreeBytes. A probe
 	// error is "unknown", never "full" (the repository-wide rule).
 	FreeBytes func(dir string) (uint64, error)
+	// MaxUploadBytes is upload.max_size_mb in bytes — the per-file cap
+	// storage.Storage already enforces during Save. It bounds how much an
+	// unknown-length request can possibly cost, since no single file can
+	// land for more than this; 0 means unset (falls back to the request cap).
+	MaxUploadBytes int64
 }
 
 // storageQuota is the in-process half of the counter.
@@ -90,6 +95,16 @@ func (s *UploadService) SetStorageLimits(l StorageLimits) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
 	s.quota.limits = l
+}
+
+// MaxUploadBytes reports the configured per-file cap (0 means unset), so a
+// caller that must reserve before it knows a request's true size — an
+// unknown-length body — can bound the reservation by what a single file can
+// ever cost rather than the full request cap.
+func (s *UploadService) MaxUploadBytes() int64 {
+	s.quota.mu.Lock()
+	defer s.quota.mu.Unlock()
+	return s.quota.limits.MaxUploadBytes
 }
 
 // fitsLocked reports whether n more bytes leave the floor intact. The probe
