@@ -435,6 +435,7 @@ func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) 
 		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
 		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
 		Dir:            cfg.Upload.StorageDir,
+		MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20,
 	})
 }
 

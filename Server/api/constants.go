@@ -109,10 +109,6 @@ const (
 	// uploadMaxBodySize is the request body size limit for file uploads (100 MiB).
 	uploadMaxBodySize = 100 << 20
 
-	// multipartMemoryLimit is the in-memory limit for multipart form parsing;
-	// data beyond this is spilled to disk.
-	multipartMemoryLimit = 10 << 20
-
 	// maxUploadFilenameLength is the maximum length of an upload filename
 	// (filesystem-safe limit).
 	maxUploadFilenameLength = 255

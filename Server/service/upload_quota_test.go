@@ -223,8 +223,8 @@ func TestReserve_FreeBelowFloorWithReservationOutstandingRefuses(t *testing.T) {
 	if _, err := svc.Reserve(ctx, 2, 1); !errors.Is(err, ErrLowDisk) {
 		t.Fatalf("free < floor with 200 MiB in flight: got %v, want ErrLowDisk", err)
 	}
-	if err := svc.CheckHeadroom(1); !errors.Is(err, ErrLowDisk) {
-		t.Fatalf("CheckHeadroom under the floor: got %v, want ErrLowDisk", err)
+	if _, err := svc.ReserveHeadroom(ctx, 1); !errors.Is(err, ErrLowDisk) {
+		t.Fatalf("ReserveHeadroom under the floor: got %v, want ErrLowDisk", err)
 	}
 }
 
@@ -235,8 +235,10 @@ func TestReserve_UnknownFreeSpaceIsNotFull(t *testing.T) {
 	if _, err := svc.Reserve(context.Background(), quotaTestUser, 1<<30); err != nil {
 		t.Fatalf("a failed probe refused an upload: %v", err)
 	}
-	if err := svc.CheckHeadroom(1 << 30); err != nil {
-		t.Fatalf("CheckHeadroom on a failed probe: %v", err)
+	if hres, err := svc.ReserveHeadroom(context.Background(), 1<<30); err != nil {
+		t.Fatalf("ReserveHeadroom on a failed probe: %v", err)
+	} else {
+		hres.Release(context.Background())
 	}
 }
 
@@ -509,5 +511,103 @@ func TestReserve_RestartForgetsInFlightButKeepsCharges(t *testing.T) {
 	}
 	if got := used(t, restarted, quotaTestUser); got != 100 {
 		t.Fatalf("after the first recount = %d, want 100 (the row that landed)", got)
+	}
+}
+
+// TestResize_LowersTheChargeToTheBytesWritten: an envelope-sized reservation
+// resized down to the true write size leaves the counter at the true size,
+// not the envelope, and the correction is stable under a repeat call and a
+// subsequent Commit.
+func TestResize_LowersTheChargeToTheBytesWritten(t *testing.T) {
+	svc, _ := newQuotaFixture(t, 0, 0, nil)
+	ctx := context.Background()
+	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Resize(ctx, 1024); err != nil { // the true size
+		t.Fatalf("Resize: %v", err)
+	}
+	if got := used(t, svc, quotaTestUser); got != 1024 {
+		t.Fatalf("counter = %d after Resize, want 1024 (the true size, not the envelope)", got)
+	}
+	// Safe to call twice: a repeat with the same true size is a no-op, not a
+	// second return of the same bytes.
+	if err := res.Resize(ctx, 1024); err != nil {
+		t.Fatalf("second Resize: %v", err)
+	}
+	if got := used(t, svc, quotaTestUser); got != 1024 {
+		t.Fatalf("counter = %d after a repeated Resize, want 1024 (idempotent)", got)
+	}
+	res.Landed()
+	commitWithRow(t, svc, res, "resized", quotaTestUser, 1024)
+	if got := used(t, svc, quotaTestUser); got != 1024 {
+		t.Fatalf("counter = %d after Commit, want 1024 (unchanged by landing or committing)", got)
+	}
+}
+
+// TestResize_NeverRaisesACharge: a value at or above the reservation's
+// current bytes is a no-op — bytes above the admitted envelope were never
+// admitted against the quota or the floor — and a headroom-only reservation
+// (charge == false) never touches a counter at all.
+func TestResize_NeverRaisesACharge(t *testing.T) {
+	svc, _ := newQuotaFixture(t, 0, 0, nil)
+	ctx := context.Background()
+	res, err := svc.Reserve(ctx, quotaTestUser, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Resize(ctx, 2048); err != nil { // above r.bytes
+		t.Fatalf("Resize above the envelope: %v", err)
+	}
+	if got := used(t, svc, quotaTestUser); got != 1024 {
+		t.Fatalf("counter = %d after an over-Resize, want 1024 (unchanged)", got)
+	}
+	if err := res.Resize(ctx, 1024); err != nil { // == r.bytes
+		t.Fatalf("Resize(n == bytes): %v", err)
+	}
+	if got := used(t, svc, quotaTestUser); got != 1024 {
+		t.Fatalf("counter = %d after Resize(n == bytes), want 1024 (unchanged)", got)
+	}
+	res.Release(ctx)
+
+	// A headroom-only reservation charges no counter (userID 0); Resize on
+	// one must not create a charge either.
+	hres, err := svc.ReserveHeadroom(ctx, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hres.Resize(ctx, 100); err != nil {
+		t.Fatalf("Resize on a headroom reservation: %v", err)
+	}
+	if got := used(t, svc, 0); got != 0 {
+		t.Fatalf("counter = %d after resizing a headroom reservation, want 0", got)
+	}
+	hres.Commit()
+}
+
+// TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart proves the failure
+// mode Resize's own error path leaves behind is self-healing: a charge left
+// at the envelope size (a crash between the write and Resize, or a Resize
+// that itself failed) is lowered to the row total by the next recount, the
+// same maintenance path that already repairs every other stale charge.
+func TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart(t *testing.T) {
+	svc, database := newQuotaFixture(t, 0, 0, nil)
+	ctx := context.Background()
+	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Landed()
+	commitWithRow(t, svc, res, "att-1", quotaTestUser, 4096) // the true, much smaller size — Resize never ran
+	if got := used(t, svc, quotaTestUser); got != 1<<20 {
+		t.Fatalf("counter = %d before the recount, want the envelope %d", got, int64(1)<<20)
+	}
+	restarted := NewUploadService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	if n, err := restarted.RecountStorage(ctx); err != nil || n != 1 {
+		t.Fatalf("RecountStorage = %d, %v; want 1, nil", n, err)
+	}
+	if got := used(t, restarted, quotaTestUser); got != 4096 {
+		t.Fatalf("counter = %d after the recount, want 4096 (the row total)", got)
 	}
 }
