@@ -20,6 +20,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
   const gateway = await startNativeUpdateServer(server, packages);
   const errors: string[] = [];
   let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
+  let traceActive = false;
   let replacement: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
     await exec(join(packages, "old/installer.exe"), ["/S", `/D=${installation}`], {
@@ -27,6 +28,8 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     });
     app = await startNativeApp(exe);
     const page = app.page;
+    await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    traceActive = true;
     page.on("pageerror", (error) => errors.push(error.message));
     configureNativeServer(gateway.origin);
     await page.locator("#auto-connect").check();
@@ -41,7 +44,6 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     await page.locator("[data-testid='message-input'] textarea").fill(text);
     await page.locator("[data-testid='message-input'] textarea").press("Enter");
     await expect(page.locator(".msg-text", { hasText: text })).toHaveCount(1);
-    await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     for (const fault of ["corrupt", "interrupted"] as const) {
       const previous = gateway.downloads();
       gateway.fault(fault);
@@ -64,6 +66,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     // attach to the successor at the inherited CDP port and record its state.
     const trace = info.outputPath("before-install.zip");
     await app.context.tracing.stop({ path: trace });
+    traceActive = false;
     await info.attach("before-install", { path: trace, contentType: "application/zip" });
     gateway.fault("none");
     await page.getByRole("button", { name: "Retry", exact: true }).click();
@@ -97,6 +100,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
       )
       .toBe("1.2.0-alpha.5");
     const next = replacement!.contexts()[0]!.pages()[0]!;
+    next.on("pageerror", (error) => errors.push(error.message));
     await expect(next.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
     await expect(next.locator(".msg-text", { hasText: text })).toHaveCount(1);
     expect(
@@ -109,6 +113,23 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
       contentType: "image/png",
     });
   } finally {
+    if (app && traceActive) {
+      const trace = info.outputPath("failed-install.zip");
+      try {
+        await app.context.tracing.stop({ path: trace });
+        await info.attach("failed-install", { path: trace, contentType: "application/zip" });
+        if (!app.page.isClosed())
+          await info.attach("failed-install-screenshot", {
+            body: await app.page.screenshot(),
+            contentType: "image/png",
+          });
+      } catch (error) {
+        await info.attach("trace-capture-error", {
+          body: String(error),
+          contentType: "text/plain",
+        });
+      }
+    }
     if (app) await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
     await replacement?.close();
     // The installer owns the replacement process. Select ONLY the executable
@@ -121,7 +142,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
         "-Command",
         "$path=$env.OWNCORD_E2E_INSTALLED_EXE; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
       ],
-      { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe } },
+      { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe }, timeout: 30_000 },
     );
     await app?.close();
     await gateway.close();
