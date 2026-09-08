@@ -49,10 +49,15 @@ export async function startNativeHttpGate(server: TestServer) {
       },
       (response) => {
         res.writeHead(response.statusCode ?? 502, response.headers);
+        // pipe() does not forward an upstream reset to the downstream client.
+        // Propagate it so cancellation/error probes do not become stalled reads.
+        response.on("error", () => res.destroy());
+        response.on("aborted", () => res.destroy());
         response.pipe(res);
       },
     );
     upstream.on("error", () => res.destroy());
+    res.on("close", () => upstream.destroy());
     req.pipe(upstream);
   });
   gateway.on("connection", track);
@@ -82,9 +87,10 @@ export async function startNativeHttpGate(server: TestServer) {
       held = undefined;
     },
     isHeld: () => !!held,
-    release() {
+    release(completion: "chunk" | "eof" | "error" = "chunk") {
       if (held && !held.destroyed) {
-        if (phase === "body") held.end("1}");
+        if (completion === "error") held.destroy();
+        else if (phase === "body") held.end(completion === "eof" ? undefined : "1}");
         else held.end('{"id":1}');
       }
       held = undefined;

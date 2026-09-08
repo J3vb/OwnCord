@@ -1,4 +1,4 @@
-import { chromium, expect, type TestInfo } from "@playwright/test";
+import { chromium, expect, type ConsoleMessage, type TestInfo } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -73,12 +73,23 @@ export async function withNativeArtifacts(
 ) {
   const errors: string[] = [];
   const onError = (error: Error) => errors.push(error.message);
+  // The HTTP SDK patch observes detached cleanup failures instead of leaving
+  // rejected promises unhandled. Preserve the same strict native failure gate.
+  const onConsole = (message: ConsoleMessage) => {
+    if (
+      message.type() === "error" &&
+      message.text().startsWith("Failed to release Tauri HTTP resource")
+    )
+      errors.push(message.text());
+  };
   app.page.on("pageerror", onError);
+  app.page.on("console", onConsole);
   await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   try {
     await use();
   } finally {
     app.page.off("pageerror", onError);
+    app.page.off("console", onConsole);
     const failed = info.status !== info.expectedStatus || errors.length > 0;
     if (failed) {
       const trace = info.outputPath("native-trace.zip");
@@ -93,6 +104,6 @@ export async function withNativeArtifacts(
     } else {
       await app.context.tracing.stop();
     }
-    expect(errors, "Unhandled WebView2 errors").toEqual([]);
+    expect(errors, "WebView2 runtime or HTTP cleanup errors").toEqual([]);
   }
 }

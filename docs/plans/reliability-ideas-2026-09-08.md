@@ -251,16 +251,39 @@ CI follow-up on `b5c03673` in [run 34264647482](https://github.com/J3vb/OwnCord/
   corrections. Installer output is now forwarded live while remaining backed
   by a file, so a lost runner need not erase the last visible installer stage.
 
+CI follow-up on `21d1112` in [run 34267311184](https://github.com/J3vb/OwnCord/actions/runs/34267311184):
+
+- Every enabled nonnative CI job passes, including both full Go jobs and the
+  complete real-server/media suite. The active-media diagnostic now passes
+  against actual encrypted media in LiveKit's single-peer-connection mode.
+- Native storage and reconnection pass without the completed-body cleanup
+  errors. Voice passes only on retry: its 30-second assertion cuts short the
+  application's three 15-second peer-connection attempts and two 2-second
+  retry delays. A regression proves recovery at 49 seconds; the native test
+  now allows 60 seconds and preserves server logs for future ICE failures.
+
+The subsequent HTTP cancellation probe also reproduced an upstream SDK race:
+a canceled body that later ends or fails can be released twice. The pinned
+Tauri HTTP 2.5.9 patch removes finished listeners, owns cancellation once, and
+rejects body responses returned after cancellation. Both published JavaScript
+entry points pass 34 actual-SDK boundary regressions; unpatched negative
+controls fail. Two native-collector tests ensure unexpected cleanup errors
+still fail CI. Patch application, version drift, and removal criteria are
+documented in [the patch notes](../../Client/patches/README.md).
+
 Still being validated:
 
-- The corrected active-media diagnostic needs another CI run. LiveKit cannot
-  enumerate network interfaces in this environment (`netlinkrib: operation
-not permitted`). No successful media-path claim follows from the ordinary
-  connection tests.
-- Native HTTP cleanup and cancellation, plus the signed Windows installer
-  journey, require fresh Windows validation. Earlier installer runs on other
-  PRs lost their entire hosted runner; diagnostic forwarding is not a claim
-  that the runner-loss cause is fixed.
+- The latest native voice assertion and real HTTP cancellation probe need
+  Windows validation. The probe cancels during delayed headers and body
+  reads, then releases the upstream response and checks safe late completion.
+  Transport cancellation remains best-effort; logical session cancellation
+  must reject stale work promptly.
+- The signed Windows installer journey remains unresolved. Test packages
+  now reuse the installed WebView2 runtime already exercised by native core.
+  That experiment passed native core and signed package builds, then exceeded
+  both its process watchdog and Actions step timeout without returning logs
+  or installer artifacts. Earlier runs lost their entire hosted runner; the
+  experiment and diagnostic forwarding do not establish the cause.
 - GitHub's additional managed security scanner failed before analysis with
   `The requested model is not supported`. This is separate from passing
   CodeQL checks; no repository gate has been disabled to conceal the failure.
