@@ -33,6 +33,7 @@ function createMockWsClient(): MockWsClient {
   let currentState: ConnectionState = "connected";
 
   return {
+    async ping() {},
     connect() {
       // no-op
     },

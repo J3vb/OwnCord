@@ -585,7 +585,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onRefreshTotpStatus: async () => {
-        // GET /users/me is the only response that states totp_enabled;
+        // GET /auth/me is the only response that states totp_enabled;
         // auth_ok never does (OC-0354). A failed read changes nothing, and
         // a read that lands after the user enabled or disabled 2FA in the
         // meantime is discarded: the local change is newer than the answer.

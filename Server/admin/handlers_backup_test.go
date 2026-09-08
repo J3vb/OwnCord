@@ -347,6 +347,112 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	}
 }
 
+// Restore must drain accepted sends before advancing the durable retry floor,
+// then persist that floor before the first byte of the database is replaced.
+func TestHandleRestoreBackup_PreservesRetryFloorBeforeCopy(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backupName := "chatserver_retry_floor.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	admin.SetDatabasePath(dbPath)
+	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	started := time.Now()
+	var floorBeforeCopy int64
+	restoreCopy := admin.StubCopyBackup(func(src, dst string) error {
+		if err := database.SQLDb().Ping(); err == nil {
+			t.Error("copy ran before the live database drained and closed")
+		}
+		// Reopen proves the on-disk cutoff is readable by the replacement
+		// process before the handler has copied any backed-up bytes.
+		probe, err := db.Open(dst)
+		if err != nil {
+			return err
+		}
+		floorBeforeCopy = probe.MessageDeliveryFloorMS()
+		if err := probe.Close(); err != nil {
+			return err
+		}
+		return admin.CopyBackupForTest(src, dst)
+	})
+	defer restoreCopy()
+	restarted, restoreRestart := admin.StubRestart()
+	defer restoreRestart()
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
+	}
+	if floorBeforeCopy <= started.Add(db.MessageDeliveryClockSkew).UnixMilli() {
+		t.Fatalf("copy began with cutoff %d, which does not reject every pre-restore id", floorBeforeCopy)
+	}
+	reopened, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close() //nolint:errcheck
+	if reopened.MessageDeliveryFloorMS() != floorBeforeCopy {
+		t.Fatal("restoring database bytes lost the durable retry cutoff")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Fatal("restore did not request a process restart")
+	}
+}
+
+func TestHandleRestoreBackup_AbortsCopyWhenRetryFloorCannotPersist(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backupName := "chatserver_retry_floor_failure.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	admin.SetDatabasePath(dbPath)
+	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	const original = "original database bytes"
+	if err := os.WriteFile(dbPath, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Portable even when tests run as root: the cutoff cannot be a directory.
+	if err := os.Mkdir(dbPath+".message-retry-floor", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restarted, restoreRestart := admin.StubRestart()
+	defer restoreRestart()
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
+	}
+	data, err := os.ReadFile(dbPath)
+	if err != nil || string(data) != original {
+		t.Fatalf("failed cutoff write changed the live database: %q, %v", data, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Fatal("failed restore left a running process with closed database pools")
+	}
+}
+
 // TestHandleRestoreBackup_RollsBackWhenCopyFails verifies the live database file
 // is not left destroyed when the copy fails partway. copyFile truncates the live
 // DB with os.Create before it can know whether the read will succeed, so a

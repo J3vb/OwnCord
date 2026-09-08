@@ -194,6 +194,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 	}
 	want := []string{
 		"failed to delete expired sessions",
+		"failed to delete expired message delivery receipts",
 		"failed to clean up expired second-factor state",
 		"push subscription sweep failed",
 		"backup maintenance failed",

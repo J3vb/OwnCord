@@ -39,6 +39,13 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(other): %v", err)
 	}
+	// Retry receipts name their sender even after message deletion. Populate
+	// both owners so the inventory proves removal and unrelated preservation.
+	exec(`INSERT INTO message_delivery_receipts
+		(user_id, client_message_id, channel_id, payload_hash, message_id, timestamp, expires_at_ms)
+		SELECT user_id, 'lineage-receipt-' || user_id, channel_id, zeroblob(32), id, timestamp,
+		       unixepoch('now') * 1000 + 86400000
+		FROM messages WHERE id IN (?, ?)`, msg.ID, otherMsg.ID)
 	dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
@@ -196,6 +203,9 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.other); n != 1 {
 		t.Errorf("other user's messages = %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, sub.other); n != 1 {
+		t.Errorf("other user's retry receipts = %d, want 1", n)
 	}
 	if n := count(`SELECT COUNT(*) FROM attachments WHERE id = 'att-other' AND message_id IS NOT NULL`); n != 1 {
 		t.Errorf("other user's attachment rows = %d, want 1 still linked", n)

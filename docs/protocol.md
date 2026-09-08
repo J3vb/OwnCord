@@ -351,6 +351,11 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0 }`.
+These fields advertise retry-safe `chat_send` support. Older servers omit them;
+clients must not infer support from the protocol epoch or silently retry a
+durable pending message against a server that no longer advertises support.
+
 **channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
@@ -410,12 +415,63 @@ to reconstruct them:
 }
 ```
 
-| Field         | Type           | Required | Constraints                                                                  |
-| ------------- | -------------- | -------- | ---------------------------------------------------------------------------- |
-| `channel_id`  | number         | Yes      | Positive integer                                                             |
-| `content`     | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty. |
-| `reply_to`    | number or null | No       | Message ID being replied to                                                  |
-| `attachments` | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.  |
+| Field               | Type           | Required | Constraints                                                                   |
+| ------------------- | -------------- | -------- | ----------------------------------------------------------------------------- |
+| `channel_id`        | number         | Yes      | Positive integer                                                              |
+| `content`           | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty.  |
+| `reply_to`          | number or null | No       | Message ID being replied to                                                   |
+| `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
+| `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
+
+`chat_send` also accepts optional `client_message_id`: exactly
+`<13-digit Unix milliseconds>:<lowercase UUID v4>` (50 characters), generated
+once for the logical message and kept unchanged across transport retries.
+The envelope `id` remains a fresh correlation id for each request. Omission
+preserves older clients' existing send behavior without deduplication.
+
+The embedded time must be less than 24 hours old and no more than five minutes
+ahead of the server clock (or equal to a later advertised restore floor).
+Expired or malformed ids return `BAD_REQUEST`;
+clients must keep the timestamp unchanged and retain expired text for copying
+or discarding rather than silently minting another id for an uncertain send.
+
+The first accepted request binds `(sender, client_message_id)` transactionally
+to its channel, raw content, reply target and ordered attachment ids. A repeat
+of the same request returns the original message id and timestamp, with the
+current envelope `id`, optional echoed `client_message_id`, and
+`deduplicated: true`. New sends omit `deduplicated` (equivalent to false).
+The `chat_message` broadcast also echoes `client_message_id` when supplied;
+history does not carry it, so clients also reconcile by acknowledged server
+message id when history was restored before acknowledgment.
+
+Retries still pass current send permissions, DM membership/block/timeout and
+the general chat rate limit. A matching receipt does not spend slow-mode
+cooldown, reopen DMs, increment mentions, dispatch push notifications or
+broadcast another message. Changed payloads or channels with the same key
+return `CONFLICT`. Keys belong to their sender, so another authorized sender
+may independently use the same key without seeing the first sender's result.
+Receipts survive message deletion: a deleted original returns `FORBIDDEN`
+and is never recreated; a missing channel returns `NOT_FOUND`.
+
+Message content, mentions, attachment ownership links and the receipt commit
+together. Receipts contain only ids, a request fingerprint, the original
+timestamp and expiry, and are removed on sender erasure or expiry maintenance.
+Expired logical ids are refused even after their receipts have been pruned.
+This guarantees one persisted message per accepted key during its retry
+window, not delivery of every post-commit notification across a process crash;
+normal history/reconnect synchronization recovers the committed message.
+Deduplication survives ordinary process restarts. Before the admin backup
+restore overwrites the closed database, the server durably advances a monotonic
+retry floor outside that database. The floor includes the permitted five-minute
+clock skew. A receipt-missing id older than that floor returns `BAD_REQUEST`
+with an instruction to review the draft; an existing matching receipt remains
+acknowledgeable. `ready.capabilities.message_retry_floor_ms` advertises the
+floor (0 before any restore). New logical ids use `max(Date.now(), floor)`,
+while recovered pending ids remain unchanged. Sidecar read/write failures
+fail closed. This protects the supported admin restore path; replacing database
+and sidecar files manually can discard this history, so such recovery requires
+deliberate review of pending drafts. The client never automatically retries
+recovered drafts.
 
 ### chat_send_ok (Server -> Client)
 

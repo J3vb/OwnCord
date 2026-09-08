@@ -1,8 +1,27 @@
 import { test, expect } from "./fixtures";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
+import { openSettings, switchSettingsTab } from "../helpers";
 
 test.use({ media: true });
 test.setTimeout(180_000);
+
+test("guided diagnostics observes actual decoded incoming media without leaving extra capture", async ({
+  alice,
+  bob,
+}) => {
+  await joinVoice(alice);
+  await joinVoice(bob);
+  await expectDecodedMedia(alice);
+  const before = await mediaStats(alice);
+  await openSettings(alice);
+  await switchSettingsTab(alice, "Logs");
+  await alice.getByRole("button", { name: "Start connection test", exact: true }).click();
+  await expect(alice.getByTestId("diagnostics-status")).toContainText("Test complete");
+  await expect(alice.getByTestId("diagnostic-signaling")).toHaveAttribute("data-status", "passed");
+  await expect(alice.getByTestId("diagnostic-media")).toHaveAttribute("data-status", "passed");
+  await expect(alice.getByTestId("diagnostic-media")).toContainText("Incoming audio decoded");
+  expect((await mediaStats(alice)).liveCapture).toBe(before.liveCapture);
+});
 
 test("encrypted media recovers from LiveKit signaling loss and application reconnect", async ({
   alice,
@@ -126,6 +145,15 @@ for (const fault of ["missing", "wrong"] as const) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(await bob.evaluate(() => window.__ocMedia.plaintextEnables)).toBe(0);
+    await openSettings(bob);
+    await switchSettingsTab(bob, "Logs");
+    await bob.getByRole("button", { name: "Start connection test", exact: true }).click();
+    await expect(bob.getByTestId("diagnostics-status")).toContainText("Test complete");
+    await expect(bob.getByTestId("diagnostic-media")).toHaveAttribute(
+      "data-status",
+      /^(failed|not-tested)$/,
+    );
+    await bob.locator(".settings-close-btn").click();
     await bob.evaluate(() => window.__ocMedia.restoreKeys());
     // The production fail-closed path may disconnect on EncryptionError.
     // Rejoin with valid keys and require real decoded media again.

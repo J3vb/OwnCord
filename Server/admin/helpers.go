@@ -85,3 +85,14 @@ func actorRoleFromContext(r *http.Request) *db.Role {
 	}
 	return role
 }
+
+// supportSession refuses API-token principals and binds previews to the exact
+// login credential already authenticated by the middleware on every request.
+func supportSession(r *http.Request) (string, bool) {
+	sess, ok := r.Context().Value(adminSessionKey).(*db.Session)
+	if !ok || sess == nil {
+		return "", false
+	}
+	hash, ok := r.Context().Value(adminTokenHashKey).(string)
+	return hash, ok && hash != ""
+}

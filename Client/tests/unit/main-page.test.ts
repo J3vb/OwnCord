@@ -236,6 +236,7 @@ type FakeWsClient = WsClient & {
 function fakeWs(): FakeWsClient {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
   return {
+    ping: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "id"),

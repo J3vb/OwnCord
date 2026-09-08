@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import type { TestServer } from "./server";
 
+type TestEnvelope = { type: string; id?: string; payload?: Record<string, unknown> };
+
 /** Test-only replacement for native IPC. HTTP/WS bytes go to the real server;
  * no responses, auth, messages, membership or E2EE offers are fabricated.
  * Windows native tests separately cover the Rust IPC/TLS boundary. */
@@ -17,6 +19,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
   let socket: WebSocket | undefined;
   let online = true;
   let closed = false;
+  let receiveFilter: ((message: TestEnvelope) => boolean) | undefined;
+  let sendObserver: ((message: TestEnvelope) => void) | undefined;
+  let httpFailure: ((request: { path: string; method: string }) => boolean) | undefined;
   const pendingEvents = new Set<Promise<void>>();
   const emit = (event: string, payload: unknown) => {
     if (closed) return;
@@ -58,6 +63,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
           if (!request) throw new Error(`Unknown HTTP resource ${args.rid}`);
           requests.delete(args.rid);
           if (!online) throw new Error("Test transport offline");
+          if (httpFailure?.({ path: new URL(request.url).pathname, method: request.method }))
+            throw new Error("Test transport HTTP failure");
           const response = await fetch(request.url, {
             method: request.method,
             headers: request.headers,
@@ -98,7 +105,10 @@ export async function installRealTransport(page: Page, server: TestServer) {
             if (socket === own) emit("ws-state", "open");
           });
           own.addEventListener("message", (event) => {
-            if (socket === own) emit("ws-message", String(event.data));
+            if (socket !== own) return;
+            const raw = String(event.data);
+            if (receiveFilter && !receiveFilter(JSON.parse(raw) as TestEnvelope)) return;
+            emit("ws-message", raw);
           });
           own.addEventListener("close", () => {
             if (socket === own) emit("ws-state", "closed");
@@ -110,6 +120,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
         }
         case "ws_send":
           if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("WS is not open");
+          sendObserver?.(JSON.parse(args.message) as TestEnvelope);
           socket.send(args.message);
           return;
         case "ws_disconnect":
@@ -141,6 +152,14 @@ export async function installRealTransport(page: Page, server: TestServer) {
           return secrets.get(`credential:${args.host}`) ?? null;
         case "delete_credential":
           secrets.delete(`credential:${args.host}`);
+          return;
+        case "save_pending_messages":
+          secrets.set(`pending:${JSON.stringify([args.host, args.userId])}`, args.value);
+          return;
+        case "load_pending_messages":
+          return secrets.get(`pending:${JSON.stringify([args.host, args.userId])}`) ?? null;
+        case "delete_pending_messages":
+          secrets.delete(`pending:${JSON.stringify([args.host, args.userId])}`);
           return;
         case "check_client_update":
           return { available: false, version: null, body: null };
@@ -184,6 +203,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
   );
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, any>;
+    w.isTauri = true;
     const callbacks = new Map<number, (event: unknown) => void>();
     const listeners = new Map<string, Set<number>>();
     let id = 0;
@@ -227,6 +247,18 @@ export async function installRealTransport(page: Page, server: TestServer) {
   });
   return {
     errors,
+    /** Fail selected HTTP sends at the native transport boundary. */
+    failHttpRequests(filter?: (request: { path: string; method: string }) => boolean) {
+      httpFailure = filter;
+    },
+    /** Drop selected actual frames after server processing to model lost delivery. */
+    filterServerMessages(filter?: (message: TestEnvelope) => boolean) {
+      receiveFilter = filter;
+    },
+    /** Observe real commands without modifying their contents or fabricating ACKs. */
+    observeClientMessages(observer?: (message: TestEnvelope) => void) {
+      sendObserver = observer;
+    },
     async offline() {
       online = false;
       socket?.close();

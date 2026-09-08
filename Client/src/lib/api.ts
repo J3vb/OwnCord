@@ -5,6 +5,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
 import { isValidHost } from "./hostValidation";
+import { SessionScope } from "./sessionScope";
 import type {
   AuthResponse,
   RegisterResponse,
@@ -79,122 +80,99 @@ const log = createLogger("api");
 
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
-  let config = { ...initialConfig };
+  let config: Readonly<ApiClientConfig> = Object.freeze({ ...initialConfig });
+  let generation = 0;
+  let session = new SessionScope({ host: config.host, generation });
 
-  // REST traffic is tunneled through the Rust HTTP TOFU proxy: instead of
-  // hitting https://{host} directly (which used to require accepting invalid
-  // certs), we hit http://127.0.0.1:{port} where the proxy pins the server
-  // certificate to the same trust-on-first-use fingerprint as the WS proxy.
-  async function baseUrl(): Promise<string> {
-    return `${await ensureHttpProxy(config.host)}/api/v1`;
+  function replaceSession(nextConfig: ApiClientConfig): void {
+    const previous = session;
+    config = Object.freeze({ ...nextConfig });
+    session = new SessionScope({ host: config.host, generation: ++generation });
+    previous.dispose();
   }
 
-  async function adminBaseUrl(): Promise<string> {
-    return `${await ensureHttpProxy(config.host)}/admin/api`;
-  }
-
-  function headers(): Record<string, string> {
-    const h: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (config.token) {
-      h["Authorization"] = `Bearer ${config.token}`;
-    }
-    return h;
-  }
-
+  // Snapshot both destination and credentials BEFORE starting the native proxy.
+  // Every path (including multipart, admin and TOTP) uses the same ownership
+  // checks through response-body consumption. Native cancellation is best-effort;
+  // SessionScope also rejects completions that arrive after a session switch.
   async function doFetch<T>(
     label: string,
-    urlBase: string,
+    prefix: string,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean },
   ): Promise<T> {
-    const url = `${urlBase}${path}`;
-    const init: RequestInit = {
-      method,
-      headers: headers(),
-      signal,
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-    }
-
-    log.debug(`${label} →`, { method, path });
-
-    let res: Response;
+    const snapshot = config;
+    const owner = session.fork(signal);
     try {
-      res = await fetch(url, init);
-    } catch (fetchErr) {
-      log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-      if (fetchErr instanceof Error) {
-        throw fetchErr;
+      owner.assertCurrent();
+      const headers: Record<string, string> = {};
+      if (!opts?.multipart) headers["Content-Type"] = "application/json";
+      const token = opts?.token ?? snapshot.token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const init: RequestInit = { method, headers, signal: owner.signal };
+      if (body !== undefined)
+        init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
+      const origin = await owner.run(ensureHttpProxy(snapshot.host));
+      owner.assertCurrent();
+      log.debug(`${label} →`, { method, path });
+      let res: Response;
+      try {
+        res = await owner.run(fetch(`${origin}${prefix}${path}`, init));
+      } catch (fetchErr) {
+        owner.assertCurrent();
+        log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
+        if (fetchErr instanceof Error) throw fetchErr;
+        throw new Error(String(fetchErr), { cause: fetchErr });
       }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
-        cause: fetchErr,
-      });
-    }
-
-    log.debug(`${label} ←`, { method, path, status: res.status });
-
-    if (res.status === 401) {
-      // Most 401s mean "the session is no longer valid" — the global sink
-      // (onUnauthorized) reacts by logging the user out and, for a
-      // remembered host, deleting the saved credential. A handful of
-      // endpoints instead use 401 as an ordinary per-call verdict (e.g.
-      // "invalid two-factor code" on totp/confirm) while the caller's
-      // session stays perfectly valid; those callers opt out via
-      // `skipUnauthorized` so a wrong answer there doesn't sign the user
-      // out and erase their stored credential.
-      if (!opts?.skipUnauthorized) {
-        onUnauthorized?.();
+      owner.assertCurrent();
+      log.debug(`${label} ←`, { method, path, status: res.status });
+      if (!res.ok) {
+        const err = await owner.run(parseError(res));
+        owner.assertCurrent();
+        if (res.status === 401 && !opts?.skipUnauthorized) {
+          // Parse first: the session can change while the error body is arriving.
+          // This callback is allowed to synchronously dispose the current session.
+          onUnauthorized?.();
+        }
+        log.warn(`${label} error`, {
+          method,
+          path,
+          status: res.status,
+          code: err.error,
+          message: err.message,
+          reqId: res.headers.get("x-request-id") ?? undefined,
+        });
+        throw new ApiClientError(res.status, err.error, err.message);
       }
-      const err = await parseError(res);
-      throw new ApiClientError(401, err.error, err.message);
+      if (res.status === 204) return undefined as T;
+      const data = await owner.run(res.json() as Promise<T>);
+      owner.assertCurrent();
+      return data;
+    } finally {
+      owner.dispose();
     }
-
-    if (!res.ok) {
-      const err = await parseError(res);
-      log.warn(`${label} error`, {
-        method,
-        path,
-        status: res.status,
-        code: err.error,
-        message: err.message,
-        // Server echoes its request ID in this header — logging it lets a
-        // client-side failure be matched to the server's log line for it.
-        reqId: res.headers.get("x-request-id") ?? undefined,
-      });
-      throw new ApiClientError(res.status, err.error, err.message);
-    }
-
-    // 204 No Content
-    if (res.status === 204) {
-      return undefined as T;
-    }
-
-    return res.json() as Promise<T>;
   }
 
-  async function request<T>(
+  function request<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean },
   ): Promise<T> {
-    return doFetch<T>("API", await baseUrl(), method, path, body, signal, opts);
+    return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
   }
 
-  async function adminRequest<T>(
+  function adminRequest<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    return doFetch<T>("Admin API", await adminBaseUrl(), method, path, body, signal);
+    return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
@@ -225,15 +203,28 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       // login/register request to the new host rides a still-live session
       // token for the old one. Callers that only rotate the token (post-auth)
       // never pass `host`, so this never touches a same-host token refresh.
-      if (
-        newConfig.host !== undefined &&
+      const nextConfig = {
+        ...config,
+        ...newConfig,
+        ...(newConfig.host !== undefined &&
         newConfig.host !== config.host &&
         newConfig.token === undefined
-      ) {
-        config = { ...config, ...newConfig, token: undefined };
-      } else {
-        config = { ...config, ...newConfig };
+          ? { token: undefined }
+          : {}),
+      };
+      if (nextConfig.host !== config.host || nextConfig.token !== config.token) {
+        replaceSession(nextConfig);
       }
+    },
+
+    /** Capture before async work; public ownership metadata never exposes tokens. */
+    getSession(): SessionScope {
+      return session;
+    },
+
+    /** End even a same-host, pre-auth attempt and invalidate all its resources. */
+    endSession(): void {
+      replaceSession({ host: config.host });
     },
 
     /** Get current config (for debugging). Token is redacted. */
@@ -265,52 +256,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("POST", "/auth/logout", undefined, signal);
     },
 
-    async verifyTotp(
-      code: string,
-      partialToken: string,
-      signal?: AbortSignal,
-    ): Promise<AuthResponse> {
-      // Don't mutate shared config — make direct fetch with the partial token
-      const url = `${await baseUrl()}/auth/verify-totp`;
-      const init: RequestInit = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${partialToken}`,
-        },
-        body: JSON.stringify({ code }),
-        signal,
-      };
-
-      let res: Response;
-      try {
-        res = await fetch(url, init);
-      } catch (fetchErr) {
-        log.error("API fetch failed", {
-          method: "POST",
-          path: "/auth/verify-totp",
-          error: String(fetchErr),
-        });
-        if (fetchErr instanceof Error) {
-          throw fetchErr;
-        }
-        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
-          cause: fetchErr,
-        });
-      }
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-
-      return res.json() as Promise<AuthResponse>;
+    verifyTotp(code: string, partialToken: string, signal?: AbortSignal): Promise<AuthResponse> {
+      return request<AuthResponse>("POST", "/auth/verify-totp", { code }, signal, {
+        token: partialToken,
+      });
     },
 
     deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
@@ -320,7 +269,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // ── Users ─────────────────────────────────────────────
 
     getMe(signal?: AbortSignal): Promise<MemberResponse> {
-      return request<MemberResponse>("GET", "/users/me", undefined, signal);
+      return request<MemberResponse>("GET", "/auth/me", undefined, signal);
     },
 
     updateProfile(
@@ -346,28 +295,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * On success the server has already pointed the user's avatar at the
      * served file and broadcast a user_update.
      */
-    async uploadAvatar(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    uploadAvatar(file: File, signal?: AbortSignal): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/users/me/avatar`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-
-      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-      return res.json() as Promise<UploadResponse>;
+      return request<UploadResponse>("POST", "/users/me/avatar", formData, signal, {
+        multipart: true,
+      });
     },
 
     changePassword(
@@ -427,8 +361,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
+      const owner = session;
       return request<SessionsListResponse>("GET", "/users/me/sessions", undefined, signal).then(
-        (r) => r.sessions,
+        (r) => {
+          owner.assertCurrent();
+          return r.sessions;
+        },
       );
     },
 
@@ -569,36 +507,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── File Uploads ──────────────────────────────────────
 
-    async uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/uploads`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-      // Don't set Content-Type — browser sets multipart boundary
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: h,
-        body: formData,
-        signal,
-      });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-
-      return res.json() as Promise<UploadResponse>;
+      return request<UploadResponse>("POST", "/uploads", formData, signal, { multipart: true });
     },
 
     // ── Invites ───────────────────────────────────────────
@@ -633,30 +546,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * GIF/WebP, at most 512 KB and 128x128), so the only thing this promises
      * is to send it; a rejection arrives as an ApiClientError with the reason.
      */
-    async uploadEmoji(shortcode: string, file: File, signal?: AbortSignal): Promise<EmojiResponse> {
+    uploadEmoji(shortcode: string, file: File, signal?: AbortSignal): Promise<EmojiResponse> {
       const formData = new FormData();
       formData.append("shortcode", shortcode);
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/emoji`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-      // Don't set Content-Type — browser sets multipart boundary
-
-      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-      return res.json() as Promise<EmojiResponse>;
+      return request<EmojiResponse>("POST", "/emoji", formData, signal, { multipart: true });
     },
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
@@ -726,21 +621,35 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── Health ────────────────────────────────────────────
 
-    async getHealth(host?: string, timeoutMs = 3000): Promise<HealthResponse> {
+    async getHealth(
+      host?: string,
+      timeoutMs = 3000,
+      signal?: AbortSignal,
+    ): Promise<HealthResponse> {
+      // Explicit-host checks belong to the server picker, independently of the
+      // signed-in server. Its page supplies cancellation; current-server checks
+      // additionally belong to the authenticated session.
       const targetHost = host ?? config.host;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const owner =
+        host === undefined
+          ? session.fork(signal)
+          : new SessionScope({ host: targetHost, generation }, signal ? [signal] : []);
+      const timer = setTimeout(() => owner.dispose(), timeoutMs);
       try {
-        const origin = await ensureHttpProxy(targetHost);
-        const res = await fetch(`${origin}/api/v1/health`, {
-          signal: controller.signal,
-        });
+        owner.assertCurrent();
+        const origin = await owner.run(ensureHttpProxy(targetHost));
+        owner.assertCurrent();
+        const res = await owner.run(fetch(`${origin}/api/v1/health`, { signal: owner.signal }));
+        owner.assertCurrent();
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
-        return res.json() as Promise<HealthResponse>;
+        const data = await owner.run(res.json() as Promise<HealthResponse>);
+        owner.assertCurrent();
+        return data;
       } finally {
         clearTimeout(timer);
+        owner.dispose();
       }
     },
 

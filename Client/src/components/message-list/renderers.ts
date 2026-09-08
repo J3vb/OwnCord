@@ -162,9 +162,13 @@ function sendErrorReason(code: string | null): string {
     case "FORBIDDEN":
       return "You don't have permission to post here";
     case "OFFLINE":
-      return "Not connected — message not sent";
+      return "Disconnected — delivery not confirmed";
     case "NETWORK":
-      return "Connection problem — message not sent";
+      return "Connection problem — delivery not confirmed";
+    case "UNCONFIRMED":
+      return "Delivery not confirmed — check the conversation before retrying";
+    case "RECOVERED":
+      return "Recovered pending message — retry when you're ready";
     case "BAD_REQUEST":
       return "Message rejected";
     default:

@@ -67,15 +67,16 @@ type memberJoinPayload struct {
 }
 
 type chatMessagePayload struct {
-	ID          int64             `json:"id"`
-	ChannelID   int64             `json:"channel_id"`
-	User        memberUserPayload `json:"user"`
-	Content     string            `json:"content"`
-	ReplyTo     *int64            `json:"reply_to"`
-	Timestamp   string            `json:"timestamp"`
-	Attachments []map[string]any  `json:"attachments"`
-	Reactions   []any             `json:"reactions"`
-	Pinned      bool              `json:"pinned"`
+	ClientMessageID string            `json:"client_message_id,omitempty"`
+	ID              int64             `json:"id"`
+	ChannelID       int64             `json:"channel_id"`
+	User            memberUserPayload `json:"user"`
+	Content         string            `json:"content"`
+	ReplyTo         *int64            `json:"reply_to"`
+	Timestamp       string            `json:"timestamp"`
+	Attachments     []map[string]any  `json:"attachments"`
+	Reactions       []any             `json:"reactions"`
+	Pinned          bool              `json:"pinned"`
 	// Mentions carries the server-resolved user ids; MentionsEveryone reports
 	// an @everyone/@here that cleared MENTION_EVERYONE. Clients highlight from
 	// these instead of re-parsing the content.
@@ -140,8 +141,10 @@ type emojiUpdatePayload struct {
 }
 
 type chatSendOKPayload struct {
-	MessageID int64  `json:"message_id"`
-	Timestamp string `json:"timestamp"`
+	ClientMessageID string `json:"client_message_id,omitempty"`
+	Deduplicated    bool   `json:"deduplicated,omitempty"`
+	MessageID       int64  `json:"message_id"`
+	Timestamp       string `json:"timestamp"`
 }
 
 type chatEditedPayload struct {
@@ -453,6 +456,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 // chatMessageArgs is the input to buildChatMessage. It is a struct rather than
 // a positional list because the payload has outgrown readable call sites.
 type chatMessageArgs struct {
+	ClientMessageID  string
 	MsgID            int64
 	ChannelID        int64
 	UserID           int64
@@ -483,8 +487,9 @@ func buildChatMessage(a chatMessageArgs) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatMessage,
 		Payload: chatMessagePayload{
-			ID:        a.MsgID,
-			ChannelID: a.ChannelID,
+			ClientMessageID: a.ClientMessageID,
+			ID:              a.MsgID,
+			ChannelID:       a.ChannelID,
 			User: memberUserPayload{
 				ID:          a.UserID,
 				Username:    a.Username,
@@ -576,12 +581,12 @@ func buildEmojiUpdate(list []*db.Emoji) []byte {
 	})
 }
 
-// buildChatSendOK constructs a chat_send_ok ack.
-func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
+// buildChatSendOK correlates the current request with the original commit.
+func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatSendOK,
 		ID:      requestID,
-		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp},
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate},
 	})
 }
 

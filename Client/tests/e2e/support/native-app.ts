@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startProcess, stopProcess, waitForHttp } from "./process";
 
-export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BINARY) {
+export async function startNativeApp(
+  binary = process.env.OWNCORD_E2E_CLIENT_BINARY,
+  options: { preserveProfile?: boolean } = {},
+) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
   const exe = resolve(binary ?? "src-tauri/target/release/owncord-client.exe");
   const directory = await mkdtemp(join(tmpdir(), "owncord-native-e2e-"));
@@ -20,7 +23,7 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
     for (const profile of profiles)
       await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
   };
-  await clearProfiles();
+  if (!options.preserveProfile) await clearProfiles();
   const running = startProcess(exe, [], directory);
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
@@ -41,12 +44,12 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
       process: running.child,
       directory,
       log: running.log,
-      async close() {
+      async close(closeOptions: { preserveProfile?: boolean } = {}) {
         try {
           await browser?.close();
         } finally {
           await stopProcess(running.child);
-          await clearProfiles();
+          if (!closeOptions.preserveProfile) await clearProfiles();
           await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
         }
       },

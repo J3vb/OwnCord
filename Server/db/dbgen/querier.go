@@ -137,6 +137,7 @@ type Querier interface {
 	CreateEmoji(ctx context.Context, arg CreateEmojiParams) (CreateEmojiRow, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
+	CreateMessageForDelivery(ctx context.Context, arg CreateMessageForDeliveryParams) (Message, error)
 	// Approval-mode registration (B4-1): the account exists from the application
 	// on, as registration_status = 'pending', and cannot sign in until an admin
 	// approves it. Denial anonymises the row and marks it 'denied' for good.
@@ -158,6 +159,7 @@ type Querier interface {
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
 	DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error
 	DeleteEmoji(ctx context.Context, id int64) (sql.Result, error)
+	DeleteExpiredMessageDeliveryReceipts(ctx context.Context, expiresAtMs int64) error
 	// Sargable text comparison against idx_sessions_expires_at (migration 031).
 	// expires_at is stored as RFC3339 UTC ("2006-01-02T15:04:05Z") and the
 	// migration normalized legacy rows, so the caller must pass the cutoff in
@@ -308,6 +310,7 @@ type Querier interface {
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
 	GetMaxEventSeq(ctx context.Context) (int64, error)
 	GetMessage(ctx context.Context, id int64) (Message, error)
+	GetMessageDeliveryReceipt(ctx context.Context, arg GetMessageDeliveryReceiptParams) (GetMessageDeliveryReceiptRow, error)
 	GetMessageRequestByPair(ctx context.Context, arg GetMessageRequestByPairParams) (MessageRequest, error)
 	GetMessageRequestForRecipient(ctx context.Context, arg GetMessageRequestForRecipientParams) (MessageRequest, error)
 	GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIParams) ([]GetMessagesForAPIRow, error)
@@ -395,6 +398,7 @@ type Querier interface {
 	// after commit and marks the job done, retrying from startup and the
 	// maintenance tick until it is.
 	InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error)
+	InsertMessageDeliveryReceipt(ctx context.Context, arg InsertMessageDeliveryReceiptParams) error
 	InsertMessageRequest(ctx context.Context, arg InsertMessageRequestParams) (int64, error)
 	// moderation_actions is the B5-9 moderator-action ledger (migration 049):
 	// every warning, timeout, kick, ban and removal writes a row here. Keep

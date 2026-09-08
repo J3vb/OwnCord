@@ -40,6 +40,8 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("@lib/themes", () => ({ restoreTheme: vi.fn() }));
 vi.mock("@lib/ptt", () => ({ initPtt: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@lib/logPersistence", () => ({
@@ -94,16 +96,24 @@ vi.mock("@lib/updater", () => ({
   }),
 }));
 const mockApiState = { host: "" };
-vi.mock("@lib/api", () => ({
-  createApiClient: vi.fn(() => ({
-    setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
-      if (cfg.host !== undefined) mockApiState.host = cfg.host;
+vi.mock("@lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/api")>();
+  return {
+    ...actual,
+    createApiClient: vi.fn(() => {
+      const api = actual.createApiClient({ host: "" });
+      return {
+        ...api,
+        setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
+          if (cfg.host !== undefined) mockApiState.host = cfg.host;
+          api.setConfig(cfg);
+        }),
+        login: (...args: unknown[]) => mockLogin(...args),
+        getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
+      };
     }),
-    getConfig: vi.fn(() => ({ host: mockApiState.host })),
-    login: (...args: unknown[]) => mockLogin(...args),
-    getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
-  })),
-}));
+  };
+});
 
 // ConnectPage — captures the real onLogin callback main.ts wires up so the
 // test can drive wirePostAuth exactly the way a real login does, without
@@ -163,6 +173,8 @@ vi.mock("@lib/dispatcher", async () => {
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { clearAuth } from "@stores/auth.store";
+import { createApiClient } from "@lib/api";
+import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { deleteCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
@@ -490,5 +502,55 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(deleteCredential).toHaveBeenCalledWith("server-d.example:8443");
+  });
+});
+
+describe("main.ts session ownership", () => {
+  it("invalidates API work synchronously on logout before deferred store notifications", () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const owner = api.getSession();
+    const cleanup = vi.fn();
+    owner.addCleanup(cleanup);
+    clearAuth();
+    // No await: a queued HTTP completion must already be unable to publish.
+    expect(owner.signal.aborted).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(api.getConfig().token).toBeUndefined();
+    expect(deactivatePendingMessages).toHaveBeenLastCalledWith({ discard: true });
+  });
+
+  it("retains pending messages on a deliberate server switch", () => {
+    sessionStorage.setItem("owncord:quick-switch-target", "next.example");
+    try {
+      clearAuth();
+      expect(deactivatePendingMessages).toHaveBeenLastCalledWith({ discard: false });
+    } finally {
+      sessionStorage.removeItem("owncord:quick-switch-target");
+    }
+  });
+
+  it("does not let an older same-host login overwrite the newer attempt", async () => {
+    await Promise.resolve();
+    let resolveOld!: (value: unknown) => void;
+    mockLogin.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    mockLogin.mockResolvedValueOnce({ token: "new-account-token", requires_2fa: false });
+    const old = capturedConnectCallbacks.onLogin!("same.example", "alice", "first-password");
+    const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" });
+    await capturedConnectCallbacks.onLogin!("same.example", "bob", "second-password");
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const current = api.getSession();
+    resolveOld({ token: "old-account-token", requires_2fa: false });
+    await rejected;
+    expect(api.getSession()).toBe(current);
+    expect(current.isCurrent()).toBe(true);
   });
 });

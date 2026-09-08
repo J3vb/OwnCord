@@ -225,7 +225,8 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       const controller = new AbortController();
       await api.getMe(controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
   });
 
@@ -378,10 +379,10 @@ describe("API Client", () => {
   });
 
   describe("user endpoints", () => {
-    it("getMe calls GET /users/me", async () => {
+    it("getMe calls GET /auth/me", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "me" }));
       const result = await api.getMe();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
       expect(fetchCallOpts().method).toBe("GET");
       expect(result).toEqual({ id: 1, username: "me" });
     });
@@ -608,7 +609,8 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
       const controller = new AbortController();
       await api.verifyTotp("123456", "pt", controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
 
     it("never sets danger.acceptInvalidCerts (cert pinning is handled by the Rust proxy)", async () => {
@@ -783,7 +785,8 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({ url: "u", filename: "f" }));
       const controller = new AbortController();
       await api.uploadFile(new File(["x"], "f"), controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
 
     it("uploadFile parseError fallback on non-JSON error body", async () => {
@@ -1123,7 +1126,7 @@ describe("API Client", () => {
     it("fetches through the resolved proxy origin", async () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       await api.getMe();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
     });
   });
 

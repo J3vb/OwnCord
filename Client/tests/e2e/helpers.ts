@@ -456,6 +456,16 @@ export function buildTauriMockScript(opts: {
   storedCredential?: { username: string; token: string } | null;
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
+  // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
+  // authenticated default explicit, with scenario-provided routes taking priority.
+  const httpRoutes = [
+    ...opts.httpRoutes,
+    {
+      pattern: "/api/v1/auth/me",
+      status: 200,
+      body: { ...MOCK_AUTH_OK.payload.user, totp_enabled: false },
+    },
+  ];
 
   // Merge explicit wsHandlers with auto-generated chat echo handlers
   const allWsHandlers: Array<{ type: string; handler: string }> = [
@@ -489,7 +499,7 @@ export function buildTauriMockScript(opts: {
     // -----------------------------------------------------------------------
     // HTTP mock state
     // -----------------------------------------------------------------------
-    const HTTP_ROUTES = ${JSON.stringify(opts.httpRoutes)};
+    const HTTP_ROUTES = ${JSON.stringify(httpRoutes)};
     let __nextRid = 1;
     const __pendingFetch = {};   // rid → { url, route }
     const __pendingBody = {};    // responseRid → Uint8Array (body bytes)
@@ -680,6 +690,11 @@ export function buildTauriMockScript(opts: {
         // ---- Credentials ----
         if (cmd === "save_credential" || cmd === "delete_credential") return null;
         if (cmd === "load_credential") return ${JSON.stringify(opts.storedCredential ?? null)};
+        window.__mockPendingMessages ??= {};
+        const pendingOwner = JSON.stringify([args?.host, args?.userId]);
+        if (cmd === "save_pending_messages") { window.__mockPendingMessages[pendingOwner] = args.value; return; }
+        if (cmd === "load_pending_messages") return window.__mockPendingMessages[pendingOwner] ?? null;
+        if (cmd === "delete_pending_messages") { delete window.__mockPendingMessages[pendingOwner]; return; }
 
         // ---- Settings ----
         if (cmd === "get_settings") return ${JSON.stringify(opts.storedSettings ?? {})};

@@ -3,9 +3,9 @@
 B4-8 (BPR-055, the server half of BG-15). This page answers three questions
 an operator or a reviewer has about a self-hosted OwnCord server: **what can
 I look at when something is wrong**, **what does the server ever send off
-this machine**, and **what may a future support bundle contain**. The first
-two are checked by tests on every CI run; the third is the contract the
-B6/B9 bundle implementation must satisfy before it exists.
+this machine**, and **what a support bundle contains**. The server-side support bundle is
+implemented in the admin panel; all three are checked by tests on every CI run.
+Desktop-local bundles and broader B6/B9 recovery qualification remain separate work.
 
 The short version: OwnCord sends no automatic product or usage telemetry.
 Every outbound network path in the server is one of three things — an
@@ -18,17 +18,18 @@ messaging, upload, idle and shutdown.
 
 ## Diagnostic surfaces (all local)
 
-| Surface                      | Where                                                                    | Who can read it                                                            | Leaves the machine?                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Health probe                 | `GET /health`                                                            | anyone who can reach the port (no body detail beyond the subsystem reason) | no                                                                                         |
-| Connectivity diagnostics     | `GET /api/v1/diagnostics/connectivity`                                   | `ADMINISTRATOR`, 5/min                                                     | no                                                                                         |
-| JSON metrics                 | `GET /api/v1/metrics`                                                    | addresses in `server.metrics_allowed_cidrs` (else `admin_allowed_cidrs`)   | no — a scraper the operator admits pulls it                                                |
-| Prometheus exporter          | `GET /metrics` (`-tags otel`, `telemetry.exporter: prometheus`)          | same allowlist                                                             | no — pulled, never pushed                                                                  |
-| OpenTelemetry traces/metrics | OTLP (`-tags otel`, `telemetry.enabled`, `telemetry.exporter: otlp`)     | the collector at `telemetry.otlp_endpoint`                                 | **only** when an operator builds with the tag and configures an endpoint; absent otherwise |
-| Server log                   | stdout, and the in-memory ring buffer behind the admin panel's live view | the process owner; `ADMINISTRATOR` via the SSE stream (single-use tickets) | no                                                                                         |
-| Audit log                    | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                           | no                                                                                         |
-| Backups                      | `backup.dir` (scheduled and on demand)                                   | the process owner; `MANAGE_SERVER` via the admin API                       | no                                                                                         |
-| Healthcheck CLI              | `owncord --healthcheck` probes this server's `/health`                   | the orchestrator                                                           | loopback only                                                                              |
+| Surface                      | Where                                                                    | Who can read it                                                                 | Leaves the machine?                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Health probe                 | `GET /health`                                                            | anyone who can reach the port (no body detail beyond the subsystem reason)      | no                                                                                         |
+| Connectivity diagnostics     | `GET /api/v1/diagnostics/connectivity`                                   | `ADMINISTRATOR`, 5/min                                                          | no                                                                                         |
+| JSON metrics                 | `GET /api/v1/metrics`                                                    | addresses in `server.metrics_allowed_cidrs` (else `admin_allowed_cidrs`)        | no — a scraper the operator admits pulls it                                                |
+| Prometheus exporter          | `GET /metrics` (`-tags otel`, `telemetry.exporter: prometheus`)          | same allowlist                                                                  | no — pulled, never pushed                                                                  |
+| OpenTelemetry traces/metrics | OTLP (`-tags otel`, `telemetry.enabled`, `telemetry.exporter: otlp`)     | the collector at `telemetry.otlp_endpoint`                                      | **only** when an operator builds with the tag and configures an endpoint; absent otherwise |
+| Server log                   | stdout, and the in-memory ring buffer behind the admin panel's live view | the process owner; `ADMINISTRATOR` via the SSE stream (single-use tickets)      | no                                                                                         |
+| Support bundle               | Admin panel **Diagnostics**, `/admin/api/support-bundles/*`              | `ADMINISTRATOR` with a current login session; explicit preview and confirmation | local download only, never uploaded                                                        |
+| Audit log                    | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                                | no                                                                                         |
+| Backups                      | `backup.dir` (scheduled and on demand)                                   | the process owner; `MANAGE_SERVER` via the admin API                            | no                                                                                         |
+| Healthcheck CLI              | `owncord --healthcheck` probes this server's `/health`                   | the orchestrator                                                                | loopback only                                                                              |
 
 Log content is governed by `logging.level`; usernames, ids and client
 addresses appear at `info` (data-lifecycle class 22), which is why the
@@ -141,8 +142,8 @@ must be `false` for that run, as it is here.
 
 ## Support-bundle data contract
 
-BG-15's bundle lands in B6/B9. Whatever ships must satisfy this contract;
-it is written against the data-class inventory in
+The admin panel's **Diagnostics** section implements the server half of
+BG-15. Its contract is written against the data-class inventory in
 [data-lifecycle.md](data-lifecycle.md) so every item names the classes it
 touches.
 
@@ -187,6 +188,57 @@ touches.
    line; the forbidden items cannot be selected; the audit row is written
    and content-free.
 
-Until that implementation exists, an operator who needs to share
-diagnostics does so by hand, from the surfaces in the first table, and this
-contract is the checklist for what to leave out.
+### Implemented server bundle
+
+An administrator opens **Diagnostics**, selects **Create support bundle preview**,
+reviews the item names, exact byte sizes, SHA-256 hashes and omission rules, then
+selects **Confirm download**. Previewing or discarding does not download or upload
+anything. No automatic collector or crash hook exists.
+
+- `POST /admin/api/support-bundles/preview` accepts an empty JSON object. Unknown
+  fields (including item selection and address opt-ins) are refused. It returns
+  `preview_id`, `expires_at`, `byte_size`, `sha256`, `items` and `redactions`.
+- `POST /admin/api/support-bundles/download` accepts `preview_id` and `sha256` and
+  downloads the exact ZIP frozen at preview. It does not recollect live data.
+  A successful confirmation consumes the preview once, including across concurrent
+  requests. The response includes `X-Content-SHA256`; both endpoints use `no-store`.
+- Both endpoints require a current login session with `ADMINISTRATOR`. Headless API
+  tokens are refused. The preview is bound to that actor and exact session; current
+  permissions, bans and session validity are checked again on confirmation.
+- Previews expire after five minutes and are removed from memory by a timer. One
+  preview per session and at most 16 per process are retained, each ZIP at most
+  256 KiB. Only one collector and two downloads run at a time, so slow downloads cannot
+  retain unbounded consumed archives. Collection has a three-second database deadline.
+  Replacing a session's preview invalidates the old one. A failed audit write
+  prevents download and requires a fresh preview.
+
+The ZIP contains six fixed files:
+
+| File                 | Contents and boundary                                                                                                                                                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build.json`         | Application/Go version, OS/architecture, available VCS revision and modified flag. No module replacement paths or environment.                                                                                                                                                                                                        |
+| `configuration.json` | An explicit scalar allowlist from the running startup configuration. Numbers, booleans and normalized enums only. All names, paths, addresses, URLs, contacts and credentials are structurally omitted. Live database settings are not included.                                                                                      |
+| `database.json`      | Applied migration names from the embedded catalog, known table names and counts from one read transaction, and aggregate writer wait counters. No rows, SQL definitions/defaults, unknown migration names, custom table names, plugin storage or search index.                                                                        |
+| `health.json`        | Database readability, process memory/GC/goroutine counts, and available aggregate hub connection/replay/drop/backpressure counters. This snapshot does not test LiveKit or the client's media path.                                                                                                                                   |
+| `events.json`        | At most 200 recent timestamp/level/event-code records. Exact known application messages map to fixed codes for voice, socket, storage, backup and maintenance failures. Unknown messages become `log_event`; all raw messages, attributes and source paths are omitted. Invalid timestamps are omitted and unknown levels normalized. |
+| `manifest.json`      | Capture time, payload item sizes/hashes/data classes and the same omission report shown in preview. The manifest hashes the five payload files; preview additionally hashes the manifest itself and the complete ZIP, avoiding a self-referential manifest digest.                                                                    |
+
+This implementation is intentionally stricter than the upper bound in clause 3:
+there is no raw log excerpt and no per-bundle address opt-in. Structural omission
+also covers unfamiliar secret formats, including secrets embedded in arbitrary
+configuration strings or log attributes. Table counts do not expose their rows.
+No archive or preview is written to disk on the server; only the required audit row is persisted. The browser initiates a
+local download, and sharing that file remains the administrator's decision.
+
+`support_bundle_create` is written synchronously at confirmation with the actor
+and the fixed item list only, never contents, session hashes or preview IDs.
+
+Verification: `Server/admin/support_bundle_test.go` exercises real database rows,
+planted session/API/password/TOTP/recovery/GitHub/LiveKit/OTLP/environment secrets,
+a scanner negative control, frozen archive/per-item hashes, content-free audit,
+forbidden selections, authentication, session binding and permission revocation.
+`support_store_test.go` covers expiry, bounded memory, replacement and concurrent
+single-use confirmation; `Server/db/diagnostics_test.go` excludes custom schema
+names and rows. The executable panel contract in
+`Client/tests/contract/server-admin-support-bundle.test.ts` verifies preview,
+separate confirmation, discard and sign-out during a pending preview.
