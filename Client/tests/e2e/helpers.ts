@@ -431,6 +431,7 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 export function buildTauriMockScript(opts: {
   httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
   simulateWsFlow: boolean;
+  deferReady?: boolean;
   echoChatSend?: boolean;
   wsHandlers?: Array<{ type: string; handler: string }>;
   readyOverrides?: {
@@ -641,7 +642,7 @@ export function buildTauriMockScript(opts: {
               setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(MOCK_AUTH_OK)}));
               }, 100);
-              setTimeout(function() {
+              if (!${!!opts.deferReady}) setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(readyPayload)}));
               }, 200);
             }
@@ -771,7 +772,10 @@ export async function mockTauriConnectWith2FA(page: Page): Promise<void> {
   );
 }
 
-export async function mockTauriFullSession(page: Page): Promise<void> {
+export async function mockTauriFullSession(
+  page: Page,
+  options: { deferReady?: boolean } = {},
+): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
@@ -781,6 +785,7 @@ export async function mockTauriFullSession(page: Page): Promise<void> {
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
       simulateWsFlow: true,
+      deferReady: options.deferReady,
     }),
   );
 }

@@ -1,47 +1,23 @@
-/**
- * E2E tests for the ConnectedOverlay component.
- * Covers: overlay appears after login, shows server info, spinner → "Ready!" transition.
- */
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, submitLogin, navigateToMainPage } from "./helpers";
+import { mockTauriFullSession, submitLogin, emitWsMessage, MOCK_READY_PAYLOAD } from "./helpers";
 
-test.describe("Connected Overlay", () => {
-  test("overlay appears after login with server info", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await submitLogin(page);
-
-    const overlay = page.locator("[data-testid='connected-overlay']");
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-
-    const connectedText = page.locator(".connected-text");
-    await expect(connectedText).toHaveText("Connected!");
-
-    const userText = page.locator(".connected-user");
-    await expect(userText).toContainText("testuser");
-
-    const serverIcon = page.locator(".connected-srv-icon");
-    await expect(serverIcon).toBeVisible({ timeout: 5000 });
-  });
-
-  test("overlay shows loader area during connection", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await submitLogin(page);
-
-    // The loader area is always present in the overlay; spinner may be hidden
-    // after ready fires (mock ready arrives at ~200ms), so just verify the
-    // loader element is part of the overlay DOM.
-    const loader = page.locator(".connected-loader");
-    await expect(loader).toBeAttached({ timeout: 5000 });
-  });
-
-  test("overlay transitions to main page after ready", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    const app = page.locator("[data-testid='app-layout']");
-    await expect(app).toBeVisible({ timeout: 5000 });
-  });
+test("connection overlay shows authenticated state until server data is ready", async ({
+  page,
+}) => {
+  // Hold READY at the transport boundary so a busy runner cannot miss the
+  // short-lived overlay while checking several independent fields.
+  await mockTauriFullSession(page, { deferReady: true });
+  await page.goto("/");
+  await submitLogin(page);
+  const overlay = page.getByTestId("connected-overlay");
+  await expect(overlay).toBeVisible();
+  await expect(overlay.locator(".connected-text")).toHaveText("Connected!");
+  await expect(overlay.locator(".connected-user")).toContainText("testuser");
+  await expect(overlay.locator(".connected-srv-icon")).toBeVisible();
+  await expect(overlay.locator(".connected-loader .spinner")).toBeVisible();
+  await expect(page.getByTestId("app-layout")).not.toBeVisible();
+  await emitWsMessage(page, MOCK_READY_PAYLOAD);
+  await expect(overlay.locator(".connected-loader")).toContainText("Ready!");
+  await expect(page.getByTestId("app-layout")).toBeVisible();
+  await expect(overlay).toHaveCount(0);
 });
