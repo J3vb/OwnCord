@@ -37,6 +37,84 @@ beforeEach(() => {
 });
 
 describe("API session ownership", () => {
+  it.each([...requests, ["health", (api: ApiClient) => api.getHealth()] as const])(
+    "%s releases completed transport before disposing its logical request scope",
+    async (_label, send) => {
+      const api = createApiClient({ host: "same.example", token: "alice" });
+      await send(api);
+      const transport = (mockFetch.mock.calls[0]?.[1] as RequestInit).signal!;
+      // A real plugin abort listener tries to close the already-removed native
+      // response resource here. It must not run after completion or on logout.
+      expect(transport.aborted).toBe(false);
+      api.endSession();
+      expect(transport.aborted).toBe(false);
+    },
+  );
+
+  it("releases a consumed 401 body before onUnauthorized synchronously ends the session", async () => {
+    let api: ApiClient;
+    const unauthorized = vi.fn(() => api.endSession());
+    api = createApiClient({ host: "same.example", token: "alice" }, unauthorized);
+    mockFetch.mockResolvedValue(response({ error: "UNAUTHORIZED", message: "Expired" }, 401));
+    await expect(api.getMe()).rejects.toMatchObject({ status: 401 });
+    expect(unauthorized).toHaveBeenCalledOnce();
+    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+  });
+
+  it.each(["request", "health"])(
+    "%s does not abort a body consumed before a JSON parse error",
+    async (kind) => {
+      const api = createApiClient({ host: "same.example" });
+      mockFetch.mockResolvedValue({
+        ...response(),
+        json: () => Promise.reject(new SyntaxError("Invalid JSON")),
+      });
+      await expect(kind === "health" ? api.getHealth() : api.getMe()).rejects.toThrow(
+        "Invalid JSON",
+      );
+      expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+    },
+  );
+
+  it("releases a completed response without a body", async () => {
+    const api = createApiClient({ host: "same.example" });
+    mockFetch.mockResolvedValue(response(undefined, 204));
+    await api.logout();
+    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+  });
+
+  it("cancels an unread unsuccessful health response body", async () => {
+    const api = createApiClient({ host: "same.example" });
+    const json = vi.fn();
+    mockFetch.mockResolvedValue({ ...response(undefined, 503), json });
+    await expect(api.getHealth()).rejects.toMatchObject({ status: 503 });
+    expect(json).not.toHaveBeenCalled();
+    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+  });
+
+  it.each(["request", "health"])(
+    "%s still aborts a body being read when its session ends",
+    async (kind) => {
+      const body = deferred<unknown>();
+      const started = deferred<void>();
+      mockFetch.mockResolvedValue({
+        ...response(),
+        json: () => {
+          started.resolve();
+          return body.promise;
+        },
+      });
+      const api = createApiClient({ host: "same.example" });
+      const result = kind === "health" ? api.getHealth() : api.getMe();
+      const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+      await started.promise;
+      api.endSession();
+      expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+      await rejected;
+      body.resolve({ old: true });
+    },
+  );
+
   it.each(requests)(
     "%s cancels deferred proxy setup without sending another account's credentials",
     async (_label, send) => {

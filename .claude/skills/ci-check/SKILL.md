@@ -55,10 +55,18 @@ still in progress.
 ## Client (from `Client/`)
 
 ```bash
+node --test ../scripts/check-tauri-versions.test.mjs
+node ../scripts/check-tauri-versions.mjs
 npm test
 npm run typecheck
 npm run lint
 ```
+
+The Tauri check reads resolved npm/Cargo lockfile versions without installing
+or building. Paired core/API and official plugin packages must have matching
+major/minor versions; independent npm and Cargo dependency updates must update
+the other side when that pair moves to a new minor release. CI runs this in
+Client Static Checks and before the Windows native build.
 
 Formatting is no longer a client gate — Prettier is configured once at the
 repository root and checked by `check:hygiene` below.

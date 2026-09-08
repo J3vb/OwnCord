@@ -106,13 +106,18 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
   ): Promise<T> {
     const snapshot = config;
     const owner = session.fork(signal);
+    // Tauri keeps abort listeners after a response body has been consumed.
+    // Detach transport cancellation when that work settles, while still
+    // disposing the logical request scope and all of its parent listeners.
+    const transport = new AbortController();
+    const releaseTransport = owner.addCleanup(() => transport.abort());
     try {
       owner.assertCurrent();
       const headers: Record<string, string> = {};
       if (!opts?.multipart) headers["Content-Type"] = "application/json";
       const token = opts?.token ?? snapshot.token;
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const init: RequestInit = { method, headers, signal: owner.signal };
+      const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
         init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
       const origin = await owner.run(ensureHttpProxy(snapshot.host));
@@ -130,7 +135,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       owner.assertCurrent();
       log.debug(`${label} ←`, { method, path, status: res.status });
       if (!res.ok) {
-        const err = await owner.run(parseError(res));
+        const err = await owner.run(parseError(res)).finally(releaseTransport);
         owner.assertCurrent();
         if (res.status === 401 && !opts?.skipUnauthorized) {
           // Parse first: the session can change while the error body is arriving.
@@ -147,8 +152,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         });
         throw new ApiClientError(res.status, err.error, err.message);
       }
-      if (res.status === 204) return undefined as T;
-      const data = await owner.run(res.json() as Promise<T>);
+      if (res.status === 204) {
+        releaseTransport();
+        return undefined as T;
+      }
+      const data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
       owner.assertCurrent();
       return data;
     } finally {
@@ -634,17 +642,21 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         host === undefined
           ? session.fork(signal)
           : new SessionScope({ host: targetHost, generation }, signal ? [signal] : []);
+      const transport = new AbortController();
+      const releaseTransport = owner.addCleanup(() => transport.abort());
       const timer = setTimeout(() => owner.dispose(), timeoutMs);
       try {
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
         owner.assertCurrent();
-        const res = await owner.run(fetch(`${origin}/api/v1/health`, { signal: owner.signal }));
+        const res = await owner.run(fetch(`${origin}/api/v1/health`, { signal: transport.signal }));
         owner.assertCurrent();
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
-        const data = await owner.run(res.json() as Promise<HealthResponse>);
+        const data = await owner
+          .run(res.json() as Promise<HealthResponse>)
+          .finally(releaseTransport);
         owner.assertCurrent();
         return data;
       } finally {

@@ -97,7 +97,11 @@ interface DecodingSnapshot {
 }
 
 async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> | null> {
-  const report = await room.engine.pcManager?.subscriber?.getStats();
+  const manager = room.engine.pcManager;
+  // LiveKit receives media on the publisher in single-peer-connection mode.
+  // Dual-connection sessions keep their incoming tracks on the subscriber.
+  const receiver = manager?.subscriber ?? manager?.publisher;
+  const report = await receiver?.getStats();
   if (!report) return null;
   const result = new Map<string, DecodingSnapshot>();
   report.forEach((entry: Record<string, unknown>) => {

@@ -63,12 +63,14 @@ describe("Tauri default capability — HTTP scope", () => {
     );
   });
 
-  it.each(["http:allow-fetch-send", "http:allow-fetch-read-body"])(
-    "%s is a bare identifier (a scope there would be inert)",
-    (identifier) => {
-      expect(find(identifier)).toBe(identifier);
-    },
-  );
+  it.each([
+    "http:allow-fetch-send",
+    "http:allow-fetch-read-body",
+    "http:allow-fetch-cancel",
+    "http:allow-fetch-cancel-body",
+  ])("%s is a bare identifier (a scope there would be inert)", (identifier) => {
+    expect(find(identifier)).toBe(identifier);
+  });
 
   it("no permission grants a plaintext-http or any-scheme wildcard", () => {
     const allUrls = permissions.flatMap((p) =>

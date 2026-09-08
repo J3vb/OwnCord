@@ -146,7 +146,11 @@ describe("connection diagnostics", () => {
     expect(JSON.stringify(results)).not.toContain("secret");
   });
 
-  function activeRoom(before: Record<string, unknown>, after: Record<string, unknown>): Room {
+  function activeRoom(
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+    singleConnection = false,
+  ): Room {
     const stats = vi
       .fn()
       .mockResolvedValueOnce(new Map([["audio", { id: "audio", type: "inbound-rtp", ...before }]]))
@@ -156,27 +160,37 @@ describe("connection diagnostics", () => {
       remoteParticipants: new Map([["other", {}]]),
       engine: {
         client: { ws: { readyState: WebSocket.OPEN } },
-        pcManager: { subscriber: { getStats: stats } },
+        pcManager: singleConnection
+          ? { publisher: { getStats: stats } }
+          : {
+              subscriber: { getStats: stats },
+              // Outgoing media must never be accepted as incoming evidence.
+              publisher: { getStats: vi.fn().mockRejectedValue(new Error("publisher read")) },
+            },
       },
     } as unknown as Room;
     services.getRoom = vi.fn().mockReturnValue(room);
     return room;
   }
 
-  it("requires advancing decoded audio energy and nonconcealed samples", async () => {
-    activeRoom(
-      { totalAudioEnergy: 4, totalSamplesReceived: 100, concealedSamples: 0 },
-      { totalAudioEnergy: 5, totalSamplesReceived: 200, concealedSamples: 0 },
-    );
-    const work = run();
-    await vi.advanceTimersByTimeAsync(3100);
-    await work;
-    expect(final("signaling")?.status).toBe("passed");
-    expect(final("media")).toMatchObject({
-      status: "passed",
-      detail: expect.stringContaining("Incoming audio decoded"),
-    });
-  });
+  it.each([false, true])(
+    "requires advancing decoded audio energy and nonconcealed samples (single connection: %s)",
+    async (singleConnection) => {
+      activeRoom(
+        { totalAudioEnergy: 4, totalSamplesReceived: 100, concealedSamples: 0 },
+        { totalAudioEnergy: 5, totalSamplesReceived: 200, concealedSamples: 0 },
+        singleConnection,
+      );
+      const work = run();
+      await vi.advanceTimersByTimeAsync(3100);
+      await work;
+      expect(final("signaling")?.status).toBe("passed");
+      expect(final("media")).toMatchObject({
+        status: "passed",
+        detail: expect.stringContaining("Incoming audio decoded"),
+      });
+    },
+  );
 
   it.each([
     [{ bytesReceived: 1 }, { bytesReceived: 50 }],

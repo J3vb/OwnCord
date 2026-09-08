@@ -227,30 +227,49 @@ Verified in the Linux development environment:
   pass under the race detector. The telemetry capture test passes in isolation.
 - Generated SQL/protocol/API/schema output is current. Repository hygiene
   and docs gates pass; shellcheck and actionlint were unavailable locally
-  and remain CI checks. No shell scripts or workflows were changed.
+  and were subsequently verified by CI.
+
+CI follow-up on `b5c03673` in [run 34264647482](https://github.com/J3vb/OwnCord/actions/runs/34264647482):
+
+- Both full Go race-and-coverage passes (Linux and Windows) pass. The initial
+  local database/service/WebSocket race runs exhausted their ten-minute
+  package budgets; the complete CI passes resolve that validation gap.
+- Complete client unit, mocked-browser and production-browser suites pass,
+  including the two synchronization corrections above. Static checks, Rust
+  unit tests, admin E2E, hygiene, docs and all three CodeQL analyses pass.
+- Fifteen of sixteen real-server/media cases pass, including message retry,
+  ordinary connection diagnostics and signed server replacement. The active
+  media diagnostic exposed LiveKit's single-peer-connection layout: incoming
+  media lives on the publisher when there is no subscriber. The fallback fix
+  has a regression that fails with the former subscriber-only implementation.
+- The Windows native pending-message test passes encryption-backed storage,
+  account isolation, persistence across real process restarts, and deletion
+  persistence. Other native cases exposed completed HTTP requests being
+  canceled during cleanup and a missing response-body cancellation permission.
+- Separate dependency PRs exposed npm/Rust Tauri minor-version drift. The new
+  fast lockfile check detects both original failures and accepts their paired
+  corrections. Installer output is now forwarded live while remaining backed
+  by a file, so a lost runner need not erase the last visible installer stage.
 
 Still being validated:
 
-- The complete server race pass remains unresolved: database, service and
-  WebSocket packages exhausted their ten-minute package budgets while making
-  progress through ordinary tests/migrations. These are explicit failed local
-  checks; focused race passes do not replace the missing complete pass.
-  Dedicated CI must also run the complete client/browser suites with the two
-  test-only synchronization corrections above.
-- Real-media diagnostic assertions need CI: the verified LiveKit binary cannot
+- The corrected active-media diagnostic needs another CI run. LiveKit cannot
   enumerate network interfaces in this environment (`netlinkrib: operation
 not permitted`). No successful media-path claim follows from the ordinary
   connection tests.
-- Windows native execution needs CI. The required native suite now saves a
-  value larger than the Windows keyring entry limit, restarts the real app,
-  verifies owner isolation, deletes it, and restarts again to verify deletion.
-  The browser test store does not substitute for this check.
+- Native HTTP cleanup and cancellation, plus the signed Windows installer
+  journey, require fresh Windows validation. Earlier installer runs on other
+  PRs lost their entire hosted runner; diagnostic forwarding is not a claim
+  that the runner-loss cause is fixed.
+- GitHub's additional managed security scanner failed before analysis with
+  `The requested model is not supported`. This is separate from passing
+  CodeQL checks; no repository gate has been disabled to conceal the failure.
 
 The initial support bundle covers the server only. A combined desktop bundle
 remains a separate extension of the existing privacy contract. Pending-send
 recovery limits are described above and in
 [credential-storage.md](../credential-storage.md).
 
-The owner authorized publishing this implementation to `J3vb/OwnCord` and
-opening a draft PR against `dev`. The platform checks above remain required
-before the work is ready to merge.
+Implementation is tracked in [PR #1573](https://github.com/J3vb/OwnCord/pull/1573)
+against `dev`. The platform checks above remain required before the work is
+ready to merge.
