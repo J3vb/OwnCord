@@ -36,9 +36,8 @@ import (
 // user past upload.user_quota_mb. Handlers answer 507 STORAGE_QUOTA_EXCEEDED.
 var ErrQuotaExceeded = errors.New("upload would exceed your storage quota")
 
-// ErrLowDisk is returned by Reserve and CheckHeadroom when the upload would
-// take the upload volume under server.min_free_disk_mb. Handlers answer 507
-// STORAGE_LOW_DISK.
+// ErrLowDisk is returned by Reserve when the upload would take the upload
+// volume under server.min_free_disk_mb. Handlers answer 507 STORAGE_LOW_DISK.
 var ErrLowDisk = errors.New("server storage is below its reserved headroom")
 
 // StorageLimits is what the upload path admits against.
@@ -123,22 +122,6 @@ func (q *storageQuota) fitsLocked(n int64) bool {
 		return false
 	}
 	return free >= need
-}
-
-// CheckHeadroom reports ErrLowDisk if n more bytes would take the upload
-// volume under its floor. It charges nothing; the upload handler runs it
-// against the request's Content-Length before the multipart parser spools
-// the body to disk, which happens before any Reserve could.
-func (s *UploadService) CheckHeadroom(n int64) error {
-	if n < 0 {
-		return fmt.Errorf("%w: negative upload size", ErrBadRequest)
-	}
-	s.quota.mu.Lock()
-	defer s.quota.mu.Unlock()
-	if !s.quota.fitsLocked(n) {
-		return ErrLowDisk
-	}
-	return nil
 }
 
 // Reserve admits n bytes for userID against both bounds and charges the
