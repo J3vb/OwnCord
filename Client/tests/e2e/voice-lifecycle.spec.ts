@@ -246,6 +246,10 @@ test.describe("Voice WS flow", () => {
     await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
 
+    // Await the server acknowledgment before leaving. The widget appears
+    // optimistically, before the delayed voice_state reply arrives.
+    await expect(page.locator(".voice-user-item", { hasText: "testuser" })).toHaveCount(1);
+
     // Leave voice
     const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
     await disconnectBtn.click();

@@ -4,5 +4,6 @@
   "project": ["src/**/*.ts"],
   "ignore": ["public/**", "src-tauri/**", "src/lib/protocolTypes.ts"],
   "ignoreDependencies": ["@tauri-apps/cli"],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": ["go"]
 }

@@ -19,6 +19,7 @@ export default defineConfig({
   globalTimeout: 25 * 60 * 1000,
   reporter: process.env.CI
     ? [
+        ["list"],
         ["html", { open: "never", outputFolder: "playwright-report/native" }],
         ["junit", { outputFile: "test-results/native-junit.xml" }],
       ]

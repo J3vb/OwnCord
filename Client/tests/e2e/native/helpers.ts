@@ -81,21 +81,32 @@ const confirmedHosts = new WeakMap<Page, Set<string>>();
 export async function nativeLogin(page: Page): Promise<void> {
   await expect(page.locator("#host")).toBeEditable();
   await page.locator("#host").fill(SERVER_URL);
+  await page.locator("#username").fill(TEST_USER);
+  await page.locator("#password").fill(TEST_PASS);
+  const submit = page.locator("button.btn-primary[type='submit']");
   const confirmed = confirmedHosts.get(page) ?? new Set<string>();
   if (!confirmed.has(SERVER_URL)) {
-    // Every fixture starts with its own empty certificate store. Exercise the
-    // real first-use ceremony before sending credentials to the owned server.
+    // A manually entered host has no saved-profile health check. Submit
+    // triggers its first TLS contact; Rust refuses to send credentials until
+    // this certificate has been explicitly trusted.
+    await submit.click();
     const dialog = page.getByRole("dialog", { name: "New Server Certificate" });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(SERVER_URL);
     await dialog.getByRole("button", { name: "Trust This Certificate", exact: true }).click();
     await expect(dialog).toBeHidden();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (host) => (window as any).__TAURI_INTERNALS__.invoke("get_cert_fingerprint", { host }),
+          SERVER_URL,
+        ),
+      )
+      .toMatch(/^[0-9A-Fa-f:]+$/);
     confirmed.add(SERVER_URL);
     confirmedHosts.set(page, confirmed);
   }
-  await page.locator("#username").fill(TEST_USER);
-  await page.locator("#password").fill(TEST_PASS);
-  await page.locator("button.btn-primary[type='submit']").click();
+  await submit.click();
   await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
 }
 
@@ -177,5 +188,5 @@ export async function countTextChannels(page: Page): Promise<number> {
  * Count voice channels visible in the sidebar.
  */
 export async function countVoiceChannels(page: Page): Promise<number> {
-  return page.locator(".channel-item .ch-icon", { hasText: "\u{1F50A}" }).count();
+  return page.locator(".channel-item.voice").count();
 }

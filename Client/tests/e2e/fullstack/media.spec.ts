@@ -4,7 +4,7 @@ import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 test.use({ media: true });
 test.setTimeout(180_000);
 
-test("encrypted audio/video survives signaling loss and channel switches without duplicate capture", async ({
+test("encrypted media recovers from LiveKit signaling loss and application reconnect", async ({
   alice,
   bob,
   aliceTransport,
@@ -16,10 +16,30 @@ test("encrypted audio/video survives signaling loss and channel switches without
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expectDecodedMedia(bob, true);
   const baseline = await mediaStats(alice);
+  const signalCount = await alice.evaluate(() => window.__ocMedia.signaling.length);
+  await alice.evaluate(() => {
+    const socket = window.__ocMedia.signaling.find((ws) => ws.readyState === WebSocket.OPEN);
+    if (!socket) throw new Error("No live LiveKit signaling connection");
+    socket.close(4000, "E2E signaling interruption");
+  });
+  await expect
+    .poll(() => alice.evaluate(() => window.__ocMedia.signaling.length))
+    .toBeGreaterThan(signalCount);
+  await expectDecodedMedia(bob, true);
+  expect((await mediaStats(alice)).senders).toBe(baseline.senders);
+
+  // The application server intentionally removes voice membership when
+  // its authenticated socket disconnects. Require cleanup, then a fresh
+  // authorized join and key exchange after application reconnection.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   aliceTransport.online();
   await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
+  await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);
+  await expect.poll(async () => (await mediaStats(alice)).liveCapture).toBe(0);
+  await joinVoice(alice);
+  await expectDecodedMedia(alice);
+  await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
@@ -41,7 +61,7 @@ test("microphone denial offers recovery and device removal produces the applicat
   });
   await joinVoice(alice);
   await joinVoice(bob);
-  const grant = alice.getByRole("button", { name: "Grant Microphone", exact: true });
+  const grant = alice.getByRole("button", { name: "Grant microphone permission", exact: true });
   await expect(grant).toBeVisible();
   await alice.evaluate(() => {
     window.__ocMedia.denyMic = false;

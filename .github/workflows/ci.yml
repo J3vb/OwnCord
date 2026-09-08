@@ -737,11 +737,13 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          cache-on-failure: true
       - run: npm ci
       - run: npm run test:e2e:build-server
       - run: node tests/e2e/scripts/install-livekit.mjs
-      # Exercise the release executable without requiring production signing secrets.
-      - run: npm run tauri build -- --no-bundle
+      # Release optimization, separate identity and API-configured WebView2 debugging.
+      - run: node tests/e2e/scripts/native-test-config.mjs
+      - run: npm run tauri build -- --no-bundle --config tests/e2e/.bin/tauri.native.json
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe

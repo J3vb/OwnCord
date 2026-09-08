@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile, readdir, copyFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { nativeTestConfig } from "./native-test-config.mjs";
 const exec = promisify(execFile);
 if (process.platform !== "win32" || !process.env.CI)
   throw new Error("Packaged desktop builds run in Windows CI only");
@@ -33,6 +34,7 @@ for (const [label, version] of [
   await writeFile(
     config,
     JSON.stringify({
+      ...(await nativeTestConfig()),
       version,
       productName: "OwnCord E2E",
       identifier: "com.owncord.e2e",

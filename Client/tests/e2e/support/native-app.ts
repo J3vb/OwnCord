@@ -1,23 +1,27 @@
 import { chromium, expect, type TestInfo } from "@playwright/test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { freePort, startProcess, stopProcess, waitForHttp } from "./process";
+import { startProcess, stopProcess, waitForHttp } from "./process";
 
 export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BINARY) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
   const exe = resolve(binary ?? "src-tauri/target/release/owncord-client.exe");
   const directory = await mkdtemp(join(tmpdir(), "owncord-native-e2e-"));
-  const port = await freePort();
-  await mkdir(join(directory, "roaming"));
-  await mkdir(join(directory, "local"));
-  const running = startProcess(exe, [], directory, {
-    ...process.env,
-    APPDATA: join(directory, "roaming"),
-    LOCALAPPDATA: join(directory, "local"),
-    WEBVIEW2_USER_DATA_FOLDER: join(directory, "webview"),
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --use-fake-device-for-media-stream --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required`,
-  });
+  // Native builds use com.owncord.e2e and a fixed CDP port configured via
+  // Tauri, because elevated WebView2 ignores environment overrides. The
+  // native lane is serial and owns this namespace; production data is separate.
+  const port = 9222;
+  const profiles = [...new Set([process.env.APPDATA, process.env.LOCALAPPDATA])]
+    .filter((root): root is string => !!root)
+    .map((root) => join(root, "com.owncord.e2e"));
+  if (profiles.length === 0) throw new Error("Windows application data paths are missing");
+  const clearProfiles = async () => {
+    for (const profile of profiles)
+      await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+  };
+  await clearProfiles();
+  const running = startProcess(exe, [], directory);
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
     await waitForHttp(`http://127.0.0.1:${port}/json/version`, running);
@@ -38,6 +42,7 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
           await browser?.close();
         } finally {
           await stopProcess(running.child);
+          await clearProfiles();
           await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
         }
       },
@@ -45,6 +50,7 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
   } catch (error) {
     await browser?.close().catch(() => {});
     await stopProcess(running.child);
+    await clearProfiles();
     await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
     throw new Error(`${String(error)}\n${running.log()}`);
   }

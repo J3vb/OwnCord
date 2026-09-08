@@ -55,17 +55,13 @@ interface PrevSnapshot {
  *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
 async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
   try {
-    const engine = room.engine as unknown as Record<string, unknown>;
-    const pcManager = engine.pcManager as
-      | { publisher?: { pc?: RTCPeerConnection }; subscriber?: { pc?: RTCPeerConnection } }
-      | undefined;
-
+    // Use the SDK transport API: PCTransport owns a private _pc, not a
+    // public `pc`. Keeping this typed makes SDK shape changes a build error.
+    const pcManager = room.engine.pcManager;
     const reports: RTCStatsReport[] = [];
-    if (pcManager?.publisher?.pc) {
-      reports.push(await pcManager.publisher.pc.getStats());
-    }
-    if (pcManager?.subscriber?.pc) {
-      reports.push(await pcManager.subscriber.pc.getStats());
+    for (const transport of [pcManager?.publisher, pcManager?.subscriber]) {
+      const report = await transport?.getStats();
+      if (report) reports.push(report);
     }
     return reports;
   } catch {

@@ -2,7 +2,8 @@
  * Native E2E: Voice channel controls with real app.
  *
  * Tests voice channel UI, mute/deafen buttons, voice widget rendering,
- * and disconnect flow. Does NOT test actual WebRTC (no mic/audio).
+ * and disconnect flow through the real server and LiveKit. Decoded media
+ * assertions live in the full-stack suite.
  *
  * Requires: Server with at least 1 voice channel.
  */
@@ -22,22 +23,18 @@ test.describe("Voice Channel UI", () => {
   });
 
   test("voice channels are listed with speaker icon", async ({ nativePage }) => {
-    const voiceIcons = nativePage.locator(".channel-item .ch-icon", { hasText: "🔊" });
+    const voiceIcons = nativePage.locator(".channel-item.voice .ch-icon [data-icon='volume-2']");
     await expect(voiceIcons.first()).toBeVisible();
   });
 
   test("voice channel names are displayed", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     const name = await voiceChannels.first().locator(".ch-name").textContent();
     expect(name?.trim().length).toBeGreaterThan(0);
   });
 
   test("clicking voice channel triggers voice join", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     await voiceChannels.first().click();
 
     const voiceWidget = nativePage.locator(".voice-widget.visible");
@@ -45,9 +42,7 @@ test.describe("Voice Channel UI", () => {
   });
 
   test("voice widget shows channel name", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     const channelName = await voiceChannels.first().locator(".ch-name").textContent();
     await voiceChannels.first().click();
 
@@ -59,9 +54,7 @@ test.describe("Voice Channel UI", () => {
   });
 
   test("voice widget has control buttons", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     await voiceChannels.first().click();
     const voiceWidget = nativePage.locator(".voice-widget.visible");
     await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
@@ -72,9 +65,7 @@ test.describe("Voice Channel UI", () => {
   });
 
   test("mute button toggles active state", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     await voiceChannels.first().click();
     const voiceWidget = nativePage.locator(".voice-widget.visible");
     await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
@@ -92,9 +83,7 @@ test.describe("Voice Channel UI", () => {
   });
 
   test("disconnect button leaves voice channel", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item").filter({
-      has: nativePage.locator(".ch-icon", { hasText: "🔊" }),
-    });
+    const voiceChannels = nativePage.locator(".channel-item.voice");
     await voiceChannels.first().click();
     const voiceWidget = nativePage.locator(".voice-widget.visible");
     await expect(voiceWidget).toBeVisible({ timeout: 10_000 });

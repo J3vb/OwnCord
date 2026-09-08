@@ -29,6 +29,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     const page = app.page;
     page.on("pageerror", (error) => errors.push(error.message));
     configureNativeServer(gateway.origin);
+    await page.locator("#auto-connect").check();
     await nativeLogin(page);
     const version = () =>
       page.evaluate(() => (window as any).__TAURI_INTERNALS__.invoke("plugin:app|version"));
@@ -87,6 +88,8 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
             }
             return current;
           } catch {
+            await replacement?.close().catch(() => {});
+            replacement = undefined;
             return "starting";
           }
         },

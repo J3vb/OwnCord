@@ -25,6 +25,8 @@ Browser full-stack tests replace desktop IPC only: HTTP, WebSocket, authenticati
 
 Server update tests build two real main packages using a Go overlay for the ephemeral signing key, upstream HTTP destination and PID journal. Production signature verification, staging, atomic replacement and restart code remain intact. Tests check that a broken download reaches the artifact, fails, leaves the installed hash unchanged and clears staging. A valid signed release is applied through the admin UI; the successor must serve the new version, preserve messages, accept new traffic and, in the media variant, resume decoded audio.
 
+Native builds use `native-test-config.mjs` for a separate application identifier, a serial CDP port and WebView settings passed through Tauri’s API (elevated WebView2 ignores environment overrides). Each fresh native process clears only the `com.owncord.e2e` profile; an installer relaunch retains it.
+
 Desktop installer tests use a separate application identifier and ephemeral signing key. They never need production signing secrets. Their TLS gateway proxies real OwnCord traffic and supplies only release metadata and signed installer bytes.
 
 ## Failure policy

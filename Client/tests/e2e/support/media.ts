@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 
 type MediaProbe = {
   peers: RTCPeerConnection[];
+  signaling: WebSocket[];
   tracks: MediaStreamTrack[];
   denyMic: boolean;
   poorQuality: boolean;
@@ -30,6 +31,15 @@ declare global {
  * never by writing application stores, badges, toasts or CSS. */
 export async function installMediaProbe(page: Page) {
   await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        // OwnCord's application socket lives in the Node transport adapter;
+        // these are the real LiveKit browser signaling connections.
+        probe.signaling.push(this);
+      }
+    };
     const originalStats = RTCPeerConnection.prototype.getStats;
     const originalGetMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     const originalPost = Worker.prototype.postMessage;
@@ -43,6 +53,7 @@ export async function installMediaProbe(page: Page) {
     );
     const probe: MediaProbe = {
       peers: [],
+      signaling: [],
       tracks: [],
       denyMic: false,
       poorQuality: false,
