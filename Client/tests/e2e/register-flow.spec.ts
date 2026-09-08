@@ -2,7 +2,7 @@
  * E2E tests for the registration flow.
  * Covers: mode toggle, form validation, register success, register error.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE } from "./helpers";
 
 const MOCK_REGISTER_RESPONSE = {

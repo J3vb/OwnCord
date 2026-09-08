@@ -6,7 +6,7 @@
  * in localStorage, and survive navigation between settings tabs.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   mockTauriFullSession,
   navigateToMainPageReady,

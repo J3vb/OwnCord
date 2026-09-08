@@ -11,10 +11,16 @@ import { type Page, expect } from "@playwright/test";
 // Environment config
 // ---------------------------------------------------------------------------
 
-export const SERVER_URL = process.env.OWNCORD_SERVER_URL ?? "localhost:8443";
-export const TEST_USER = process.env.OWNCORD_TEST_USER ?? "";
-export const TEST_PASS = process.env.OWNCORD_TEST_PASS ?? "";
+export let SERVER_URL = process.env.OWNCORD_SERVER_URL ?? "localhost:8443";
+export let TEST_USER = process.env.OWNCORD_TEST_USER ?? "";
+export let TEST_PASS = process.env.OWNCORD_TEST_PASS ?? "";
 export const SKIP_SERVER = !!process.env.OWNCORD_SKIP_SERVER_TESTS;
+
+export function configureNativeServer(origin: string): void {
+  SERVER_URL = origin.replace("https://", "");
+  TEST_USER = "alice";
+  TEST_PASS = "OwnCord-E2E-pass-123!";
+}
 
 /** Returns true if real server credentials are configured. */
 export function hasCredentials(): boolean {
@@ -68,52 +74,29 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
  * Perform a real login against the server.
  * Requires OWNCORD_TEST_USER and OWNCORD_TEST_PASS env vars.
  *
- * Includes exponential backoff retry to handle server rate limiting
- * (5 logins/min, 10-failure lockout).
+ * The fixture owns the fresh server and certificate store; retries happen at
+ * the Playwright attempt boundary with a fresh worker.
  */
-export async function nativeLogin(page: Page, maxRetries = 3): Promise<void> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Wait for the connect form to be ready instead of relying on networkidle
-      const hostInput = page.locator("#host");
-      await expect(hostInput).toBeVisible({ timeout: 15_000 });
-      await expect(hostInput).toBeEditable({ timeout: 5_000 });
-
-      // Fill the connect form
-      await hostInput.clear();
-      await hostInput.fill(SERVER_URL);
-
-      await page.locator("#username").fill(TEST_USER);
-      await page.locator("#password").fill(TEST_PASS);
-      await page.locator("button.btn-primary[type='submit']").click();
-
-      // Wait for the main app layout to appear (real server + WS handshake).
-      // Use 60s timeout to accommodate server rate limiting and slow connections.
-      const appLayout = page.locator("[data-testid='app-layout']");
-      await expect(appLayout).toBeVisible({ timeout: 60_000 });
-      return; // success
-    } catch (error: unknown) {
-      lastError = error;
-
-      if (attempt < maxRetries) {
-        // Exponential backoff: 2s, 4s, 8s
-        const delay = Math.pow(2, attempt + 1) * 1000;
-        await new Promise((r) => setTimeout(r, delay));
-
-        // Dismiss any error banner before retrying
-        const errorBanner = page.locator(".error-banner");
-        const hasBanner = await errorBanner.isVisible().catch(() => false);
-        if (hasBanner) {
-          // Wait for the error banner to disappear before retrying
-          await errorBanner.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
-        }
-      }
-    }
+const confirmedHosts = new WeakMap<Page, Set<string>>();
+export async function nativeLogin(page: Page): Promise<void> {
+  await expect(page.locator("#host")).toBeEditable();
+  await page.locator("#host").fill(SERVER_URL);
+  const confirmed = confirmedHosts.get(page) ?? new Set<string>();
+  if (!confirmed.has(SERVER_URL)) {
+    // Every fixture starts with its own empty certificate store. Exercise the
+    // real first-use ceremony before sending credentials to the owned server.
+    const dialog = page.getByRole("dialog", { name: "New Server Certificate" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(SERVER_URL);
+    await dialog.getByRole("button", { name: "Trust This Certificate", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    confirmed.add(SERVER_URL);
+    confirmedHosts.set(page, confirmed);
   }
-
-  throw lastError;
+  await page.locator("#username").fill(TEST_USER);
+  await page.locator("#password").fill(TEST_PASS);
+  await page.locator("button.btn-primary[type='submit']").click();
+  await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
 }
 
 /**

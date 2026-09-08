@@ -2,7 +2,7 @@
  * E2E tests for the ConnectedOverlay component.
  * Covers: overlay appears after login, shows server info, spinner → "Ready!" transition.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSession, submitLogin, navigateToMainPage } from "./helpers";
 
 test.describe("Connected Overlay", () => {

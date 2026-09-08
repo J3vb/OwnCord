@@ -437,20 +437,7 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
-  # Playwright e2e against the mocked-Tauri dev server. Runaway protection
-  # lives in playwright.config.ts (maxFailures: 20 aborts a systemic cascade
-  # early; globalTimeout: 20 min self-terminates with a usable report) with
-  # timeout-minutes below as the outer backstop.
-  #
-  # BLOCKING since 2026-08-05 (DC-07): the post-repair soak recorded green
-  # full-suite runs at 270, 276 and 291 tests across the 08-04/08-05 audit
-  # branches, and the one hard CI failure in that window was a real spec bug
-  # (updater install-settle race), which a non-blocking job would have let
-  # rot. retries: 2 absorbs the known rare flake class (see E2E-ISSUES.md's
-  # flake accounting).
-  # See docs/audit-test-coverage-2026-07-25.md T-2026-07-25-21.
-  # The native config (playwright.config.native.ts) is deliberately not wired
-  # up — it needs a real server and a built desktop binary.
+  # Mocked desktop boundary: unexpected IPC/page errors and flakes fail.
   client-e2e:
     name: Client E2E (Playwright)
     runs-on: ubuntu-latest
@@ -492,22 +479,10 @@ jobs:
             Client/test-results/
           retention-days: 7
 
-  # Admin-panel journey against a REAL server (no mocks): start-server.sh
-  # builds the Go binary and boots it with a fresh temp data dir, and the
-  # suite drives the embedded SPA through the first-run wizard, dashboard,
-  # channel CRUD, audit log and re-login — the one DC-04 surface the mocked
-  # suites cannot reach. Non-blocking while it earns its soak, same
-  # graduation convention client-e2e followed.
-  # GRADUATION CRITERION (recorded 2026-08-15): flip continue-on-error to
-  # false once the job has ~30 consecutive green runs on main with no
-  # infra-flake reruns — the same evidence bar client-e2e cleared (270+ green
-  # runs cited in docs/audit-2026-08-04-docs-and-coverage.md) scaled to this
-  # job's lower traffic. Check with: gh run list -w CI -b main --json
-  # conclusion | jq '[.[] | .conclusion] | index("failure")'.
+  # Each admin attempt owns a fresh real server and database.
   admin-e2e:
-    name: Admin Panel E2E (real server, non-blocking)
+    name: Admin Panel E2E (real server)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 20
     defaults:
       run:
@@ -533,7 +508,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run admin-panel journey
-        run: npx playwright test --config=playwright.config.admin.ts
+        run: npm run test:e2e:admin
 
       - name: Upload Playwright report
         if: always()
@@ -545,13 +520,8 @@ jobs:
             Client/test-results/
           retention-days: 7
 
-  # Blocking e2e subset: the parity-feature specs (tagged "@parity"), covering
-  # the wire paths added in v1.2.0 (mentions/badges, per-channel mute, NSFW
-  # gate, group DMs, role change, custom-emoji autocomplete, voice moderation).
-  # These are new and authored green, so unlike the full legacy suite above they
-  # gate PRs: a regression on one of these features must fail CI. Kept as its own
-  # job (not folded into the non-blocking suite) so the legacy suite can keep
-  # earning its "few green pushes" before it too graduates to blocking.
+  # Built production assets catch bundling/worker regressions independently.
+  # Keep the historical check name: live branch protection already requires it.
   client-e2e-parity:
     name: Client E2E (parity subset, blocking)
     runs-on: ubuntu-latest
@@ -574,8 +544,8 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Run parity e2e specs
-        run: npx playwright test --config=playwright.config.ts --grep "@parity"
+      - name: Run production e2e specs
+        run: npm run test:e2e:prod
 
       - name: Upload Playwright report
         if: always()
@@ -710,3 +680,81 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
+
+  client-fullstack:
+    name: Client E2E (real server and media)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/e2e/scripts/install-livekit.mjs
+      - name: Test two clients, real server and encrypted decoded media
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
+        run: npm run test:e2e:fullstack
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: fullstack-e2e-report
+          path: |
+            Client/playwright-report/
+            Client/test-results/
+          retention-days: 7
+
+  client-native:
+    name: Client E2E (Windows native)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: Client/src-tauri
+      - run: npm ci
+      - run: npm run test:e2e:build-server
+      - run: node tests/e2e/scripts/install-livekit.mjs
+      # Exercise the release executable without requiring production signing secrets.
+      - run: npm run tauri build -- --no-bundle
+      - name: Test actual Rust transport and WebView2
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
+        run: npx playwright test --config playwright.config.native.ts --project native-core
+      - name: Build two signed NSIS test packages
+        run: node tests/e2e/scripts/build-native-updates.mjs
+      - name: Test actual signed desktop installation and relaunch
+        run: npx playwright test --config playwright.config.native.ts --project native-updater
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-e2e-report
+          path: |
+            Client/playwright-report/
+            Client/test-results/
+          retention-days: 7

@@ -8,30 +8,32 @@ import { defineConfig, devices } from "@playwright/test";
  * Usage:  npm run test:e2e:prod
  */
 export default defineConfig({
+  outputDir: "test-results/prod",
   testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**"],
+  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**"],
   timeout: 30_000,
   expect: {
     timeout: 5_000,
   },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 1,
+  retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never" }],
-        ["junit", { outputFile: "test-results/junit.xml" }],
+        ["html", { open: "never", outputFolder: "playwright-report/prod" }],
+        ["junit", { outputFile: "test-results/prod-junit.xml" }],
       ]
-    : "html",
+    : [["list"], ["html", { open: "never", outputFolder: "playwright-report/prod" }]],
 
   use: {
     baseURL: "http://localhost:4173",
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
     screenshot: "only-on-failure",
-    trace: "on-first-retry",
-    video: "on-first-retry",
+    trace: "retain-on-failure",
+    video: "retain-on-failure",
     contextOptions: { reducedMotion: "reduce" },
   },
 
@@ -46,9 +48,9 @@ export default defineConfig({
     // Spawn Vite directly rather than through npm — see the note in
     // playwright.config.ts: an `npm run` wrapper leaves vite alive as an
     // orphaned grandchild on teardown and the runner never exits.
-    command: "npx vite preview",
+    command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",
     url: "http://localhost:4173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

@@ -8,19 +8,17 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import { SKIP_SERVER, hasCredentials, ensureLoggedIn, countVoiceChannels } from "./helpers";
+import { ensureLoggedIn, countVoiceChannels } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
 test.describe("Voice Channel UI", () => {
   test.beforeEach(async ({ nativePage }) => {
-    test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
-    test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await ensureLoggedIn(nativePage);
 
-    // Conditional skip: need at least 1 voice channel
+    // Seeded fixture guarantees voice channels; missing data is a failure.
     const voiceCount = await countVoiceChannels(nativePage);
-    test.skip(voiceCount === 0, "No voice channels on this server");
+    expect(voiceCount).toBeGreaterThan(0);
   });
 
   test("voice channels are listed with speaker icon", async ({ nativePage }) => {
@@ -84,11 +82,13 @@ test.describe("Voice Channel UI", () => {
     const muteBtn = voiceWidget.locator("button[aria-label='Mute']");
     await expect(muteBtn).toBeVisible({ timeout: 5_000 });
 
+    await expect(muteBtn).toHaveAttribute("aria-pressed", "false");
     await muteBtn.click();
-    const hasActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    expect(typeof hasActive).toBe("boolean");
-
+    await expect(muteBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(muteBtn).toHaveClass(/active-ctrl/);
     await muteBtn.click();
+    await expect(muteBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(muteBtn).not.toHaveClass(/active-ctrl/);
   });
 
   test("disconnect button leaves voice channel", async ({ nativePage }) => {

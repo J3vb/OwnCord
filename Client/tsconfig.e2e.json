@@ -15,7 +15,8 @@
     "playwright.config.ts",
     "playwright.config.prod.ts",
     "playwright.config.native.ts",
-    "playwright.config.admin.ts"
+    "playwright.config.admin.ts",
+    "playwright.config.fullstack.ts"
   ],
   "exclude": []
 }

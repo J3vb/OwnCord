@@ -2,7 +2,7 @@
  * E2E tests for the message send round-trip flow.
  * Covers: type message → send → see it appear in message list.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Send Flow", () => {

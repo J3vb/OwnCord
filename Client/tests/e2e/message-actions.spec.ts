@@ -2,7 +2,7 @@
  * E2E tests for message action buttons (hover actions bar).
  * Tests: reply, edit, delete buttons on message hover.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Actions Bar", () => {

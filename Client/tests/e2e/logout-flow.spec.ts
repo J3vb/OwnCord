@@ -2,7 +2,7 @@
  * E2E tests for the logout flow.
  * Covers: settings → Log Out → returns to connect page.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   mockTauriFullSession,
   mockTauriFullSessionWithAutoConnect,

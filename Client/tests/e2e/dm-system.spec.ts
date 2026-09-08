@@ -6,7 +6,7 @@
  * and background unread increments.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   MOCK_AUTH_OK,

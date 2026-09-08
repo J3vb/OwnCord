@@ -11,7 +11,7 @@
  * These tests validate the UI layer's response to voice-related WS events.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   mockTauriFullSessionWithVoice,
   mockTauriFullSessionWithVoiceFailure,
@@ -168,58 +168,9 @@ test.describe("Voice WS flow", () => {
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
   });
 
-  // 3. Permission recovery button — grant mic button appears when
-  //    listenOnly is true (display toggled via voice store subscription).
-  test("grant mic button appears in listen-only mode", async ({ page }) => {
-    await joinVoiceChannelByName(page);
-    const widget = page.locator("[data-testid='voice-widget']");
-
-    // Set listen-only mode by manipulating the DOM directly (store isn't
-    // exposed on window; listenOnly is set by livekitSession on mic failure).
-    await page.evaluate(() => {
-      const grantBtn = document.querySelector(".vw-grant-mic") as HTMLElement | null;
-      if (grantBtn) grantBtn.style.display = "block";
-    });
-
-    const grantMicBtn = page.locator(".vw-grant-mic");
-    await expect(grantMicBtn).toBeVisible({ timeout: 5000 });
-  });
-
-  // 4. Device hot-swap toast — simulate a toast notification for device change.
-  test("device change shows toast notification", async ({ page }) => {
-    // Toast container is mounted by MainPage — inject a toast element.
-    await page.evaluate(() => {
-      const container = document.querySelector("[data-testid='toast-container']");
-      if (!container) return;
-      const toast = document.createElement("div");
-      toast.className = "toast toast-error";
-      toast.setAttribute("data-testid", "toast");
-      toast.textContent = "Audio device disconnected — switched to default";
-      container.appendChild(toast);
-      requestAnimationFrame(() => toast.classList.add("show"));
-    });
-
-    const toast = page.locator("[data-testid='toast']");
-    await expect(toast).toBeVisible({ timeout: 5000 });
-  });
-
-  // 5. Connection quality warning — stats pane auto-expands on quality degradation.
-  test("quality degradation auto-expands stats pane", async ({ page }) => {
-    await joinVoiceChannelByName(page);
-    const widget = page.locator("[data-testid='voice-widget']");
-
-    const statsPane = page.locator(".vw-stats");
-    await expect(statsPane).not.toHaveClass(/visible/);
-
-    // Simulate quality degradation by adding .visible class to stats pane
-    // (mirrors the onQualityChanged callback for "poor"/"bad" quality)
-    await page.evaluate(() => {
-      const pane = document.querySelector(".vw-stats");
-      if (pane) pane.classList.add("visible");
-    });
-
-    await expect(statsPane).toHaveClass(/visible/, { timeout: 5000 });
-  });
+  // Permission recovery, device removal and quality degradation are tested
+  // through real media/browser APIs in fullstack/media.spec.ts. Never insert
+  // a toast or a CSS class here and assert the test's own DOM mutation.
 
   // 6. Mute/deafen toggle — buttons use aria-pressed and .active-ctrl class.
   test("mute and deafen buttons toggle state", async ({ page }) => {
@@ -340,21 +291,19 @@ test.describe("Voice WS flow — failure", () => {
     await navigateToMainPageReady(page);
   });
 
-  // 13. Voice join failure — join Music, which triggers the failure handler.
-  test("voice join failure does not crash and disconnect still works", async ({ page }) => {
-    const widget = page.locator("[data-testid='voice-widget']");
+  test("voice join refusal reports the error and clears optimistic voice state", async ({
+    page,
+  }) => {
+    const widget = page.getByTestId("voice-widget");
     await expect(widget).not.toHaveClass(/visible/);
-
-    // Join Music — the failure handler responds with a VOICE_JOIN_FAILED error
-    // event; joinVoiceChannel is called synchronously on click, so the widget
-    // shows immediately regardless.
-    await joinVoiceChannelByName(page, "Music");
-
-    // Wait for the error event to be processed — verify app is still functional
-    // by checking the disconnect button remains clickable
-    const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
-    await expect(disconnectBtn).toBeEnabled({ timeout: 5_000 });
-    await disconnectBtn.click();
-    await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
+    // Do not require the transient optimistic widget to survive the refusal.
+    await page.locator(".channel-item.voice", { hasText: "Music" }).click();
+    await expect(
+      page.getByTestId("toast").filter({ hasText: "Failed to join voice channel" }),
+    ).toBeVisible();
+    await expect(widget).not.toHaveClass(/visible/);
+    await expect(page.locator(".voice-user-item", { hasText: "testuser" })).toHaveCount(0);
+    await expect(page.getByTestId("app-layout")).toBeVisible();
+    await expect(page.locator("[data-testid='message-input'] textarea")).toBeEditable();
   });
 });
