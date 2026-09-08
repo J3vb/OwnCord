@@ -295,16 +295,18 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 	}
 }
 
-// findFilePart walks a multipart request until it finds the "file" field,
-// closing every other part without buffering it, and reports the reader's
-// own error (io.EOF included) when no such field turns up.
+// findFilePart walks a multipart request until it finds the "file" field
+// carrying an actual file (a filename= attribute — what distinguished
+// r.FormFile("file") from a same-named plain value), closing every other
+// part without buffering it, and reports the reader's own error (io.EOF
+// included) when no such field turns up.
 func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 	for {
 		part, err := mr.NextPart()
 		if err != nil {
 			return nil, err
 		}
-		if part.FormName() == "file" {
+		if part.FormName() == "file" && part.FileName() != "" {
 			return part, nil
 		}
 		part.Close() //nolint:errcheck
