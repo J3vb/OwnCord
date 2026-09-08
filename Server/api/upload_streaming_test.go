@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -184,6 +186,38 @@ func TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead(t *testing
 	}
 	if probes.Load() < 1 {
 		t.Fatal("the floor probe never ran for an unknown-length body")
+	}
+}
+
+// TestUpload_PlainFieldNamedFileIsNotAFile: a plain form value named "file"
+// (no filename= attribute — not a file part at all) must still be refused
+// as a missing file field, matching what r.FormFile("file") always gave a
+// same-named non-file value. findFilePart matches on form name alone, so
+// this would otherwise upload the field's own bytes as a nameless file.
+func TestUpload_PlainFieldNamedFileIsNotAFile(t *testing.T) {
+	h := newQuotaHarness(t, nil)
+	h.limits(t, 0, 0, nil)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("file", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	rr := httptest.NewRecorder()
+	h.router.ServeHTTP(rr, req)
+
+	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
+	if !strings.Contains(rr.Body.String(), "missing file field") {
+		t.Fatalf("body = %s, want the missing-file-field message", rr.Body.String())
+	}
+	if h.filesOnDisk(t) != 0 {
+		t.Fatal("a plain field named \"file\" was uploaded as a file")
 	}
 }
 
