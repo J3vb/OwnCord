@@ -237,6 +237,41 @@ func (r *StorageReservation) Landed() {
 	q.inflightTotal -= r.ubytes
 }
 
+// Resize lowers a reservation to the bytes actually written. It never
+// raises one: a larger value is ignored, because bytes above the admitted
+// envelope were never admitted against the quota or the floor. A no-op for
+// n < 0, n >= the reservation's current bytes, or a reservation already
+// committed or released — so a repeat call, or one made too late, is
+// always safe.
+func (r *StorageReservation) Resize(ctx context.Context, n int64) error {
+	if r == nil || n < 0 {
+		return nil
+	}
+	q := &r.s.quota
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if n >= r.bytes || r.committed || r.released {
+		return nil
+	}
+	delta := r.bytes - n
+	if r.charged {
+		if err := r.s.st.ReleaseUserStorage(ctx, r.userID, delta); err != nil {
+			return fmt.Errorf("%w: storage resize: %w", ErrInternal, err)
+		}
+		if left := q.inflight[r.userID] - delta; left > 0 {
+			q.inflight[r.userID] = left
+		} else {
+			delete(q.inflight, r.userID)
+		}
+	}
+	if !r.landed {
+		q.inflightTotal -= uint64(delta) //nolint:gosec // G115: delta = r.bytes - n, both already checked >= 0 above (n < 0 returns early, n >= r.bytes returns early), so delta is positive and within r.bytes
+	}
+	r.bytes = n
+	r.ubytes = uint64(n)
+	return nil
+}
+
 // Commit keeps the charge: the bytes are on disk and their row exists. A
 // charged reservation is committed by UploadService.Record, under the same
 // lock as its row insert, so a recount can never see the file both in the
