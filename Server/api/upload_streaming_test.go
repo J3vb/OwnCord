@@ -124,6 +124,69 @@ func TestUpload_UnknownLengthIsFloorGatedBeforeTheBodyIsRead(t *testing.T) {
 	}
 }
 
+// chunkedUpload builds and serves a request with no declared Content-Length —
+// httptest's stand-in for a real chunked client, since httptest.NewRequest
+// cannot itself produce chunked transfer-encoding on the wire.
+func chunkedUpload(t *testing.T, h *quotaHarness, content []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	body, contentType := makeMultipartFile(t, "file", "f.bin", content)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.ContentLength = -1
+	req.TransferEncoding = []string{"chunked"}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	rr := httptest.NewRecorder()
+	h.router.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestUpload_UnknownLengthAdmittedUnderAPerFileCap: an unknown-length body
+// must reserve at most upload.max_size_mb, not the full request cap — a
+// user whose quota sits strictly between the two can still upload. Against
+// the unfixed handler the envelope is always the 100 MiB request cap, so
+// this quota (10 MiB) refuses every chunked upload outright.
+func TestUpload_UnknownLengthAdmittedUnderAPerFileCap(t *testing.T) {
+	h := newQuotaHarness(t, nil)
+	h.limitsCapped(t, 10<<20, 0, nil, 5<<20) // quota above the 5 MiB cap, below the 100 MiB request cap
+
+	rr := chunkedUpload(t, h, []byte("hello"))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("chunked upload under a per-file cap smaller than the quota: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap: the same shape, but
+// the quota sits below the cap, so it still refuses — admitting the cap
+// instead of the request size is a tighter bound, not an open one.
+func TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap(t *testing.T) {
+	h := newQuotaHarness(t, nil)
+	h.limitsCapped(t, 3<<20, 0, nil, 5<<20) // quota below the 5 MiB cap
+
+	rr := chunkedUpload(t, h, []byte("hello"))
+	assertErrorCode(t, rr, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED")
+}
+
+// TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead is
+// TestUpload_UnknownLengthIsFloorGatedBeforeTheBodyIsRead's mirror image: a
+// floor with just enough headroom for the 5 MiB cap, but not for the 100 MiB
+// request cap, still admits — proving the reservation made before any byte
+// is read is the cap, not uploadMaxBodySize.
+func TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead(t *testing.T) {
+	h := newQuotaHarness(t, nil)
+	var probes atomic.Int32
+	// 60 MiB free, 50 MiB floor: room for 10 MiB in flight — enough for the
+	// 5 MiB cap, nowhere near enough for a 100 MiB worst case.
+	h.limitsCapped(t, 0, 50<<20, func(string) (uint64, error) { probes.Add(1); return 60 << 20, nil }, 5<<20)
+
+	rr := chunkedUpload(t, h, []byte("hello"))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("chunked upload reserving the 5 MiB cap under a floor that only has room for the cap: %d %s", rr.Code, rr.Body.String())
+	}
+	if probes.Load() < 1 {
+		t.Fatal("the floor probe never ran for an unknown-length body")
+	}
+}
+
 // blockThenCancelReader returns bytes from the wrapped reader until budget
 // bytes have been handed out, signals ready exactly once, then blocks until
 // ctx is done and returns its error — modeling a client that sends some
