@@ -1104,6 +1104,70 @@ allocated blocks, so an operator sizing a volume from
 stays charged until the orphan sweep reclaims it, which is the existing
 lifecycle (data-lifecycle O3) and the safe side.
 
+**Exit-gate follow-up, 2026-09-08 — condition 5.** The 2026-09-06 audit
+carried condition 5 forward asking B5-2 to qualify reservation, admission
+and cleanup over the **complete** upload path, not just the final file
+write: multipart temporary storage included, concurrent bodies above the
+in-memory threshold, both known and unknown lengths, a separately mounted
+temporary volume, cancellation, and restart — with the configured headroom
+boundary proven throughout staging **and** final storage.
+
+Answered by removing the staging stage rather than accounting for it.
+`handleUpload` now calls `r.MultipartReader()` and reserves before reading a
+byte of the body, so no temporary file is ever created and the "separately
+mounted temporary volume" case cannot arise — there is no longer a second
+volume for the floor to miss. `multipartMemoryLimit` (the old 10 MiB
+in-memory threshold `ParseMultipartForm` was called with) is deleted, since
+nothing spools to memory or disk anymore for it to bound. The other three
+multipart handlers were left as they were: `emoji_handler.go`'s
+`emojiMultipartMemoryLimit` (1 MiB) sits above `maxEmojiFileBytes` (512
+KiB), `profile_handler.go`'s `avatarMultipartMemoryLimit` (2 MiB) sits above
+`maxAvatarFileBytes` (1 MiB), and `plugins_handler.go` passes its whole cap
+as the in-memory limit — none of the three can spill, so none needed the
+same treatment.
+
+An unknown-length request (chunked, `Content-Length: -1`) still has to
+reserve something before its true size is known. The envelope is the
+declared length when it is sane, otherwise the smallest of the configured
+per-file cap (`upload.max_size_mb`, already enforced by
+`storage.Storage.Save`) and the request cap. Consequence stated plainly: a
+user without that much quota or headroom left is refused before the body is
+read, however small the upload turns out to be. This is a deliberate
+tightening of the floor's coverage, not an accident — the alternative is
+letting a chunked request through the gate that every known-length request
+already has to clear.
+
+`StorageReservation.Resize` lowers a reservation from its envelope to the
+bytes actually written once the write lands, so a request that reserved the
+worst case is charged only the true size. A `Resize` failure leaves the
+counter high rather than failing the upload — the safe side — and the
+existing maintenance recount repairs it, the same "counter high, never low"
+contract `migrations/044_user_storage.sql` already states for every other
+stale charge.
+
+New tests: `TestUpload_LargeBodyNeverStagesOutsideTheStorageDir`,
+`TestUpload_UnknownLengthIsFloorGatedBeforeTheBodyIsRead`,
+`TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor`,
+`TestUpload_UnknownLengthAdmittedUnderAPerFileCap`,
+`TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap`,
+`TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead`,
+`TestUpload_PlainFieldNamedFileIsNotAFile`,
+`TestResize_LowersTheChargeToTheBytesWritten`,
+`TestResize_NeverRaisesACharge`, and
+`TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart`. One test does not
+fit the pattern and is recorded honestly rather than dressed up as a clean
+red-to-green cycle: `TestUpload_CancelledMidBodyReleasesTheChargeAndLeavesNoFile`
+could not be made to fail against the old handler, because the scenario it
+covers — a reservation outstanding while the body is still being read — was
+unreachable there; the old handler could only reserve after
+`ParseMultipartForm` had already consumed the entire body. It is kept as a
+forward regression guard for the streaming design, not evidence the old
+handler had this covered.
+
+`CheckHeadroom` is removed. Its only caller was the pre-parse
+`Content-Length` check this step's early `Reserve` call subsumes; no other
+caller remained.
+
 ## B5-3 — BG-01 server posture: browser hosting off by default
 
 **Closes:** BG-01's first two closure clauses. **Decisions:** decision 10 — settled. **Size:** 1 day. **Protocol effects:** none. **Migration:** none.

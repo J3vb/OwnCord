@@ -36,9 +36,8 @@ import (
 // user past upload.user_quota_mb. Handlers answer 507 STORAGE_QUOTA_EXCEEDED.
 var ErrQuotaExceeded = errors.New("upload would exceed your storage quota")
 
-// ErrLowDisk is returned by Reserve and CheckHeadroom when the upload would
-// take the upload volume under server.min_free_disk_mb. Handlers answer 507
-// STORAGE_LOW_DISK.
+// ErrLowDisk is returned by Reserve when the upload would take the upload
+// volume under server.min_free_disk_mb. Handlers answer 507 STORAGE_LOW_DISK.
 var ErrLowDisk = errors.New("server storage is below its reserved headroom")
 
 // StorageLimits is what the upload path admits against.
@@ -52,6 +51,11 @@ type StorageLimits struct {
 	// FreeBytes probes free space; nil means diskutil.FreeBytes. A probe
 	// error is "unknown", never "full" (the repository-wide rule).
 	FreeBytes func(dir string) (uint64, error)
+	// MaxUploadBytes is upload.max_size_mb in bytes — the per-file cap
+	// storage.Storage already enforces during Save. It bounds how much an
+	// unknown-length request can possibly cost, since no single file can
+	// land for more than this; 0 means unset (falls back to the request cap).
+	MaxUploadBytes int64
 }
 
 // storageQuota is the in-process half of the counter.
@@ -93,6 +97,16 @@ func (s *UploadService) SetStorageLimits(l StorageLimits) {
 	s.quota.limits = l
 }
 
+// MaxUploadBytes reports the configured per-file cap (0 means unset), so a
+// caller that must reserve before it knows a request's true size — an
+// unknown-length body — can bound the reservation by what a single file can
+// ever cost rather than the full request cap.
+func (s *UploadService) MaxUploadBytes() int64 {
+	s.quota.mu.Lock()
+	defer s.quota.mu.Unlock()
+	return s.quota.limits.MaxUploadBytes
+}
+
 // fitsLocked reports whether n more bytes leave the floor intact. The probe
 // runs under the lock on purpose: a reading taken before earlier uploads
 // landed, judged after they committed (and so left the in-flight sum),
@@ -123,22 +137,6 @@ func (q *storageQuota) fitsLocked(n int64) bool {
 		return false
 	}
 	return free >= need
-}
-
-// CheckHeadroom reports ErrLowDisk if n more bytes would take the upload
-// volume under its floor. It charges nothing; the upload handler runs it
-// against the request's Content-Length before the multipart parser spools
-// the body to disk, which happens before any Reserve could.
-func (s *UploadService) CheckHeadroom(n int64) error {
-	if n < 0 {
-		return fmt.Errorf("%w: negative upload size", ErrBadRequest)
-	}
-	s.quota.mu.Lock()
-	defer s.quota.mu.Unlock()
-	if !s.quota.fitsLocked(n) {
-		return ErrLowDisk
-	}
-	return nil
 }
 
 // Reserve admits n bytes for userID against both bounds and charges the
@@ -235,6 +233,41 @@ func (r *StorageReservation) Landed() {
 	defer q.mu.Unlock()
 	r.landed = true
 	q.inflightTotal -= r.ubytes
+}
+
+// Resize lowers a reservation to the bytes actually written. It never
+// raises one: a larger value is ignored, because bytes above the admitted
+// envelope were never admitted against the quota or the floor. A no-op for
+// n < 0, n >= the reservation's current bytes, or a reservation already
+// committed or released — so a repeat call, or one made too late, is
+// always safe.
+func (r *StorageReservation) Resize(ctx context.Context, n int64) error {
+	if r == nil || n < 0 {
+		return nil
+	}
+	q := &r.s.quota
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if n >= r.bytes || r.committed || r.released {
+		return nil
+	}
+	delta := r.bytes - n
+	if r.charged {
+		if err := r.s.st.ReleaseUserStorage(ctx, r.userID, delta); err != nil {
+			return fmt.Errorf("%w: storage resize: %w", ErrInternal, err)
+		}
+		if left := q.inflight[r.userID] - delta; left > 0 {
+			q.inflight[r.userID] = left
+		} else {
+			delete(q.inflight, r.userID)
+		}
+	}
+	if !r.landed {
+		q.inflightTotal -= uint64(delta) //nolint:gosec // G115: delta = r.bytes - n, both already checked >= 0 above (n < 0 returns early, n >= r.bytes returns early), so delta is positive and within r.bytes
+	}
+	r.bytes = n
+	r.ubytes = uint64(n)
+	return nil
 }
 
 // Commit keeps the charge: the bytes are on disk and their row exists. A

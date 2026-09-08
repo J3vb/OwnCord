@@ -75,7 +75,15 @@ func newQuotaHarness(t *testing.T, store api.FileStore) *quotaHarness {
 
 func (h *quotaHarness) limits(t *testing.T, quota int64, minFree uint64, free func(string) (uint64, error)) {
 	t.Helper()
-	h.uploads.SetStorageLimits(service.StorageLimits{UserQuotaBytes: quota, MinFreeBytes: minFree, Dir: h.dir, FreeBytes: free})
+	h.limitsCapped(t, quota, minFree, free, 0)
+}
+
+// limitsCapped is limits plus upload.max_size_mb in bytes (0 falls back to
+// uploadMaxBodySize) — the bound an unknown-length request's envelope is
+// held to instead of the full request cap.
+func (h *quotaHarness) limitsCapped(t *testing.T, quota int64, minFree uint64, free func(string) (uint64, error), maxUpload int64) {
+	t.Helper()
+	h.uploads.SetStorageLimits(service.StorageLimits{UserQuotaBytes: quota, MinFreeBytes: minFree, Dir: h.dir, FreeBytes: free, MaxUploadBytes: maxUpload})
 }
 
 func (h *quotaHarness) used(t *testing.T) int64 {
@@ -115,7 +123,14 @@ func assertErrorCode(t *testing.T, rr *httptest.ResponseRecorder, status int, co
 
 func TestUploadQuota_ExceededIs507WithItsOwnCode(t *testing.T) {
 	h := newQuotaHarness(t, nil)
-	h.limits(t, 1024, 0, nil)
+	// B5-2 follow-up: Reserve now admits the multipart envelope (the file
+	// bytes plus a few hundred bytes of boundary/header framing) up front,
+	// not the file's own length — Resize corrects the charge down to 1024
+	// only after the write succeeds. The quota has to clear that envelope
+	// for the second upload to be admitted at all, so it is measured from
+	// an identically-shaped body rather than pinned to the file size.
+	envelopeBody, _ := makeMultipartFile(t, "file", "ok.bin", bytes.Repeat([]byte("x"), 1024))
+	h.limits(t, int64(envelopeBody.Len()), 0, nil)
 	rr := doUpload(t, h.router, h.token, "file", "big.bin", bytes.Repeat([]byte("x"), 2048))
 	assertErrorCode(t, rr, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED")
 	if h.filesOnDisk(t) != 0 {
@@ -129,7 +144,7 @@ func TestUploadQuota_ExceededIs507WithItsOwnCode(t *testing.T) {
 		t.Fatalf("exactly-at-quota upload: %d %s", rr.Code, rr.Body.String())
 	}
 	if got := h.used(t); got != 1024 {
-		t.Fatalf("counter = %d, want 1024", got)
+		t.Fatalf("counter = %d, want 1024 (Resize corrected the envelope charge down to the true size)", got)
 	}
 }
 
@@ -165,7 +180,13 @@ func TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled(t *testing.T) {
 func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
 	const size = 1000
 	h := newQuotaHarness(t, nil)
-	h.limits(t, 3*size, 0, nil)
+	// B5-2 follow-up: room for exactly three admissions is now three
+	// envelopes (file bytes plus multipart framing), not three file
+	// lengths — Resize corrects each charge down to size once its write
+	// lands, but the up-front Reserve that decides admission still has to
+	// clear the larger number.
+	envelopeBody, _ := makeMultipartFile(t, "file", "f.bin", bytes.Repeat([]byte("y"), size))
+	h.limits(t, 3*int64(envelopeBody.Len()), 0, nil)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	var created, refused, other atomic.Int32
