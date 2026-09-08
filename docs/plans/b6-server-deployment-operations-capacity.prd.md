@@ -145,9 +145,11 @@ and **one** data-fixture set.
       calls it a real gap needing a named owner before HP-6.
 - [ ] What are the p95/p99 latency budgets HP-6 measures against?
 - [ ] Do ARM64 assets ship in B6, or does B6 only qualify them?
-- [ ] Where do the generated step plans live? ECC's `/plan` writes to
-      `.claude/plans/`, which `.gitignore:9` leaves untracked. Either whitelist
-      it (`!.claude/plans/`) or redirect output into `docs/plans/`.
+- [x] **Decided 2026-09-08:** generated step plans live at ECC's default
+      `.claude/plans/`, whitelisted in `.gitignore` so they are tracked and
+      reviewable in the PR. Prettier reads `.gitignore`, so those plans are
+      format-gated like any other tracked markdown; `npm run format` fixes
+      drift. This PRD stays in `docs/plans/` as the tracked entry point.
 - [ ] Are public-IP certificates still gated on short-lived certificate
       handling per current Let's Encrypt guidance? Re-check before B6-3.
 
