@@ -28,6 +28,10 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     const context = browser.contexts()[0];
     if (!context) throw new Error("WebView2 did not create a context");
+    // This context is attached manually, so Playwright's `use` timeouts are
+    // not applied by the built-in browser fixture.
+    context.setDefaultTimeout(30_000);
+    context.setDefaultNavigationTimeout(45_000);
     await expect.poll(() => context.pages().length).toBeGreaterThan(0);
     const page = context.pages()[0]!;
     return {

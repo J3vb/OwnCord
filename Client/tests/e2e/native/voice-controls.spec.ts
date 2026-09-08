@@ -1,5 +1,6 @@
 import { test, expect } from "../native-fixture-persistent";
 import { ensureLoggedIn } from "./helpers";
+import { setTimeout as delay } from "node:timers/promises";
 
 // One complete journey avoids order-dependent tests sharing a live voice join.
 // Full-stack tests separately require two-user decoded encrypted audio/video.
@@ -26,6 +27,9 @@ test("native voice connects, exposes controls, mutes, deafens and disconnects", 
   await expect(mute).toHaveAttribute("aria-pressed", "false");
   await expect(mute).not.toHaveClass(/active-ctrl/);
 
+  // The protocol permits two mute/deafen actions per second. This is input
+  // pacing after the two mute actions, not a wait for UI/network readiness.
+  await delay(1_000);
   const deafen = widget.getByRole("button", { name: "Deafen", exact: true });
   await expect(deafen).toHaveAttribute("aria-pressed", "false");
   await deafen.click();

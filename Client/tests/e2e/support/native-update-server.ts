@@ -5,12 +5,26 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import type { TestServer } from "./server";
+import { X509Certificate } from "node:crypto";
+import type { PeerCertificate } from "node:tls";
 
 /** Real TLS + Rust updater and real OwnCord HTTP/WS. Only external release
  * metadata/downloads are supplied by the fixture, signed with the CI key. */
 export async function startNativeUpdateServer(server: TestServer, packageDir: string) {
   const cert = await readFile(join(server.directory, "data/cert.pem"));
   const key = await readFile(join(server.directory, "data/key.pem"));
+  // OwnCord's generated certificate has no DNS/IP SANs. Trust its exact
+  // certificate and identity on our owned loopback upstream, just as TOFU
+  // does, while retaining TLS chain/signature/expiry verification.
+  const fingerprint = new X509Certificate(cert).fingerprint256;
+  const upstreamTLS = {
+    ca: cert,
+    checkServerIdentity(host: string, peer: PeerCertificate) {
+      if (host !== "127.0.0.1" || peer.fingerprint256 !== fingerprint)
+        return new Error("Native test upstream certificate does not match its pin");
+      return undefined;
+    },
+  };
   const data = await readFile(join(packageDir, "new/update.nsis.zip"));
   const signature = (await readFile(join(packageDir, "new/update.nsis.zip.sig"), "utf8")).trim();
   let fault: "corrupt" | "interrupted" | "none" = "corrupt";
@@ -56,14 +70,13 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
       res.end(data);
       return;
     }
-    // This scoped bypass trusts only our own generated loopback upstream;
-    // the app's connection to the gateway still goes through actual TOFU.
+    // The app's connection to this gateway still goes through actual TOFU.
     const upstream = request(
       `${server.origin}${path}`,
       {
         method: req.method,
         headers: { ...req.headers, host: new URL(server.origin).host },
-        rejectUnauthorized: false,
+        ...upstreamTLS,
       },
       (response) => {
         res.writeHead(response.statusCode ?? 502, response.headers);
@@ -78,19 +91,16 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
   });
   gateway.on("connection", track);
   gateway.on("upgrade", (req, socket, head) => {
-    const upstream = connect(
-      { host: "127.0.0.1", port: server.port, rejectUnauthorized: false },
-      () => {
-        const headers = { ...req.headers, host: new URL(server.origin).host };
-        upstream.write(
-          `${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers)
-            .map(([name, value]) => `${name}: ${value}`)
-            .join("\r\n")}\r\n\r\n`,
-        );
-        upstream.write(head);
-        socket.pipe(upstream).pipe(socket);
-      },
-    );
+    const upstream = connect({ host: "127.0.0.1", port: server.port, ...upstreamTLS }, () => {
+      const headers = { ...req.headers, host: new URL(server.origin).host };
+      upstream.write(
+        `${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers)
+          .map(([name, value]) => `${name}: ${value}`)
+          .join("\r\n")}\r\n\r\n`,
+      );
+      upstream.write(head);
+      socket.pipe(upstream).pipe(socket);
+    });
     track(upstream);
     socket.on("close", () => upstream.destroy());
     upstream.on("close", () => socket.destroy());

@@ -765,12 +765,12 @@ jobs:
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         run: node tests/e2e/scripts/build-native-updates.mjs
       - name: Test actual signed desktop installation and relaunch
-        timeout-minutes: 10
+        timeout-minutes: 12
         if: ${{ !cancelled() && steps.native_packages.outcome == 'success' }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/native-updater
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/native-updater.xml
-        run: npx playwright test --config playwright.config.native.ts --project native-updater --output test-results/native-updater
+        run: node tests/e2e/scripts/run-native-updater.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
