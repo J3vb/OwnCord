@@ -222,11 +222,21 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// length is untrusted and a chunked request carries none at all
 		// (-1), so the envelope is what this request may cost the volume
 		// before the true size is known: the declared length when it is
-		// sane, otherwise the worst case. The deferred Settle returns the
-		// charge on every path that does not reach Record, a panic included.
+		// sane, otherwise the worst case a single file can ever cost — the
+		// configured per-file cap (upload.max_size_mb, already enforced by
+		// storage.Storage.Save) when one is set, else the full request cap.
+		// A chunked upload otherwise reserves the entire 100 MiB request cap
+		// for every user regardless of how small the body turns out to be,
+		// which starves anyone whose quota or headroom is smaller than that.
+		// The deferred Settle returns the charge on every path that does not
+		// reach Record, a panic included.
+		worstCase := int64(uploadMaxBodySize)
+		if fileCap := uploads.MaxUploadBytes(); fileCap > 0 && fileCap < worstCase {
+			worstCase = fileCap
+		}
 		envelope := r.ContentLength
-		if envelope <= 0 || envelope > uploadMaxBodySize {
-			envelope = uploadMaxBodySize
+		if envelope <= 0 || envelope > worstCase {
+			envelope = worstCase
 		}
 		res, err := uploads.Reserve(r.Context(), user.ID, envelope)
 		if err != nil {
