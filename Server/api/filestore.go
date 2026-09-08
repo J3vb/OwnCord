@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -52,6 +53,15 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 	if err != nil {
 		res.Release(ctx)
 		return 0, err
+	}
+	// B5-2: an unknown or generous declared length reserves more than the
+	// upload turns out to cost; lower the charge to what was actually
+	// written before the reservation lands. A failure here leaves the
+	// counter high — the safe side — and the next maintenance recount
+	// repairs it (migrations/044_user_storage.sql), so it must not fail
+	// the upload itself.
+	if err := res.Resize(ctx, written); err != nil {
+		slog.Error("storage: could not resize a reservation to the bytes written", "bytes_written", written, "error", err)
 	}
 	res.Landed()
 	return written, nil
