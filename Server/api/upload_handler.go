@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"image"
@@ -203,22 +204,13 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		// B5-2: the multipart parser below spools a large body to disk
-		// before any reservation could run, so the headroom floor is checked
-		// against the declared length first. A chunked body (-1) is unknown
-		// here; the per-file reservation still gates the store write itself.
-		if r.ContentLength > 0 {
-			if err := uploads.CheckHeadroom(r.ContentLength); err != nil {
-				writeStorageSaveError(w, err, "file upload")
-				return
-			}
-		}
-
 		// Limit request body size to prevent abuse.
 		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxBodySize)
 
-		// Parse multipart form — 10 MB in memory, rest on disk.
-		if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
+		// Stream the multipart body instead of buffering or spooling it: no
+		// part is read until the bytes it could cost are admitted below.
+		mr, err := r.MultipartReader()
+		if err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "BAD_REQUEST",
 				Message: "invalid multipart form",
@@ -226,35 +218,38 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "missing file field",
-			})
-			return
+		// B5-2: admit the bytes before reading any of them. The declared
+		// length is untrusted and a chunked request carries none at all
+		// (-1), so the envelope is what this request may cost the volume
+		// before the true size is known: the declared length when it is
+		// sane, otherwise the worst case. The deferred Settle returns the
+		// charge on every path that does not reach Record, a panic included.
+		envelope := r.ContentLength
+		if envelope <= 0 || envelope > uploadMaxBodySize {
+			envelope = uploadMaxBodySize
 		}
-		defer file.Close() //nolint:errcheck
-
-		// B5-2: admit the bytes before writing them. header.Size is the part
-		// length the parser measured, never a client-declared number. The
-		// deferred Settle returns the charge on every path that does not
-		// reach Record, a panic included.
-		res, err := uploads.Reserve(r.Context(), user.ID, header.Size)
+		res, err := uploads.Reserve(r.Context(), user.ID, envelope)
 		if err != nil {
 			writeStorageSaveError(w, err, "file upload")
 			return
 		}
 		defer res.Settle(r.Context())
 
-		stored, ok := uploadStoreFile(r.Context(), w, file, res, store)
+		part, err := findFilePart(mr)
+		if err != nil {
+			writeUploadPartError(w, err)
+			return
+		}
+		defer part.Close() //nolint:errcheck
+
+		stored, ok := uploadStoreFile(r.Context(), w, part, res, store)
 		if !ok {
 			return
 		}
 
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
-		safeFilename := sanitizeUploadFilename(header.Filename)
+		safeFilename := sanitizeUploadFilename(part.FileName())
 		if err := uploads.Record(r.Context(), service.AttachmentRecord{
 			ID:         stored.id,
 			UploaderID: user.ID,
@@ -288,6 +283,41 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			Height:   stored.height,
 		})
 	}
+}
+
+// findFilePart walks a multipart request until it finds the "file" field,
+// closing every other part without buffering it, and reports the reader's
+// own error (io.EOF included) when no such field turns up.
+func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			return nil, err
+		}
+		if part.FormName() == "file" {
+			return part, nil
+		}
+		part.Close() //nolint:errcheck
+	}
+}
+
+// writeUploadPartError maps findFilePart's error onto the response the
+// handler always gave: running out of parts without finding "file" is the
+// same "missing file field" FormFile gave, and anything else — a malformed
+// boundary, truncated headers — is the same "invalid multipart form"
+// ParseMultipartForm gave for any structural failure.
+func writeUploadPartError(w http.ResponseWriter, err error) {
+	if errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: "missing file field",
+		})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, errorResponse{
+		Error:   "BAD_REQUEST",
+		Message: "invalid multipart form",
+	})
 }
 
 func handleServeFile(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
@@ -372,7 +402,12 @@ type storedUpload struct {
 // image. It writes its own error response and reports ok=false, so the caller
 // only has to return. Split out of handleUpload to keep that handler under
 // the funlen limit; the steps and their order are unchanged.
-func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file multipart.File, res *service.StorageReservation, store FileStore) (storedUpload, bool) {
+//
+// file is an io.Reader, not multipart.File — a *multipart.Part (the caller's
+// argument since the handler moved to streaming) is not seekable, so the
+// sniffed header bytes are re-joined with the rest of the stream instead of
+// being rewound.
+func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader, res *service.StorageReservation, store FileStore) (storedUpload, bool) {
 	// Generate UUID for storage.
 	fileID := uuid.New().String()
 
@@ -387,17 +422,11 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file multipart.
 		return storedUpload{}, false
 	}
 	mime := http.DetectContentType(sniffBuf[:n])
-	// Seek back so the full content is available for storage.
-	if _, seekErr := file.Seek(0, 0); seekErr != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{
-			Error:   "INTERNAL_ERROR",
-			Message: "failed to process uploaded file",
-		})
-		return storedUpload{}, false
-	}
+	// Reconstruct the full stream: the sniffed bytes plus the remainder.
+	body := io.MultiReader(bytes.NewReader(sniffBuf[:n]), file)
 
 	// Store file on disk (validates file type via magic bytes).
-	writtenBytes, saveErr := saveReserved(ctx, res, store, fileID, file)
+	writtenBytes, saveErr := saveReserved(ctx, res, store, fileID, body)
 	if saveErr != nil {
 		writeStorageSaveError(w, saveErr, "file upload")
 		return storedUpload{}, false
