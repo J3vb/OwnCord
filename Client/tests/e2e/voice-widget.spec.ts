@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithVoice, navigateToMainPage, emitWsMessage } from "./helpers";
 
 const VOICE_STATE_EVENT = {

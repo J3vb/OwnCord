@@ -2,7 +2,7 @@
  * E2E tests for message edit and delete flows.
  * Covers: edit → save, edit → cancel, delete.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Edit Flow", () => {

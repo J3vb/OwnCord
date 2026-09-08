@@ -123,11 +123,15 @@ describe("renderers", () => {
 
   describe("isSameDay", () => {
     it("returns true for timestamps on the same day", () => {
-      expect(isSameDay("2025-01-15T08:00:00Z", "2025-01-15T20:00:00Z")).toBe(true);
+      expect(
+        isSameDay(new Date(2025, 0, 15, 8).toISOString(), new Date(2025, 0, 15, 20).toISOString()),
+      ).toBe(true);
     });
 
     it("returns false for timestamps on different days", () => {
-      expect(isSameDay("2025-01-15T08:00:00Z", "2025-01-16T08:00:00Z")).toBe(false);
+      expect(
+        isSameDay(new Date(2025, 0, 15, 8).toISOString(), new Date(2025, 0, 16, 8).toISOString()),
+      ).toBe(false);
     });
   });
 

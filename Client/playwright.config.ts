@@ -1,15 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
+  outputDir: "test-results/mock",
   testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**"],
+  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**"],
   timeout: 30_000,
   expect: {
     timeout: 5_000,
   },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 1,
+  retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   workers: process.env.CI ? 1 : undefined,
   // CI fail-fast: a systemic breakage (e.g. the shared login helper) makes
   // most of the 255 tests burn their full timeout × retries — hours of runner
@@ -21,18 +23,18 @@ export default defineConfig({
   globalTimeout: process.env.CI ? 20 * 60 * 1000 : 0,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never" }],
-        ["junit", { outputFile: "test-results/junit.xml" }],
+        ["html", { open: "never", outputFolder: "playwright-report/mock" }],
+        ["junit", { outputFile: "test-results/mock-junit.xml" }],
       ]
-    : "html",
+    : [["list"], ["html", { open: "never", outputFolder: "playwright-report/mock" }]],
 
   use: {
     baseURL: "http://localhost:1420",
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
     screenshot: "only-on-failure",
-    trace: "on-first-retry",
-    video: "on-first-retry",
+    trace: "retain-on-failure",
+    video: "retain-on-failure",
     contextOptions: { reducedMotion: "reduce" },
   },
 

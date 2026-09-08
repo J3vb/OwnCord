@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSession, navigateToMainPage, emitWsMessage } from "./helpers";
 
 test.describe("Typing Indicator — WebSocket", () => {

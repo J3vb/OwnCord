@@ -431,6 +431,7 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 export function buildTauriMockScript(opts: {
   httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
   simulateWsFlow: boolean;
+  deferReady?: boolean;
   echoChatSend?: boolean;
   wsHandlers?: Array<{ type: string; handler: string }>;
   readyOverrides?: {
@@ -507,7 +508,14 @@ export function buildTauriMockScript(opts: {
     // -----------------------------------------------------------------------
     // __TAURI_INTERNALS__
     // -----------------------------------------------------------------------
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+      unregisterListener(event, id) {
+        __eventListeners[event] = (__eventListeners[event] || []).filter(entry => entry.id !== id);
+        delete window["__tcb_" + id];
+      },
+    };
     window.__TAURI_INTERNALS__ = {
+      unregisterCallback(id) { delete window["__tcb_" + id]; },
       metadata: {
         currentWindow: { label: "main" },
         currentWebview: { label: "main" },
@@ -537,7 +545,11 @@ export function buildTauriMockScript(opts: {
           }
           return handlerId || 0;
         }
-        if (cmd === "plugin:event|unlisten") return;
+        if (cmd === "plugin:event|unlisten") {
+          const listeners = __eventListeners[args?.event] || [];
+          __eventListeners[args?.event] = listeners.filter((entry) => entry.id !== args?.eventId);
+          return;
+        }
 
         // ---- HTTP: fetch (step 1 — register request, return rid) ----
         if (cmd === "plugin:http|fetch") {
@@ -630,7 +642,7 @@ export function buildTauriMockScript(opts: {
               setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(MOCK_AUTH_OK)}));
               }, 100);
-              setTimeout(function() {
+              if (!${!!opts.deferReady}) setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(readyPayload)}));
               }, 200);
             }
@@ -641,7 +653,7 @@ export function buildTauriMockScript(opts: {
                 (new Function('parsed', '__tauriEmitEvent', h.handler))(parsed, __tauriEmitEvent);
               }
             }
-          } catch (e) {}
+          } catch (e) { console.error("[tauri-mock] WS handler error", e); throw e; }
           `
               : ""
           }
@@ -683,7 +695,10 @@ export function buildTauriMockScript(opts: {
         // exercises the fresh-key path. Pins are configurable per test:
         // identityPins seeds get_identity_pin per userId, identityPinError
         // makes the read REJECT (the DC-08 "store unreadable" path).
-        if (cmd === "save_identity_key" || cmd === "load_identity_key" || cmd === "delete_identity_key") return null;
+        window.__mockIdentityKeys ??= {};
+        if (cmd === "save_identity_key") { window.__mockIdentityKeys[args.host] = args.key; return; }
+        if (cmd === "load_identity_key") return window.__mockIdentityKeys[args.host] ?? null;
+        if (cmd === "delete_identity_key") { delete window.__mockIdentityKeys[args.host]; return; }
         if (cmd === "get_identity_pin") {
           ${
             opts.identityPinError === true
@@ -704,11 +719,25 @@ export function buildTauriMockScript(opts: {
           return null;
         }
 
+        if (cmd === "plugin:path|resolve_directory") return "/test-logs";
+        if (cmd === "plugin:path|join") return (args?.paths || []).join("/");
+        if (cmd === "plugin:fs|read_dir" || cmd === "plugin:window|available_monitors") return [];
+        if (cmd === "plugin:fs|exists") return false;
+
         // ---- Window/webview plugin stubs ----
         if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;
 
-        console.log("[tauri-mock] unhandled invoke:", cmd);
-        return null;
+        // Explicit desktop-only no-ops. Unknown commands are never success.
+        if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
+             "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
+             "plugin:notification|is_permission_granted", "plugin:notification|notify",
+             "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
+             "open_devtools"].includes(cmd)) return null;
+        if (cmd === "ptt_polling_supported") return false;
+        if (cmd === "check_client_update") return { available: false, version: null, body: null };
+        const error = new Error("Unexpected IPC command: " + cmd);
+        console.error("[tauri-mock]", error.message);
+        throw error;
       },
 
       convertFileSrc: (path) => path,
@@ -743,7 +772,10 @@ export async function mockTauriConnectWith2FA(page: Page): Promise<void> {
   );
 }
 
-export async function mockTauriFullSession(page: Page): Promise<void> {
+export async function mockTauriFullSession(
+  page: Page,
+  options: { deferReady?: boolean } = {},
+): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
@@ -753,6 +785,7 @@ export async function mockTauriFullSession(page: Page): Promise<void> {
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
       simulateWsFlow: true,
+      deferReady: options.deferReady,
     }),
   );
 }

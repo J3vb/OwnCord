@@ -41,9 +41,6 @@
 #         Tauri Full Build (...)        reports "skipping" on a dev PR, under the
 #                                       UNEXPANDED matrix name -- the job is
 #                                       skipped before matrix expansion
-#         Admin Panel E2E               continue-on-error: true, so it reports
-#                                       success unconditionally; requiring it is
-#                                       theatre (that is R-01, B10 work)
 #         CodeQL                        default-setup aggregate over the three
 #                                       Analyze jobs; pinning those is enough
 #
@@ -71,6 +68,9 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
       "Docs & Ledger Consistency",
       "Client E2E (Playwright)",
       "Client E2E (parity subset, blocking)",
+      "Admin Panel E2E (real server)",
+      "Client E2E (real server and media)",
+      "Client E2E (Windows native)",
       "Analyze (go)",
       "Analyze (javascript-typescript)",
       "Analyze (actions)"

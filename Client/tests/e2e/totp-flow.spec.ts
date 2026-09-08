@@ -2,7 +2,7 @@
  * E2E tests for TOTP (2FA) submission flow.
  * Covers: valid code submits, invalid code shows error, cancel returns to login.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN } from "./helpers";
 
 async function mockTotpSuccess(page: import("@playwright/test").Page): Promise<void> {

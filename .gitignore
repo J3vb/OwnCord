@@ -138,3 +138,6 @@ server.log
 # directory — it reached ~208 MB with cache and dated snapshots — does not see it
 # as untracked noise.
 graphify-out/
+
+# Locally built end-to-end test binaries
+Client/tests/e2e/.bin/

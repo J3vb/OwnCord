@@ -3,7 +3,7 @@
  * ChannelSidebar renders voice channels as .channel-item with 🔊 icon.
  * VoiceWidget shows connected users when in a voice channel.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   mockTauriFullSessionWithVoice,
   navigateToMainPage,

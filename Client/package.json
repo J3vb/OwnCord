@@ -19,7 +19,7 @@
     "test:e2e": "playwright test",
     "test:e2e:prod": "npm run build && playwright test --config playwright.config.prod.ts",
     "test:e2e:native": "playwright test --config playwright.config.native.ts",
-    "test:e2e:admin": "playwright test --config playwright.config.admin.ts",
+    "test:e2e:admin": "npm run test:e2e:build-server && playwright test --config playwright.config.admin.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -32,7 +32,9 @@
     "lint:ox": "oxlint src/",
     "knip": "knip",
     "test:mutate": "stryker run",
-    "test:mutate:dry": "stryker run --dryRunOnly"
+    "test:mutate:dry": "stryker run --dryRunOnly",
+    "test:e2e:build-server": "node tests/e2e/scripts/build-server.mjs",
+    "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config playwright.config.fullstack.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
