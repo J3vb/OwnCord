@@ -743,14 +743,19 @@ jobs:
       - run: node tests/e2e/scripts/install-livekit.mjs
       # Release optimization, separate identity and API-configured WebView2 debugging.
       - run: node tests/e2e/scripts/native-test-config.mjs
-      - run: npm run tauri build -- --no-bundle --config tests/e2e/.bin/tauri.native.json
+      - id: native_build
+        run: npm run tauri build -- --no-bundle --config tests/e2e/.bin/tauri.native.json
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
         run: npx playwright test --config playwright.config.native.ts --project native-core
+      # Collect installer evidence even if a core test fails; the job still fails.
       - name: Build two signed NSIS test packages
+        id: native_packages
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         run: node tests/e2e/scripts/build-native-updates.mjs
       - name: Test actual signed desktop installation and relaunch
+        if: ${{ !cancelled() && steps.native_packages.outcome == 'success' }}
         run: npx playwright test --config playwright.config.native.ts --project native-updater
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

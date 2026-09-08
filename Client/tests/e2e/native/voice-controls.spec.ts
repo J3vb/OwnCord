@@ -1,97 +1,38 @@
-/**
- * Native E2E: Voice channel controls with real app.
- *
- * Tests voice channel UI, mute/deafen buttons, voice widget rendering,
- * and disconnect flow through the real server and LiveKit. Decoded media
- * assertions live in the full-stack suite.
- *
- * Requires: Server with at least 1 voice channel.
- */
-
 import { test, expect } from "../native-fixture-persistent";
-import { ensureLoggedIn, countVoiceChannels } from "./helpers";
+import { ensureLoggedIn } from "./helpers";
 
-test.describe.configure({ mode: "serial" });
+// One complete journey avoids order-dependent tests sharing a live voice join.
+// Full-stack tests separately require two-user decoded encrypted audio/video.
+test("native voice connects, exposes controls, mutes, deafens and disconnects", async ({
+  nativePage: page,
+}) => {
+  await ensureLoggedIn(page);
+  const channel = page.locator(".channel-item.voice", { hasText: "voice-one" });
+  await expect(channel.locator(".ch-icon [data-icon='volume-2']")).toBeVisible();
+  await expect(channel.locator(".ch-name")).toHaveText("voice-one");
+  await channel.click();
+  const widget = page.locator(".voice-widget.visible");
+  await expect(widget).toContainText("Voice Connected", { timeout: 30_000 });
+  await expect(widget.locator(".vw-channel")).toHaveText("voice-one");
+  await expect(widget.getByRole("button", { name: "Camera", exact: true })).toBeVisible();
+  await expect(widget.getByRole("button", { name: "Screenshare", exact: true })).toBeVisible();
 
-test.describe("Voice Channel UI", () => {
-  test.beforeEach(async ({ nativePage }) => {
-    await ensureLoggedIn(nativePage);
+  const mute = widget.getByRole("button", { name: "Mute", exact: true });
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  await expect(mute).toHaveClass(/active-ctrl/);
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await expect(mute).not.toHaveClass(/active-ctrl/);
 
-    // Seeded fixture guarantees voice channels; missing data is a failure.
-    const voiceCount = await countVoiceChannels(nativePage);
-    expect(voiceCount).toBeGreaterThan(0);
-  });
-
-  test("voice channels are listed with speaker icon", async ({ nativePage }) => {
-    const voiceIcons = nativePage.locator(".channel-item.voice .ch-icon [data-icon='volume-2']");
-    await expect(voiceIcons.first()).toBeVisible();
-  });
-
-  test("voice channel names are displayed", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    const name = await voiceChannels.first().locator(".ch-name").textContent();
-    expect(name?.trim().length).toBeGreaterThan(0);
-  });
-
-  test("clicking voice channel triggers voice join", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    await voiceChannels.first().click();
-
-    const voiceWidget = nativePage.locator(".voice-widget.visible");
-    await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
-  });
-
-  test("voice widget shows channel name", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    const channelName = await voiceChannels.first().locator(".ch-name").textContent();
-    await voiceChannels.first().click();
-
-    const voiceWidget = nativePage.locator(".voice-widget.visible");
-    await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
-
-    const widgetChannel = voiceWidget.locator(".vw-channel");
-    await expect(widgetChannel).toContainText(channelName?.trim() ?? "");
-  });
-
-  test("voice widget has control buttons", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    await voiceChannels.first().click();
-    const voiceWidget = nativePage.locator(".voice-widget.visible");
-    await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
-
-    await expect(voiceWidget.locator("button[aria-label='Mute']")).toBeVisible({ timeout: 5_000 });
-    await expect(voiceWidget.locator("button[aria-label='Deafen']")).toBeVisible();
-    await expect(voiceWidget.locator("button[aria-label='Disconnect']")).toBeVisible();
-  });
-
-  test("mute button toggles active state", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    await voiceChannels.first().click();
-    const voiceWidget = nativePage.locator(".voice-widget.visible");
-    await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
-
-    const muteBtn = voiceWidget.locator("button[aria-label='Mute']");
-    await expect(muteBtn).toBeVisible({ timeout: 5_000 });
-
-    await expect(muteBtn).toHaveAttribute("aria-pressed", "false");
-    await muteBtn.click();
-    await expect(muteBtn).toHaveAttribute("aria-pressed", "true");
-    await expect(muteBtn).toHaveClass(/active-ctrl/);
-    await muteBtn.click();
-    await expect(muteBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(muteBtn).not.toHaveClass(/active-ctrl/);
-  });
-
-  test("disconnect button leaves voice channel", async ({ nativePage }) => {
-    const voiceChannels = nativePage.locator(".channel-item.voice");
-    await voiceChannels.first().click();
-    const voiceWidget = nativePage.locator(".voice-widget.visible");
-    await expect(voiceWidget).toBeVisible({ timeout: 10_000 });
-
-    const disconnectBtn = voiceWidget.locator("button[aria-label='Disconnect']");
-    await expect(disconnectBtn).toBeVisible({ timeout: 5_000 });
-    await disconnectBtn.click();
-
-    await expect(voiceWidget).not.toBeVisible({ timeout: 10_000 });
-  });
+  const deafen = widget.getByRole("button", { name: "Deafen", exact: true });
+  await expect(deafen).toHaveAttribute("aria-pressed", "false");
+  await deafen.click();
+  await expect(deafen).toHaveAttribute("aria-pressed", "true");
+  await deafen.click();
+  await expect(deafen).toHaveAttribute("aria-pressed", "false");
+  await widget.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(widget).toBeHidden();
+  await expect(page.locator(".voice-user-item", { hasText: "alice" })).toHaveCount(0);
 });

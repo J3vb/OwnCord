@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
+import { createSocket } from "node:dgram";
 import { setTimeout as delay } from "node:timers/promises";
 
 export async function freePort(): Promise<number> {
@@ -11,6 +12,16 @@ export async function freePort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("No test port allocated");
   await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())));
   return address.port;
+}
+
+/** TCP availability does not imply UDP availability (notably Windows exclusions). */
+export async function freeUdpPort(): Promise<number> {
+  const socket = createSocket("udp4");
+  socket.bind(0, "0.0.0.0");
+  await once(socket, "listening");
+  const port = socket.address().port;
+  await new Promise<void>((resolve) => socket.close(resolve));
+  return port;
 }
 
 export function startProcess(command: string, args: string[], cwd: string, env = process.env) {

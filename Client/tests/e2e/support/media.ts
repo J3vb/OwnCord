@@ -114,10 +114,16 @@ export async function installMediaProbe(page: Page) {
     };
     RTCPeerConnection.prototype.getStats = async function (selector?: MediaStreamTrack | null) {
       const report = await originalStats.call(this, selector);
-      if (probe.poorQuality)
-        report.forEach((entry) => {
-          if (entry.type === "candidate-pair") entry.currentRoundTripTime = 0.8;
-        });
+      if (probe.poorQuality) {
+        // RTCStatsReport materializes fresh dictionaries on each read.
+        // Mutating a forEach entry does not change the report seen by callers.
+        return new Map(
+          [...report].map(([id, entry]) => [
+            id,
+            entry.type === "candidate-pair" ? { ...entry, currentRoundTripTime: 0.8 } : entry,
+          ]),
+        ) as RTCStatsReport;
+      }
       return report;
     };
     navigator.mediaDevices.getUserMedia = async (constraints) => {

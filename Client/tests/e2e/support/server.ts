@@ -2,7 +2,7 @@ import { request, expect } from "@playwright/test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-import { freePort, startProcess, stopProcess, waitForHttp } from "./process";
+import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from "./process";
 
 export const TEST_PASSWORD = "OwnCord-E2E-pass-123!";
 
@@ -23,6 +23,7 @@ export async function startTestServer(
   const port = await freePort();
   const livekitPort = await freePort();
   const rtcPort = await freePort();
+  const rtcUdpPort = options.livekit ? await freeUdpPort() : 0;
   const dataDir = join(directory, "data");
   await mkdir(dataDir);
   const binary = resolve(
@@ -33,7 +34,7 @@ export async function startTestServer(
   if (options.livekit) {
     await writeFile(
       join(dataDir, "livekit.yaml"),
-      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
+      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
     );
   }
   const config = {
