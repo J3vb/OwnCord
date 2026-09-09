@@ -1,5 +1,5 @@
 import { chromium, expect, type TestInfo } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startProcess, stopProcess, waitForHttp } from "./process";
@@ -81,7 +81,11 @@ export async function withNativeArtifacts(
       const trace = info.outputPath("native-trace.zip");
       await app.context.tracing.stop({ path: trace });
       await info.attach("native-trace", { path: trace, contentType: "application/zip" });
-      await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
+      // Attach by path: reporters drop inline text bodies, and the list
+      // reporter truncates them, so a body attachment never reaches CI.
+      const processLog = info.outputPath("native-process.log");
+      await writeFile(processLog, app.log());
+      await info.attach("native-process", { path: processLog, contentType: "text/plain" });
       if (!app.page.isClosed())
         await info.attach("native-screenshot", {
           body: await app.page.screenshot(),

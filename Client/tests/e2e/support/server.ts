@@ -32,9 +32,11 @@ export async function startTestServer(
       `tests/e2e/.bin/chatserver${process.platform === "win32" ? ".exe" : ""}`,
   );
   if (options.livekit) {
+    // pion at debug logs every ICE check and candidate pair; the server log is
+    // attached to each native test so an ICE failure is diagnosable from CI.
     await writeFile(
       join(dataDir, "livekit.yaml"),
-      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
+      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\nlogging:\n  level: info\n  pion_level: debug\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
     );
   }
   const config = {
