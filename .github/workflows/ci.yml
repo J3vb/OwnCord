@@ -721,9 +721,14 @@ jobs:
           retention-days: 7
 
   client-native:
-    name: Client E2E (Windows native)
+    name: Client E2E (Windows native) ${{ matrix.sample }}
     runs-on: windows-latest
     timeout-minutes: 75
+    # TEMP flake sampling: 4 runners x 5 fresh native-core runs. Revert before merge.
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: Client/
@@ -755,16 +760,22 @@ jobs:
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
-        run: npx playwright test --config playwright.config.native.ts --project native-core
+        run: |
+          $failed = 0
+          foreach ($i in 1..5) {
+            Write-Host "===== native-core sample ${{ matrix.sample }} iteration $i"
+            npx playwright test --config playwright.config.native.ts --project native-core --output "test-results/native-$i"
+            if ($LASTEXITCODE -ne 0) { $failed++ }
+          }
+          if ($failed -ne 0) { Write-Host "$failed of 5 iterations failed"; exit 1 }
       - name: Preserve native core diagnostics before building installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: native-core-e2e-report
+          name: native-core-e2e-report-${{ matrix.sample }}
           path: |
             Client/playwright-report/native/
-            Client/test-results/native/
-            Client/test-results/native-junit.xml
+            Client/test-results/
           retention-days: 7
       # Collect installer evidence even if a core test fails; the job still fails.
       - name: Build two signed NSIS test packages
@@ -781,7 +792,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: native-e2e-report
+          name: native-e2e-report-${{ matrix.sample }}
           path: |
             Client/playwright-report/
             Client/test-results/
