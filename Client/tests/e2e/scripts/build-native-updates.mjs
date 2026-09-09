@@ -41,7 +41,13 @@ for (const [label, version] of [
       bundle: {
         targets: ["nsis"],
         createUpdaterArtifacts: "v1Compatible",
-        windows: { nsis: { installMode: "currentUser" } },
+        windows: {
+          nsis: { installMode: "currentUser" },
+          // This update journey starts with an installed, working runtime,
+          // already exercised by native-core. Keep test packages from
+          // changing the runner's shared WebView2 installation.
+          webviewInstallMode: { type: "skip" },
+        },
       },
       plugins: {
         updater: { pubkey, windows: { installMode: "quiet" } },
