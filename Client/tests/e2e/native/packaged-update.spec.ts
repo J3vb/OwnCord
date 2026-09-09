@@ -11,10 +11,14 @@ import { startNativeUpdateServer } from "../support/native-update-server";
 import { configureNativeServer, nativeLogin } from "./helpers";
 const exec = promisify(execFile);
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("signed NSIS update rejects broken downloads then installs and relaunches the new version", async ({}, info) => {
   test.setTimeout(240_000);
-  const progress = (stage: string) =>
-    appendFile(info.outputPath("installer-progress.log"), `${new Date().toISOString()} ${stage}\n`);
+  const progress = async (stage: string) => {
+    const line = `${new Date().toISOString()} ${stage}`;
+    console.log(`[native-updater] ${line}`);
+    await appendFile(info.outputPath("installer-progress.log"), `${line}\n`);
+  };
   await progress("starting server");
   const packages = resolve("tests/e2e/.bin/native-updates");
   const installation = await mkdtemp(join(tmpdir(), "owncord-installed-e2e-"));
@@ -126,6 +130,10 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     });
   } finally {
     await progress("capturing failure diagnostics");
+    // A crashed WebView can make trace capture fail. Preserve the owned
+    // process logs before asking that same WebView for more diagnostics.
+    if (app) await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
+    await info.attach("native-server", { body: server.log(), contentType: "text/plain" });
     if (app && traceActive) {
       const trace = info.outputPath("failed-install.zip");
       try {
@@ -143,7 +151,6 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
         });
       }
     }
-    if (app) await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
     await progress("disconnecting successor CDP");
     await replacement?.close();
     // The installer owns the replacement process. Select ONLY the executable
@@ -155,7 +162,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$path=$env.OWNCORD_E2E_INSTALLED_EXE; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
+        "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
       ],
       { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe }, timeout: 30_000 },
     );
