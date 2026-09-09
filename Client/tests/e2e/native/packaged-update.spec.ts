@@ -11,6 +11,7 @@ import { startNativeUpdateServer } from "../support/native-update-server";
 import { configureNativeServer, nativeLogin } from "./helpers";
 const exec = promisify(execFile);
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("signed NSIS update rejects broken downloads then installs and relaunches the new version", async ({}, info) => {
   test.setTimeout(240_000);
   const progress = async (stage: string) => {
@@ -161,7 +162,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$path=$env.OWNCORD_E2E_INSTALLED_EXE; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
+        "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
       ],
       { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe }, timeout: 30_000 },
     );
