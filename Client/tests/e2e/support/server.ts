@@ -32,11 +32,18 @@ export async function startTestServer(
       `tests/e2e/.bin/chatserver${process.platform === "win32" ? ".exe" : ""}`,
   );
   if (options.livekit) {
+    // Bind the RTC port to loopback only. LiveKit binds udp_port on every
+    // interface, pion rewrites each socket's candidate to the advertised
+    // 127.0.0.1 and drops the duplicates, so only the first enumerated
+    // interface's socket holds the participant's ICE credentials. When that
+    // is not loopback (Windows runners, about one run in five) the client's
+    // checks to 127.0.0.1 are dropped and the join times out; Linux always
+    // enumerates lo first, which is why the media lane never saw it.
     // pion at debug logs every ICE check and candidate pair; the server log is
     // attached to each native test so an ICE failure is diagnosable from CI.
     await writeFile(
       join(dataDir, "livekit.yaml"),
-      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\nlogging:\n  level: info\n  pion_level: debug\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
+      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n  ips:\n    includes: [127.0.0.1/32]\nlogging:\n  level: info\n  pion_level: debug\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
     );
   }
   const config = {
