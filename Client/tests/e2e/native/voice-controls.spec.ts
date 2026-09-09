@@ -13,7 +13,12 @@ test("native voice connects, exposes controls, mutes, deafens and disconnects", 
   await expect(channel.locator(".ch-name")).toHaveText("voice-one");
   await channel.click();
   const widget = page.locator(".voice-widget.visible");
-  await expect(widget).toContainText("Voice Connected", { timeout: 30_000 });
+  // connectAndSetup allows three attempts with 2s gaps. With this healthy
+  // local fixture and Alice as key holder, livekit-client 2.22.1's 15s peer
+  // timeout permits 3 * 15s + 2 * 2s = 49s of RTC recovery. Allow 11s for
+  // local signaling/setup; 30s aborts the second attempt before its deadline.
+  // This fixture bound does not cover arbitrary remote signaling/E2EE delays.
+  await expect(widget).toContainText("Voice Connected", { timeout: 60_000 });
   await expect(widget.locator(".vw-channel")).toHaveText("voice-one");
   await expect(widget.getByRole("button", { name: "Camera", exact: true })).toBeVisible();
   await expect(widget.getByRole("button", { name: "Screenshare", exact: true })).toBeVisible();
