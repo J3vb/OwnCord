@@ -41,7 +41,7 @@ export const test = base.extend<Fixtures, Workers>({
     },
     { scope: "worker", timeout: 90_000 },
   ],
-  nativePage: async ({ nativeApp }, use, testInfo) => {
+  nativePage: async ({ nativeApp, nativeServer }, use, testInfo) => {
     // Reset transient UI using user actions; retain login in the same process.
     await nativeApp.page.keyboard.press("Escape");
     const disconnect = nativeApp.page.locator(
@@ -51,7 +51,16 @@ export const test = base.extend<Fixtures, Workers>({
       await disconnect.click();
       await expect(nativeApp.page.locator(".voice-widget")).not.toHaveClass(/visible/);
     }
-    await withNativeArtifacts(nativeApp, () => use(nativeApp.page), testInfo);
+    try {
+      await withNativeArtifacts(nativeApp, () => use(nativeApp.page), testInfo);
+    } finally {
+      // Includes the fixture's LiveKit child output, needed to distinguish
+      // ICE/socket failures from a client-side connection timeout.
+      await testInfo.attach("native-server", {
+        body: nativeServer.log(),
+        contentType: "text/plain",
+      });
+    }
   },
   nativeContext: async ({ nativePage }, use) => {
     await use(nativePage.context());

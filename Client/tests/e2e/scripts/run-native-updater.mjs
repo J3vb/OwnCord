@@ -26,6 +26,27 @@ const child = spawn(
   { stdio: ["ignore", log.fd, log.fd] },
 );
 let timedOut = false;
+let printedBytes = 0;
+let outputPump = Promise.resolve();
+// Forward output while the runner is alive. Waiting until the child exits
+// hides the last installer stage when Windows itself loses communication.
+// Only this parent writes to Actions; installer descendants still inherit
+// the file handle above, never the runner's output pipes.
+const flushOutput = () => {
+  outputPump = outputPump
+    .catch(() => {})
+    .then(async () => {
+      const bytes = await readFile(logPath);
+      if (bytes.length > printedBytes) {
+        process.stdout.write(bytes.subarray(printedBytes));
+        printedBytes = bytes.length;
+      }
+    });
+  return outputPump;
+};
+const outputTimer = setInterval(() => {
+  void flushOutput().catch((error) => console.error(`Cannot read updater output: ${error}`));
+}, 1_000);
 const timer = setTimeout(async () => {
   timedOut = true;
   console.error("Native updater exceeded nine minutes; terminating its owned process tree.");
@@ -51,6 +72,7 @@ try {
   process.exitCode = timedOut ? 1 : code;
 } finally {
   clearTimeout(timer);
+  clearInterval(outputTimer);
   await log.close();
-  console.log(await readFile(logPath, "utf8"));
+  await flushOutput();
 }

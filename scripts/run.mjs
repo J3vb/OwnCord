@@ -130,6 +130,8 @@ const CHECK_SERVER = [
 ];
 
 const CHECK_CLIENT = [
+  step("node", ["--test", "scripts/check-tauri-versions.test.mjs"]),
+  step("node", ["scripts/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
   step("npm", ["run", "lint"], "Client"),
   step("npm", ["test"], "Client"),
