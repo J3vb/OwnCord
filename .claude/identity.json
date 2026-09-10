@@ -6,9 +6,7 @@
     "codeComments": true,
     "explanations": true
   },
-  "domains": [
-    "typescript"
-  ],
+  "domains": ["typescript"],
   "suggestedBy": "ecc-tools-repo-analysis",
   "createdAt": "2026-09-08T01:23:39.783Z"
 }
