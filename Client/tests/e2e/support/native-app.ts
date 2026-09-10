@@ -72,10 +72,12 @@ export async function withNativeArtifacts(
   info: TestInfo,
 ) {
   const errors: string[] = [];
+  const webview: string[] = [];
   const onError = (error: Error) => errors.push(error.message);
   // The HTTP SDK patch observes detached cleanup failures instead of leaving
   // rejected promises unhandled. Preserve the same strict native failure gate.
   const onConsole = (message: ConsoleMessage) => {
+    webview.push(`[${message.type()}] ${message.text()}`);
     if (
       message.type() === "error" &&
       message.text().startsWith("Failed to release Tauri HTTP resource")
@@ -85,26 +87,42 @@ export async function withNativeArtifacts(
   app.page.on("pageerror", onError);
   app.page.on("console", onConsole);
   await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  // `info.status` is still the expected status while the test body's own
+  // rejection is propagating, so track the throw directly.
+  let threw = false;
   try {
     await use();
+  } catch (error) {
+    threw = true;
+    throw error;
   } finally {
     app.page.off("pageerror", onError);
     app.page.off("console", onConsole);
-    const failed = info.status !== info.expectedStatus || errors.length > 0;
+    const failed = threw || info.status !== info.expectedStatus || errors.length > 0;
     if (failed) {
-      const trace = info.outputPath("native-trace.zip");
-      await app.context.tracing.stop({ path: trace });
-      await info.attach("native-trace", { path: trace, contentType: "application/zip" });
       // Attach by path: reporters drop inline text bodies, and the list
       // reporter truncates them, so a body attachment never reaches CI.
-      const processLog = info.outputPath("native-process.log");
-      await writeFile(processLog, app.log());
-      await info.attach("native-process", { path: processLog, contentType: "text/plain" });
-      if (!app.page.isClosed())
-        await info.attach("native-screenshot", {
-          body: await app.page.screenshot(),
-          contentType: "image/png",
-        });
+      const attachText = async (name: string, content: string) => {
+        const path = info.outputPath(`${name}.log`);
+        await writeFile(path, content);
+        await info.attach(name, { path, contentType: "text/plain" });
+      };
+      // Logs first: `tracing.stop` can fail after the app exited mid-test,
+      // and a capture error must never replace the test's own failure.
+      await attachText("native-process", app.log());
+      await attachText("native-webview", webview.join("\n"));
+      try {
+        if (!app.page.isClosed())
+          await info.attach("native-screenshot", {
+            body: await app.page.screenshot(),
+            contentType: "image/png",
+          });
+        const trace = info.outputPath("native-trace.zip");
+        await app.context.tracing.stop({ path: trace });
+        await info.attach("native-trace", { path: trace, contentType: "application/zip" });
+      } catch (error) {
+        await attachText("native-capture-error", String(error));
+      }
     } else {
       await app.context.tracing.stop();
     }

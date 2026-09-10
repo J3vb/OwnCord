@@ -11,6 +11,7 @@ declare global {
   }
 }
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("native connection diagnostics cancel delayed HTTP headers and response bodies without unhandled errors", async ({}, info) => {
   const server = await startTestServer({ tls: true });
   let gate: Awaited<ReturnType<typeof startNativeHttpGate>> | undefined;
@@ -25,38 +26,44 @@ test("native connection diagnostics cancel delayed HTTP headers and response bod
       async () => {
         const page = app!.page;
         await nativeLoginAndReady(page);
-        // Observe genuine IPC promises so the body scenario cancels with a
-        // native read pending. Requests, return values and rejections are
-        // delegated unchanged; no transport or application result is mocked.
+        // Observe the genuine IPC transport so the body scenario cancels with a
+        // native read pending. Tauri seals every `__TAURI_INTERNALS__` member
+        // (non-writable `defineProperty` values), so `invoke` cannot be wrapped;
+        // on Windows each call is a `window.fetch` to the `ipc.localhost`
+        // protocol instead. Requests, replies and rejections are delegated
+        // unchanged; no transport or application result is mocked.
         await page.evaluate(() => {
-          const tauri = (
-            window as unknown as {
-              __TAURI_INTERNALS__: {
-                invoke(command: string, args?: any, options?: any): Promise<any>;
-              };
-            }
-          ).__TAURI_INTERNALS__;
-          const invoke = tauri.invoke.bind(tauri);
+          const nativeFetch = window.fetch;
           const requests = new Set<number>();
           const bodies = new Set<number>();
           const reads = { pending: 0, started: 0 };
           window.__nativeHttpReads = reads;
-          tauri.invoke = async (command, args, options) => {
-            const bodyRead = command === "plugin:http|fetch_read_body" && bodies.has(args.rid);
+          window.fetch = async (input, init) => {
+            const url =
+              typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const ipc = /^https?:\/\/ipc\.localhost\/(.+)$/.exec(url);
+            const command = ipc ? decodeURIComponent(ipc[1] ?? "") : undefined;
+            const args =
+              command && typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { rid?: number; clientConfig?: { url: string } })
+                : undefined;
+            const bodyRead = command === "plugin:http|fetch_read_body" && bodies.has(args!.rid!);
             if (bodyRead) {
               reads.pending++;
               reads.started++;
             }
             try {
-              const result = await invoke(command, args, options);
-              if (
-                command === "plugin:http|fetch" &&
-                args.clientConfig.url.endsWith("/api/v1/auth/me")
-              )
-                requests.add(result);
-              if (command === "plugin:http|fetch_send" && requests.has(args.rid))
-                bodies.add(result.rid);
-              return result;
+              const response = await nativeFetch(input, init);
+              if (response.headers.get("Tauri-Response") === "ok") {
+                if (
+                  command === "plugin:http|fetch" &&
+                  args!.clientConfig!.url.endsWith("/api/v1/auth/me")
+                )
+                  requests.add(await response.clone().json());
+                if (command === "plugin:http|fetch_send" && requests.has(args!.rid!))
+                  bodies.add((await response.clone().json()).rid);
+              }
+              return response;
             } finally {
               if (bodyRead) reads.pending--;
             }
@@ -98,6 +105,10 @@ test("native connection diagnostics cancel delayed HTTP headers and response bod
           // error; each late outcome must settle without another disposal.
           httpGate.release(completion);
           await expect.poll(() => page.evaluate(() => window.__nativeHttpReads!.pending)).toBe(0);
+          // The server answers at most two pings per user per second
+          // (Server/ws/handlers_ping.go) and silently drops the rest. A phase
+          // completes within milliseconds, so space the heartbeat probes out.
+          await page.waitForTimeout(1100);
           // Complete another real request/heartbeat cycle before checking the
           // error collector, allowing late body-read and cleanup replies to land.
           await page.getByRole("button", { name: "Start connection test", exact: true }).click();
