@@ -2644,6 +2644,38 @@ describe("LiveKitSession", () => {
   });
 
   describe("connectAndSetup retry logic", () => {
+    it("stays joining through two peer timeouts and connects on the final attempt", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      // The native fixture's signaling is local, but the SDK may spend its
+      // full 15s peer-connection timeout on each attempt. A 30s UI assertion
+      // would interrupt the second attempt before production gives up.
+      const peerTimeout = () =>
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("peer connection timed out")), 15_000),
+        );
+      mockRoom.connect
+        .mockImplementationOnce(peerTimeout)
+        .mockImplementationOnce(peerTimeout)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => setTimeout(resolve, 15_000)));
+
+      const resultPromise = (session as any).connectAndSetup(
+        "token",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        true,
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+      expect((session as any)._state.type).toBe("connecting");
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(await resultPromise).toBe(true);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(3);
+      expect((session as any)._state.type).toBe("connected");
+    });
+
     it("retries on first failure and succeeds on second attempt", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);

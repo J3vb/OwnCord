@@ -2,6 +2,7 @@ import { configureNativeServer } from "./native/helpers";
 import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
 import { startNativeApp, withNativeArtifacts, type NativeApp } from "./support/native-app";
 import { startTestServer, type TestServer } from "./support/server";
+import { writeFile } from "node:fs/promises";
 
 import { startTcpGate } from "./support/tcp-gate";
 
@@ -13,6 +14,7 @@ type Workers = {
 
 export const test = base.extend<Fixtures, Workers>({
   nativeServer: [
+    // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
     async ({}, use) => {
       const server = await startTestServer({ tls: true, livekit: true });
       const network = await startTcpGate(server.port);
@@ -41,7 +43,7 @@ export const test = base.extend<Fixtures, Workers>({
     },
     { scope: "worker", timeout: 90_000 },
   ],
-  nativePage: async ({ nativeApp }, use, testInfo) => {
+  nativePage: async ({ nativeApp, nativeServer }, use, testInfo) => {
     // Reset transient UI using user actions; retain login in the same process.
     await nativeApp.page.keyboard.press("Escape");
     const disconnect = nativeApp.page.locator(
@@ -51,7 +53,15 @@ export const test = base.extend<Fixtures, Workers>({
       await disconnect.click();
       await expect(nativeApp.page.locator(".voice-widget")).not.toHaveClass(/visible/);
     }
-    await withNativeArtifacts(nativeApp, () => use(nativeApp.page), testInfo);
+    try {
+      await withNativeArtifacts(nativeApp, () => use(nativeApp.page), testInfo);
+    } finally {
+      // Includes the fixture's LiveKit child output, needed to distinguish
+      // ICE/socket failures from a client-side connection timeout.
+      const serverLog = testInfo.outputPath("native-server.log");
+      await writeFile(serverLog, nativeServer.log());
+      await testInfo.attach("native-server", { path: serverLog, contentType: "text/plain" });
+    }
   },
   nativeContext: async ({ nativePage }, use) => {
     await use(nativePage.context());

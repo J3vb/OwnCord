@@ -11,6 +11,10 @@ Server/.env
 !.claude/workflows/
 !.claude/rules/
 !.claude/settings.json
+# ECC's /plan writes step plans here. They are reviewable artifacts that belong
+# in the PR, not machine-local state. Prettier reads this file, so plans under
+# it are format-gated like any other tracked markdown -- `npm run format` fixes.
+!.claude/plans/
 CLAUDE.local.md
 .mcp.json
 
