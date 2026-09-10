@@ -48,6 +48,15 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # livekit/protocol v1.51.0 changed TransferSIPParticipant's return type from
+      # *emptypb.Empty to *livekit.TransferSIPParticipantResponse. server-sdk-go/v2
+      # v2.18.1 -- the newest SDK release -- still returns *emptypb.Empty from
+      # sipclient.go:354, so the bump does not compile on any platform (PR #1559).
+      # Hold protocol on 1.50.x until the SDK catches up; drop this entry once
+      # server-sdk-go ships a release built against protocol >= 1.51.
+      # Patch updates within 1.50.x still flow through.
+      - dependency-name: "github.com/livekit/protocol"
+        update-types: ["version-update:semver-minor"]
 
   # Server container base images (Server/Dockerfile). The builder's
   # `golang:1.26-bookworm` tracks the toolchain in Server/go.mod and every
