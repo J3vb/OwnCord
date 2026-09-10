@@ -98,6 +98,13 @@ linters:
       # a shared helper that hides what each case is doing.
       - linters: [funlen, cyclop, nestif, dupl]
         path: _test\.go
+      # cmd/smoke is a CI harness whose entire job is to execute the release
+      # binary named on its command line and read the log it wrote inside a
+      # directory the harness itself created. gosec's taint analysis flags that
+      # argument reaching exec.Command and os.Stat (G702/G703) — which is the
+      # tool's purpose, not a defect. It never runs in the server.
+      - linters: [gosec]
+        path: cmd/smoke/main\.go
 
 # gofmt is the required Go formatting gate (S-05). It lives here rather than as a
 # standalone CI step because `gofmt -l` prints offenders and still exits 0, so a

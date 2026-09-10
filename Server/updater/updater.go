@@ -32,12 +32,16 @@ const (
 	// effective deadline as before.
 	fetchTimeout     = 30 * time.Second
 	checksumAsset    = "checksums.sha256"
-	signatureAsset   = windowsServerBinary + ".sig"
 	manifestAsset    = "server-update-manifest.json"
 	manifestSigAsset = manifestAsset + ".sig"
 
-	windowsServerBinary = "chatserver.exe"
-	linuxServerArchive  = "chatserver-linux-amd64.tar.gz"
+	// The four published server assets. The amd64 pair's names are frozen:
+	// servers deployed before arm64 existed match them exactly, so renaming
+	// either would strand every one of them on its current version.
+	windowsServerBinary      = "chatserver.exe"
+	linuxServerArchive       = "chatserver-linux-amd64.tar.gz"
+	windowsServerArm64Binary = "chatserver-windows-arm64.exe"
+	linuxServerArm64Archive  = "chatserver-linux-arm64.tar.gz"
 )
 
 // UpdateInfo holds the result of a version check.
@@ -254,6 +258,9 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	var downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string
 	assets := make([]Asset, 0, len(release.Assets))
 	wantBinary := serverDownloadAssetName(runtime.GOOS, runtime.GOARCH)
+	// Paired with wantBinary, never fixed: a Windows arm64 host that matched
+	// the amd64 signature would fail verification on every update.
+	wantSignature := serverSignatureAssetName(runtime.GOOS, runtime.GOARCH)
 	for _, asset := range release.Assets {
 		assets = append(assets, Asset{
 			Name:        asset.Name,
@@ -264,7 +271,7 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 			downloadURL = asset.BrowserDownloadURL
 		case strings.EqualFold(asset.Name, checksumAsset):
 			checksumURL = asset.BrowserDownloadURL
-		case strings.EqualFold(asset.Name, signatureAsset):
+		case wantSignature != "" && strings.EqualFold(asset.Name, wantSignature):
 			signatureURL = asset.BrowserDownloadURL
 		case strings.EqualFold(asset.Name, manifestAsset):
 			manifestURL = asset.BrowserDownloadURL

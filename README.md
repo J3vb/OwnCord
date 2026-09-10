@@ -62,8 +62,8 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, and a full source snapshot per release).
 2. Run the server binary:
-   - Windows: `chatserver.exe`
-   - Linux: `./chatserver`
+   - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
+   - Linux: `./chatserver`, from the `amd64` or `arm64` archive
 3. Open `https://localhost:8443/admin` and complete the setup wizard — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
 4. Generate invite codes in the admin panel and share them with friends.
 
