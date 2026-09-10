@@ -48,6 +48,9 @@ type DB struct {
 	// synchronous — the token CLI and tests rely on that.
 	auditWriter atomic.Pointer[AuditWriter]
 
+	// Loaded from the durable sidecar before serving a restored database.
+	messageDeliveryFloor atomic.Int64
+
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
@@ -225,6 +228,10 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
+	retryFloor, err := readMessageDeliveryFloor(path)
+	if err != nil {
+		return nil, fmt.Errorf("loading message retry cutoff: %w", err)
+	}
 
 	base := path
 	if !strings.HasPrefix(base, "file:") {
@@ -271,6 +278,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	}
 
 	d := newDB(writer, reader)
+	d.messageDeliveryFloor.Store(retryFloor)
 	d.lockRelease = release
 	ok = true
 	return d, nil

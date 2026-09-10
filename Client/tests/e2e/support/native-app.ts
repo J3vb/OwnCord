@@ -1,10 +1,13 @@
-import { chromium, expect, type TestInfo } from "@playwright/test";
+import { chromium, expect, type ConsoleMessage, type TestInfo } from "@playwright/test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startProcess, stopProcess, waitForHttp } from "./process";
 
-export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BINARY) {
+export async function startNativeApp(
+  binary = process.env.OWNCORD_E2E_CLIENT_BINARY,
+  options: { preserveProfile?: boolean } = {},
+) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
   const exe = resolve(binary ?? "src-tauri/target/release/owncord-client.exe");
   const directory = await mkdtemp(join(tmpdir(), "owncord-native-e2e-"));
@@ -20,7 +23,7 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
     for (const profile of profiles)
       await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
   };
-  await clearProfiles();
+  if (!options.preserveProfile) await clearProfiles();
   const running = startProcess(exe, [], directory);
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
@@ -41,12 +44,12 @@ export async function startNativeApp(binary = process.env.OWNCORD_E2E_CLIENT_BIN
       process: running.child,
       directory,
       log: running.log,
-      async close() {
+      async close(closeOptions: { preserveProfile?: boolean } = {}) {
         try {
           await browser?.close();
         } finally {
           await stopProcess(running.child);
-          await clearProfiles();
+          if (!closeOptions.preserveProfile) await clearProfiles();
           await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
         }
       },
@@ -69,31 +72,60 @@ export async function withNativeArtifacts(
   info: TestInfo,
 ) {
   const errors: string[] = [];
+  const webview: string[] = [];
   const onError = (error: Error) => errors.push(error.message);
+  // The HTTP SDK patch observes detached cleanup failures instead of leaving
+  // rejected promises unhandled. Preserve the same strict native failure gate.
+  const onConsole = (message: ConsoleMessage) => {
+    webview.push(`[${message.type()}] ${message.text()}`);
+    if (
+      message.type() === "error" &&
+      message.text().startsWith("Failed to release Tauri HTTP resource")
+    )
+      errors.push(message.text());
+  };
   app.page.on("pageerror", onError);
+  app.page.on("console", onConsole);
   await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  // `info.status` is still the expected status while the test body's own
+  // rejection is propagating, so track the throw directly.
+  let threw = false;
   try {
     await use();
+  } catch (error) {
+    threw = true;
+    throw error;
   } finally {
     app.page.off("pageerror", onError);
-    const failed = info.status !== info.expectedStatus || errors.length > 0;
+    app.page.off("console", onConsole);
+    const failed = threw || info.status !== info.expectedStatus || errors.length > 0;
     if (failed) {
-      const trace = info.outputPath("native-trace.zip");
-      await app.context.tracing.stop({ path: trace });
-      await info.attach("native-trace", { path: trace, contentType: "application/zip" });
       // Attach by path: reporters drop inline text bodies, and the list
       // reporter truncates them, so a body attachment never reaches CI.
-      const processLog = info.outputPath("native-process.log");
-      await writeFile(processLog, app.log());
-      await info.attach("native-process", { path: processLog, contentType: "text/plain" });
-      if (!app.page.isClosed())
-        await info.attach("native-screenshot", {
-          body: await app.page.screenshot(),
-          contentType: "image/png",
-        });
+      const attachText = async (name: string, content: string) => {
+        const path = info.outputPath(`${name}.log`);
+        await writeFile(path, content);
+        await info.attach(name, { path, contentType: "text/plain" });
+      };
+      // Logs first: `tracing.stop` can fail after the app exited mid-test,
+      // and a capture error must never replace the test's own failure.
+      await attachText("native-process", app.log());
+      await attachText("native-webview", webview.join("\n"));
+      try {
+        if (!app.page.isClosed())
+          await info.attach("native-screenshot", {
+            body: await app.page.screenshot(),
+            contentType: "image/png",
+          });
+        const trace = info.outputPath("native-trace.zip");
+        await app.context.tracing.stop({ path: trace });
+        await info.attach("native-trace", { path: trace, contentType: "application/zip" });
+      } catch (error) {
+        await attachText("native-capture-error", String(error));
+      }
     } else {
       await app.context.tracing.stop();
     }
-    expect(errors, "Unhandled WebView2 errors").toEqual([]);
+    expect(errors, "WebView2 runtime or HTTP cleanup errors").toEqual([]);
   }
 }

@@ -289,6 +289,18 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
+		// The close drained every accepted send. Preserve the greatest possible
+		// pre-restore logical id outside the database before restoring a snapshot
+		// that may have lost its receipt. A failed cutoff write must not copy.
+		if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
+			slog.Error("restore refused: could not preserve message retry cutoff", "err", err)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"could not preserve message retry protection — database untouched, server restarting")
+			commitRestartPending()
+			go requestRestart("backup_restore_cutoff_failed")
+			return
+		}
+
 		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
 		if err := copyBackupFile(target, dbPath); err != nil {

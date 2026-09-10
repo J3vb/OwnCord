@@ -295,6 +295,11 @@ export interface AuthErrorPayload {
 }
 
 export interface ReadyPayload {
+  readonly capabilities?: {
+    readonly message_deduplication?: boolean;
+    readonly message_retry_window_seconds?: number;
+    readonly message_retry_floor_ms?: number;
+  };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
@@ -303,6 +308,7 @@ export interface ReadyPayload {
 }
 
 export interface ChatMessagePayload {
+  readonly client_message_id?: string;
   readonly id: number;
   readonly channel_id: number;
   readonly user: MessageUser;
@@ -334,6 +340,8 @@ export interface ChatMessagePayload {
 }
 
 export interface ChatSendOkPayload {
+  readonly client_message_id?: string;
+  readonly deduplicated?: boolean;
   readonly message_id: number;
   readonly timestamp: string;
 }
@@ -658,6 +666,7 @@ export interface AuthPayload {
 }
 
 export interface ChatSendPayload {
+  readonly client_message_id?: string;
   readonly channel_id: number;
   readonly content: string;
   readonly reply_to: number | null;

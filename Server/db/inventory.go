@@ -38,6 +38,7 @@ var SubjectInventory = []InventoryClass{
 	{"7 login attempts", `SELECT COUNT(*) FROM login_attempts WHERE username = ?`, inventoryByUname},
 	{"8a messages attributed", `SELECT COUNT(*) FROM messages WHERE user_id = ?`, inventoryByUID},
 	{"8b messages with content", `SELECT COUNT(*) FROM messages WHERE user_id = ? AND content <> ''`, inventoryByUID},
+	{"8c message retry receipts", `SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, inventoryByUID},
 	{"9 mentions naming the subject", `SELECT COUNT(*) FROM message_mentions WHERE mentioned_user_id = ?`, inventoryByUID},
 	{"10 reactions", `SELECT COUNT(*) FROM reactions WHERE user_id = ?`, inventoryByUID},
 	{"11 read states", `SELECT COUNT(*) FROM read_states WHERE user_id = ?`, inventoryByUID},

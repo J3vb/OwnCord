@@ -35,18 +35,20 @@ var (
 
 // SendMessageParams contains validated input for sending a message.
 type SendMessageParams struct {
-	ChannelID     int64
-	UserID        int64
-	Username      string
-	Avatar        *string
-	RoleName      string
-	Content       string // raw, will be sanitized
-	ReplyTo       *int64
-	AttachmentIDs []string
+	ClientMessageID string // stable logical id, optional for older clients
+	ChannelID       int64
+	UserID          int64
+	Username        string
+	Avatar          *string
+	RoleName        string
+	Content         string // raw, will be sanitized
+	ReplyTo         *int64
+	AttachmentIDs   []string
 }
 
 // SendMessageResult contains the output of a successful message send.
 type SendMessageResult struct {
+	Duplicate bool // retry acknowledgment only, no repeated broadcasts or effects
 	MessageID int64
 	Timestamp string
 	Content   string // sanitized content

@@ -22,17 +22,22 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	sendCmd := cmd.(ChatSendCmd)
 
 	result, err := d.MessageSvc.SendMessage(ctx, service.SendMessageParams{
-		ChannelID:     sendCmd.ChannelID(),
-		UserID:        info.UserID,
-		Username:      info.Username,
-		Avatar:        info.Avatar,
-		RoleName:      info.RoleName,
-		Content:       sendCmd.Content(),
-		ReplyTo:       sendCmd.ReplyTo(),
-		AttachmentIDs: sendCmd.Attachments(),
+		ClientMessageID: sendCmd.ClientMessageID(),
+		ChannelID:       sendCmd.ChannelID(),
+		UserID:          info.UserID,
+		Username:        info.Username,
+		Avatar:          info.Avatar,
+		RoleName:        info.RoleName,
+		Content:         sendCmd.Content(),
+		ReplyTo:         sendCmd.ReplyTo(),
+		AttachmentIDs:   sendCmd.Attachments(),
 	})
 	if err != nil {
 		return serviceErrorToResult(err)
+	}
+	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID(), result.Duplicate)
+	if result.Duplicate {
+		return Result{Reply: reply}
 	}
 
 	// Build attachment data for broadcast.
@@ -47,8 +52,8 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		})
 	}
 
-	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp)
 	broadcast := buildChatMessage(chatMessageArgs{
+		ClientMessageID:  sendCmd.ClientMessageID(),
 		MsgID:            result.MessageID,
 		ChannelID:        sendCmd.ChannelID(),
 		UserID:           info.UserID,

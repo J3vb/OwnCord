@@ -174,6 +174,8 @@ export function createWsClient() {
 
   // State change listeners
   const stateListeners = new Set<(state: ConnectionState) => void>();
+  // Diagnostic probes observe a fresh server heartbeat; pongs carry no id.
+  const pongListeners = new Set<() => void>();
 
   // Local send-failure listeners (transport level: proxy not open, outbound
   // channel full/closed). Notified with the envelope id so the dispatcher can
@@ -292,8 +294,11 @@ export function createWsClient() {
       lastSeq = seq;
     }
 
-    // Server pong messages have no payload — silently ignore.
-    if (parsed.type === "pong") return;
+    // Heartbeats have no payload and do not belong in the domain dispatcher.
+    if (parsed.type === "pong") {
+      for (const listener of pongListeners) listener();
+      return;
+    }
 
     if (!parsed.type || parsed.payload === undefined) {
       log.warn("Invalid WS message: missing type or payload", { parsed });
@@ -681,6 +686,54 @@ export function createWsClient() {
     },
 
     disconnect,
+
+    /** Send a heartbeat and require a fresh pong on this authenticated socket.
+     * Pongs are uncorrelated, so this proves liveness, not an RTT measurement. */
+    ping(signal: AbortSignal, timeoutMs = 5000): Promise<void> {
+      return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        if (state !== "connected" || !proxyOpen || tauriInvoke === null) {
+          reject(new Error("The application connection is not ready."));
+          return;
+        }
+        const generation = wsGeneration;
+        const cleanup = (): void => {
+          clearTimeout(timer);
+          pongListeners.delete(onPong);
+          stateListeners.delete(onState);
+          signal.removeEventListener("abort", onAbort);
+        };
+        const fail = (reason: unknown): void => {
+          cleanup();
+          reject(reason);
+        };
+        const onAbort = (): void => fail(signal.reason);
+        const onState = (next: ConnectionState): void => {
+          if (next !== "connected") fail(new Error("The application connection changed."));
+        };
+        const onPong = (): void => {
+          if (generation !== wsGeneration) {
+            fail(new Error("The application connection changed."));
+            return;
+          }
+          cleanup();
+          resolve();
+        };
+        const timer = setTimeout(
+          () => fail(new Error("No heartbeat response arrived.")),
+          timeoutMs,
+        );
+        pongListeners.add(onPong);
+        stateListeners.add(onState);
+        signal.addEventListener("abort", onAbort, { once: true });
+        void tauriInvoke("ws_send", {
+          message: JSON.stringify({ type: "ping", payload: {} }),
+        }).catch(fail);
+      });
+    },
 
     send(msg: ClientMessage): string {
       return send(msg);

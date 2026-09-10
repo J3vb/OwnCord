@@ -243,6 +243,7 @@ vi.mock("@stores/blocks.store", () => ({
 // ---------------------------------------------------------------------------
 
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
+import { activatePendingMessages, deactivatePendingMessages } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import {
@@ -303,6 +304,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
 
 describe("createChannelController", () => {
   beforeEach(() => {
+    deactivatePendingMessages();
     vi.clearAllMocks();
     capturedMessageListOpts = null;
     capturedMessageInputOpts = null;
@@ -496,6 +498,154 @@ describe("createChannelController", () => {
   });
 
   describe("MessageInput callbacks", () => {
+    it("releases retry payloads on its own keyed echo, while ignoring another user's echo", async () => {
+      activatePendingMessages(
+        { host: "chat.example", userId: 1 },
+        { id: 1, username: "tester", avatar: null },
+        true,
+      );
+      const opts = makeOpts();
+      const ownedCleanups = new Set<() => void>();
+      let current = true;
+      Object.assign(opts.api, {
+        getConfig: () => ({ host: "chat.example", token: "token" }),
+        getSession: () => ({
+          isCurrent: () => current,
+          addCleanup: (cleanup: () => void) => {
+            ownedCleanups.add(cleanup);
+            return () => ownedCleanups.delete(cleanup);
+          },
+        }),
+      });
+      let next = 0;
+      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageInputOpts.onSend("private text", null, []);
+      await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
+      const logicalId = mockAddOptimistic.mock.calls[0]![0].clientMessageId;
+      const callback = vi
+        .mocked(opts.ws.on)
+        .mock.calls.find(([event]) => event === "chat_message")![1] as (payload: {
+        user: { id: number };
+        channel_id: number;
+        client_message_id: string;
+      }) => void;
+      callback({ user: { id: 2 }, channel_id: 42, client_message_id: logicalId });
+      expect(ownedCleanups.size).toBe(1);
+      current = false;
+      callback({ user: { id: 1 }, channel_id: 42, client_message_id: logicalId });
+      expect(ownedCleanups.size).toBe(1);
+      current = true;
+      callback({ user: { id: 1 }, channel_id: 42, client_message_id: logicalId });
+      expect(ownedCleanups.size).toBe(0);
+      capturedMessageListOpts.onRetry("cid-2");
+      expect(
+        vi.mocked(opts.ws.send).mock.calls.filter(([frame]) => frame.type === "chat_send"),
+      ).toHaveLength(1);
+      ctrl.destroyChannel();
+    });
+
+    it("keeps the stable logical identity across explicit retries while changing transport ids", async () => {
+      activatePendingMessages(
+        { host: "chat.example", userId: 1 },
+        { id: 1, username: "tester", avatar: null },
+        true,
+      );
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+      let next = 0;
+      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageInputOpts.onSend("send once", null, []);
+      await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
+      const first = vi
+        .mocked(opts.ws.send)
+        .mock.calls.find(([frame]) => frame.type === "chat_send")![0];
+      expect(first.payload).toMatchObject({ client_message_id: expect.stringMatching(/^\d{13}:/) });
+      capturedMessageListOpts.onRetry("cid-2");
+      await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledTimes(2));
+      const sends = vi
+        .mocked(opts.ws.send)
+        .mock.calls.filter(([frame]) => frame.type === "chat_send");
+      expect(sends[1]![0].payload).toEqual(first.payload);
+      expect(mockAddOptimistic.mock.calls[0]![0].correlationId).not.toEqual(
+        mockAddOptimistic.mock.calls[1]![0].correlationId,
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("cannot retry a saved logical identity after a server capability downgrade", async () => {
+      const owner = { host: "chat.example", userId: 1 };
+      const user = { id: 1, username: "tester", avatar: null };
+      activatePendingMessages(owner, user, true);
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
+      let next = 0;
+      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageInputOpts.onSend("private text", null, []);
+      await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
+      activatePendingMessages(owner, user, false);
+      capturedMessageListOpts.onRetry("cid-2");
+      expect(
+        vi.mocked(opts.ws.send).mock.calls.filter(([frame]) => frame.type === "chat_send"),
+      ).toHaveLength(1);
+      expect(mockRemoveOptimistic).not.toHaveBeenCalled();
+      expect(opts.showToast).toHaveBeenCalledWith(
+        expect.stringContaining("cannot safely retry"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("ignores a stale composer callback after its server session changes", () => {
+      let current = true;
+      const opts = makeOpts();
+      Object.assign(opts.api, { getSession: () => ({ isCurrent: () => current }) });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      current = false;
+      capturedMessageInputOpts.onSend("belongs to the old server", null, []);
+      expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
+    });
+
+    it("releases every acknowledged send timer and its session cleanup", () => {
+      vi.useFakeTimers();
+      try {
+        const cleanups = new Set<() => void>();
+        const opts = makeOpts();
+        Object.assign(opts.api, {
+          getSession: () => ({
+            isCurrent: () => true,
+            addCleanup: (cleanup: () => void) => {
+              cleanups.add(cleanup);
+              return () => cleanups.delete(cleanup);
+            },
+          }),
+        });
+        let next = 0;
+        vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        for (let i = 0; i < 100; i++) {
+          capturedMessageInputOpts.onSend("hello", null, []);
+          const callback = vi
+            .mocked(opts.ws.on)
+            .mock.calls.find(([event]) => event === "chat_send_ok")![1];
+          (callback as (payload: object, id: string) => void)({}, `cid-${next}`);
+        }
+        expect(cleanups.size).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+        vi.advanceTimersByTime(20_000);
+        expect(mockMarkSendFailed).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("onSend sends chat_send via ws", () => {
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
@@ -1399,6 +1549,15 @@ describe("createChannelController", () => {
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+    });
+
+    it("does not charge slow mode again for a deduplicated receipt", () => {
+      seedChannel(30);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      wsHandler(opts, "chat_send_ok")({ deduplicated: true } as never);
       expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
     });
 

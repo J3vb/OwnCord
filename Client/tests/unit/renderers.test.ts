@@ -295,7 +295,7 @@ describe("renderers", () => {
 
       expect(el.classList.contains("failed")).toBe(true);
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
-        "Connection problem — message not sent",
+        "Connection problem — delivery not confirmed",
       );
 
       ac.abort();

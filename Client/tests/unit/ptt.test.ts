@@ -1308,14 +1308,20 @@ describe("PTT binding lifecycle races", () => {
       }
       return Promise.resolve();
     });
+    const { setMuted } = await import("../../src/lib/livekitSession");
     const pending = updatePttKey(0x20);
     await vi.waitFor(() => expect(finishSupport).toBeTypeOf("function"));
+    // Clearing an unfinished binding must also release an existing PTT gate.
+    // Start closed so the assertion proves a transition rather than false → false.
+    mockPttGated = true;
     await updatePttKey(0);
     expect(nativeKey).toBe(0);
     expect(testPrefs.get("pttVk")).toBe(0);
     finishSupport(true);
     await pending;
-    await vi.dynamicImportSettled();
+    // Await this Clear's observable microphone work. dynamicImportSettled waits
+    // every unresolved import in the worker, including unrelated module work.
+    await vi.waitFor(() => expect(vi.mocked(setMuted)).toHaveBeenCalledWith(false));
 
     expect(mockPttPollingLive).toBe(false);
     expect(mockPttGated).toBe(false);

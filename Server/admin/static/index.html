@@ -323,6 +323,7 @@ const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
+  supportPreview:null,supportBusy:false,
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
@@ -335,7 +336,7 @@ function handleSessionExpired(){
   state.logConnectSeq++;
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
-  state.token='';state.me=null;localStorage.removeItem('admin_token');
+  state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');
   const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
   showOverlay('loginOverlay');
 }
@@ -764,6 +765,7 @@ const NAV=[
   {id:'audit',label:'Audit Log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
   {id:'tokens',label:'API Tokens',icon:I.lock,allowed:isOwner},
   {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'diagnostics',label:'Diagnostics',icon:I.shield,allowed:()=>can(PERM.ADMINISTRATOR)},
   {id:'logs',label:'Server Logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'retention',label:'Retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
@@ -826,12 +828,55 @@ function navigateTo(id){
   }
 }
 
-function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';state.me=null;localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+
+/* Support bundles remain local until the administrator chooses to share the
+   downloaded file. The server freezes the preview; confirmation sends its ID
+   and hash, and cannot regenerate different content under an old preview. */
+function renderDiagnostics(){
+  let html='<div class="page-title">Diagnostics</div><div class="page-desc">Create a support bundle to investigate server problems.</div>';
+  html+='<div class="section-card"><div class="section-card-body"><p>Includes versions, selected settings, database counts, server health metrics and a recent event timeline. Client media connectivity is not tested. Message contents, credentials, addresses and raw logs are excluded. Nothing is uploaded.</p><button class="btn btn-accent" style="margin-top:16px" onclick="previewSupportBundle()" '+(state.supportBusy?'disabled':'')+'>'+(state.supportBusy?'Preparing…':'Create support bundle preview')+'</button></div></div>';
+  const p=state.supportPreview;if(!p)return html;
+  html+='<div class="section-card" id="support-preview"><div class="section-card-header"><h3>Review before download</h3></div><div class="section-card-body"><p>Archive size: <strong>'+p.byte_size+' bytes</strong> ('+fmtBytes(p.byte_size)+'). Preview expires '+esc(utcDate(p.expires_at).toLocaleTimeString())+'.</p><p style="overflow-wrap:anywhere">SHA-256: <code>'+esc(p.sha256)+'</code></p><table class="tbl"><thead><tr><th>Item</th><th>Bytes</th><th>SHA-256</th></tr></thead><tbody>';
+  p.items.forEach(item=>{html+='<tr><td>'+esc(item.name)+'</td><td>'+item.byte_size+'</td><td style="overflow-wrap:anywhere;max-width:280px"><code>'+esc(item.sha256)+'</code></td></tr>'});
+  html+='</tbody></table><h4 style="margin-top:16px">Redaction report</h4>';
+  p.redactions.forEach(rule=>{html+='<p><strong>'+esc(rule.item)+': '+esc(rule.rule)+'</strong><br>'+esc(rule.omitted)+'</p>'});
+  html+='<p>Review the downloaded file before sharing it with someone helping you.</p><button class="btn btn-ghost" onclick="discardSupportBundle()" '+(state.supportBusy?'disabled':'')+'>Discard preview</button> <button class="btn btn-accent" id="support-confirm" onclick="downloadSupportBundle()" '+(state.supportBusy?'disabled':'')+'>Confirm download</button></div></div>';
+  return html;
+}
+function discardSupportBundle(){state.supportPreview=null;if(state.section==='diagnostics')renderContent()}
+async function previewSupportBundle(){
+  if(state.supportBusy)return;
+  const token=state.token;state.supportBusy=true;state.supportPreview=null;renderContent();
+  try{
+    const res=await fetch('/admin/api/support-bundles/preview',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});
+    if(state.token!==token)return;
+    if(res.status===401){handleSessionExpired();return}
+    const data=await res.json();if(state.token!==token)return;
+    if(!res.ok)throw new Error(data.message||'Could not prepare diagnostics');
+    state.supportPreview=data;
+  }catch(e){if(state.token===token)showToast(e.message,'error')}
+  finally{if(state.token===token){state.supportBusy=false;if(state.section==='diagnostics')renderContent()}}
+}
+async function downloadSupportBundle(){
+  const p=state.supportPreview;if(!p||state.supportBusy)return;
+  const token=state.token;state.supportBusy=true;renderContent();
+  try{
+    const res=await fetch('/admin/api/support-bundles/download',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({preview_id:p.preview_id,sha256:p.sha256})});
+    if(state.token!==token)return;
+    if(res.status===401){handleSessionExpired();return}
+    if(!res.ok){const data=await res.json();throw new Error(data.message||'Could not download diagnostics')}
+    const blob=await res.blob();if(state.token!==token)return;
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='owncord-support.zip';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    showToast('Support bundle downloaded');
+  }catch(e){if(state.token===token)showToast(e.message,'error')}
+  finally{if(state.token===token){state.supportPreview=null;state.supportBusy=false;if(state.section==='diagnostics')renderContent()}}
+}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}

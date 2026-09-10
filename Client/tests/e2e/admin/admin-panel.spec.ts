@@ -1,4 +1,6 @@
 import type { Page } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
 
 // One atomic user journey with a fresh process/database on EVERY attempt.
@@ -89,6 +91,43 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page }) => {
     await navigate(page, "Audit Log");
     await expect(page.locator(".badge", { hasText: "channel_create" }).first()).toBeVisible();
     await expect(page.locator(".badge", { hasText: "channel_update" }).first()).toBeVisible();
+  });
+
+  await test.step("support preview requires confirmation and downloads the exact reviewed archive", async () => {
+    await navigate(page, "Diagnostics");
+    const downloads: string[] = [];
+    const onDownload = (download: { suggestedFilename(): string }) =>
+      downloads.push(download.suggestedFilename());
+    page.on("download", onDownload);
+    try {
+      const response = page.waitForResponse(
+        (res) =>
+          res.url().endsWith("/support-bundles/preview") && res.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Create support bundle preview" }).click();
+      const previewResponse = await response;
+      expect(previewResponse.ok()).toBe(true);
+      const preview = (await previewResponse.json()) as { byte_size: number; sha256: string };
+      await expect(page.locator("#support-preview")).toBeVisible();
+      await expect(page.locator("#support-preview")).toContainText(`${preview.byte_size} bytes`);
+      await expect(page.locator("#support-preview")).toContainText(preview.sha256);
+      await expect(page.locator("#support-preview")).toContainText("Redaction report");
+      expect(downloads).toEqual([]);
+      const downloadPromise = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Confirm download" }).click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe("owncord-support.zip");
+      const file = await download.path();
+      expect(file).not.toBeNull();
+      const bytes = readFileSync(file!);
+      expect(bytes.length).toBe(preview.byte_size);
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(preview.sha256);
+      await expect(page.locator("#support-preview")).toHaveCount(0);
+      await navigate(page, "Audit Log");
+      await expect(page.locator(".badge", { hasText: "support_bundle_create" })).toBeVisible();
+    } finally {
+      page.off("download", onDownload);
+    }
   });
 
   await test.step("logout returns to the login overlay; owner can sign back in", async () => {

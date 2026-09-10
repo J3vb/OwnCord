@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 166 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 168 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -84,6 +84,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/setup`                                                   |
 | GET     | `/admin/api/setup/status`                                            |
 | GET     | `/admin/api/stats`                                                   |
+| POST    | `/admin/api/support-bundles/download`                                |
+| POST    | `/admin/api/support-bundles/preview`                                 |
 | GET     | `/admin/api/tokens`                                                  |
 | POST    | `/admin/api/tokens`                                                  |
 | DELETE  | `/admin/api/tokens/{id}`                                             |

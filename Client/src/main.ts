@@ -9,9 +9,12 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
+import { SessionScope } from "@lib/sessionScope";
+import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
+import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
 import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
@@ -131,6 +134,18 @@ const api = createApiClient({ host: "" }, () => {
   clearAuth();
 });
 const ws = createWsClient();
+configureConnectionDiagnostics(api, ws);
+onAuthCleared((reason) => {
+  // Server switches also use clearAuth("user"); retain their account-scoped
+  // drafts. Explicit logout and invalid credentials discard pending sends.
+  try {
+    deactivatePendingMessages({
+      discard: reason === "user" && sessionStorage.getItem("owncord:quick-switch-target") === null,
+    });
+  } finally {
+    api.endSession();
+  }
+});
 // Single writer for the UX-facing connection status (docs/architecture/ux §3):
 // live controls read ui.store.connectionStatus reactively instead of wiring
 // their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
@@ -291,10 +306,12 @@ function runHealthChecks(
     ): void;
   },
   profiles: readonly { host: string }[],
+  owner: SessionScope,
 ): void {
   for (const profile of profiles) {
     void (async () => {
       try {
+        owner.assertCurrent();
         connectPage.updateHealthStatus(profile.host, {
           status: "checking",
           latencyMs: null,
@@ -302,7 +319,8 @@ function runHealthChecks(
           onlineUsers: null,
         });
         const start = performance.now();
-        const health = await api.getHealth(profile.host, 3000);
+        const health = await api.getHealth(profile.host, 3000, owner.signal);
+        owner.assertCurrent();
         const elapsed = Math.round(performance.now() - start);
         connectPage.updateHealthStatus(profile.host, {
           status: elapsed > 1500 ? "slow" : "online",
@@ -311,6 +329,7 @@ function runHealthChecks(
           onlineUsers: health.online_users ?? null,
         });
       } catch (err) {
+        if (!owner.isCurrent()) return;
         // Record why the check failed (TLS/cert-pin/network) — otherwise a
         // "can't connect" report has no logged cause to diagnose.
         log.warn("health check failed", { host: profile.host, error: String(err) });
@@ -359,13 +378,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     dispatcherCleanup = null;
     connectedOverlay?.destroy();
     connectedOverlay = null;
-    api.setConfig({ token });
+    api.setConfig({ host, token });
+    const owner = api.getSession();
     // Store token in authStore so the dispatcher's auth_ok handler has it
     authStore.setState((prev) => ({ ...prev, token }));
     lastConnectHost = host;
     lastConnectToken = token;
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
+    owner.addCleanup(dispatcherCleanup);
     log.info("Dispatcher wired, connecting WS");
 
     // Session-scoped WS listeners — collected so they're all removed together
@@ -376,7 +397,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     if (rememberPassword) {
       saveCredential(host, username, token, password)
         .then((ok) => {
-          if (!ok) {
+          if (!ok && owner.isCurrent()) {
             log.warn("Credential save failed — auto-login will not work for this server");
             setTransientError("Could not save credentials — auto-login won't work");
           }
@@ -429,10 +450,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         username: payload.user.username ?? username,
         motd: payload.motd ?? "",
         onReady: () => {
+          if (!owner.isCurrent()) return;
           connectedOverlay?.destroy();
           connectedOverlay = null;
           router.navigate("main");
         },
+      });
+      const ownedOverlay = connectedOverlay;
+      owner.addCleanup(() => {
+        ownedOverlay.destroy();
+        if (connectedOverlay === ownedOverlay) connectedOverlay = null;
       });
       appEl!.appendChild(connectedOverlay.element);
       connectedOverlay.show();
@@ -449,6 +476,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       for (const unsub of sessionUnsubs) unsub();
       sessionUnsubs.length = 0;
     };
+    owner.addCleanup(sessionCleanup);
   }
 
   // Track partial auth state for TOTP flow
@@ -457,6 +485,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   let pendingTotpUsername = "";
 
   if (pageId === "connect") {
+    const pageOwner = new SessionScope({ host: "", generation: 0 });
     // Helper to get the profile list for the ConnectPage
     function getProfileList(): readonly {
       name: string;
@@ -522,8 +551,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     const connectPage = createConnectPage(
       {
         async onLogin(host, username, password) {
+          api.endSession();
           api.setConfig({ host });
+          const attempt = api.getSession();
           const result = await api.login(username, password);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
           if (result.requires_2fa) {
             pendingTotpHost = host;
             pendingTotpPartialToken = result.partial_token ?? "";
@@ -539,8 +572,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           }
         },
         async onRegister(host, username, password, inviteCode) {
+          api.endSession();
           api.setConfig({ host });
+          const attempt = api.getSession();
           const result = await api.register(username, password, inviteCode);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
           if (result.status === "pending_approval" || result.token === undefined) {
             // Approval mode (B4-1): no session yet — an admin decides. The
             // dedicated notice is B9's; until then the form's message line
@@ -560,7 +597,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             log.error("TOTP submit without pending partial token");
             return;
           }
+          const attempt = api.getSession();
           const result = await api.verifyTotp(code, pendingTotpPartialToken);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
           if (result.token) {
             // Clear the sensitive partial token now that it has been
             // exchanged for a real session token. A rejected code must NOT
@@ -600,7 +640,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
           // Check health for the new profile
-          runHealthChecks(connectPage, getProfileList());
+          runHealthChecks(connectPage, getProfileList(), pageOwner);
         },
         onDeleteProfile(profileId) {
           profileManager.removeProfile(profileId);
@@ -614,6 +654,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         },
         onAutoLoginCancel() {
           autoLoginCancelled = true;
+          deactivatePendingMessages();
+          api.endSession();
           // Every read of this flag below runs before the overlay carrying
           // this Cancel button is ever painted, so by the time a click
           // reaches here the session is already in flight (wirePostAuth has
@@ -660,14 +702,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     // Periodic health check — re-run every 15s so offline servers update when they come back
     const healthCheckInterval = setInterval(() => {
-      runHealthChecks(connectPage, getProfileList());
+      runHealthChecks(connectPage, getProfileList(), pageOwner);
     }, 15_000);
 
+    pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
+    pageOwner.addCleanup(unsubUpdateRequired);
+    // Page-owned checks and listeners cannot update a later connect screen.
     // Wrap destroy to clear the interval
     currentPage = {
       destroy() {
-        clearInterval(healthCheckInterval);
-        unsubUpdateRequired();
+        pageOwner.dispose();
         updateNotifier?.destroy?.();
         connectPage.destroy?.();
       },
@@ -675,7 +719,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     // Expose a health-refresh hook so trusting a first-use certificate can
     // re-check the now-reachable server without a full page navigation.
-    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList());
+    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList(), pageOwner);
 
     // Route deep-link invites into this connect page. Apply any that arrived
     // before it mounted.
@@ -685,16 +729,21 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       pendingInviteLink = null;
     }
 
+    // Profile loading must not later start auto-login over a manual attempt.
+    // Capture ownership before its first await, not after credentials arrive.
+    const startupAttempt = api.getSession();
     // Load saved profiles and kick off health checks
     void (async () => {
       try {
         await profileManager.loadProfiles();
+        if (!pageOwner.isCurrent()) return;
         const profiles = getProfileList();
         connectPage.refreshProfiles(profiles);
-        runHealthChecks(connectPage, profiles);
+        runHealthChecks(connectPage, profiles, pageOwner);
       } catch (err) {
+        if (!pageOwner.isCurrent()) return;
         log.warn("Failed to load profiles, using defaults", err);
-        runHealthChecks(connectPage, getProfileList());
+        runHealthChecks(connectPage, getProfileList(), pageOwner);
       }
 
       // Consume any pending skip-auto-login flag on THIS mount regardless of
@@ -730,7 +779,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // Suppressing the attempt removes the race instead of relying on the
       // delete being dispatched early enough to win it — and an auto-login
       // immediately after an explicit logout is wrong regardless of timing.
-      if (skipAutoLogin) {
+      if (skipAutoLogin || !startupAttempt.isCurrent()) {
         return;
       }
 
@@ -740,7 +789,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       const autoProfile = profileManager.getAutoConnectProfile();
       if (autoProfile) {
         try {
+          const attempt = api.getSession();
           const cred = await loadCredential(autoProfile.host);
+          if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
           if (cred?.username && cred?.token && !autoLoginCancelled) {
             // Pass autoConnect so the checkbox still reads correctly if the
             // user cancels and lands back on the form.
@@ -770,7 +821,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             return;
           }
         } catch (err) {
-          if (!autoLoginCancelled) {
+          if (!autoLoginCancelled && pageOwner.isCurrent()) {
             const message = err instanceof Error ? err.message : "Auto-login failed";
             log.warn("Auto-login failed", { host: autoProfile.host, error: message });
             connectPage.showError(`Auto-login failed: ${message}`);
@@ -806,14 +857,15 @@ authStore.subscribeSelector(
     // onReady, 800ms after `ready` arrives — so a session that ends between
     // auth_ok and ready (a ban, an auth_error on an intervening reconnect,
     // a server_restart shutdown) flips isAuthenticated false while the
-    // router is still "connect". Gate on connectedOverlay too so that case
-    // still tears down: otherwise the overlay (position:fixed, opaque,
+    // router is still "connect". The synchronous session cleanup has already
+    // destroyed its overlay; lastConnectHost retains the transport ownership
+    // needed to finish teardown here. Otherwise the overlay (position:fixed, opaque,
     // z-index 200, appended straight to #app in wirePostAuth's auth_ok
     // handler) is orphaned over the connect page with no remaining owner —
     // its only other teardown paths are its own onReady timer (never armed
     // without `ready`), the next wirePostAuth, onAutoLoginCancel, and the
     // invite deep-link handler, none of which this path takes (OC-0157).
-    if (!isAuthenticated && (router.getCurrentPage() === "main" || connectedOverlay !== null)) {
+    if (!isAuthenticated && (router.getCurrentPage() === "main" || lastConnectHost !== "")) {
       // Leave voice channel before disconnecting so other clients see it
       // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
       // than the live voiceStore: clearAuth applies state (including this
@@ -864,6 +916,8 @@ window.addEventListener("beforeunload", () => {
     voiceSessionLeave(false); // false: we send voice_leave below
     ws.send({ type: "voice_leave", payload: {} });
   }
+  deactivatePendingMessages();
+  api.endSession();
   // Flush any buffered log entries to disk before the window closes.
   void flushLogs();
 });
@@ -889,6 +943,8 @@ function handleInviteDeepLink(code: string, host?: string): void {
     clearAuth();
     return;
   }
+  deactivatePendingMessages();
+  api.endSession();
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected

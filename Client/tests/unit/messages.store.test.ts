@@ -62,6 +62,82 @@ const ATTACHMENT: Attachment = {
   url: "/uploads/screenshot.png",
 };
 
+describe("stable logical send reconciliation", () => {
+  beforeEach(() => resetStore());
+  const logicalId = "1773568800000:85c9cd7e-3f19-4dce-9ee1-2a3d49e2fca0";
+  function optimistic(correlationId = "first-attempt") {
+    addOptimisticMessage({
+      correlationId,
+      clientMessageId: logicalId,
+      channelId: 1,
+      user: TEST_USER,
+      content: "same text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+  }
+
+  it("does not mistake identical text from another device for this send", () => {
+    optimistic();
+    addMessage(makeChatPayload({ content: "same text", client_message_id: `${logicalId}other` }));
+    expect(getChannelMessages(1)).toHaveLength(2);
+    expect(getChannelMessages(1).filter((row) => row.status === "pending")).toHaveLength(1);
+  });
+
+  it("reconciles the exact echo even after timeout, with sanitized content", () => {
+    optimistic();
+    markSendFailed("first-attempt", "UNCONFIRMED");
+    addMessage(makeChatPayload({ content: "sanitized text", client_message_id: logicalId }));
+    expect(getChannelMessages(1)).toHaveLength(1);
+    expect(getChannelMessages(1)[0]).toMatchObject({
+      id: 100,
+      status: "sent",
+      content: "sanitized text",
+    });
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+
+  it("a late ACK reconciles the newer retry by logical identity", () => {
+    optimistic("second-attempt");
+    confirmSend("first-attempt", 100, "2026-03-15T10:00:00Z", logicalId);
+    expect(getChannelMessages(1)).toHaveLength(1);
+    expect(getChannelMessages(1)[0]).toMatchObject({ id: 100, status: "sent" });
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+
+  it("one logical send stays one row even if Retry was clicked twice before repaint", () => {
+    optimistic("second-attempt");
+    optimistic("third-attempt");
+    confirmSend("third-attempt", 100, "2026-03-15T10:00:00Z", logicalId);
+    expect(getChannelMessages(1)).toHaveLength(1);
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+
+  it("retry ACK removes the recovered row when history already has the committed message", () => {
+    optimistic("recovered-attempt");
+    markSendFailed("recovered-attempt", "RECOVERED");
+    setMessages(1, [makeMessageResponse({ id: 100, content: "edited on another device" })], false);
+    expect(getChannelMessages(1)).toHaveLength(2);
+    confirmSend("recovered-attempt", 100, "2026-03-15T10:00:00Z", logicalId);
+    expect(getChannelMessages(1)).toHaveLength(1);
+    expect(getChannelMessages(1)[0]).toMatchObject({
+      id: 100,
+      content: "edited on another device",
+      status: "sent",
+    });
+  });
+
+  it("the live echo also consumes the pending twin when history won the race", () => {
+    optimistic();
+    setMessages(1, [makeMessageResponse({ id: 100, content: "same text" })], false);
+    expect(getChannelMessages(1)).toHaveLength(2);
+    addMessage(makeChatPayload({ id: 100, content: "same text", client_message_id: logicalId }));
+    expect(getChannelMessages(1)).toHaveLength(1);
+    expect(getChannelMessages(1)[0]).toMatchObject({ id: 100, status: "sent" });
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+});
+
 function makeChatPayload(overrides?: Partial<ChatMessagePayload>): ChatMessagePayload {
   return {
     id: 100,

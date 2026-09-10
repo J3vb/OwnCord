@@ -14,6 +14,7 @@ import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
+import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -92,6 +93,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     LOG_FILTER_LEVELS,
   );
   let unsubLogListener: (() => void) | null = null;
+  let cleanupConnectionDiagnostics: (() => void) | null = null;
 
   // Single point of truth for both the list and the "N entries" counter above
   // it, so every render path (filter change, Clear, Refresh, live entry)
@@ -116,6 +118,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
   function build(buildSignal: AbortSignal = signal): HTMLDivElement {
     const section = createElement("div", { class: "settings-pane active" });
+    cleanupConnectionDiagnostics?.();
+    const diagnostics = createConnectionDiagnosticsPanel(buildSignal);
+    cleanupConnectionDiagnostics = diagnostics.cleanup;
+    section.appendChild(diagnostics.element);
 
     // Version display
     const versionEl = createElement(
@@ -360,6 +366,8 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   }
 
   function cleanup(): void {
+    cleanupConnectionDiagnostics?.();
+    cleanupConnectionDiagnostics = null;
     unsubLogListener?.();
     unsubLogListener = null;
     logListEl = null;

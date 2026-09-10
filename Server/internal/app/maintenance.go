@@ -161,6 +161,7 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 func (m *maintenance) steps() []maintenanceStep {
 	return []maintenanceStep{
 		{"failed to delete expired sessions", m.sweepSessions},
+		{"failed to delete expired message delivery receipts", m.sweepMessageDeliveryReceipts},
 		{"failed to clean up expired second-factor state", m.sweepSecondFactor},
 		{"push subscription sweep failed", m.sweepPushSubscriptions},
 		{"backup maintenance failed", m.maintainBackups},
@@ -192,6 +193,10 @@ func (m *maintenance) tick(ctx context.Context) bool {
 
 func (m *maintenance) sweepSessions(ctx context.Context) error {
 	return m.database.DeleteExpiredSessions(ctx)
+}
+
+func (m *maintenance) sweepMessageDeliveryReceipts(ctx context.Context) error {
+	return m.database.DeleteExpiredMessageDeliveryReceipts(ctx)
 }
 
 // sweepSecondFactor removes expired login challenges, staged enrolments and

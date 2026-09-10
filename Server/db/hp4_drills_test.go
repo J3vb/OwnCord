@@ -68,6 +68,22 @@ func takeInventory(t *testing.T, database *DB, uid int64, uname string) map[stri
 	return out
 }
 
+// Alpha snapshots predate retry receipts. Seed one for the chosen sender so
+// erasure and post-restore marker replay prove more than an empty-table count.
+func seedDrillMessageReceipt(t *testing.T, database *DB, uid int64) {
+	t.Helper()
+	if _, err := database.ExecContext(context.Background(), `INSERT INTO message_delivery_receipts
+		(user_id, client_message_id, channel_id, payload_hash, message_id, timestamp, expires_at_ms)
+		SELECT user_id, 'drill-receipt-' || user_id, channel_id, zeroblob(32), id, timestamp,
+		       unixepoch('now') * 1000 + 86400000
+		FROM messages WHERE user_id = ? ORDER BY id LIMIT 1`, uid); err != nil {
+		t.Fatal(err)
+	}
+	if countQ(t, database, `SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, uid) != 1 {
+		t.Fatal("drill has no retry receipt for the subject")
+	}
+}
+
 // logInventory prints the before/after table the scorecard pastes.
 func logInventory(t *testing.T, title string, before, after map[string]int) {
 	t.Helper()
@@ -128,6 +144,7 @@ func runD1(t *testing.T, database *DB, uid int64, uname string, before map[strin
 func TestHP4_D1_ErasureLeavesNoClass(t *testing.T) {
 	database, _ := drillCopy(t)
 	uid, uname := pickSubject(t, database)
+	seedDrillMessageReceipt(t, database, uid)
 	before := takeInventory(t, database, uid, uname)
 	if before["8a messages attributed"] == 0 || before["12 attachment rows uploaded"] == 0 || before["14a dm participation"] == 0 {
 		t.Fatalf("subject %d is not a member with everything: %v", uid, before)
@@ -181,6 +198,7 @@ func TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure(t *testing.T) {
 	database, dbPath := drillCopy(t)
 	ctx := context.Background()
 	uid, uname := pickSubject(t, database)
+	seedDrillMessageReceipt(t, database, uid)
 	before := takeInventory(t, database, uid, uname)
 	backup := backupTo(t, database, "before-erasure.db")
 	m := openTestMarkers(t, testMarkerKey(5))

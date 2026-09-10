@@ -43,7 +43,12 @@ export default defineConfig({
     {
       name: "native-core",
       testDir: "./tests/e2e/native",
-      testMatch: ["reconnection.spec.ts", "voice-controls.spec.ts"],
+      testMatch: [
+        "reconnection.spec.ts",
+        "voice-controls.spec.ts",
+        "pending-messages.spec.ts",
+        "http-cancellation.spec.ts",
+      ],
     },
     {
       name: "native-no-auth",

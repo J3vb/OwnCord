@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -396,10 +397,19 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListUnacknowledgedWarnings: %w", err)
 	}
+	retryFloorMS := int64(0)
+	if h.db != nil {
+		retryFloorMS = h.db.MessageDeliveryFloorMS()
+	}
 
 	return buildJSON(map[string]any{
 		"type": MsgTypeReady,
 		"payload": map[string]any{
+			"capabilities": map[string]any{
+				"message_deduplication":        true,
+				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
+				"message_retry_floor_ms":       retryFloorMS,
+			},
 			"channels":     channelPayloads,
 			"members":      members,
 			"voice_states": voiceStates,

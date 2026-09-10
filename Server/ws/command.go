@@ -31,20 +31,22 @@ func (c PingCmd) UserID() int64 { return c.userID }
 
 // ChatSendCmd represents a chat_send message.
 type ChatSendCmd struct {
-	userID      int64
-	reqID       string
-	channelID   int64
-	content     string
-	replyTo     *int64
-	attachments []string
+	clientMessageID string
+	userID          int64
+	reqID           string
+	channelID       int64
+	content         string
+	replyTo         *int64
+	attachments     []string
 }
 
-func (c ChatSendCmd) Type() string     { return MsgTypeChatSend }
-func (c ChatSendCmd) UserID() int64    { return c.userID }
-func (c ChatSendCmd) ChannelID() int64 { return c.channelID }
-func (c ChatSendCmd) ReqID() string    { return c.reqID }
-func (c ChatSendCmd) Content() string  { return c.content }
-func (c ChatSendCmd) ReplyTo() *int64  { return c.replyTo }
+func (c ChatSendCmd) Type() string            { return MsgTypeChatSend }
+func (c ChatSendCmd) UserID() int64           { return c.userID }
+func (c ChatSendCmd) ChannelID() int64        { return c.channelID }
+func (c ChatSendCmd) ReqID() string           { return c.reqID }
+func (c ChatSendCmd) Content() string         { return c.content }
+func (c ChatSendCmd) ReplyTo() *int64         { return c.replyTo }
+func (c ChatSendCmd) ClientMessageID() string { return c.clientMessageID }
 func (c ChatSendCmd) Attachments() []string {
 	dst := make([]string, len(c.attachments))
 	copy(dst, c.attachments)
@@ -400,10 +402,11 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 
 	MsgTypeChatSend: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 		var p struct {
-			ChannelID   json.Number `json:"channel_id"`
-			Content     string      `json:"content"`
-			ReplyTo     *int64      `json:"reply_to"`
-			Attachments []string    `json:"attachments"`
+			ClientMessageID string      `json:"client_message_id"`
+			ChannelID       json.Number `json:"channel_id"`
+			Content         string      `json:"content"`
+			ReplyTo         *int64      `json:"reply_to"`
+			Attachments     []string    `json:"attachments"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid chat_send payload: %w", err)
@@ -431,12 +434,13 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		attachments := make([]string, len(p.Attachments))
 		copy(attachments, p.Attachments)
 		return ChatSendCmd{
-			userID:      userID,
-			reqID:       reqID,
-			channelID:   chID,
-			content:     p.Content,
-			replyTo:     p.ReplyTo,
-			attachments: attachments,
+			clientMessageID: p.ClientMessageID,
+			userID:          userID,
+			reqID:           reqID,
+			channelID:       chID,
+			content:         p.Content,
+			replyTo:         p.ReplyTo,
+			attachments:     attachments,
 		}, nil
 	},
 

@@ -55,6 +55,7 @@
     "http:allow-fetch-send",
     "http:allow-fetch-read-body",
     "http:allow-fetch-cancel",
+    "http:allow-fetch-cancel-body",
     "opener:default",
     "dialog:default",
     "process:allow-restart",
