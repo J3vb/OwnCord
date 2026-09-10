@@ -94,6 +94,23 @@ server's internals were reorganised behind service boundaries.
 - An API token can no longer be created with a negative lifetime, and a token
   whose label is a number can be revoked again.
 
+### Installing & updating
+
+- **ARM64 server builds.** Releases now carry four server assets instead of
+  two: `chatserver.exe` and `chatserver-windows-arm64.exe` for Windows,
+  `chatserver-linux-amd64.tar.gz` and `chatserver-linux-arm64.tar.gz` for
+  Linux. The existing x64 names are unchanged.
+- **Self-update works on ARM64.** An ARM64 server previously reported no update
+  available, forever, because no asset matched its architecture. It now
+  downloads and verifies the asset built for it. Each Windows binary carries
+  its own signature, so an ARM64 machine no longer checks its download against
+  the x64 one.
+- Every published server asset is now built on its own architecture and run
+  through a full lifecycle check before release — it starts, migrates a fresh
+  database, reports healthy, shuts down cleanly on a stop signal, and restarts
+  on the same data directory. Previously a release asset was only checked as
+  far as "it starts".
+
 ### Privacy & data
 
 - **Deleting an account now really deletes it.** Every class of data the

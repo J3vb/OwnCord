@@ -45,6 +45,15 @@ jobs:
       - name: Build server
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
+      # release.yml smokes every shipped asset with this harness. Running it
+      # here too means a regression in the harness itself is caught pre-merge
+      # rather than at tag time — the same reason docker-smoke.sh is called from
+      # all three workflows. It runs the built binary through the whole
+      # owner-visible lifecycle: cold boot, migrate, healthy, graceful drain to a
+      # clean exit, then restart on the same data directory.
+      - name: Smoke server binary (boot, migrate, drain, restart)
+        run: go run ./cmd/smoke ./${{ matrix.binary }}
+
       # Phase B + C build-tag matrix. Each tag variant must compile so the
       # tag boundaries don't drift.
       - name: Build with -tags otel (Phase B Step 8)

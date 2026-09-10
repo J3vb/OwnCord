@@ -1,0 +1,8 @@
+# actionlint validates `runs-on` against a built-in list of runner labels, and
+# that list does not yet carry GitHub's hosted Windows ARM64 runner. Declaring
+# the label here is actionlint's documented escape hatch. Despite the key's
+# name the runner is GitHub-hosted, not self-hosted — release.yml uses it to
+# build and smoke the Windows ARM64 server asset on its own architecture.
+self-hosted-runner:
+  labels:
+    - windows-11-arm
