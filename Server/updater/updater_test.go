@@ -134,8 +134,18 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	} else if info.DownloadURL != "" {
 		t.Error("expected empty DownloadURL on unsupported GOOS")
 	}
-	if info.SignatureURL == "" {
-		t.Error("expected non-empty SignatureURL")
+	// The detached binary signature is Windows-only: DownloadAndVerify sets
+	// needSignature = runtime.GOOS == "windows", and the Linux tarball path
+	// verifies through the signed manifest and checksum instead. The reported
+	// URL is now the signature paired with the asset this host would actually
+	// download, so a non-Windows host reports none rather than pointing at a
+	// Windows signature it would never fetch.
+	if want := serverSignatureAssetName(runtime.GOOS, runtime.GOARCH); want != "" {
+		if info.SignatureURL == "" {
+			t.Error("expected non-empty SignatureURL on Windows")
+		}
+	} else if info.SignatureURL != "" {
+		t.Errorf("expected empty SignatureURL off Windows, got %q", info.SignatureURL)
 	}
 	if info.ManifestURL == "" {
 		t.Error("expected non-empty ManifestURL")
