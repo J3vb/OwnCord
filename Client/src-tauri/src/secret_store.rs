@@ -1,8 +1,8 @@
 //! Secret storage with a verified round-trip and a degraded-mode fallback.
 //!
-//! Every secret the client persists (the login credential and the voice-E2EE
-//! long-term identity key) goes through here. The OS credential store is always
-//! tried first and is the only store used on a healthy machine.
+//! Every secret the client persists (login credentials, voice-E2EE long-term
+//! identity keys and bounded pending-message text) goes through here. The OS
+//! credential store is always tried first and used when the write round-trips.
 //!
 //! # Why a write is verified
 //!

@@ -118,6 +118,12 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 // the same statement that links, so there is no check-then-link race.
 // Returns the number of rows updated.
 func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+	return linkAttachmentsToMessage(ctx, d.writer, messageID, uploaderID, attachmentIDs)
+}
+
+// linkAttachmentsToMessage is shared by legacy sends and retry-safe sends'
+// writer transaction, so both enforce the same atomic ownership predicate.
+func linkAttachmentsToMessage(ctx context.Context, exec mentionExecer, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
 	if len(attachmentIDs) == 0 {
 		return 0, nil
 	}
@@ -138,7 +144,7 @@ func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID
 		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)`,
 		strings.Join(placeholders, ","),
 	)
-	res, err := d.writer.ExecContext(ctx, query, args...)
+	res, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}

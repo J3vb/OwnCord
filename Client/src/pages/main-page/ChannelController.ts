@@ -42,6 +42,15 @@ import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { markChannelRead } from "@lib/read-state";
+import {
+  newClientMessageId,
+  pendingMessageExpired,
+  pendingMessageRetryFloor,
+  recoveredPendingText,
+  supportsMessageDeduplication,
+  savePendingText,
+  acknowledgePendingMessage,
+} from "@lib/pendingMessages";
 
 const log = createLogger("channel-ctrl");
 
@@ -129,8 +138,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // user has since left must not be attributed to whatever channel is
       // mounted when it arrives.
       channelId: number;
+      clientMessageId?: string;
     }
   >();
+  const sendTimers = new Map<string, { timer: number; release?: () => void }>();
+  function clearSendTimer(id: string): void {
+    const owned = sendTimers.get(id);
+    if (!owned) return;
+    sendTimers.delete(id);
+    window.clearTimeout(owned.timer);
+    owned.release?.();
+  }
 
   function destroyChannel(): void {
     pendingDeleteManager.cleanup();
@@ -215,6 +233,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     channelAbort = new AbortController();
     const signal = channelAbort.signal;
     const userId = getCurrentUserId();
+    const owner = { host: api.getConfig?.().host ?? "", userId };
+    const session = api.getSession?.();
+    const ownsAccountSession = (): boolean =>
+      (session === undefined || session.isCurrent()) &&
+      getCurrentUserId() === owner.userId &&
+      (api.getConfig?.().host ?? "") === owner.host;
+    const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
 
     function currentMessageUser(): MessageUser | null {
       const u = authStore.getState().user;
@@ -226,9 +251,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       content: string,
       replyTo: number | null,
       attachments: readonly string[],
+      existingClientMessageId?: string,
     ): void {
       const user = currentMessageUser();
-      if (user === null) return;
+      if (user === null || !ownsSession()) return;
       // Sending while viewing a detached history window jumps to present: the
       // optimistic row belongs in the live tail, and addMessage would refuse
       // to append the echo into a detached window anyway. Mirrors
@@ -247,34 +273,135 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       }
       const timestamp = new Date().toISOString();
+      const clientMessageId =
+        existingClientMessageId ??
+        (supportsMessageDeduplication(owner)
+          ? newClientMessageId(pendingMessageRetryFloor(owner))
+          : undefined);
       if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a
         // failed row with retry rather than silently dropping the message.
         const cid = crypto.randomUUID();
-        addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
-        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId });
+        addOptimisticMessage({
+          correlationId: cid,
+          clientMessageId,
+          channelId,
+          user,
+          content,
+          replyTo,
+          timestamp,
+        });
+        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
         markSendFailed(cid, "OFFLINE");
+        if (clientMessageId && replyTo === null && attachments.length === 0) {
+          void savePendingText(owner, {
+            clientMessageId,
+            channelId,
+            content,
+            createdAt: Number(clientMessageId.split(":", 1)[0]),
+          }).catch(() => {
+            if (ownsSession())
+              showToast("Could not save this pending message for recovery after restart", "error");
+          });
+        }
         return;
       }
-      const cid = ws.send({
-        type: "chat_send",
-        payload: { channel_id: channelId, content, reply_to: replyTo, attachments },
-      });
-      addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
-      draftByCorrelation.set(cid, { content, replyTo, attachments, channelId });
+      const sendNow = (): void => {
+        if (!ownsAccountSession()) return;
+        const cid = ws.send({
+          type: "chat_send",
+          payload: {
+            channel_id: channelId,
+            content,
+            reply_to: replyTo,
+            attachments,
+            ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
+          },
+        });
+        addOptimisticMessage({
+          correlationId: cid,
+          clientMessageId,
+          channelId,
+          user,
+          content,
+          replyTo,
+          timestamp,
+        });
+        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
+        // A live socket can lose an ACK without disconnecting. End the spinner
+        // honestly; only a server ACK/echo ever calls a message delivered.
+        const timer = window.setTimeout(() => {
+          clearSendTimer(cid);
+          if (
+            (session === undefined || session.isCurrent()) &&
+            getCurrentUserId() === owner.userId
+          ) {
+            markSendFailed(cid, "UNCONFIRMED");
+          }
+        }, 20_000);
+        sendTimers.set(cid, { timer, release: session?.addCleanup(() => clearSendTimer(cid)) });
+      };
+      if (clientMessageId && replyTo === null && attachments.length === 0) {
+        // Persist before handing text to the socket, so a process crash after
+        // commit but before ACK can recover the same logical identity.
+        void savePendingText(owner, {
+          clientMessageId,
+          channelId,
+          content,
+          createdAt: Number(clientMessageId.split(":", 1)[0]),
+        })
+          .catch(() => {
+            if (ownsSession())
+              showToast("Could not save this pending message for recovery after restart", "error");
+          })
+          .then(sendNow);
+      } else sendNow();
     }
 
     function retrySend(correlationId: string): void {
-      const draft = draftByCorrelation.get(correlationId);
-      draftByCorrelation.delete(correlationId);
-      removeOptimistic(correlationId);
-      if (draft !== undefined) {
-        performSend(draft.content, draft.replyTo, draft.attachments);
+      if (!ownsSession()) return;
+      const recovered = recoveredPendingText(owner, correlationId);
+      const draft =
+        draftByCorrelation.get(correlationId) ??
+        (recovered
+          ? {
+              ...recovered,
+              replyTo: null,
+              attachments: [] as readonly string[],
+            }
+          : undefined);
+      if (draft === undefined || draft.channelId !== channelId) return;
+      if (
+        draft.clientMessageId &&
+        pendingMessageExpired(draft.clientMessageId, Date.now(), pendingMessageRetryFloor(owner))
+      ) {
+        showToast(
+          "This message's retry window expired. Copy the text to send a new message.",
+          "error",
+        );
+        return;
       }
+      if (draft.clientMessageId && !supportsMessageDeduplication(owner)) {
+        showToast(
+          "This server cannot safely retry a saved message. Copy its text to send it again.",
+          "error",
+        );
+        return;
+      }
+      draftByCorrelation.delete(correlationId);
+      clearSendTimer(correlationId);
+      removeOptimistic(correlationId);
+      performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
     }
 
     function deleteDraft(correlationId: string): void {
+      if (!ownsSession()) return;
+      const id =
+        draftByCorrelation.get(correlationId)?.clientMessageId ??
+        recoveredPendingText(owner, correlationId)?.clientMessageId;
+      acknowledgePendingMessage(id);
       draftByCorrelation.delete(correlationId);
+      clearSendTimer(correlationId);
       removeOptimistic(correlationId);
     }
 
@@ -502,7 +629,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // The server accepted a message — the next one is subject to the cooldown.
     composerGatingUnsubs.push(
-      ws.on("chat_send_ok", (_payload, correlationId) => {
+      ws.on("chat_send_ok", (payload, correlationId) => {
+        if (!ownsSession()) return;
         const sameChannel = sentToMountedChannel(correlationId);
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
@@ -510,10 +638,42 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // drop it — every message sent in the session would be retained.
         if (correlationId !== undefined && correlationId !== "") {
           draftByCorrelation.delete(correlationId);
+          clearSendTimer(correlationId);
+        }
+        if (payload.client_message_id) {
+          for (const [id, draft] of draftByCorrelation) {
+            if (draft.clientMessageId === payload.client_message_id) {
+              draftByCorrelation.delete(id);
+              clearSendTimer(id);
+            }
+          }
         }
         const ch = channelsStore.getState().channels.get(channelId);
-        if (ch !== undefined && ch.id === channelsStore.getState().activeChannelId && sameChannel) {
+        if (
+          ch !== undefined &&
+          ch.id === channelsStore.getState().activeChannelId &&
+          sameChannel &&
+          !payload.deduplicated
+        ) {
           startSlowMode(ch.slowMode);
+        }
+      }),
+    );
+    composerGatingUnsubs.push(
+      ws.on("chat_message", (payload) => {
+        if (!ownsSession() || payload.user.id !== owner.userId || !payload.client_message_id)
+          return;
+        // The live echo proves delivery even when its preceding ACK was lost.
+        // Dispatcher owns store reconciliation; this listener only releases
+        // private retry payloads and timers owned by this controller.
+        for (const [id, draft] of draftByCorrelation) {
+          if (
+            draft.clientMessageId === payload.client_message_id &&
+            draft.channelId === payload.channel_id
+          ) {
+            draftByCorrelation.delete(id);
+            clearSendTimer(id);
+          }
         }
       }),
     );

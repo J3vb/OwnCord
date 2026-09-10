@@ -57,11 +57,21 @@ const INITIAL_STATE: AuthState = {
 
 export const authStore = createStore<AuthState>(INITIAL_STATE);
 
+// Store notifications are deferred; cancellation cannot wait until after a
+// pending request has a chance to repopulate stores that clearAuth just reset.
+const authCleanupListeners = new Set<(reason: LogoutReason) => void>();
+
+/** Register application session cleanup that must run synchronously on logout. */
+export function onAuthCleared(listener: (reason: LogoutReason) => void): () => void {
+  authCleanupListeners.add(listener);
+  return () => authCleanupListeners.delete(listener);
+}
+
 /** Populate auth state after a successful auth_ok message. */
 export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
   authStore.setState((prev) => ({
     token,
-    // auth_ok's user never carries totp_enabled — only GET /users/me does —
+    // auth_ok's user never carries totp_enabled — only GET /auth/me does —
     // so a reconnect must not wipe the value the profile fetch established
     // for the same account (OC-0354).
     user:
@@ -97,6 +107,14 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
  *  logout as module-global state and mount the DM sidebar (with the old
  *  server's DM peer id) on whatever server is signed into next. */
 export function clearAuth(reason: LogoutReason = "user"): void {
+  const cleanups = [...authCleanupListeners];
+  for (const cleanup of cleanups) {
+    try {
+      cleanup(reason);
+    } catch {
+      log.warn("Session cleanup failed during logout");
+    }
+  }
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
   // lazily so it stays out of the startup path. Only import it when there is
   // actually a voice session to leave — otherwise a text-only user who never

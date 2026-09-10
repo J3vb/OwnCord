@@ -174,6 +174,16 @@ type Message struct {
 	MentionsEveryone int64   `json:"mentionsEveryone"`
 }
 
+type MessageDeliveryReceipt struct {
+	UserID          int64  `json:"userId"`
+	ClientMessageID string `json:"clientMessageId"`
+	ChannelID       int64  `json:"channelId"`
+	PayloadHash     []byte `json:"payloadHash"`
+	MessageID       int64  `json:"messageId"`
+	Timestamp       string `json:"timestamp"`
+	ExpiresAtMs     int64  `json:"expiresAtMs"`
+}
+
 type MessageMention struct {
 	MessageID       int64 `json:"messageId"`
 	MentionedUserID int64 `json:"mentionedUserId"`

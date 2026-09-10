@@ -13,42 +13,52 @@ import {
   navigateToMainPageReady,
   emitWsEvent,
   emitWsMessage,
-  MOCK_AUTH_OK,
-  MOCK_CHANNELS,
-  MOCK_ROLES,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Helper: simulate a full disconnect -> reconnect cycle
 // ---------------------------------------------------------------------------
 
-const MOCK_READY_PAYLOAD = {
-  type: "ready",
-  payload: {
-    channels: MOCK_CHANNELS,
-    members: [
-      { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
-      { id: 2, username: "otheruser", avatar: "", status: "online", role: "member" },
-    ],
-    voice_states: [],
-    roles: MOCK_ROLES,
-  },
-};
+async function transportProgress(page: Page) {
+  return page.evaluate(() => {
+    const calls = (
+      window as unknown as {
+        __invokeLog: Array<{ cmd: string; args?: { clientConfig?: { url?: string } } }>;
+      }
+    ).__invokeLog;
+    return {
+      connects: calls.filter((call) => call.cmd === "ws_connect").length,
+      historyReads: calls.filter(
+        (call) =>
+          call.cmd === "plugin:http|fetch" &&
+          call.args?.clientConfig?.url?.includes("/channels/1/messages"),
+      ).length,
+    };
+  });
+}
 
 /**
- * Simulate a full disconnect -> reconnect -> auth_ok -> ready sequence.
- * Waits for the reconnect banner to disappear and channels to reappear.
+ * Disconnect and let the application's retry attempt drive the mock handshake.
+ * A manual open/auth/READY would leave the real retry timer armed; its later
+ * READY could overwrite an injected message with the static history fixture.
  */
 async function simulateReconnect(page: Page): Promise<void> {
-  // Disconnect
+  await expect(page.getByTestId("message-101")).toBeVisible();
+  const before = await transportProgress(page);
   await emitWsEvent(page, "ws-state", "closed");
+  await expect(page.locator(".reconnecting-banner")).toHaveClass(/visible/);
 
-  // Reconnect
-  await emitWsEvent(page, "ws-state", "open");
-  await emitWsMessage(page, MOCK_AUTH_OK);
-  await emitWsMessage(page, MOCK_READY_PAYLOAD);
+  // The mock returns open/auth_ok/READY only after the client actually issues
+  // ws_connect. An existing channel row alone cannot prove a reconnect.
+  await expect.poll(async () => (await transportProgress(page)).connects).toBe(before.connects + 1);
+  await expect
+    .poll(async () => (await transportProgress(page)).historyReads)
+    .toBeGreaterThan(before.historyReads);
 
-  // Wait for channels to reappear as proof of successful reconnect
+  // READY clears the old history before fetching the tail; wait for that
+  // response to render before injecting a genuinely post-reconnect message.
+  await expect(page.getByTestId("message-101")).toBeVisible();
+  await expect(page.locator(".reconnecting-banner")).not.toHaveClass(/visible/);
   await expect(page.locator(".channel-item").first()).toBeVisible({ timeout: 5_000 });
 }
 

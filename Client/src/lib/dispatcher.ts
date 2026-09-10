@@ -81,6 +81,7 @@ import { ensureIdentityKeyPublished } from "@lib/identity";
 import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
+import { activatePendingMessages, acknowledgePendingMessage } from "./pendingMessages";
 import { ServerMessageType as S, PROTOCOL_EPOCH } from "./protocolTypes";
 // SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
 // place the DM->channelsStore mirror row is synthesized (selectDmConversation
@@ -308,6 +309,15 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.READY, (payload) => {
+      const pendingUser = authStore.getState().user;
+      if (api?.getConfig && pendingUser) {
+        activatePendingMessages(
+          { host: api.getConfig().host, userId: pendingUser.id },
+          pendingUser,
+          payload.capabilities?.message_deduplication === true,
+          payload.capabilities?.message_retry_floor_ms,
+        );
+      }
       // OC-0201: snapshot the current voice channel's peer roster BEFORE the
       // wholesale replace below, so the reconciliation branch further down
       // can tell who left while the socket was down. Must run before
@@ -655,6 +665,9 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.CHAT_MESSAGE, (payload) => {
+      if (payload.user.id === authStore.getState().user?.id) {
+        acknowledgePendingMessage(payload.client_message_id);
+      }
       log.debug("chat_message received", {
         id: payload.id,
         channelId: payload.channel_id,
@@ -794,8 +807,9 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.CHAT_SEND_OK, (payload, id) => {
+      acknowledgePendingMessage(payload.client_message_id);
       if (id) {
-        confirmSend(id, payload.message_id, payload.timestamp);
+        confirmSend(id, payload.message_id, payload.timestamp, payload.client_message_id);
       }
     }),
   );

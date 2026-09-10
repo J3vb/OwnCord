@@ -1,12 +1,59 @@
 # Credential storage
 
-The desktop client persists two secrets per server, both in the OS credential
-store under the service name `com.owncord.client`:
+The desktop client persists credentials, identity keys and pending message text
+through the verified secret store under the service name `com.owncord.client`.
+The OS credential store is tried first, with the encrypted fallback described
+below when a write fails or cannot be verified:
 
-| Secret                          | Account name      | Contents                               |
-| ------------------------------- | ----------------- | -------------------------------------- |
-| Login credential                | `{host}`          | JSON `{"username","token","password"}` |
-| Voice-E2EE identity private key | `identity:{host}` | base64 JWK (P-256 private key)         |
+| Secret                          | Account name                      | Contents                                             |
+| ------------------------------- | --------------------------------- | ---------------------------------------------------- |
+| Login credential                | `{host}`                          | JSON `{"username","token","password"}`               |
+| Voice-E2EE identity private key | `identity:{host}`                 | base64 JWK (P-256 private key)                       |
+| Pending message text            | `pending-messages:{owner_digest}` | JSON array of text drafts and stable send identities |
+
+For pending messages, `owner_digest` is the lowercase hexadecimal SHA-256 digest
+of JSON `[host, userId]`. The full host, including its port, and authenticated
+user ID partition the queue. Different accounts or server ports do not share
+drafts. Its save, load and delete commands use the same credential-store mutex,
+write verification and encrypted fallback as the other secrets.
+
+## Pending message recovery
+
+Durable recovery applies to **native desktop text-only sends** when the server
+advertises message deduplication. At most **64 drafts and 128 KiB of serialized
+UTF-8 JSON** are retained per server/account queue; the native commands enforce
+both limits as well. A draft contains its channel ID, text, creation timestamp
+and stable logical message ID. Replies and attachment references remain in
+memory and are not included in this recovery queue. Browser builds keep pending
+text in memory without writing it to Web Storage.
+
+Eligible text is saved before transmission. After an app restart, recovered
+rows require an explicit **Retry** click; they are never sent automatically.
+Retries retain the original logical message ID while using a new transport
+correlation ID. A recovered send cannot be retried against a server that no
+longer advertises deduplication. If persistence fails, the client reports that
+the message cannot be recovered after restart; normal in-memory sending still
+works.
+
+The logical retry window is **24 hours**. Expired entries are pruned when the
+account's queue is activated or a draft is added. There is no timer that deletes
+encrypted drafts for inactive accounts at the expiry instant: a queue for an
+account that is never reopened can remain on disk until explicitly cleared.
+Expiration prevents another retry with that logical ID.
+
+| Event                                                    | Pending text lifecycle                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Server ACK or matching own-message echo                  | Remove the confirmed draft from recovery storage.                                    |
+| User discards a failed/recovered draft                   | Remove that draft from recovery storage.                                             |
+| User logout or invalidated authentication                | Clear the current account's queue.                                                   |
+| Quick server switch                                      | Retain the previous account's encrypted queue; it is not exposed in the new session. |
+| App shutdown, server shutdown or protocol-update handoff | Retain encrypted drafts for recovery on the next login.                              |
+
+Loads, writes and deletion are serialized across session changes so a late
+write cannot restore a queue after a completed logout deletion. Cleanup failures
+are logged; they do not constitute successful deletion.
+
+## Voice identity continuity
 
 The identity key is the long-term key peers pin under trust-on-first-use. Its
 public half is published to the server (`users.identity_public_key`) and its
@@ -155,11 +202,17 @@ instead of silently regenerating keys.
 | No roaming profile, with `CRED_PERSIST_ENTERPRISE`                                             | —                                                                           | Documented Windows behaviour: the credential simply persists locally instead of roaming. Harmless.                                                                                                                                                                          |
 | App running as a different user than the vault being inspected                                 | `whoami` in the app's context vs. the one running `cmdkey`                  | Credentials are per-user; compare like for like.                                                                                                                                                                                                                            |
 
-Blob size is not a plausible cause: `CRED_MAX_CREDENTIAL_BLOB_SIZE` is 2560
+Blob size was not a plausible cause of the identity-key regression:
+`CRED_MAX_CREDENTIAL_BLOB_SIZE` is 2560
 bytes and `keyring` stores the secret as UTF-16, so the ceiling is ~1280
 characters. The identity blob is a ~256-character base64 JWK (~512 bytes), and
 an oversized secret would be rejected up front with a `TooLong` error, not
 silently dropped.
+
+Pending-message arrays can legitimately exceed this per-entry limit even on a
+healthy Windows machine. Those rejected writes use the verified encrypted
+fallback; the queue's 128 KiB application limit is not a claim that the OS
+keyring accepts entries of that size.
 
 ## Write verification and the fallback store
 
@@ -167,7 +220,7 @@ silently dropped.
 success. A store that accepts a write and does not return it is the one failure
 a `Result` cannot express, and it is exactly what caused this incident.
 
-When that check fails, the secret is sealed and parked in
+When a write is rejected or that check fails, the secret is sealed and parked in
 `credential_fallback.json` in the app data dir:
 
 - **Windows**: DPAPI (`CryptProtectData`, user-scoped,
@@ -181,7 +234,7 @@ When that check fails, the secret is sealed and parked in
   plaintext, that a copied `credential_fallback.json` is useless without the key
   file next to it, and that the common no-Secret-Service Linux desktop (no
   gnome-keyring / KWallet, e.g. a bare window manager) can still persist
-  credentials and the voice-E2EE identity key at all — previously those
+  credentials, voice-E2EE identity keys and pending message text. Previously those
   machines had nowhere to save, so logins and identity keys silently vanished
   on every restart.
 
@@ -189,7 +242,7 @@ In both cases the account name is mixed in (DPAPI entropy / AEAD associated
 data), so a blob cannot be moved between entries and still decrypt. The
 fallback:
 
-- engages **only** after a write has been proven not to round-trip — never as
+- engages **only** after a write is rejected or fails round-trip verification — never as
   the default;
 - is cleared automatically as soon as the OS credential store works again, so a
   repaired machine returns to the real store with no migration step.

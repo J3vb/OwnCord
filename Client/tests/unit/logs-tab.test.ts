@@ -74,8 +74,10 @@ describe("LogsTab", () => {
   it("renders a Voice Diagnostics header", () => {
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const h3 = el.querySelector("h3");
-    expect(h3).not.toBeNull();
+    const h3 = [...el.querySelectorAll("h3")].find(
+      (heading) => heading.textContent === "Voice Diagnostics",
+    );
+    expect(h3).toBeDefined();
     expect(h3!.textContent).toBe("Voice Diagnostics");
   });
 

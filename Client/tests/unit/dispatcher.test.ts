@@ -109,6 +109,7 @@ function createMockWs() {
   const stateListeners = new Set<(state: ConnectionState) => void>();
 
   const ws: WsClient = {
+    ping: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "test-id"),

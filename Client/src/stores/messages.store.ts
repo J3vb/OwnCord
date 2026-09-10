@@ -48,6 +48,8 @@ export interface Message {
    * chat_send_ok / error. Null once reconciled or for server-sourced rows.
    */
   readonly correlationId: string | null;
+  /** Stable logical send identity; transport correlation changes on each retry. */
+  readonly clientMessageId?: string;
   /** Error code when status === "failed" (e.g. "SLOW_MODE", "FORBIDDEN"). */
   readonly errorCode: string | null;
   /**
@@ -130,6 +132,7 @@ function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     timestamp: payload.timestamp,
     status: "sent",
     correlationId: null,
+    clientMessageId: payload.client_message_id,
     errorCode: null,
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
@@ -261,6 +264,15 @@ function echoNormalize(s: string): string {
  * onto a single row.
  */
 function isUnreconciledEcho(optimistic: Message, candidate: Message): boolean {
+  // Stable identities must never fall back to text matching: another device
+  // can send identical text, and history does not carry this private receipt.
+  if (optimistic.clientMessageId !== undefined) {
+    return (
+      optimistic.status !== "sent" &&
+      optimistic.user.id === candidate.user.id &&
+      optimistic.clientMessageId === candidate.clientMessageId
+    );
+  }
   return (
     (optimistic.status === "pending" ||
       (optimistic.status === "failed" && optimistic.errorCode === "OFFLINE")) &&
@@ -295,10 +307,20 @@ export function addMessage(payload: ChatMessagePayload): void {
     // 1. Replace an existing row with the same real id (reconcile / idempotent).
     const idIdx = existing.findIndex((m) => m.id !== 0 && m.id === message.id);
     if (idIdx !== -1) {
-      const replaced = existing.map((m, i) => (i === idIdx ? message : m));
+      const pendingSends = new Map(prev.pendingSends);
+      const replaced = existing.flatMap((m, i) => {
+        if (i === idIdx) return [message];
+        // History may have arrived before the live echo, carrying the real
+        // id but no private receipt. Consume its exact optimistic twin too.
+        if (message.clientMessageId !== undefined && isUnreconciledEcho(m, message)) {
+          if (m.correlationId) pendingSends.delete(m.correlationId);
+          return [];
+        }
+        return [m];
+      });
       const updated = new Map(prev.messagesByChannel);
       updated.set(channelId, replaced);
-      return { ...prev, messagesByChannel: updated };
+      return { ...prev, messagesByChannel: updated, pendingSends };
     }
 
     // 2. Defensive: reconcile the oldest pending (or transport-failed) optimistic
@@ -317,7 +339,10 @@ export function addMessage(payload: ChatMessagePayload): void {
       const replaced = existing.map((m, i) => (i === pendingIdx ? message : m));
       const updated = new Map(prev.messagesByChannel);
       updated.set(channelId, replaced);
-      return { ...prev, messagesByChannel: updated };
+      const pendingSends = new Map(prev.pendingSends);
+      const correlationId = existing[pendingIdx]!.correlationId;
+      if (correlationId) pendingSends.delete(correlationId);
+      return { ...prev, messagesByChannel: updated, pendingSends };
     }
 
     // 3. Append as a new message — unless the channel is showing a detached
@@ -360,6 +385,7 @@ export function addMessage(payload: ChatMessagePayload): void {
  */
 export function addOptimisticMessage(params: {
   correlationId: string;
+  clientMessageId?: string;
   channelId: number;
   user: MessageUser;
   content: string;
@@ -381,6 +407,7 @@ export function addOptimisticMessage(params: {
     timestamp: params.timestamp,
     status: "pending",
     correlationId: params.correlationId,
+    clientMessageId: params.clientMessageId,
     errorCode: null,
   };
   messagesStore.setState((prev) => {
@@ -860,9 +887,31 @@ export function addPendingSend(correlationId: string, channelId: number): void {
  * upgrading the row to the full server message. Removing it from pendingSends
  * makes a late error a no-op.
  */
-export function confirmSend(correlationId: string, messageId: number, timestamp: string): void {
+export function confirmSend(
+  correlationId: string,
+  messageId: number,
+  timestamp: string,
+  clientMessageId?: string,
+): void {
   messagesStore.setState((prev) => {
-    const channelId = prev.pendingSends.get(correlationId);
+    // A lost ACK can arrive after the offline sweep removed pendingSends, or
+    // after a retry has a new transport id. The logical identity still owns it.
+    let channelId = prev.pendingSends.get(correlationId);
+    if (channelId === undefined) {
+      for (const [id, rows] of prev.messagesByChannel) {
+        if (
+          rows.some(
+            (m) =>
+              m.status !== "sent" &&
+              (m.correlationId === correlationId ||
+                (clientMessageId !== undefined && m.clientMessageId === clientMessageId)),
+          )
+        ) {
+          channelId = id;
+          break;
+        }
+      }
+    }
     const updatedPending = new Map(prev.pendingSends);
     updatedPending.delete(correlationId);
     if (channelId === undefined) {
@@ -872,11 +921,21 @@ export function confirmSend(correlationId: string, messageId: number, timestamp:
     if (existing === undefined) {
       return { ...prev, pendingSends: updatedPending };
     }
-    const updatedList = existing.map((m) =>
-      m.correlationId === correlationId
-        ? { ...m, id: messageId, timestamp, status: "sent" as const, errorCode: null }
-        : m,
-    );
+    const alreadyInHistory = existing.some((m) => m.id === messageId && m.status === "sent");
+    let reconciled = alreadyInHistory;
+    const updatedList = existing.flatMap((m) => {
+      const matches =
+        m.status !== "sent" &&
+        (m.correlationId === correlationId ||
+          (clientMessageId !== undefined && m.clientMessageId === clientMessageId));
+      if (!matches) return [m];
+      if (m.correlationId) updatedPending.delete(m.correlationId);
+      // Replayed ACKs have no second broadcast. Keep the authoritative history
+      // row (including sanitization/edits), rather than displaying it twice.
+      if (reconciled) return [];
+      reconciled = true;
+      return [{ ...m, id: messageId, timestamp, status: "sent" as const, errorCode: null }];
+    });
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, updatedList);
     return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };

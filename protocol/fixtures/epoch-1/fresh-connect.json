@@ -38,6 +38,11 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "capabilities": {
+              "message_deduplication": true,
+              "message_retry_floor_ms": 0,
+              "message_retry_window_seconds": 86400
+            },
             "channels": [
               {
                 "can_send": true,
@@ -244,6 +249,11 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "capabilities": {
+              "message_deduplication": true,
+              "message_retry_floor_ms": 0,
+              "message_retry_window_seconds": 86400
+            },
             "channels": [
               {
                 "can_send": true,

@@ -197,6 +197,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	if len(opts) > 0 {
 		setupOpts = opts[0]
 	}
+	bundles := newSupportBundles(service.NewDiagnosticsService(database), version, setupOpts.RunningCfg, logBuf, hub)
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
 	setupLimiter := auth.NewRateLimiter()
@@ -230,6 +231,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe())
+		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/preview", bundles.preview)
+		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/download", bundles.download)
 		mountUserRoutes(r, svc, hub, permInvalidator, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.

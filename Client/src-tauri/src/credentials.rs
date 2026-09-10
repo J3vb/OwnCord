@@ -246,6 +246,74 @@ pub fn delete_identity_key(app: AppHandle, host: String) -> Result<(), String> {
     })
 }
 
+// Pending text is private data. Reuse the credential store's verified,
+// encrypted fallback and its cross-command lock; never put it in settings.json.
+const PENDING_MESSAGE_MAX_BYTES: usize = 128 * 1024;
+
+fn pending_messages_account(host: &str, user_id: u64) -> Result<String, String> {
+    if host.is_empty() || host.len() > 2048 || user_id == 0 {
+        return Err("invalid pending message owner".to_string());
+    }
+    let owner = serde_json::to_vec(&(host, user_id)).map_err(|e| e.to_string())?;
+    let digest = ring::digest::digest(&ring::digest::SHA256, &owner);
+    let digest = digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!("pending-messages:{digest}"))
+}
+
+fn validate_pending_messages(value: &str) -> Result<(), String> {
+    if value.len() > PENDING_MESSAGE_MAX_BYTES {
+        return Err("pending message storage limit exceeded".to_string());
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(value).map_err(|_| "invalid pending message data".to_string())?;
+    match parsed.as_array() {
+        Some(entries) if entries.len() <= 64 => Ok(()),
+        _ => Err("invalid pending message count".to_string()),
+    }
+}
+
+#[tauri::command(async)]
+pub fn save_pending_messages(
+    app: AppHandle,
+    host: String,
+    user_id: u64,
+    value: String,
+) -> Result<(), String> {
+    with_credential_lock(|| {
+        let account = pending_messages_account(&host, user_id)?;
+        validate_pending_messages(&value)?;
+        secret_store::set(&app, &account, &value).map(|_| ())
+    })
+}
+
+#[tauri::command(async)]
+pub fn load_pending_messages(
+    app: AppHandle,
+    host: String,
+    user_id: u64,
+) -> Result<Option<String>, String> {
+    with_credential_lock(|| {
+        let account = pending_messages_account(&host, user_id)?;
+        let value = secret_store::get(&app, &account)?;
+        if let Some(ref value) = value {
+            validate_pending_messages(value)?;
+        }
+        Ok(value)
+    })
+}
+
+#[tauri::command(async)]
+pub fn delete_pending_messages(app: AppHandle, host: String, user_id: u64) -> Result<(), String> {
+    with_credential_lock(|| {
+        let account = pending_messages_account(&host, user_id)?;
+        secret_store::delete(&app, &account)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
@@ -317,6 +385,41 @@ pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_messages_are_partitioned_by_host_port_and_account() {
+        let first = pending_messages_account("chat.example:55000", 1).unwrap();
+        assert_ne!(
+            first,
+            pending_messages_account("chat.example:55000", 2).unwrap()
+        );
+        assert_ne!(
+            first,
+            pending_messages_account("chat.example:55001", 1).unwrap()
+        );
+        assert_ne!(
+            first,
+            pending_messages_account("other.example:55000", 1).unwrap()
+        );
+        assert_eq!(
+            first,
+            pending_messages_account("chat.example:55000", 1).unwrap()
+        );
+        assert!(!first.contains("chat.example"));
+        assert!(pending_messages_account("", 1).is_err());
+        assert!(pending_messages_account("chat.example", 0).is_err());
+    }
+
+    #[test]
+    fn pending_messages_enforce_native_size_and_count_limits() {
+        assert!(validate_pending_messages("[]").is_ok());
+        assert!(validate_pending_messages("[{}").is_err());
+        assert!(validate_pending_messages("{}").is_err());
+        let count = serde_json::to_string(&vec![0; 65]).unwrap();
+        assert!(validate_pending_messages(&count).is_err());
+        let large = serde_json::to_string(&vec!["x".repeat(PENDING_MESSAGE_MAX_BYTES)]).unwrap();
+        assert!(validate_pending_messages(&large).is_err());
+    }
 
     #[test]
     fn require_non_empty_rejects_empty_and_names_the_field() {

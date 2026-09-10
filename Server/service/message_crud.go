@@ -34,6 +34,22 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		return nil, err
 	}
 	isDM := ch.Type == "dm"
+	delivery, err := messageDeliveryParams(p, content, s.st.MessageDeliveryFloorMS())
+	if err != nil {
+		return nil, err
+	}
+	if delivery != nil {
+		previous, lookupErr := s.st.FindMessageDelivery(ctx, *delivery)
+		if lookupErr != nil {
+			return nil, messageDeliveryError(lookupErr)
+		}
+		if previous != nil {
+			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
+		}
+	}
+	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
+		return nil, err
+	}
 
 	// Resolve mentions against the sanitized content, before the insert, so the
 	// row and its mention set are written together. Unknown @words and an
@@ -42,18 +58,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
-	msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo,
-		mentions.UserIDs, mentions.Everyone)
-	if err != nil {
-		slog.Error("MessageService.SendMessage CreateMessage", "err", err)
-		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
-	}
-	msgID := msg.ID
-
-	attachments, err := s.sendMessageLinkAttachments(ctx, p, msgID, content)
+	msg, attachments, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
 	if err != nil {
 		return nil, err
 	}
+	if duplicate {
+		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
+	}
+	msgID := msg.ID
 
 	// Advance the author's own read state past the message they just sent.
 	// Both unread queries count "messages with id > my read_states row" and
@@ -124,7 +136,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 // sendMessagePrecheck runs every gate a send must clear before anything is
 // written: rate limit, channel lookup, send permission, content sanitization,
-// attachment permission and slow mode. It returns the resolved channel and the
+// and attachment permission. It returns the resolved channel and the
 // sanitized content for the caller to persist.
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	// Rate limit.
@@ -161,19 +173,6 @@ func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageP
 	if !isDM && len(p.AttachmentIDs) > 0 {
 		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
 			return nil, "", fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
-		}
-	}
-
-	// Slow mode (non-DM only). Deliberately checked last, after content and
-	// attachment validation: Allow() below records the cooldown timestamp the
-	// instant it returns true, so a send that fails validation after this
-	// point must not have already spent the once-per-window token — that
-	// would lock the composer for up to ch.SlowMode seconds for a send that
-	// never actually posted anything.
-	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
-		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
-		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			return nil, "", fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
 		}
 	}
 

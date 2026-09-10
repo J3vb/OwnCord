@@ -90,7 +90,7 @@ describe("auth store", () => {
       expect(authStore.getState().serverName).toBe(TEST_SERVER_NAME);
     });
 
-    // OC-0354: auth_ok's user never carries totp_enabled; only GET /users/me
+    // OC-0354: auth_ok's user never carries totp_enabled; only GET /auth/me
     // does. A reconnect must not wipe the value the profile fetch set.
     it("keeps the known totp_enabled when the same account re-authenticates without it", () => {
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
