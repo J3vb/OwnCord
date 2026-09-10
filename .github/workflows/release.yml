@@ -229,16 +229,27 @@ jobs:
           path: linux-staging/
 
   release-server:
-    name: Build server (${{ matrix.os }})
+    name: Build server (${{ matrix.asset }})
     needs: verify-versions
     strategy:
       fail-fast: false
       matrix:
         include:
+          # The amd64 asset names are frozen: servers deployed before arm64
+          # existed match them exactly (Server/updater/updater.go), so renaming
+          # either would strand every one of them on its current version.
           - os: windows-latest
-            artifact: server-windows
+            artifact: server-windows-amd64
+            asset: chatserver.exe
+          - os: windows-11-arm
+            artifact: server-windows-arm64
+            asset: chatserver-windows-arm64.exe
           - os: ubuntu-latest
-            artifact: server-linux
+            artifact: server-linux-amd64
+            asset: chatserver-linux-amd64.tar.gz
+          - os: ubuntu-22.04-arm
+            artifact: server-linux-arm64
+            asset: chatserver-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -255,70 +266,60 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      # Every row builds on its own architecture rather than cross-compiling,
+      # because the smoke below has to EXECUTE the artifact that ships. A
+      # cross-compiled asset could only be type-checked, which is the exact gap
+      # B6-1 exists to close.
       - name: Build server (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: bash
-        run: cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=$VERSION" .
+        working-directory: Server
+        run: go build -o "${{ matrix.asset }}" -ldflags "-s -w -X main.version=$VERSION" .
 
       - name: Build server (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         working-directory: Server
         env:
           CGO_ENABLED: "0"
         run: go build -o chatserver -ldflags "-s -w -X main.version=$VERSION" .
 
-      # Boot-smoke the EXACT artifact that ships: this feed drives the signed
+      # Smoke the EXACT artifact that ships: this feed drives the signed
       # self-update, so a binary that compiles but dies on boot would deploy
       # itself to every auto-updating instance. CI's tests exercise the same
       # commit but never this build (release ldflags, CGO_ENABLED=0) and never
-      # execute the produced binary. First run writes config.yaml, generates a
-      # self-signed cert, migrates a fresh SQLite DB — a real cold boot.
-      - name: Boot-smoke server binary
+      # execute the produced binary.
+      #
+      # cmd/smoke covers the whole owner-visible lifecycle, not only a boot:
+      # cold boot writes config.yaml, generates a certificate and migrates a
+      # fresh database; a graceful stop must then drain to a clean exit; a
+      # restart on the SAME directory must come back healthy without rewriting
+      # either. Shared with ci.yml so a regression is caught pre-merge.
+      - name: Smoke server binary (boot, migrate, drain, restart)
         shell: bash
         working-directory: Server
         run: |
-          SMOKE_DIR="$RUNNER_TEMP/owncord-smoke"
-          mkdir -p "$SMOKE_DIR"
-          cd "$SMOKE_DIR"
-          BIN="$GITHUB_WORKSPACE/Server/chatserver"
-          [ -f "$GITHUB_WORKSPACE/Server/chatserver.exe" ] && BIN="$GITHUB_WORKSPACE/Server/chatserver.exe"
-          "$BIN" &
-          SERVER_PID=$!
-          ok=0
-          for _ in $(seq 1 30); do
-            sleep 1
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo "::error::server process exited during boot smoke"
-              exit 1
-            fi
-            if "$BIN" healthcheck; then ok=1; break; fi
-          done
-          kill "$SERVER_PID" 2>/dev/null || true
-          wait "$SERVER_PID" 2>/dev/null || true
-          if [ "$ok" != "1" ]; then
-            echo "::error::server never reported healthy within 30s"
-            exit 1
-          fi
-          echo "boot smoke passed"
+          BIN="./chatserver"
+          [ -f "./${{ matrix.asset }}" ] && BIN="./${{ matrix.asset }}"
+          go run ./cmd/smoke "$BIN"
 
       - name: Create tar.gz (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         working-directory: Server
-        run: tar czf ../chatserver-linux-amd64.tar.gz chatserver
+        run: tar czf "../${{ matrix.asset }}" chatserver
 
       - name: Upload Windows binary
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
-          path: Server/chatserver.exe
+          path: Server/${{ matrix.asset }}
 
       - name: Upload Linux archive
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
-          path: chatserver-linux-amd64.tar.gz
+          path: ${{ matrix.asset }}
 
   release-client-linux-arm64:
     name: Build Tauri (Linux ARM64)
@@ -536,16 +537,21 @@ jobs:
           name: linux-arm64-release-assets
           path: linux
 
-      - name: Download Windows server binary
+      # Four server assets, one per supported architecture. They land in the
+      # same windows/ and linux/ staging directories the client assets use, so
+      # the checksum and release steps below pick them all up unchanged.
+      - name: Download Windows server binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: server-windows
+          pattern: server-windows-*
+          merge-multiple: true
           path: windows
 
-      - name: Download Linux server archive
+      - name: Download Linux server archives
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: server-linux
+          pattern: server-linux-*
+          merge-multiple: true
           path: linux
 
       - name: Extract version from tag
@@ -570,22 +576,31 @@ jobs:
           (cd linux && sha256sum -- *) >> checksums.sha256
           sha256sum owncord-src-*.tar.gz >> checksums.sha256
 
-      # The legacy top-level asset/sha256 pair stays bound to the Windows
-      # binary so already-deployed servers (which only understand the
-      # single-asset schema) can still verify and update; the assets list
-      # binds every OS. Server-side schema: updater.releaseManifest.
+      # Server-side schema: updater.releaseManifest.
       - name: Generate server update manifest
         shell: bash
         run: |
+          # Built from the files on disk, not a hard-coded list: an asset
+          # added to the build matrix and forgotten here would be published
+          # without a signed hash, and every host on that architecture would
+          # refuse the update with no obvious cause.
+          set -euo pipefail
           WIN_HASH=$(sha256sum windows/chatserver.exe | awk '{print $1}')
-          LINUX_HASH=$(sha256sum linux/chatserver-linux-amd64.tar.gz | awk '{print $1}')
           # protocol_epoch is read from the schema, never typed here, so the
           # manifest cannot drift from the constants the binaries were built with.
           # The server's client-update endpoint withholds any release whose epoch
           # is newer than its own (Server/api/client_update.go).
           EPOCH=$(jq -e '.protocol_epoch' protocol/schema.json)
-          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s","assets":[{"asset":"chatserver.exe","sha256":"%s"},{"asset":"chatserver-linux-amd64.tar.gz","sha256":"%s"}],"protocol_epoch":%s}' \
-            "$VERSION" "$WIN_HASH" "$WIN_HASH" "$LINUX_HASH" "$EPOCH" > windows/server-update-manifest.json
+          ASSETS=$(
+            for f in windows/chatserver*.exe linux/chatserver-linux-*.tar.gz; do
+              jq -n -c --arg a "$(basename "$f")"                 --arg h "$(sha256sum "$f" | awk '{print $1}')"                 '{asset: $a, sha256: $h}'
+            done | jq -s -c .
+          )
+          # The legacy top-level asset/sha256 pair stays bound to the Windows
+          # amd64 binary so already-deployed servers, which only understand the
+          # single-asset schema, can still verify and update.
+          jq -n -c --arg v "v$VERSION" --arg h "$WIN_HASH"             --argjson assets "$ASSETS" --argjson epoch "$EPOCH"             '{version: $v, asset: "chatserver.exe", sha256: $h, assets: $assets, protocol_epoch: $epoch}'             > windows/server-update-manifest.json
+          echo "manifest covers $(jq '.assets | length' windows/server-update-manifest.json) assets"
 
       - name: Sign server update assets
         working-directory: Client
@@ -598,8 +613,13 @@ jobs:
           printf '%s' "$SERVER_UPDATE_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
           trap 'rm -f "$KEY_PATH"' EXIT
           npm ci
-          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../windows/chatserver.exe
-          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../windows/server-update-manifest.json
+          # Every Windows binary needs its own detached signature: the updater
+          # pairs the signature with the asset it downloaded, so an arm64 host
+          # offered the amd64 .sig would fail verification on every update
+          # (Server/updater/download.go, serverSignatureAssetName).
+          for f in ../windows/chatserver*.exe ../windows/server-update-manifest.json; do
+            npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" "$f"
+          done
 
       # Fail closed before publishing: prove the freshly signed assets verify
       # against the pinned public key that ships inside the server binary.
@@ -610,7 +630,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y minisign
           base64 -d Server/updater/server_update_public_key.txt > "$RUNNER_TEMP/server_update.pub"
-          for f in windows/chatserver.exe windows/server-update-manifest.json; do
+          for f in windows/chatserver*.exe windows/server-update-manifest.json; do
             base64 -d "$f.sig" > "$RUNNER_TEMP/asset.minisig"
             minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
           done

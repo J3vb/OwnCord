@@ -33,8 +33,21 @@ CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha
 
 Alternatively, download a pre-built binary from GitHub Releases:
 
-- **Windows**: `chatserver.exe`
-- **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
+| Platform      | Asset                           |
+| ------------- | ------------------------------- |
+| Windows x64   | `chatserver.exe`                |
+| Windows ARM64 | `chatserver-windows-arm64.exe`  |
+| Linux x64     | `chatserver-linux-amd64.tar.gz` |
+| Linux ARM64   | `chatserver-linux-arm64.tar.gz` |
+
+The Linux archives extract to a binary named `chatserver`. Download the asset
+matching your machine's architecture: the server refuses an update built for a
+different one rather than installing something it cannot execute, so a mismatch
+leaves you stranded on the version you installed.
+
+Every asset is built on its own architecture and, before release, run through a
+full lifecycle check — it starts, migrates a fresh database, reports healthy,
+shuts down cleanly on a stop signal, and restarts on the same data directory.
 
 ## Docker (Linux)
 
@@ -481,7 +494,7 @@ The server checks GitHub Releases for updates:
 
 - Compares semver versions
 - Results are cached for 1 hour
-- Downloads `chatserver.exe` with detached Ed25519/minisign signature verification
+- Downloads the asset matching this machine's OS and architecture, with detached Ed25519/minisign signature verification on Windows
 - Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
 - Cross-checks the binary SHA256 against `checksums.sha256`
 

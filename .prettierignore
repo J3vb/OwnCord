@@ -42,3 +42,8 @@ Client/src-tauri/target/
 Client/src-tauri/gen/
 .serena/
 .superpowers/sdd/
+
+# Machine-written agent state carried from main with the ECC bundle (#1564).
+# The inherited instinct file is emitted by the homunculus tool and is not valid
+# YAML to a strict parser, so Prettier cannot read it at all.
+.claude/homunculus/

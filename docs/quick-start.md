@@ -28,8 +28,8 @@ Get OwnCord running with the fewest possible steps.
 
 1. Download from [GitHub Releases](https://github.com/J3vb/OwnCord/releases).
 2. Start the server:
-   - Windows: `chatserver.exe`
-   - Linux: `./chatserver`
+   - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
+   - Linux: `./chatserver`, from the `amd64` or `arm64` archive
 3. Open `https://localhost:8443/admin`.
 4. Complete the setup wizard: it creates the Owner account and configures the
    basics (server name, port, security, uploads, voice). Your choices are

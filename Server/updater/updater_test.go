@@ -134,8 +134,18 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	} else if info.DownloadURL != "" {
 		t.Error("expected empty DownloadURL on unsupported GOOS")
 	}
-	if info.SignatureURL == "" {
-		t.Error("expected non-empty SignatureURL")
+	// The detached binary signature is Windows-only: DownloadAndVerify sets
+	// needSignature = runtime.GOOS == "windows", and the Linux tarball path
+	// verifies through the signed manifest and checksum instead. The reported
+	// URL is now the signature paired with the asset this host would actually
+	// download, so a non-Windows host reports none rather than pointing at a
+	// Windows signature it would never fetch.
+	if want := serverSignatureAssetName(runtime.GOOS, runtime.GOARCH); want != "" {
+		if info.SignatureURL == "" {
+			t.Error("expected non-empty SignatureURL on Windows")
+		}
+	} else if info.SignatureURL != "" {
+		t.Errorf("expected empty SignatureURL off Windows, got %q", info.SignatureURL)
 	}
 	if info.ManifestURL == "" {
 		t.Error("expected non-empty ManifestURL")
@@ -456,16 +466,45 @@ func TestServerDownloadAssetName(t *testing.T) {
 	}{
 		{"windows", "amd64", "chatserver.exe"},
 		{"linux", "amd64", "chatserver-linux-amd64.tar.gz"},
+		{"windows", "arm64", "chatserver-windows-arm64.exe"},
+		{"linux", "arm64", "chatserver-linux-arm64.tar.gz"},
 		{"darwin", "amd64", ""},
 		{"freebsd", "amd64", ""},
-		// No arm64 asset is published; an arm64 host must not receive the
-		// amd64 binary it cannot execute (OC-0320).
-		{"linux", "arm64", ""},
-		{"windows", "arm64", ""},
+		// The pairing still fails closed: a host must never receive a binary
+		// for an architecture it cannot execute (OC-0320). Only the four
+		// published pairs above resolve; everything else is "".
+		{"darwin", "arm64", ""},
+		{"linux", "386", ""},
+		{"windows", "arm", ""},
 	}
 	for _, tc := range tests {
 		if got := serverDownloadAssetName(tc.goos, tc.goarch); got != tc.want {
 			t.Errorf("serverDownloadAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
+		}
+	}
+}
+
+// The detached binary signature must name the asset actually downloaded. A
+// fixed "chatserver.exe.sig" would hand a Windows arm64 host the amd64
+// signature, so verification would fail on every arm64 update — the OC-0320
+// architecture-blindness failure moved one step down the pipeline.
+func TestServerSignatureAssetName(t *testing.T) {
+	tests := []struct {
+		goos   string
+		goarch string
+		want   string
+	}{
+		{"windows", "amd64", "chatserver.exe.sig"},
+		{"windows", "arm64", "chatserver-windows-arm64.exe.sig"},
+		// Windows-only: the Linux tarball verifies through the signed
+		// manifest and checksum and never receives a detached signature.
+		{"linux", "amd64", ""},
+		{"linux", "arm64", ""},
+		{"darwin", "arm64", ""},
+	}
+	for _, tc := range tests {
+		if got := serverSignatureAssetName(tc.goos, tc.goarch); got != tc.want {
+			t.Errorf("serverSignatureAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
 		}
 	}
 }
