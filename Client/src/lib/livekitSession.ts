@@ -506,6 +506,12 @@ export class LiveKitSession {
         getState: () => this._state,
         setState: (s) => this.setState(s),
         syncModuleRooms: () => this.syncModuleRooms(),
+        setModuleRooms: (room) => {
+          this._audioPipeline.setRoom(room);
+          this._audioElements.setRoom(room);
+          this._deviceManager.setRoom(room);
+          this._deviceManager.setAudioPipeline(this._audioPipeline);
+        },
         createRoom: () => this.createRoom(),
         resolveUrl: (p, d) => this.resolveLiveKitUrl(p, d),
         reannounceE2EE: () => this._e2ee.reannounceForReconnect(),
@@ -514,6 +520,13 @@ export class LiveKitSession {
         requestTokenRefresh: () => this.requestTokenRefresh(),
         sendWs: (msg) => this.ws?.send(msg as ClientMessage),
         onError: (msg) => this.onErrorCallback?.(msg),
+        isStateConnected: (channelId, room) => this.isStateConnected(channelId, room),
+        disconnectSupersededLocalRoom: (room) => this.disconnectSupersededLocalRoom(room),
+        setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
+        reapplyMuteGain: () => this.reapplyMuteGain(),
+        clearPendingReconnectFields: () => {
+          this._pendingReconnectFields = null;
+        },
       },
       this._urlResolver,
     );

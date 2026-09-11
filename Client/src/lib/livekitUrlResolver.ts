@@ -84,6 +84,11 @@ export class LiveKitUrlResolver {
 
   /** Stop the Rust-side TLS proxy (fire-and-forget). */
   stopProxy(): void {
+    // Drop the recorded port with the proxy it names. Nothing reads it back
+    // (resolve() always re-invokes, deliberately — see ensureLiveKitProxy), but
+    // leaving a dead port behind after cleanup means any future reader inherits
+    // a value that no longer points at a running proxy.
+    this._proxyPort = null;
     invoke("stop_livekit_proxy").catch((err) => log.warn("Failed to stop LiveKit proxy", err));
   }
 }

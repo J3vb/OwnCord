@@ -224,7 +224,6 @@ import {
   leaveVoiceChannel,
   setVoiceStatus,
   setPeerVerification,
-  clearPeerVerifications,
   setEncryptionDegraded,
 } from "@stores/voice.store";
 import { getIdentityPin, storeIdentityPin } from "@lib/identity";
@@ -482,7 +481,9 @@ describe("LiveKitSession", () => {
         mic.resolve(undefined);
         expect(await connecting).toBe(mode === "join" ? "superseded" : undefined);
         expect(setup).not.toHaveBeenCalled();
-        expect((session as any).tokenRefreshTimer).toBeNull();
+        // Timer lives on VoiceTokenManager since the refactor. A superseded
+        // attempt must not have armed it.
+        expect((session as any)._tokenManager._refreshTimer).toBeNull();
       },
     );
 
@@ -1814,14 +1815,17 @@ describe("LiveKitSession", () => {
     });
 
     it("clears the token refresh timer so it does not fire after leave", () => {
-      // Set up a timer that would fail if it fires
-      (session as any).tokenRefreshTimer = setTimeout(() => {
+      // The timer moved onto VoiceTokenManager; leaveVoice must still clear it
+      // through clearTimers(), or a token refresh fires against a session the
+      // user has already left.
+      const tokenManager = (session as any)._tokenManager;
+      tokenManager._refreshTimer = setTimeout(() => {
         throw new Error("Timer should have been cleared");
       }, 100);
 
       session.leaveVoice(false);
 
-      expect((session as any).tokenRefreshTimer).toBeNull();
+      expect(tokenManager._refreshTimer).toBeNull();
       // Advance past when it would have fired — should not throw
       vi.advanceTimersByTime(200);
     });
@@ -1863,7 +1867,6 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect((session as any)._state.type).toBe("connected");
-      const room = (session as any)._state.room;
 
       session.leaveVoice(false);
 
@@ -1938,12 +1941,15 @@ describe("LiveKitSession", () => {
       expect((session as any).onRemoteVideoRemovedCallback).toBeNull();
     });
 
-    it("nulls liveKitProxyPort", () => {
-      (session as any).liveKitProxyPort = 7881;
+    it("nulls the LiveKit proxy port", () => {
+      // The port moved onto LiveKitUrlResolver with the rest of proxy handling;
+      // cleanupAll must still clear it, or a logout leaves a port recorded for a
+      // proxy that is no longer running.
+      (session as any)._urlResolver._proxyPort = 7881;
 
       session.cleanupAll();
 
-      expect((session as any).liveKitProxyPort).toBeNull();
+      expect((session as any)._urlResolver._proxyPort).toBeNull();
     });
   });
 
@@ -2607,10 +2613,14 @@ describe("LiveKitSession", () => {
     });
   });
 
+  // ensureLiveKitProxy moved into LiveKitUrlResolver, which LiveKitSession owns
+  // as _urlResolver. These reach it there rather than through resolve(), because
+  // the null-host guard is unreachable from resolve(): a null host takes the
+  // passthrough branch and never calls the proxy at all.
   describe("ensureLiveKitProxy", () => {
     it("invokes start_livekit_proxy on every call so a re-pinned cert is picked up", async () => {
       session.setServerHost("example.com:443");
-      const port1 = await (session as any).ensureLiveKitProxy();
+      const port1 = await (session as any)._urlResolver.ensureLiveKitProxy();
       expect(port1).toBe(7881);
       expect(mockInvoke).toHaveBeenCalledTimes(1);
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
@@ -2623,21 +2633,21 @@ describe("LiveKitSession", () => {
       // into the stale pin until logout. The Rust reuse branch dedups, so the
       // repeat call is cheap.
       mockInvoke.mockClear();
-      const port2 = await (session as any).ensureLiveKitProxy();
+      const port2 = await (session as any)._urlResolver.ensureLiveKitProxy();
       expect(port2).toBe(7881);
       expect(mockInvoke).toHaveBeenCalledTimes(1);
     });
 
     it("appends :443 when serverHost has no port", async () => {
       session.setServerHost("example.com");
-      await (session as any).ensureLiveKitProxy();
+      await (session as any)._urlResolver.ensureLiveKitProxy();
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
     });
 
     it("throws when serverHost is null", async () => {
-      await expect((session as any).ensureLiveKitProxy()).rejects.toThrow(
+      await expect((session as any)._urlResolver.ensureLiveKitProxy()).rejects.toThrow(
         "no server host for LiveKit proxy",
       );
     });

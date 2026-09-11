@@ -16,8 +16,18 @@ export interface ReconnectDeps {
   getState: () => any;
   /** Transition to a new state. */
   setState: (state: any) => void;
-  /** Sync extracted modules (AudioPipeline, AudioElements, DeviceManager) to the current room. */
+  /** Sync extracted modules (AudioPipeline, AudioElements, DeviceManager) to the room
+   *  in the CURRENT shared state. Only correct where that state is the one to follow —
+   *  the abort/failure paths. Mid-attempt, use setModuleRooms instead. */
   syncModuleRooms: () => void;
+  /** Point the extracted modules at THIS attempt's room.
+   *
+   *  Not syncModuleRooms(): that reads the room out of the shared state, and at
+   *  the point this is called the state is still "reconnecting", which is
+   *  room-less. Syncing there wires every module to null, so the reconnect
+   *  finishes with no audio pipeline and no remote-subscription handling —
+   *  deafen silently stops being re-applied. */
+  setModuleRooms: (room: Room) => void;
   /** Create a new Room with E2EE wired up. */
   createRoom: () => Promise<Room>;
   /** Resolve a LiveKit URL. */
@@ -34,6 +44,16 @@ export interface ReconnectDeps {
   sendWs: (msg: { type: string; payload: unknown }) => void;
   /** Error callback. */
   onError: (message: string) => void;
+  /** True when the shared state is still THIS attempt's connected room. */
+  isStateConnected: (channelId: number, room: Room) => boolean;
+  /** Tear down a room this attempt no longer owns. */
+  disconnectSupersededLocalRoom: (room: Room) => void;
+  /** Rebuild the audio pipeline against the new room. */
+  setupAudioPipeline: () => void;
+  /** Re-apply mute gain once the pipeline is rebuilt. */
+  reapplyMuteGain: () => void;
+  /** Clear the pending-reconnect fields now the tail has completed. */
+  clearPendingReconnectFields: () => void;
 }
 
 /** Max auto-reconnect attempts before giving up and showing error. */
@@ -116,7 +136,7 @@ export async function attemptAutoReconnect(
       if (current.type === "reconnecting") {
         deps.setState({ ...current, ac: current.ac });
       }
-      deps.syncModuleRooms();
+      deps.setModuleRooms(newRoom);
 
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
       const resolvedUrl = await urlResolver.resolve(url, directUrl);
@@ -162,6 +182,22 @@ export async function attemptAutoReconnect(
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
       await deps.restoreLocalVoiceState("reconnect");
 
+      // OC-0009: mirrors connectAndSetup's post-connect checkpoints. This tail
+      // keeps awaiting AFTER it has already installed "connected" into the
+      // shared state, so superseded() — which expects "reconnecting" — can no
+      // longer tell a still-current attempt from a superseded one. A newer join
+      // may have claimed the state for a different channel meanwhile, so each
+      // await below is followed by an isStateConnected() checkpoint that reads
+      // the live value. Without them a stale tail re-arms the shared token timer
+      // and sends a refresh against somebody else's session.
+      if (!deps.isStateConnected(channelId, newRoom)) {
+        log.info("Auto-reconnect: superseded after restoreLocalVoiceState — aborting tail", {
+          channelId,
+        });
+        deps.disconnectSupersededLocalRoom(newRoom);
+        return;
+      }
+
       // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
       const savedInput = loadPref<string>("audioInputDevice", "");
       if (savedInput) {
@@ -170,6 +206,14 @@ export async function attemptAutoReconnect(
         } catch (err) {
           log.warn("Reconnect: saved input device unavailable, using default", err);
         }
+      }
+
+      if (!deps.isStateConnected(channelId, newRoom)) {
+        log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
+          channelId,
+        });
+        deps.disconnectSupersededLocalRoom(newRoom);
+        return;
       }
 
       const savedOutput = loadPref<string>("audioOutputDevice", "");
@@ -181,7 +225,19 @@ export async function attemptAutoReconnect(
         }
       }
 
+      if (!deps.isStateConnected(channelId, newRoom)) {
+        log.info("Auto-reconnect: superseded after audiooutput switch — aborting tail", {
+          channelId,
+        });
+        deps.disconnectSupersededLocalRoom(newRoom);
+        return;
+      }
+
+      deps.setupAudioPipeline();
+      deps.reapplyMuteGain();
       deps.startTokenRefreshTimer();
+      // Signal the setReconnectAc callback that the reconnect is done.
+      deps.clearPendingReconnectFields();
       // Request a fresh token since the stored one may be close to expiry.
       deps.requestTokenRefresh();
       return;
