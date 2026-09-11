@@ -47,8 +47,12 @@ readonly drain_budget=20
 
 cleanup() {
   local c
+  # "${a[@]:-}" yields one empty element for an empty array under `set -u`,
+  # hence the guard rather than an unconditional rm.
   for c in "${containers[@]:-}"; do
-    [ -n "$c" ] && docker rm -f "$c" >/dev/null 2>&1 || true
+    if [ -n "$c" ]; then
+      docker rm -f "$c" >/dev/null 2>&1 || true
+    fi
   done
   docker volume rm -f "$vol" >/dev/null 2>&1 || true
   rm -rf "$work"
