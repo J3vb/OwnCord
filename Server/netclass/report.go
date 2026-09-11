@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
 )
 
 // Params is everything BuildReport needs from the server's configuration.
@@ -103,6 +104,11 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 			r.HasGlobalAddress = true
 		case KindCGNAT:
 			r.CGNATRangePresent = true
+		default:
+			// Every other class is recorded in LocalAddresses above and
+			// sets no summary flag: the two flags exist to answer "is this
+			// host directly on the internet" and "is the ambiguous 100.64/10
+			// range in play", and nothing else bears on either question.
 		}
 	}
 	if r.CGNATRangePresent {
@@ -125,9 +131,11 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 }
 
 func requiredPorts(p Params) []RequiredPort {
-	ports := []RequiredPort{
-		{Port: fmt.Sprintf("%d", p.ListenPort), Protocol: "tcp", Purpose: "OwnCord HTTPS, REST API and WebSocket"},
-	}
+	// Capacity 4: the chat port, plus LiveKit's three when voice is on.
+	ports := make([]RequiredPort, 0, 4)
+	ports = append(ports,
+		RequiredPort{Port: strconv.Itoa(p.ListenPort), Protocol: "tcp", Purpose: "OwnCord HTTPS, REST API and WebSocket"},
+	)
 	if !p.VoiceEnabled {
 		return ports
 	}

@@ -157,10 +157,12 @@ func TestReport_AlwaysStatesItsOwnLimits(t *testing.T) {
 func TestReport_UndeterminableNamesEveryLimitTheMilestoneListed(t *testing.T) {
 	r := BuildReport(addrs(t, "192.168.1.50"), defaultParams())
 
-	var joined string
+	var b strings.Builder
 	for _, u := range r.Undeterminable {
-		joined += " " + strings.ToLower(u.Fact+" "+u.Why)
+		b.WriteString(" ")
+		b.WriteString(strings.ToLower(u.Fact + " " + u.Why))
 	}
+	joined := b.String()
 	for _, want := range []string{"inbound", "carrier-grade nat", "hairpin", "blocked", "changes"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("Undeterminable never mentions %q; it must cover blocked ports, CGNAT, hairpin NAT, dynamic IP and inbound reachability", want)
