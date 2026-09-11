@@ -110,6 +110,19 @@ server's internals were reorganised behind service boundaries.
   database, reports healthy, shuts down cleanly on a stop signal, and restarts
   on the same data directory. Previously a release asset was only checked as
   far as "it starts".
+- **ARM64 Docker image.** `ghcr.io/j3vb/owncord-server` is now one tag covering
+  `linux/amd64` and `linux/arm64`, so a Raspberry Pi, an Ampere or Graviton
+  VPS and an x86-64 box all pull the same tag. Both are built and checked on
+  their own hardware before the tag is pushed.
+- The container is checked through the same full lifecycle as the standalone
+  assets: it boots on an empty volume, migrates, reports healthy, drains
+  cleanly on `docker stop`, and is then replaced by a new container that finds
+  the old data intact. Previously only "it starts" was checked.
+- **The image reports its own health.** `docker ps` shows a health state even
+  without the compose file, so `docker run`, Podman and Kubernetes all see it.
+- **The shipped compose file drops every Linux capability** and blocks
+  privilege escalation. If you run the container by hand, pass
+  `--cap-drop=ALL --security-opt=no-new-privileges:true`.
 
 ### Privacy & data
 

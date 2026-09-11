@@ -30,8 +30,17 @@ permissions:
 jobs:
   # Keep in sync with ci.yml's server-docker-build job.
   nightly-docker-smoke:
-    runs-on: ubuntu-latest
+    name: Nightly Docker Smoke (linux/${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -56,13 +65,14 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: Server/
+          platforms: linux/${{ matrix.arch }}
           push: false
           load: true
           tags: owncord-smoke:candidate
           build-args: VERSION=ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nightly-server-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=nightly-server-${{ matrix.arch }}
 
       # Same script release.yml and ci.yml run.
-      - name: Boot-smoke Docker image
+      - name: Lifecycle-smoke Docker image
         run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate

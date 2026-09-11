@@ -421,9 +421,65 @@ jobs:
           name: linux-arm64-release-assets
           path: linux-arm64-staging/
 
+  # Smoke each architecture on its OWN hardware before anything is pushed
+  # (B6-2). Emulating arm64 under QEMU would prove only that binfmt can
+  # interpret the image — not that it runs on an ARM host — and it would make
+  # the drain budget meaningless. Same runner pair as the release-server matrix.
+  smoke-server-docker:
+    name: Smoke Server Docker Image (linux/${{ matrix.arch }})
+    needs: verify-versions
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Same VERSION the push job builds with, so the layers this job smoked are
+      # the layers the push job restores from cache rather than rebuilding.
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # Built locally and loaded, never pushed: a pushed :latest that dies on
+      # boot deploys itself to every `docker compose pull` upgrade.
+      #
+      # Per-architecture cache scope: both legs run concurrently, and a shared
+      # scope would have them overwrite each other's manifest.
+      - name: Build image (local, for smoke test)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: Server/
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: owncord-smoke:candidate
+          cache-from: type=gha,scope=server-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=server-${{ matrix.arch }}
+
+      # Shared with ci.yml and nightly-docker-smoke.yml so the smoke itself is
+      # exercised pre-merge — the first alpha.3 release run died here on a
+      # smoke-harness bug (bare `docker run`, nowhere writable for the default
+      # config) that no pre-merge check had ever run.
+      - name: Lifecycle-smoke Docker image
+        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
+
   release-server-docker:
     name: Build & Push Server Docker Image
-    needs: verify-versions
+    # Nothing reaches ghcr.io until BOTH architectures have been smoked on
+    # native hardware.
+    needs: smoke-server-docker
     # The `release` environment carries a required reviewer; naming it here
     # is what gates this job's ghcr.io push behind that approval, the same
     # way it gates the `publish` job below — without this line the push to
@@ -462,36 +518,46 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      # Build locally first so the image can be boot-smoked BEFORE anything
-      # is pushed — a pushed :latest that dies on boot deploys itself to every
-      # `docker compose pull` upgrade.
-      - name: Build image (local, for smoke test)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: Server/
-          load: true
-          build-args: VERSION=${{ env.VERSION }}
-          tags: owncord-smoke:candidate
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Shared with ci.yml's docker-build job so the smoke itself is exercised
-      # on every PR to main — the first alpha.3 release run died here on a
-      # smoke-harness bug (bare `docker run`, nowhere writable for the
-      # default config) that no pre-merge check had ever run.
-      - name: Boot-smoke Docker image
-        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
-
+      # One manifest carrying both architectures (B6-2). The smoke jobs this
+      # job `needs` already ran each of these on its own hardware; the layers
+      # come back from their per-architecture caches rather than being rebuilt.
+      #
+      # The Dockerfile cross-compiles from $BUILDPLATFORM, so the arm64 leg
+      # costs a Go cross-compile here, not a QEMU-emulated toolchain.
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: Server/
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=server-amd64
+            type=gha,scope=server-arm64
+          cache-to: type=gha,mode=max,scope=server-manifest
+
+      # Proof in the run log that both architectures actually shipped, rather
+      # than leaving it to be re-derived from the build step's output.
+      - name: Verify the pushed manifest carries both architectures
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # metadata-action emits one tag per line; any of them resolves to the
+          # same manifest list, so the first is enough.
+          tag=$(echo "$TAGS" | head -n 1)
+          manifest=$(docker buildx imagetools inspect "$tag")
+          echo "$manifest"
+          for arch in amd64 arm64; do
+            case "$manifest" in
+              *"linux/$arch"*) ;;
+              *)
+                echo "::error::pushed manifest $tag is missing linux/$arch"
+                exit 1
+                ;;
+            esac
+          done
 
   publish:
     name: Publish GitHub Release

@@ -34,16 +34,24 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Persistent data (SQLite DB + uploaded files)
       - owncord-data:/app/data
-    # The binary is its own probe (`healthcheck` subcommand) — the distroless
-    # image has no shell or curl. Plain docker compose only SURFACES unhealthy
-    # (docker ps, events); pair with an external watchdog (or an autoheal
-    # container) if you want automatic restarts on hang.
-    healthcheck:
-      test: ["CMD", "/chatserver", "healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    # No `healthcheck:` here on purpose. The image declares its own (see
+    # Server/Dockerfile) and compose inherits it, so the probe cannot drift
+    # between "run the image" and "run the compose file". The binary is its own
+    # probe — the distroless image has no shell or curl. Plain docker compose
+    # only SURFACES unhealthy (docker ps, events); pair with an external
+    # watchdog (or an autoheal container) if you want automatic restarts on hang.
+    #
+    # Minimal privilege. The image already runs as uid 65532 on distroless (no
+    # shell, no package manager); these two drop what is left. The server binds
+    # 8443, above the privileged-port range, so it needs no capability at all.
+    # `read_only: true` is deliberately NOT set: the server writes its default
+    # config.yaml into /app on first boot, and a read-only root filesystem turns
+    # that documented behaviour into a boot failure for anyone who has not yet
+    # mounted a config.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     # Uncomment and size to your host to keep a runaway process from starving
     # the machine (values are a starting point for a small community):

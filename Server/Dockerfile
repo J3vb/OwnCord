@@ -1,16 +1,24 @@
 # syntax=docker/dockerfile:1
 
 # ─── Build stage ────────────────────────────────────────────────────────────
-FROM golang:1.27-bookworm AS builder
+# Pinned to the BUILD platform, not the target: a linux/amd64,linux/arm64
+# buildx run would otherwise emulate the whole Go toolchain under QEMU for the
+# arm64 leg. Nothing here is cgo (modernc.org/sqlite is pure Go), so the host
+# toolchain cross-compiles both targets natively via GOARCH below.
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS builder
 
 ARG VERSION=dev
+# Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a
+# plain non-BuildKit `docker build`, where an empty GOARCH means "host arch" —
+# which is the right answer for that case.
+ARG TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -o /chatserver \
     -ldflags "-s -w -X main.version=${VERSION}" \
     .
@@ -40,6 +48,15 @@ VOLUME ["/app/data"]
 
 # Server listens on this port by default (configurable via config.yaml).
 EXPOSE 8443
+
+# The binary is its own probe: distroless has no shell, no curl and no wget.
+# Declared on the IMAGE rather than only in docker-compose.yml so every runtime
+# — a bare `docker run`, Podman, Kubernetes, a Portainer stack — gets a health
+# state, and so the compose file cannot drift from it. Health is advisory:
+# Docker surfaces `unhealthy` (docker ps, events) but does not act on it; pair
+# with an external watchdog if you want automatic restarts on a hang.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["/chatserver", "healthcheck"]
 
 # Refuses the in-place self-update endpoint (the binary is image content;
 # upgrades are image pulls). See Server/updater/container.go.
