@@ -339,3 +339,28 @@ func TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff(t *testing.T) {
 		t.Errorf("warned about node_ip with voice switched off:\n%s", buf.String())
 	}
 }
+
+// TestReachabilityWarningsAreNotGatedByTheFlag pins how far
+// server.reachability_report_enabled reaches.
+//
+// The owner's decision was that the detailed interface enumeration is opt-in.
+// The honest reporting is not: a limit that only surfaces once someone finds a
+// config key is not "reported actionably", which is the milestone's outcome.
+// So the flag gates the diagnostics block and nothing else — the startup
+// warnings fire with it off, and the banner's address qualifier does not take
+// the config at all. A later edit that moves either behind the flag fails here.
+func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	api.WarnOnServerConfigForTest(&config.Config{
+		Server: config.ServerConfig{ReachabilityReportEnabled: false},
+		Voice:  config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: "192.168.1.50"},
+	})
+
+	if !strings.Contains(buf.String(), "voice.node_ip") {
+		t.Errorf("the node_ip warning was silenced by the report flag being off:\n%s", buf.String())
+	}
+}

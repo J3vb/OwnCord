@@ -506,31 +506,31 @@ topology.** Every classification and report test injects `[]netip.Addr` and a
 
 ## Acceptance
 
-- [ ] A public address outranks a private one in the banner pick (`TestPickBannerAddr_PrefersPublicOverPrivate`) — **negative control required**: revert to the old first-`IsGlobalUnicast`-wins pick, watch it fail, revert the revert, record it here
-- [ ] A private-only host's banner says the address is LAN only and names the fix (`TestBannerQualifierNamesLANOnlyForPrivateAddress`)
-- [ ] A `100.64.0.0/10` address is labelled with **both** explanations, never as a CGNAT verdict (`TestBannerQualifierNamesBothCGNATExplanations`)
-- [ ] `netclass.Classify` returns `cgnat` for `100.64.1.2`, which no classifier in this repo's request path does today (`TestClassify_NamesEveryKind`)
-- [ ] `::ffff:192.168.1.1` is judged as `192.168.1.1`, not as an IPv6 address (`TestClassify_UnmapsIPv4Mapped`)
-- [ ] The reachability report is correct on five injected topologies and reads no real interface (`TestReport_InjectedTopologies`)
-- [ ] `undeterminable` is non-empty on **every** topology, including the fully-public one (`TestReport_AlwaysStatesItsOwnLimits`)
-- [ ] Building a report opens no socket and resolves no name (`TestReport_MakesNoOutboundCall`)
-- [ ] `Server/netclass` imports no HTTP, TLS or STUN vocabulary (`TestNetclassImportsNoNetworkClient`)
-- [ ] `isPrivateIP` reports CGNAT and link-local addresses as non-public (`TestIsPrivateIP`, extended)
-- [ ] `server.reachability_report_enabled` defaults to **false** on a fresh config (`TestConfigReachabilityReportDefaultsOff`)
-- [ ] With the flag on, the diagnostics response carries `reachability` and `client.address_class` (`TestDiagnosticsReportsReachabilityWhenEnabled`)
-- [ ] With the flag off, the `reachability` key is **absent**, not empty (`TestDiagnosticsOmitsReachabilityWhenDisabled`)
-- [ ] The banner qualifier and the startup warnings print regardless of the flag (`TestReachabilityBannerIsNotGatedByTheFlag`)
-- [ ] `/health` gains no reachability field and no new dependency (`TestHealthResponseCarriesNoReachabilityFields`)
-- [ ] An ACME issuance failure logs once, naming inbound `:80` (`TestLoadACME_LogsIssuanceFailureWithReachabilityCause`)
-- [ ] The IP-rejection error names this build's client, not Let's Encrypt (`TestLoadACME_IPErrorNamesTheRealLimit`)
-- [ ] A non-global `voice.node_ip` warns that remote voice will fail silently (`TestWarnOnServerConfig_NonGlobalNodeIP`)
-- [ ] `docs/port-forwarding.md` covers CGNAT, hairpin NAT, blocked ports, dynamic IP, firewalls, the LiveKit UDP range, and names every path this build leaves unqualified
-- [ ] gendocs runs clean and the route index is **unchanged** — no new route (`git diff --exit-code` on the three generated docs)
-- [ ] `publicSurface` is untouched and the posture test passes unchanged
-- [ ] `docs/server-configuration.md` gains the new key via gendocs, not by hand
-- [ ] BPR-014 is recorded as blocked on B6-3 in the traceability document
+- [x] A public address outranks a private one in the banner pick (`TestPickBannerAddr_PrefersPublicOverPrivate`) — **negative-controlled**: reverting `pickBannerAddr` to the old first-`IsGlobalUnicast`-wins pick made it fail with `pickBannerAddr([172.17.0.1 93.184.216.34]) = "172.17.0.1", want "93.184.216.34"` — the Docker-bridge case, exactly — then the revert was reverted
+- [x] A private-only host's banner says the address is LAN only and names the fix (`TestBannerQualifierNamesLANOnlyForPrivateAddress`)
+- [x] A `100.64.0.0/10` address is labelled with **both** explanations, never as a CGNAT verdict (`TestBannerQualifierNamesBothCGNATExplanations`, and `TestReport_CGNATIsObservedNeverConcluded` for the JSON)
+- [x] `netclass.Classify` returns `cgnat` for `100.64.1.2`, which no classifier in this repo's request path did before (`TestClassify_NamesEveryKind`)
+- [x] `::ffff:192.168.1.1` is judged as `192.168.1.1`, not as an IPv6 address (`TestClassify_UnmapsIPv4Mapped`)
+- [x] The reachability report is correct on five injected topologies and reads no real interface (`TestReport_InjectedTopologies`)
+- [x] `undeterminable` is non-empty on **every** topology, including the fully-public one (`TestReport_AlwaysStatesItsOwnLimits`), and names all five limits (`TestReport_UndeterminableNamesEveryLimitTheMilestoneListed`)
+- [x] Building a report opens no socket and resolves no name (`TestReport_MakesNoOutboundCall`) — **negative-controlled** with an injected `http.Get`. Its blind spot is a raw `net.Dial`, which no Go hook intercepts; `TestNetclassSourceMentionsNoDial` covers that and was negative-controlled separately
+- [x] `Server/netclass` imports no HTTP, TLS or STUN vocabulary (`TestNetclassImportsNoNetworkClient`) — **negative-controlled**
+- [x] `isPrivateIP` reports CGNAT, link-local and IPv4-mapped addresses as non-public (`TestIsPrivateIP`, extended by 11 cases)
+- [x] `server.reachability_report_enabled` defaults to **false** on a fresh config, and the shipped template keeps it commented (`TestLoadReachabilityReportDisabledByDefault`)
+- [x] With the flag on, the diagnostics response carries `reachability` (`TestDiagnosticsReportsReachabilityWhenEnabled`); `client.address_class` is reported either way (`TestDiagnosticsReportsClientAddressClass`)
+- [x] With the flag off, the `reachability` key is **absent**, not empty (`TestDiagnosticsOmitsReachabilityWhenDisabled`)
+- [x] The startup warnings print regardless of the flag (`TestReachabilityWarningsAreNotGatedByTheFlag`); the banner qualifier never takes the config, so it is ungated by construction
+- [x] `/health` gains no reachability field, asserted with the flag switched **on** so a leak would be caught (`TestHealthResponseCarriesNoReachabilityFields`)
+- [x] An ACME issuance failure logs once, naming inbound `:80` (`TestLoadACME_LogsIssuanceFailureWithReachabilityCause`), and a success logs nothing (`TestLoadACME_SuccessIsNotLogged`)
+- [x] The IP-rejection error names this build's client, not Let's Encrypt (`TestLoadACME_IPErrorNamesTheRealLimit`)
+- [x] A non-global `voice.node_ip` warns that remote voice will fail silently (`TestWarnOnServerConfig_NonGlobalNodeIP`), and stays quiet when voice is off (`TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff`)
+- [x] `docs/port-forwarding.md` covers CGNAT, hairpin NAT, blocked ports, dynamic IP, firewalls, the LiveKit UDP range, and names every path this build leaves unqualified — 48 lines to 208, opening with a table of what the server can and cannot detect
+- [x] gendocs runs clean and the route index is **unchanged** — no new route. The only generated change is the new config key's two rows
+- [x] `publicSurface` is untouched and the posture test passes unchanged
+- [x] `docs/server-configuration.md` gains the new key via gendocs, not by hand
+- [x] BPR-014 is recorded as blocked on B6-3 in the traceability document, and BPR-013's row records what B6-6 did satisfy
 - [ ] `ci-check` green across all four build-tag variants plus the deadlock pass
-- [ ] The B6-6 PRD row reads `complete` with this file in its Plan cell — **cell read back after editing**
+- [x] The B6-6 PRD row reads `complete` with this file in its Plan cell — the cell was parsed back after the edit, not eyeballed
 
 ## Status
 
