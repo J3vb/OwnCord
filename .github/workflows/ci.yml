@@ -576,10 +576,20 @@ jobs:
   #
   # Keep in sync with nightly-docker-smoke.yml's nightly-docker-smoke job.
   server-docker-build:
-    name: Server Docker Build (verify)
+    name: Server Docker Build (verify, linux/${{ matrix.arch }})
     if: github.ref_name == 'main' || github.base_ref == 'main'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    # Both published architectures, each on its own hardware (B6-2). Running
+    # the arm64 image under QEMU would prove only that binfmt can interpret it.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -590,17 +600,18 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: Server/
+          platforms: linux/${{ matrix.arch }}
           push: false
           load: true
           tags: owncord-smoke:candidate
           build-args: VERSION=ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=ci-server-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ci-server-${{ matrix.arch }}
 
       # Same script release.yml runs before it signs or pushes anything. A
-      # boot regression — or a bug in the smoke harness itself, as happened on
-      # the first v1.2.0-alpha.3 release run — must fail here, not at tag time.
-      - name: Boot-smoke Docker image
+      # lifecycle regression — or a bug in the smoke harness itself, as happened
+      # on the first v1.2.0-alpha.3 release run — must fail here, not at tag time.
+      - name: Lifecycle-smoke Docker image
         run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
 
   # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier).

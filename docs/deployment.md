@@ -53,10 +53,43 @@ shuts down cleanly on a stop signal, and restarts on the same data directory.
 
 The easiest way to run OwnCord on Linux. Includes the chat server and LiveKit voice/video as separate containers on a shared internal network. The server image is built `FROM gcr.io/distroless/static-debian12` and runs as a non-root user (`65532`), so there is no shell inside the container.
 
+`ghcr.io/j3vb/owncord-server` is published as a single multi-architecture tag
+covering **`linux/amd64` and `linux/arm64`** — a Raspberry Pi 4/5, an Ampere or
+Graviton VPS and an ordinary x86-64 box all pull the same tag and get the right
+image. Both architectures are built and lifecycle-checked on their own hardware
+before any tag is pushed: the image boots on an empty volume, migrates a fresh
+database, reports healthy, shuts down cleanly on `docker stop`, and is then
+replaced by a new container that finds the old data intact.
+
 ### Prerequisites
 
 - Docker Engine 24+ and Docker Compose v2
+- `linux/amd64` or `linux/arm64` host
 - Ports available: `8443` (chat), `7880-7881` TCP, `50000-60000` UDP (LiveKit media)
+
+### Health and privilege
+
+The image declares its own `HEALTHCHECK`, so `docker ps` reports a health state
+even without the compose file. The binary is its own probe (`chatserver
+healthcheck`) because distroless ships no shell or `curl`. Docker only
+_surfaces_ `unhealthy` — it does not restart on it; add an external watchdog if
+you want that.
+
+The shipped `docker-compose.yml` runs the server with no Linux capabilities at
+all and with privilege escalation blocked:
+
+```yaml
+cap_drop:
+  - ALL
+security_opt:
+  - no-new-privileges:true
+```
+
+If you run the container by hand rather than through compose, pass the same
+two: `--cap-drop=ALL --security-opt=no-new-privileges:true`. The server binds
+`8443`, above the privileged-port range, so it needs no capability. A read-only
+root filesystem is _not_ supported: the server writes its default
+`config.yaml` into `/app` on first boot.
 
 ### Quick Start
 
