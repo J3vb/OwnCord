@@ -63,16 +63,34 @@ is met on stated hardware with published p95/p99 measurements.**
 
 ## Success Metrics
 
-| Metric                   | Target                                                                      | How measured                                             |
-| ------------------------ | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Registered users         | ≥ 250                                                                       | `Server/scripts/k6/ws-load.js` on stated hardware        |
-| Simultaneous connections | ≥ 100                                                                       | same k6 profile                                          |
-| Concurrent voice         | ≥ 25                                                                        | **TBD — no LiveKit load harness exists** (workstream 14) |
-| Latency budgets          | **TBD — p95/p99 budgets not yet stated**                                    | load-test dataset + reproducible commands                |
-| Reference hardware       | **TBD — "stated hardware" undefined**                                       | published with the load dataset                          |
-| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                  | network-mode integration matrix                          |
-| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores | artifact and container install/boot matrix               |
-| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone               | HP-6 operator usability record                           |
+| Metric                   | Target                                                                      | How measured                                                                                                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Registered users         | ≥ 250                                                                       | `Server/scripts/k6/ws-load.js` on stated hardware                                                                                                                                    |
+| Simultaneous connections | ≥ 100                                                                       | same k6 profile                                                                                                                                                                      |
+| Concurrent voice         | ≥ 25                                                                        | `lk load-test` (LiveKit CLI) wrapper script, 25 audio publishers + subscribers, plus k6 driving the OwnCord join/leave path; decided 2026-09-11                                      |
+| Latency budgets          | see "Initial latency budgets" below (decided 2026-09-11)                    | load-test dataset + reproducible commands                                                                                                                                            |
+| Reference hardware       | 2 vCPU / 4 GB RAM / SSD, Linux x64 (decided 2026-09-11)                     | B6-9 adds a `docker run --cpus=2 --memory=4g` leg to `load-baseline.yml` (today it boots the server unconstrained on `ubuntu-latest`); numbers publish only from the constrained leg |
+| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                  | network-mode integration matrix                                                                                                                                                      |
+| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores | artifact and container install/boot matrix                                                                                                                                           |
+| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone               | HP-6 operator usability record                                                                                                                                                       |
+
+### Initial latency budgets (decided 2026-09-11)
+
+Measured at the 100-connection profile on the reference hardware. These are
+starting budgets: HP-6 measures against them, and B6-9 may tighten (never
+loosen) them once the first dataset exists. Anything looser than this is a
+finding, not a number to publish. Where the source column says "new", the k6
+script does not record that path yet; adding the metric and its p95/p99
+thresholds is B6-9 work, before the first qualifying run.
+
+| Path                                                    | p95      | p99      | Source of the number                                                            |
+| ------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------- |
+| REST login (`auth_time`)                                | < 1 s    | < 2 s    | existing k6 p95 threshold; p99 is new                                           |
+| WebSocket open → `auth_ok` received                     | < 1 s    | < 2 s    | new k6 metric in B6-9: `ws_connect_time` stops at socket open, before `auth_ok` |
+| Message send → sender acknowledgement (REST)            | < 200 ms | < 500 ms | B3 bench baseline order of magnitude, with headroom                             |
+| Message send → recipient delivery (all 100 connections) | < 250 ms | < 500 ms | new: the B3 carryover said sender ack was measured, not this                    |
+| Voice join (token + LiveKit room join)                  | < 2 s    | < 4 s    | LiveKit connect on a LAN plus one REST round trip                               |
+| Graceful drain to exit 0                                | < 20 s   | —        | `Server/cmd/smoke` `drainBudget`                                                |
 
 ## Scope
 
@@ -139,30 +157,73 @@ and **one** data-fixture set.
 
 ## Open Questions
 
-- [ ] What is the "stated hardware" for the 250/100/25 profile? Without it the
-      headline metric is unfalsifiable.
-- [ ] Who owns the 25-participant LiveKit voice load harness? Workstream 14
-      calls it a real gap needing a named owner before HP-6.
-- [ ] What are the p95/p99 latency budgets HP-6 measures against?
-- [ ] Do ARM64 assets ship in B6, or does B6 only qualify them?
+- [x] **Decided 2026-09-11:** the "stated hardware" is a 2 vCPU / 4 GB RAM /
+      SSD Linux x64 machine — the cheapest VPS or single-board class an owner
+      is likely to buy. It is reproduced, not owned: B6-9 adds a leg to
+      `load-baseline.yml` that runs the server inside a
+      `docker run --cpus=2 --memory=4g` cgroup, so anyone can re-run it. That
+      leg does not exist yet — today the job boots the server directly on an
+      unconstrained `ubuntu-latest` runner and its header says so — and no
+      capacity number is published until it does. The developer's 16-core box
+      (B3 bench baseline) is a ceiling check, never the reference.
+- [x] **Decided 2026-09-11:** the repository owner (J3vb) owns the voice load
+      harness, as B6-9 task 1. It is not written from scratch: LiveKit's CLI
+      already ships `lk load-test` (simulated audio/video publishers and
+      subscribers with per-track latency and packet-loss stats). B6-9 wraps it
+      in a script that drives 25 audio publishers + 25 subscribers against the
+      bundled `livekit-server`, while k6 drives the OwnCord join/leave/token
+      path. The "no harness exists" claim in workstream 14 was about k6; it is
+      closed by using the SFU vendor's own tool.
+- [x] **Decided 2026-09-11:** initial p95/p99 budgets are in "Initial latency
+      budgets" under Success Metrics. Tighten from data; never loosen.
+- [x] **Decided 2026-09-11:** ARM64 assets ship in B6. B6-1 (PR #1580) added
+      Windows ARM64 and Linux ARM64 server assets, ARM64-aware self-update and
+      the shared `cmd/smoke` harness to the release matrix. B6-1 stays
+      `in-progress` until the first tag run proves the three unchecked
+      acceptance rows (build/smoke/upload of all four assets, manifest and
+      checksums, signatures); B6-12's rehearsed tag is where that evidence is
+      recorded and the row flips to `complete`.
 - [x] **Decided 2026-09-08:** generated step plans live at ECC's default
       `.claude/plans/`, whitelisted in `.gitignore` so they are tracked and
       reviewable in the PR. Prettier reads `.gitignore`, so those plans are
       format-gated like any other tracked markdown; `npm run format` fixes
       drift. This PRD stays in `docs/plans/` as the tracked entry point.
-- [ ] Are public-IP certificates still gated on short-lived certificate
-      handling per current Let's Encrypt guidance? Re-check before B6-3.
+- [x] **Re-checked 2026-09-11:** yes, and it is now settled rather than
+      pending. Let's Encrypt made IP-address certificates generally available
+      on 2026-01-15. They are issued only under the `shortlived` profile
+      (160 h validity, roughly 6.7 days), validated by `http-01` or
+      `tls-alpn-01` only (no `dns-01`), for public IPv4 and IPv6. Consequences
+      for B6-3, B6-5 and B6-6 are in "Public-IP certificate consequences"
+      below.
+
+### Public-IP certificate consequences (2026-09-11)
+
+- **The current client cannot do it.** `golang.org/x/crypto/acme/autocert`
+  (v0.56.0, `Server/auth/tls.go` `loadACME`) has no profile selection and its
+  `Manager` accepts hostnames only; `loadACME` explicitly rejects IPs today.
+  B6-3 needs an ACME client that sets the order profile. `certmagic` (v0.25.x)
+  exposes `ACMEIssuer.Profile`; B6-3 starts with a spike proving it issues for
+  a public IP against the Let's Encrypt staging directory, and falls back to a
+  thin issuer on `x/crypto/acme` (which already has IP authorizations but no
+  profile field) only if certmagic refuses public-IP subjects.
+- **Renewal is every ~4 days, not every ~60.** B6-5's "renewal state survives
+  restart" becomes a hard requirement, and a server that was off for more than
+  a week boots with an expired certificate: it must re-issue before serving,
+  and B6-6 must report a failed re-issue as a reachability problem, not as
+  application success.
+- **Domain mode stays on the 90-day `classic` profile.** The two modes must
+  not share a renewal schedule.
 
 ## Risks
 
-| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                               |
-| ---------------------------------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------------- |
-| The 25-participant voice number cannot be measured because no harness exists | High       | High   | Name an owner and scope the LiveKit harness as the first task of B6-9, before any load run               |
-| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                            |
-| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently |
-| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                       |
-| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                     |
-| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                  |
+| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                                  |
+| ---------------------------------------------------------------------------- | ---------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| The 25-participant voice number cannot be measured because no harness exists | High       | High   | Owner named 2026-09-11; B6-9 task 1 wraps `lk load-test` rather than writing a harness, before any load run |
+| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                               |
+| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently    |
+| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                          |
+| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                        |
+| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                     |
 
 ---
 
