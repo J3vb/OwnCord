@@ -1429,6 +1429,46 @@ describe("LiveKitSession", () => {
 
       expect(setSubscribed).toHaveBeenCalledWith(false);
     });
+
+    // Pre-refactor parity: the reconnect success path re-installed both
+    // DeviceManager callbacks right after setVoiceStatus("connected"). The
+    // extraction's mid-attempt wiring set only room + audio pipeline, so the
+    // device-error and toast routes were never re-established on the path that
+    // replaces the room.
+    it("re-installs the device-manager error and toast callbacks on a successful reconnect", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 11,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+
+      // Spy AFTER setOnError, which installs the callback itself — we want only
+      // the calls the reconnect makes.
+      const deviceManager = (session as any)._deviceManager;
+      const setOnErrorSpy = vi.spyOn(deviceManager, "setOnError");
+      const setOnToastSpy = vi.spyOn(deviceManager, "setOnToast");
+
+      const ac = new AbortController();
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        11,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(setOnErrorSpy).toHaveBeenCalledWith(errorCb);
+      expect(setOnToastSpy).toHaveBeenCalledWith(errorCb);
+    });
   });
 
   describe("teardownForReconnect video track cleanup (BUG-098)", () => {
@@ -3154,8 +3194,11 @@ describe("LiveKitSession", () => {
         ac: new AbortController(),
       };
       session.setServerHost("localhost:7880");
+      const sendSpy = vi.fn();
+      session.setWsClient({ send: sendSpy } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
       const ac = new AbortController();
 
       mockRoom.connect.mockRejectedValue(new Error("always fails"));
@@ -3174,6 +3217,17 @@ describe("LiveKitSession", () => {
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
       expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      // The non-superseded give-up path must route through the session's FULL
+      // leave cleanup, not just a voice_leave frame. Sending the frame alone
+      // leaves the session internally "reconnecting" with the E2EE worker and
+      // its room key still resident, and only the reconnect-flavoured audio
+      // cleanup having run — so per-call screenshare mute/volume state survives
+      // until some later explicit leave or join.
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect((session as any)._state.type).toBe("idle");
+      // ...and exactly one voice_leave reaches the server: leaveVoice(true)
+      // sends it, so the give-up path must not send its own as well.
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
     });
 
     // v004 regression: if the user leaves/switches channels while the FINAL

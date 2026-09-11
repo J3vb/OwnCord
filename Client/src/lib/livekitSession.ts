@@ -1,7 +1,6 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { Room, RoomEvent, Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import type { ClientMessage } from "@lib/types";
 import {
   voiceStore,
   setLocalMuted,
@@ -139,9 +138,6 @@ export class LiveKitSession {
   private serverHost: string | null = null;
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
-  /** Max auto-reconnect attempts before giving up and showing error. */
-  private static readonly MAX_RECONNECT_ATTEMPTS = 2;
-  private static readonly RECONNECT_DELAY_MS = 3000;
   /** An explicit unmute waiting for this room's SFU publishing grant. */
   private pendingMicrophoneRoom: Room | null = null;
 
@@ -475,9 +471,14 @@ export class LiveKitSession {
 
   // --- Module wiring helper ---
 
-  /** Update all extracted modules with the current room reference. */
-  private syncModuleRooms(): void {
-    const room = this._room;
+  /** Update all extracted modules with a room reference.
+   *
+   *  Defaults to the room in the CURRENT shared state. Pass `room` explicitly
+   *  from mid-attempt code (the reconnect loop), where the state is still
+   *  "reconnecting" and therefore room-less — the default would wire every
+   *  module to null. Either way the DeviceManager callbacks are re-installed
+   *  here, so there is exactly one place that knows the full wiring. */
+  private syncModuleRooms(room: Room | null = this._room): void {
     this._audioPipeline.setRoom(room);
     this._audioElements.setRoom(room);
     this._deviceManager.setRoom(room);
@@ -496,40 +497,27 @@ export class LiveKitSession {
     directUrl: string | undefined,
     signal: AbortSignal,
   ): Promise<void> {
-    return attemptAutoReconnect(
-      token,
-      url,
-      channelId,
-      directUrl,
-      signal,
-      {
-        getState: () => this._state,
-        setState: (s) => this.setState(s),
-        syncModuleRooms: () => this.syncModuleRooms(),
-        setModuleRooms: (room) => {
-          this._audioPipeline.setRoom(room);
-          this._audioElements.setRoom(room);
-          this._deviceManager.setRoom(room);
-          this._deviceManager.setAudioPipeline(this._audioPipeline);
-        },
-        createRoom: () => this.createRoom(),
-        resolveUrl: (p, d) => this.resolveLiveKitUrl(p, d),
-        reannounceE2EE: () => this._e2ee.reannounceForReconnect(),
-        restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
-        startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
-        requestTokenRefresh: () => this.requestTokenRefresh(),
-        sendWs: (msg) => this.ws?.send(msg as ClientMessage),
-        onError: (msg) => this.onErrorCallback?.(msg),
-        isStateConnected: (channelId, room) => this.isStateConnected(channelId, room),
-        disconnectSupersededLocalRoom: (room) => this.disconnectSupersededLocalRoom(room),
-        setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
-        reapplyMuteGain: () => this.reapplyMuteGain(),
-        clearPendingReconnectFields: () => {
-          this._pendingReconnectFields = null;
-        },
+    return attemptAutoReconnect(token, url, channelId, directUrl, signal, {
+      getState: () => this._state,
+      setState: (s) => this.setState(s),
+      syncModuleRooms: () => this.syncModuleRooms(),
+      setModuleRooms: (room) => this.syncModuleRooms(room),
+      createRoom: () => this.createRoom(),
+      resolveUrl: (p, d) => this.resolveLiveKitUrl(p, d),
+      reannounceE2EE: () => this._e2ee.reannounceForReconnect(),
+      restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
+      startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
+      requestTokenRefresh: () => this.requestTokenRefresh(),
+      leaveVoice: () => this.leaveVoice(true),
+      onError: (msg) => this.onErrorCallback?.(msg),
+      isStateConnected: (channelId, room) => this.isStateConnected(channelId, room),
+      disconnectSupersededLocalRoom: (room) => this.disconnectSupersededLocalRoom(room),
+      setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
+      reapplyMuteGain: () => this.reapplyMuteGain(),
+      clearPendingReconnectFields: () => {
+        this._pendingReconnectFields = null;
       },
-      this._urlResolver,
-    );
+    });
   }
 
   // --- URL resolution (delegated to LiveKitUrlResolver) ---

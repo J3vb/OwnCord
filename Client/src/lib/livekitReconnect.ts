@@ -6,7 +6,6 @@ import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
-import type { LiveKitUrlResolver } from "@lib/livekitUrlResolver";
 
 const log = createLogger("livekitReconnect");
 
@@ -40,8 +39,18 @@ export interface ReconnectDeps {
   startTokenRefreshTimer: () => void;
   /** Request a token refresh. */
   requestTokenRefresh: () => void;
-  /** Send a WS frame. */
-  sendWs: (msg: { type: string; payload: unknown }) => void;
+  /** Full session teardown, sending voice_leave to the server.
+   *
+   *  Not a bare voice_leave frame: the give-up path is a real leave, so it owes
+   *  the session everything leaveVoice(true) does — state back to "idle", the
+   *  E2EE worker terminated so the last room key does not stay resident, timers
+   *  cleared, and the FULL audio-element cleanup that also clears per-call
+   *  screenshare mute/volume state (the reconnect-flavoured cleanup
+   *  deliberately preserves it). Only ever called once the give-up path has
+   *  confirmed it is not superseded — this teardown is global, so a superseded
+   *  loop calling it would kill the live session that replaced it
+   *  (Client/CLAUDE.md: voice sessions are superseded, not cancelled). */
+  leaveVoice: () => void;
   /** Error callback. */
   onError: (message: string) => void;
   /** True when the shared state is still THIS attempt's connected room. */
@@ -85,7 +94,6 @@ export async function attemptAutoReconnect(
   directUrl: string | undefined,
   signal: AbortSignal,
   deps: ReconnectDeps,
-  urlResolver: LiveKitUrlResolver,
 ): Promise<void> {
   const state = deps.getState();
   const owner = state.type === "reconnecting" ? state.ac : null;
@@ -138,8 +146,11 @@ export async function attemptAutoReconnect(
       }
       deps.setModuleRooms(newRoom);
 
+      // Through deps.resolveUrl, not the resolver directly: the original went
+      // via LiveKitSession.resolveLiveKitUrl(), so anything that lands there
+      // later must apply to the reconnect path too.
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
-      const resolvedUrl = await urlResolver.resolve(url, directUrl);
+      const resolvedUrl = await deps.resolveUrl(url, directUrl);
 
       if (superseded()) {
         log.info("Auto-reconnect aborted before room connect");
@@ -273,10 +284,11 @@ export async function attemptAutoReconnect(
     log.info("Auto-reconnect give-up skipped — superseded");
     return;
   }
-  // Send voice_leave over WS so the server removes our voice state;
-  // without this the server and other clients see us as a ghost participant.
+  // Tear the session down for real. leaveVoice(true) also sends voice_leave
+  // over WS, so the server removes our voice state — without that the server
+  // and other clients see us as a ghost participant.
   log.error("Auto-reconnect exhausted all attempts, giving up");
-  deps.sendWs({ type: "voice_leave", payload: {} });
+  deps.leaveVoice();
   leaveVoiceChannel();
   deps.onError("Voice connection lost — failed to reconnect");
 }
