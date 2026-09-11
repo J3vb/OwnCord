@@ -32,9 +32,10 @@ refusal:
 2. `isPrivateIP` (`Server/api/diagnostics_handler.go:87-99`) is a string-prefix
    classifier that cannot see `100.64.0.0/10`. CGNAT is this milestone's own
    subject, and the one classifier we ship is blind to it.
-3. The admin-gated diagnostics endpoint gains a `reachability` block: the facts
-   that are determinable from inside the NAT, plus an **explicit list of the
-   facts that are not**, each with the check the owner runs instead.
+3. The admin-gated diagnostics endpoint gains a `reachability` block — behind
+   `server.reachability_report_enabled`, default off (owner decision 3): the
+   facts that are determinable from inside the NAT, plus an **explicit list of
+   the facts that are not**, each with the check the owner runs instead.
 4. ACME certificate-issuance failures are currently discarded entirely
    (`Server/internal/app/lifecycle.go:377` sets `ErrorLog` to `io.Discard`), so
    a server whose port 80 is unreachable logs "server starting" and looks
@@ -62,6 +63,46 @@ range. So the report **observes the address and names both explanations**; it
 never concludes "you are behind CGNAT". Reporting "I cannot determine this from
 here, and here is how you check it yourself" is the deliverable, and Task 3's
 `undeterminable` list is where it lives.
+
+## Owner decisions (2026-09-11)
+
+All four open questions answered. Three took the plan's recommendation; the
+third narrowed scope, and the narrowing is recorded here rather than silently
+absorbed.
+
+1. **The honesty line goes in the banner.** One qualifier line in the ASCII
+   banner itself, varying by address class. Task 2 as written.
+2. **`Server/auth/tls.go` may be touched: both 6a and 6b.** The issuance-failure
+   log wrapper and the corrected IP-rejection string both land in this
+   milestone. Neither carries certificate logic for B6-3 to unpick.
+3. **The `reachability` block ships behind a config flag, default off.**
+   `server.reachability_report_enabled`, zero-value false, no `defaults()`
+   entry — the `browser_client_enabled` shape exactly. When it is off the
+   `reachability` key is **absent** from the response, not present-and-empty.
+4. **BPR-014 is recorded as blocked on B6-3**, not as partially satisfied here.
+   `docs/plans/beta-requirements-traceability-2026-08-23.md` gets that row.
+
+### What decision 3 changes, and the one line it does not
+
+The flag is a second gate on a surface that already carries the strictest gate
+in the repo (`AuthMiddleware` + `RequirePermission(Administrator)` + 5/min rate
+limit, `Server/api/router.go:207-210`). That is defensible: the block
+enumerates every local interface address, which is the most topology-revealing
+thing this server would emit, and H-8 restricted the endpoint in the first
+place _because_ it reveals topology.
+
+The cost is that a report nobody enables is a report nobody reads, and this
+milestone's outcome is that limits are **reported**, not merely reportable. So
+the flag is scoped as narrowly as it can be:
+
+- **Gated (default off):** the `reachability` block on the diagnostics endpoint
+  — local address enumeration, port inventory, the `undeterminable` list.
+- **Never gated:** the banner qualifier (Task 2) and the `warnOnServerConfig`
+  warnings (Task 6c). Those always print, for every owner, on every start.
+
+That keeps the honest answer universal at boot while making the detailed
+interface dump an opt-in. `TestReachabilityBannerIsNotGatedByTheFlag` pins the
+split so a later edit cannot quietly move the banner behind the flag.
 
 ## Verify before you implement
 
@@ -172,6 +213,10 @@ Justified from what each seam already does, not from preference:
 | ~~`/health`~~                             | Rejected. `/health` is a liveness probe on a cache (`router.go:634`); reachability is neither live-changing nor probe-shaped, and a monitor flapping on NAT topology is a false alarm                                                    |
 | ~~A new public endpoint~~                 | Rejected. It would hand an unauthenticated caller the host's interface topology, and `publicSurface` is shrink-only for exactly that reason                                                                                              |
 
+**Owner amendment (2026-09-11):** the admin-diagnostics half is additionally
+gated by `server.reachability_report_enabled`, default off. The banner half is
+not. See "What decision 3 changes" above.
+
 ## Patterns to Mirror
 
 | Category                | Source                                                | Pattern                                                                             |
@@ -191,25 +236,28 @@ Justified from what each seam already does, not from preference:
 
 ## Files to Change
 
-| File                                     | Action | Why                                                                                           |
-| ---------------------------------------- | ------ | --------------------------------------------------------------------------------------------- |
-| `Server/netclass/classify.go`            | NEW    | `Kind` classification incl. CGNAT; `Rank` for address preference; pure, injectable            |
-| `Server/netclass/classify_test.go`       | NEW    | One named case per class; the CGNAT and mapped-IPv4 cases that do not exist today             |
-| `Server/netclass/report.go`              | NEW    | `Report` built from injected `[]netip.Addr` + config, incl. the `Undeterminable` list         |
-| `Server/netclass/report_test.go`         | NEW    | Five injected topologies; no test touches a real interface                                    |
-| `Server/internal/app/banner.go`          | UPDATE | Rank-based address pick + the honesty line; `getOutboundIP` splits into a pure inner function |
-| `Server/internal/app/banner_test.go`     | UPDATE | Injected-address tests for the pick and the label                                             |
-| `Server/api/diagnostics_handler.go`      | UPDATE | `reachability` block; `isPrivateIP` delegates to `netclass`                                   |
-| `Server/api/diagnostics_handler_test.go` | UPDATE | New block assertions; **correct** the CGNAT/link-local expectations the table omits today     |
-| `Server/api/router.go`                   | UPDATE | `warnOnServerConfig`: warn when `voice.node_ip` is a non-global address                       |
-| `Server/api/router_test.go`              | UPDATE | That warning's test                                                                           |
-| `Server/auth/tls.go`                     | UPDATE | Log ACME issuance failure once, actionably; correct the stale IP-rejection message            |
-| `Server/auth/tls_test.go`                | UPDATE | Injected failing issuer; assert the log names inbound `:80`                                   |
-| `docs/port-forwarding.md`                | UPDATE | The honest-limits rewrite — the milestone's required artefact                                 |
-| `docs/deployment.md`                     | UPDATE | "Firewall and Ports" gains the unqualified-paths note and the cross-link                      |
-| `docs/api.md`                            | UPDATE | Hand-written prose for the new `reachability` fields; the index row needs no change           |
-| `CHANGELOG.md`                           | UPDATE | Unreleased entry                                                                              |
-| `docs/plans/b6-…prd.md`                  | UPDATE | B6-6 row → `in-progress`, then `complete`; Plan cell → this file                              |
+| File                                                      | Action | Why                                                                                           |
+| --------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| `Server/netclass/classify.go`                             | NEW    | `Kind` classification incl. CGNAT; `Rank` for address preference; pure, injectable            |
+| `Server/netclass/classify_test.go`                        | NEW    | One named case per class; the CGNAT and mapped-IPv4 cases that do not exist today             |
+| `Server/netclass/report.go`                               | NEW    | `Report` built from injected `[]netip.Addr` + config, incl. the `Undeterminable` list         |
+| `Server/netclass/report_test.go`                          | NEW    | Five injected topologies; no test touches a real interface                                    |
+| `Server/internal/app/banner.go`                           | UPDATE | Rank-based address pick + the honesty line; `getOutboundIP` splits into a pure inner function |
+| `Server/internal/app/banner_test.go`                      | UPDATE | Injected-address tests for the pick and the label                                             |
+| `Server/api/diagnostics_handler.go`                       | UPDATE | `reachability` block; `isPrivateIP` delegates to `netclass`                                   |
+| `Server/api/diagnostics_handler_test.go`                  | UPDATE | New block assertions; **correct** the CGNAT/link-local expectations the table omits today     |
+| `Server/api/router.go`                                    | UPDATE | `warnOnServerConfig`: warn when `voice.node_ip` is a non-global address                       |
+| `Server/api/router_test.go`                               | UPDATE | That warning's test                                                                           |
+| `Server/auth/tls.go`                                      | UPDATE | Log ACME issuance failure once, actionably; correct the stale IP-rejection message            |
+| `Server/auth/tls_test.go`                                 | UPDATE | Injected failing issuer; assert the log names inbound `:80`                                   |
+| `docs/port-forwarding.md`                                 | UPDATE | The honest-limits rewrite — the milestone's required artefact                                 |
+| `docs/deployment.md`                                      | UPDATE | "Firewall and Ports" gains the unqualified-paths note and the cross-link                      |
+| `docs/api.md`                                             | UPDATE | Hand-written prose for the new `reachability` fields; the index row needs no change           |
+| `Server/config/config.go`                                 | UPDATE | `server.reachability_report_enabled`, default off (owner decision 3)                          |
+| `Server/config/config_test.go`                            | UPDATE | Pin the default-off, mirroring the `browser_client_enabled` test                              |
+| `docs/plans/beta-requirements-traceability-2026-08-23.md` | UPDATE | BPR-014 recorded as blocked on B6-3 (owner decision 4)                                        |
+| `CHANGELOG.md`                                            | UPDATE | Unreleased entry                                                                              |
+| `docs/plans/b6-…prd.md`                                   | UPDATE | B6-6 row → `in-progress`, then `complete`; Plan cell → this file                              |
 
 No migration. No `protocol/schema.json` change (this is REST and log output; the
 schema carries wire-message constants only). No `publicSurface` entry.
@@ -258,10 +306,15 @@ schema carries wire-message constants only). No `publicSurface` entry.
   record it in Acceptance.
 - **Validate**: `(cd Server && go test ./internal/app/...)`
 
-### Task 3: The `reachability` block on the existing admin endpoint
+### Task 3: The `reachability` block on the existing admin endpoint, behind a flag
 
+- **Action first**: add `server.reachability_report_enabled` to `ServerConfig`
+  (koanf `reachability_report_enabled`, bool, zero-value false, **no**
+  `defaults()` entry) — the `BrowserClientEnabled` shape at
+  `Server/config/config.go:238`. Pin the default with a config test the way
+  `config_test.go:558-580` pins the browser flag.
 - **Action**: `netclass.Report` takes injected `[]netip.Addr` + the config and
-  returns, as JSON under a new `reachability` key:
+  returns, as JSON under a new `reachability` key **when the flag is on**:
   - `listen_port`, `binds_all_interfaces` (always true — `lifecycle.go:369`)
   - `local_addresses`: `[{addr, kind}]`, loopback included, never elided
   - `has_global_address`: bool. False means the host is behind NAT of some kind
@@ -282,7 +335,13 @@ schema carries wire-message constants only). No `publicSurface` entry.
   looks fine.
 - **Watch**: `Report` must not take a `context.Context` or an `http.Client`.
   Decision 1 is enforced by the signature having nowhere to put a dial.
-- **Validate**: `(cd Server && go test ./netclass/... ./api/...)`
+- **Watch**: with the flag off the `reachability` key is **absent** from the
+  JSON, not present-and-empty — `omitempty` on a pointer field, so an operator
+  reading the response cannot mistake "switched off" for "nothing to report".
+- **Watch**: the flag gates **only** this block. The banner qualifier (Task 2)
+  and the `warnOnServerConfig` warnings (Task 6c) are never gated, and
+  `TestReachabilityBannerIsNotGatedByTheFlag` pins that split.
+- **Validate**: `(cd Server && go test ./netclass/... ./api/... ./config/...)`
 
 ### Task 4: `isPrivateIP` learns the ranges this milestone is about
 
@@ -430,23 +489,19 @@ topology.** Every classification and report test injects `[]netip.Addr` and a
 
 ## Open questions for the owner
 
-1. **Does the banner change go in, or should the honesty line be log-only?**
-   Recommendation: banner. It is where the inaccurate claim is printed, and a
-   `slog` line at `Info` is exactly what an owner scrolling past a boot log
-   misses. Taken as decided unless you say otherwise.
-2. **Is touching `Server/auth/tls.go` acceptable while B6-3 – B6-5 are
-   deferred?** 6a adds a logging wrapper, 6b corrects a factually wrong error
-   string. Neither is certificate logic. If you would rather `auth/tls.go` stay
-   frozen until the TLS block is picked up, 6a and 6b drop out and the two
-   silences are recorded in the ledger instead — say which.
-3. **BPR-014 stays open after this milestone.** Its acceptance requires
-   automated HTTPS/WSS integration coverage for domain, IPv4 and IPv6 origins,
-   which the B6-3 deferral blocks. B6-6 closes only BPR-013 and the
-   honest-limits half of workstream 4. Confirm that traceability should record
-   BPR-014 as **blocked on B6-3**, not as partially satisfied here.
-4. **Should the `undeterminable` list also surface in the support bundle?**
-   BPR-055 mentions user-initiated support-bundle export; the bundle is B6-13's
-   scope. Not taken here. Flagging it so B6-13 picks it up rather than
+1. ~~**Does the banner change go in, or should the honesty line be
+   log-only?**~~ **Decided 2026-09-11: banner.** Task 2 as written.
+2. ~~**Is touching `Server/auth/tls.go` acceptable while B6-3 – B6-5 are
+   deferred?**~~ **Decided 2026-09-11: yes, both 6a and 6b.**
+3. ~~**Should the `reachability` block ship unconditionally?**~~ **Decided
+   2026-09-11: behind `server.reachability_report_enabled`, default off.** The
+   banner and the startup warnings stay ungated — see "What decision 3 changes"
+   above for why the split falls there.
+4. ~~**How should traceability record BPR-014?**~~ **Decided 2026-09-11:
+   blocked on B6-3**, not partially satisfied here.
+5. **Still open — should the `undeterminable` list also surface in the support
+   bundle?** BPR-055 mentions user-initiated support-bundle export; the bundle
+   is B6-13's scope. Not taken here. Flagged so B6-13 picks it up rather than
    reinventing the wording.
 
 ## Acceptance
@@ -461,7 +516,10 @@ topology.** Every classification and report test injects `[]netip.Addr` and a
 - [ ] Building a report opens no socket and resolves no name (`TestReport_MakesNoOutboundCall`)
 - [ ] `Server/netclass` imports no HTTP, TLS or STUN vocabulary (`TestNetclassImportsNoNetworkClient`)
 - [ ] `isPrivateIP` reports CGNAT and link-local addresses as non-public (`TestIsPrivateIP`, extended)
-- [ ] The diagnostics response carries `reachability` and `client.address_class` (`TestDiagnosticsReportsReachability`)
+- [ ] `server.reachability_report_enabled` defaults to **false** on a fresh config (`TestConfigReachabilityReportDefaultsOff`)
+- [ ] With the flag on, the diagnostics response carries `reachability` and `client.address_class` (`TestDiagnosticsReportsReachabilityWhenEnabled`)
+- [ ] With the flag off, the `reachability` key is **absent**, not empty (`TestDiagnosticsOmitsReachabilityWhenDisabled`)
+- [ ] The banner qualifier and the startup warnings print regardless of the flag (`TestReachabilityBannerIsNotGatedByTheFlag`)
 - [ ] `/health` gains no reachability field and no new dependency (`TestHealthResponseCarriesNoReachabilityFields`)
 - [ ] An ACME issuance failure logs once, naming inbound `:80` (`TestLoadACME_LogsIssuanceFailureWithReachabilityCause`)
 - [ ] The IP-rejection error names this build's client, not Let's Encrypt (`TestLoadACME_IPErrorNamesTheRealLimit`)
@@ -469,10 +527,13 @@ topology.** Every classification and report test injects `[]netip.Addr` and a
 - [ ] `docs/port-forwarding.md` covers CGNAT, hairpin NAT, blocked ports, dynamic IP, firewalls, the LiveKit UDP range, and names every path this build leaves unqualified
 - [ ] gendocs runs clean and the route index is **unchanged** — no new route (`git diff --exit-code` on the three generated docs)
 - [ ] `publicSurface` is untouched and the posture test passes unchanged
+- [ ] `docs/server-configuration.md` gains the new key via gendocs, not by hand
+- [ ] BPR-014 is recorded as blocked on B6-3 in the traceability document
 - [ ] `ci-check` green across all four build-tag variants plus the deadlock pass
 - [ ] The B6-6 PRD row reads `complete` with this file in its Plan cell — **cell read back after editing**
 
 ## Status
 
-Plan written 2026-09-11 at `dev` `6a7077fc`. Awaiting owner review; no
-implementation code written yet, per the milestone brief.
+Plan written 2026-09-11 at `dev` `6a7077fc` and reviewed the same day. All four
+open questions answered (see "Owner decisions" above); question 5 is new and
+deferred to B6-13. Implementation follows test-first.
