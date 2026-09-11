@@ -529,8 +529,24 @@ topology.** Every classification and report test injects `[]netip.Addr` and a
 - [x] `publicSurface` is untouched and the posture test passes unchanged
 - [x] `docs/server-configuration.md` gains the new key via gendocs, not by hand
 - [x] BPR-014 is recorded as blocked on B6-3 in the traceability document, and BPR-013's row records what B6-6 did satisfy
-- [ ] `ci-check` green across all four build-tag variants plus the deadlock pass
+- [x] `ci-check` green: four build-tag variants, `go vet`, `golangci-lint` (0 issues), the deadlock pass, the untagged `admin` leg, genprotocol drift, `check:docs` and `check:hygiene` — locally; `-race ./...` and the tag-gated legs green on CI
 - [x] The B6-6 PRD row reads `complete` with this file in its Plan cell — the cell was parsed back after the edit, not eyeballed
+
+## Two traps this milestone hit, recorded for the next plan
+
+Neither is about B6-6's subject; both cost real time and would cost it again.
+
+1. **A system-installed `golangci-lint` can silently be the wrong one.** This
+   container ships v2.5.0 built with `go1.25.1`, which refuses a module
+   targeting `go1.26` with "the Go language version used to build
+   golangci-lint is lower than the targeted Go version". That reads as "this
+   gate cannot run here", and it is not — fetching the version CI pins
+   (v2.11.3, built with `go1.26.1`) runs clean. Three findings reached CI
+   because the gate was written off instead of re-fetched.
+2. **gendocs attributes a config key to whichever section first mentions it.**
+   Writing `` `voice.node_ip` `` inside a Server-section table row moved that
+   key's generated entry from Voice to Server. Name only the key the row is
+   about.
 
 ## Status
 
