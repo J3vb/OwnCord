@@ -1,8 +1,11 @@
 package auth_test
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -317,5 +320,93 @@ func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
 	loc := rec.Header().Get("Location")
 	if want := "https://chat.example.com:8443/some/path"; loc != want {
 		t.Errorf("redirect Location = %q, want %q", loc, want)
+	}
+}
+
+// ─── B6-6: reachability failures must not be silent ─────────────────────────
+
+// TestLoadACME_IPErrorNamesTheRealLimit — the error used to read "Let's
+// Encrypt does not issue certificates for IP addresses". That stopped being
+// true on 2026-01-15, and blaming the CA sends an owner to the wrong place:
+// the limit is this build's ACME client, which accepts hostnames only.
+func TestLoadACME_IPErrorNamesTheRealLimit(t *testing.T) {
+	for _, ip := range []string{"192.168.1.1", "203.0.113.10", "2001:db8::1"} {
+		_, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "acme", Domain: ip})
+		if err == nil {
+			t.Fatalf("%s: expected an error for an IP in tls.domain", ip)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "IP address") {
+			t.Errorf("%s: error should still name the IP-address case, got: %v", ip, err)
+		}
+		if strings.Contains(msg, "Let's Encrypt does not issue") {
+			t.Errorf("%s: error blames the CA for a limit that is this build's own: %v", ip, err)
+		}
+		for _, want := range []string{"hostname", "manual"} {
+			if !strings.Contains(strings.ToLower(msg), want) {
+				t.Errorf("%s: error does not point at %q as the way forward: %v", ip, want, err)
+			}
+		}
+	}
+}
+
+// TestLoadACME_LogsIssuanceFailureWithReachabilityCause — the server discards
+// its TLS ErrorLog (Server/internal/app/lifecycle.go) to suppress handshake
+// noise, which also discarded every certificate-issuance failure. A server
+// whose port 80 is unreachable logged "server starting", looked healthy, and
+// failed every handshake in silence: a reachability limit reported as
+// application success, which is the thing B6-6 exists to stop.
+//
+// The failure is injected. Reaching a real ACME directory from a test would
+// make this depend on network topology, which this milestone's plan forbids.
+func TestLoadACME_LogsIssuanceFailureWithReachabilityCause(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	boom := errors.New("acme/autocert: unable to satisfy authorization")
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, boom
+	}, "chat.example.com")
+
+	if _, err := wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"}); !errors.Is(err, boom) {
+		t.Fatalf("the wrapper must return the underlying error unchanged, got: %v", err)
+	}
+
+	logged := buf.String()
+	for _, want := range []string{"chat.example.com", ":80", "certificate"} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("issuance-failure log does not mention %q:\n%s", want, logged)
+		}
+	}
+
+	// Logged once per domain, not once per handshake: a client retrying a
+	// failing connection must not be able to fill the disk.
+	before := buf.Len()
+	for range 5 {
+		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"})
+	}
+	if buf.Len() != before {
+		t.Errorf("the wrapper logged again on repeat failures; %d extra bytes", buf.Len()-before)
+	}
+}
+
+// TestLoadACME_SuccessIsNotLogged — a working certificate path stays quiet.
+func TestLoadACME_SuccessIsNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return &tls.Certificate{}, nil
+	}, "chat.example.com")
+
+	if _, err := wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("a successful issuance logged something:\n%s", buf.String())
 	}
 }

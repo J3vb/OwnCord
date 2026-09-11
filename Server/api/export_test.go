@@ -155,3 +155,7 @@ func SetGIFResolveForTest(resolve func(ctx context.Context, host string) ([]neti
 func SecurityHeaders(next http.Handler) http.Handler {
 	return SecurityHeadersWithTLS("")(next)
 }
+
+// WarnOnServerConfigForTest exposes warnOnServerConfig so B6-6's node_ip
+// warning can be asserted without standing up a whole router.
+var WarnOnServerConfigForTest = warnOnServerConfig

@@ -236,6 +236,19 @@ type ServerConfig struct {
 	// proving it after; Server/api/browser_hosting_posture_test.go is that
 	// proof.
 	BrowserClientEnabled bool `koanf:"browser_client_enabled"`
+	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
+	// block on GET /api/v1/diagnostics/connectivity (B6-6): the classified
+	// list of every address on every interface, the required forwarding
+	// rules, and the explicit list of what this server cannot determine
+	// about its own reachability.
+	//
+	// False by default. H-8 already restricted that endpoint to admins
+	// because it reveals network topology, and the interface enumeration is
+	// the most revealing part of it; an owner who wants the detail asks for
+	// it. Nothing else is gated by this key — the startup banner's address
+	// qualifier and the configuration warnings always print, so a limit is
+	// still reported to every owner whether or not they ever set this.
+	ReachabilityReportEnabled bool `koanf:"reachability_report_enabled"`
 	// MinFreeDiskMB is the one definition of "low disk" (B5-2, plan decision
 	// 11): the reserved headroom, in MiB, below which the start-up banner
 	// logs an error, /health reports degraded and the upload path refuses
@@ -496,6 +509,13 @@ server:
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.
+  # reachability_report_enabled: false
+  #                           # add a "reachability" block to the admin-only
+  #                           # GET /api/v1/diagnostics/connectivity: this host's
+  #                           # addresses by class, the ports that must be forwarded,
+  #                           # and what the server cannot determine about its own
+  #                           # reachability. Owner opt-in; the startup banner reports
+  #                           # the address class either way. See docs/port-forwarding.md
   # waf_enabled: false        # Coraza WAF (inline rules + OWASP Core Rule Set)
   # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
   # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs

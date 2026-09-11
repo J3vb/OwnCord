@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -70,6 +71,36 @@ func warnOnServerConfig(cfg *config.Config) {
 		slog.Warn("server.browser_client_enabled is set, but this build hosts no browser client — " +
 			"the key has no effect yet: no route is mounted and no asset is served")
 	}
+	warnOnVoiceNodeIP(cfg)
+}
+
+// warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route
+// to (B6-6).
+//
+// The value is written into livekit.yaml as the external address LiveKit
+// advertises in its ICE candidates, and Server/ws/livekit_process.go validates
+// it only for YAML-unsafe characters. Point it at a private, CGNAT or
+// loopback address and the failure is invisible from the server's side: voice
+// joins succeed, because signalling goes through OwnCord's own port, and then
+// no media ever arrives. That is a network limit wearing application success.
+//
+// It warns and never refuses: a LAN-only or tailnet-only deployment has a
+// legitimate reason to advertise a private address.
+func warnOnVoiceNodeIP(cfg *config.Config) {
+	if cfg.Voice.LiveKitURL == "" || cfg.Voice.NodeIP == "" {
+		return
+	}
+	kind := classifyIP(cfg.Voice.NodeIP)
+	if kind == netclass.KindGlobal {
+		return
+	}
+	slog.Warn("voice.node_ip is not a public address — remote clients will join voice and then hear no audio",
+		"node_ip", cfg.Voice.NodeIP,
+		"address_class", kind,
+		"why", "node_ip is the address LiveKit advertises in ICE candidates. A client outside this "+
+			"network cannot route to it, so the call connects over signalling and carries no media",
+		"fix", "set voice.node_ip to this server's public address and forward UDP 50000-60000 — "+
+			"see docs/port-forwarding.md. Ignore this if every client is on the LAN or your tailnet")
 }
 
 // NewRouter builds and returns the fully configured HTTP handler and a

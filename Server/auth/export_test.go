@@ -37,3 +37,8 @@ func (r *RateLimiter) WindowForTest(key string) (window time.Duration, ok bool) 
 	}
 	return e.window, true
 }
+
+// LogCertificateFailuresForTest exposes logCertificateFailures so the
+// issuance-failure log line can be asserted against an injected failing
+// issuer, rather than against a real ACME directory (B6-6).
+var LogCertificateFailuresForTest = logCertificateFailures
