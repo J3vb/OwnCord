@@ -9,7 +9,6 @@ const log = createLogger("voiceTokenManager");
 export interface TokenManagerDeps {
   getWs: () => WsClient | null;
   isRoomConnected: () => boolean;
-  onRefreshTimerRestart: () => void;
   onRefreshTimeout: () => void;
 }
 
@@ -78,8 +77,8 @@ export class VoiceTokenManager {
     log.info("Requesting voice token refresh");
     this._lastSentAt = Date.now();
     this.deps.getWs()?.send({ type: "voice_token_refresh", payload: {} });
-    // NOTE: startRefreshTimer is called from the response handler (onRefreshTimerRestart),
-    // not here, to avoid scheduling two competing timers per cycle.
+    // NOTE: startRefreshTimer is called from handleRefreshResponse(), not here,
+    // to avoid scheduling two competing timers per cycle.
 
     // BUG-146: Arm a 60-second response deadline. If the server never replies,
     // the token stalls silently. On timeout we log a warning and reschedule the

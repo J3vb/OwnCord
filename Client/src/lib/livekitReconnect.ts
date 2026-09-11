@@ -14,6 +14,7 @@ export interface ReconnectDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- state shape is owned by LiveKitSession; reconnect only reads .type/.ac/.channelId
   getState: () => any;
   /** Transition to a new state. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same reason as getState: the state shape is owned by LiveKitSession
   setState: (state: any) => void;
   /** Sync extracted modules (AudioPipeline, AudioElements, DeviceManager) to the room
    *  in the CURRENT shared state. Only correct where that state is the one to follow —
