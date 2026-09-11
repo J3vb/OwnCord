@@ -206,10 +206,29 @@ npm run format
 
 ## Acceptance
 
-- [ ] The published manifest carries `linux/amd64` **and** `linux/arm64` — awaits a tag run
-- [ ] Both architectures are smoked on native runners before anything is pushed
-- [ ] The smoke proves boot, migration, health, minimal privilege, clean drain and volume reuse
-- [ ] A bare `docker run` reports a health status without a compose file
-- [ ] `cap_drop: ALL` and `no-new-privileges` are the documented default posture
-- [ ] The same script still backs `ci.yml`, `release.yml` and the nightly
-- [ ] `ci-check` green across all four build-tag variants
+Merged as PR #1583 (`bbda5487`) on 2026-09-11, 16/16 checks green.
+
+- [x] The smoke proves boot, migration, health, minimal privilege, clean drain and volume reuse — executed against a real image
+- [x] A bare `docker run` reports a health status without a compose file (`.State.Health` asserted non-empty)
+- [x] `cap_drop: ALL` and `no-new-privileges` are the documented default posture, asserted as container properties
+- [x] The same script still backs `ci.yml`, `release.yml` and the nightly
+- [x] `ci-check` green across all four build-tag variants
+- [x] The two-platform build resolves, and the arm64 leg produces a real `ELF 64-bit … ARM aarch64, statically linked` binary — verified locally by extracting it from the image
+- [ ] The **published** manifest carries `linux/amd64` **and** `linux/arm64` — **awaits a tag run.** The `Verify the pushed manifest carries both architectures` step in `release.yml` is what will prove it; it has never executed.
+- [ ] Both architectures are smoked on **native runners** — **awaits a tag or nightly run.** `server-docker-build` is `main`-gated, so the matrix did not run on the `dev`-targeted PR; `ubuntu-22.04-arm` is first exercised by the nightly or the next release.
+
+**Follow-up owed at the next release:** watch `smoke-server-docker (linux/arm64)`
+and the manifest-verification step on the first tag run. Those two boxes are the
+only part of this milestone no local or PR-time check can close.
+
+## Post-merge notes
+
+- **Found while building the smoke:** `MSYS_NO_PATHCONV=1` is global to a
+  command, not scoped to its container-side argument, so it breaks the host side
+  of `docker cp` under MSYS (`/tmp/x` becomes `D:\tmp\x`). It surfaces as a
+  missing-file assertion that reads exactly like a product bug. Every host path
+  in the script now goes to `tar` or the shell, never to `docker`.
+- **CI runs ShellCheck 0.9.0; `koalaman/shellcheck:stable` is 0.11.0**, and only
+  0.9.0 reports SC2015 (`A && B || C`). A local clean run from `:stable` is not
+  evidence — it let an SC2015 through to CI here. Pin `koalaman/shellcheck:v0.9.0`
+  when checking locally.
