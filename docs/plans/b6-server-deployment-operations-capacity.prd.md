@@ -63,16 +63,31 @@ is met on stated hardware with published p95/p99 measurements.**
 
 ## Success Metrics
 
-| Metric                   | Target                                                                      | How measured                                             |
-| ------------------------ | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Registered users         | ≥ 250                                                                       | `Server/scripts/k6/ws-load.js` on stated hardware        |
-| Simultaneous connections | ≥ 100                                                                       | same k6 profile                                          |
-| Concurrent voice         | ≥ 25                                                                        | **TBD — no LiveKit load harness exists** (workstream 14) |
-| Latency budgets          | **TBD — p95/p99 budgets not yet stated**                                    | load-test dataset + reproducible commands                |
-| Reference hardware       | **TBD — "stated hardware" undefined**                                       | published with the load dataset                          |
-| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                  | network-mode integration matrix                          |
-| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores | artifact and container install/boot matrix               |
-| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone               | HP-6 operator usability record                           |
+| Metric                   | Target                                                                      | How measured                                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registered users         | ≥ 250                                                                       | `Server/scripts/k6/ws-load.js` on stated hardware                                                                                               |
+| Simultaneous connections | ≥ 100                                                                       | same k6 profile                                                                                                                                 |
+| Concurrent voice         | ≥ 25                                                                        | `lk load-test` (LiveKit CLI) wrapper script, 25 audio publishers + subscribers, plus k6 driving the OwnCord join/leave path; decided 2026-09-11 |
+| Latency budgets          | see "Initial latency budgets" below (decided 2026-09-11)                    | load-test dataset + reproducible commands                                                                                                       |
+| Reference hardware       | 2 vCPU / 4 GB RAM / SSD, Linux x64 (decided 2026-09-11)                     | `docker run --cpus=2 --memory=4g` on the load-baseline runner; published with the load dataset                                                  |
+| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                  | network-mode integration matrix                                                                                                                 |
+| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores | artifact and container install/boot matrix                                                                                                      |
+| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone               | HP-6 operator usability record                                                                                                                  |
+
+### Initial latency budgets (decided 2026-09-11)
+
+Measured at the 100-connection profile on the reference hardware. These are
+starting budgets: HP-6 measures against them, and B6-9 may tighten (never
+loosen) them once the first dataset exists. Anything looser than this is a
+finding, not a number to publish.
+
+| Path                                                    | p95      | p99      | Source of the number                                         |
+| ------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------ |
+| WebSocket connect + `auth_ok`                           | < 1 s    | < 2 s    | existing k6 thresholds (`auth_time`, `ws_connect_time`)      |
+| Message send → sender acknowledgement (REST)            | < 200 ms | < 500 ms | B3 bench baseline order of magnitude, with headroom          |
+| Message send → recipient delivery (all 100 connections) | < 250 ms | < 500 ms | new: the B3 carryover said sender ack was measured, not this |
+| Voice join (token + LiveKit room join)                  | < 2 s    | < 4 s    | LiveKit connect on a LAN plus one REST round trip            |
+| Graceful drain to exit 0                                | < 20 s   | —        | `Server/cmd/smoke` `drainBudget`                             |
 
 ## Scope
 
@@ -109,25 +124,25 @@ gates client expansion.
 <!-- Business outcomes, not engineering tasks. /plan turns each into a plan. -->
 <!-- Status: pending | in-progress | complete -->
 
-| #        | Milestone                                                | Outcome                                                                                                                                                                                                          | Status      | Plan                                                                                                 | Roadmap WS |
-| -------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------- | ---------- |
-| B6-1     | Standalone release assets                                | An owner downloads a Windows x64/ARM64 executable or Linux x64/ARM64 archive that starts, migrates, becomes healthy, drains and restarts                                                                         | in-progress | [b6-1-standalone-release-assets.plan.md](../../.claude/plans/b6-1-standalone-release-assets.plan.md) | 1          |
-| B6-2     | Docker images                                            | An owner runs the `linux/amd64` or `linux/arm64` image with persistent data, health, migration, graceful drain and minimal privilege                                                                             | pending     | —                                                                                                    | 2          |
-| B6-3     | Automatic TLS for domain and public IP                   | An owner points a domain (ACME) or an eligible stable public IPv4/IPv6 at the server and gets HTTPS/WSS with no manual renewal                                                                                   | pending     | —                                                                                                    | 3          |
-| B6-4     | LAN, offline, and manual certificate modes               | A private-LAN or offline owner completes one guided device-trust install; an advanced owner supplies their own certificate instead                                                                               | pending     | —                                                                                                    | 3          |
-| B6-5     | Certificate lifecycle safety                             | Certificate and ACME account keys are protected, renewal state survives restart, certificates hot-reload, and expiry/rotation is exercised with ample margin                                                     | pending     | —                                                                                                    | 5          |
-| B6-6     | Direct port-forward operation and honest limits          | A reverse proxy is never required; blocked-port, CGNAT, hairpin-NAT, dynamic-IP and firewall limits are reported actionably, never disguised as application success                                              | pending     | —                                                                                                    | 4          |
-| B6-7     | `GET /api/v1/server-info` and the browser-hosting switch | One endpoint answers "what is this server, and is the browser client on"; hosting is off by default and exposes no route or asset when disabled                                                                  | pending     | —                                                                                                    | 6, 16      |
-| B6-8     | Alpha-to-beta upgrade and rollback rehearsal             | An owner upgrades and rolls back database, attachments, configuration, credentials and backups on both Docker and standalone, with authenticated downloads still working afterwards                              | pending     | —                                                                                                    | 7          |
-| B6-9     | Published capacity profile                               | The 250/100/25 profile is met and published with hardware, configuration and reproducible commands                                                                                                               | pending     | —                                                                                                    | 8, 14      |
-| B6-10    | Operational performance measurements                     | Reconnect storms, database-pool wait deltas, recipient-receipt fan-out latency, voice control, upload admission through quota and storage, TLS overhead and graceful shutdown are all measured and published     | pending     | —                                                                                                    | 9          |
-| B6-11    | Failure and recovery drills                              | Backup/restore, deletion-marker restore, disk-full, low-headroom, corrupt input, unhealthy dependency, interrupted migration and rollback all pass, with byte-level erasure evidence under active readers        | pending     | —                                                                                                    | 10         |
-| B6-12    | Signed, traceable release inputs and outputs             | Containers and build inputs are pinned or auto-reviewed; SBOM, provenance, checksums and a source snapshot are signed; one tag is rehearsed against `gate-evidence` and `environment: release`                   | pending     | —                                                                                                    | 11, 15     |
-| B6-13    | Operator documentation                                   | Local logs, support-bundle generation, capacity limits, ports, storage growth, certificate trust, recovery, updates and safe failure are all documented for a stranger                                           | pending     | —                                                                                                    | 12         |
-| B6-14    | Service-boundary handle reconciliation                   | Every direct database-handle use, not only imports, has a named service, adapter or transaction-boundary owner, and the guard rejects unclassified access — with replay locking and persister ordering preserved | pending     | —                                                                                                    | 17         |
-| B6-15    | Privacy-claim reconciliation                             | BPR-053, requirement traceability and privacy acceptance evidence match the HP-4-approved retained audit-token design and `docs/trust-model.md`, with correlation and key-holder limits recorded consistently    | pending     | —                                                                                                    | 18         |
-| **HP-6** | **Operator and capacity acceptance — the owner signs**   | An owner unfamiliar with the code deploys each mode from current documentation, understands the network and trust limits, recovers a backup, rotates trust and interprets failure                                | pending     | —                                                                                                    | HP-6       |
-| B6-16    | Register and roadmap reconciliation                      | The issue register and roadmap match what B6 actually shipped                                                                                                                                                    | pending     | —                                                                                                    | exit       |
+| #        | Milestone                                                | Outcome                                                                                                                                                                                                          | Status   | Plan                                                                                                 | Roadmap WS |
+| -------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------- | ---------- |
+| B6-1     | Standalone release assets                                | An owner downloads a Windows x64/ARM64 executable or Linux x64/ARM64 archive that starts, migrates, becomes healthy, drains and restarts                                                                         | complete | [b6-1-standalone-release-assets.plan.md](../../.claude/plans/b6-1-standalone-release-assets.plan.md) | 1          |
+| B6-2     | Docker images                                            | An owner runs the `linux/amd64` or `linux/arm64` image with persistent data, health, migration, graceful drain and minimal privilege                                                                             | pending  | —                                                                                                    | 2          |
+| B6-3     | Automatic TLS for domain and public IP                   | An owner points a domain (ACME) or an eligible stable public IPv4/IPv6 at the server and gets HTTPS/WSS with no manual renewal                                                                                   | pending  | —                                                                                                    | 3          |
+| B6-4     | LAN, offline, and manual certificate modes               | A private-LAN or offline owner completes one guided device-trust install; an advanced owner supplies their own certificate instead                                                                               | pending  | —                                                                                                    | 3          |
+| B6-5     | Certificate lifecycle safety                             | Certificate and ACME account keys are protected, renewal state survives restart, certificates hot-reload, and expiry/rotation is exercised with ample margin                                                     | pending  | —                                                                                                    | 5          |
+| B6-6     | Direct port-forward operation and honest limits          | A reverse proxy is never required; blocked-port, CGNAT, hairpin-NAT, dynamic-IP and firewall limits are reported actionably, never disguised as application success                                              | pending  | —                                                                                                    | 4          |
+| B6-7     | `GET /api/v1/server-info` and the browser-hosting switch | One endpoint answers "what is this server, and is the browser client on"; hosting is off by default and exposes no route or asset when disabled                                                                  | pending  | —                                                                                                    | 6, 16      |
+| B6-8     | Alpha-to-beta upgrade and rollback rehearsal             | An owner upgrades and rolls back database, attachments, configuration, credentials and backups on both Docker and standalone, with authenticated downloads still working afterwards                              | pending  | —                                                                                                    | 7          |
+| B6-9     | Published capacity profile                               | The 250/100/25 profile is met and published with hardware, configuration and reproducible commands                                                                                                               | pending  | —                                                                                                    | 8, 14      |
+| B6-10    | Operational performance measurements                     | Reconnect storms, database-pool wait deltas, recipient-receipt fan-out latency, voice control, upload admission through quota and storage, TLS overhead and graceful shutdown are all measured and published     | pending  | —                                                                                                    | 9          |
+| B6-11    | Failure and recovery drills                              | Backup/restore, deletion-marker restore, disk-full, low-headroom, corrupt input, unhealthy dependency, interrupted migration and rollback all pass, with byte-level erasure evidence under active readers        | pending  | —                                                                                                    | 10         |
+| B6-12    | Signed, traceable release inputs and outputs             | Containers and build inputs are pinned or auto-reviewed; SBOM, provenance, checksums and a source snapshot are signed; one tag is rehearsed against `gate-evidence` and `environment: release`                   | pending  | —                                                                                                    | 11, 15     |
+| B6-13    | Operator documentation                                   | Local logs, support-bundle generation, capacity limits, ports, storage growth, certificate trust, recovery, updates and safe failure are all documented for a stranger                                           | pending  | —                                                                                                    | 12         |
+| B6-14    | Service-boundary handle reconciliation                   | Every direct database-handle use, not only imports, has a named service, adapter or transaction-boundary owner, and the guard rejects unclassified access — with replay locking and persister ordering preserved | pending  | —                                                                                                    | 17         |
+| B6-15    | Privacy-claim reconciliation                             | BPR-053, requirement traceability and privacy acceptance evidence match the HP-4-approved retained audit-token design and `docs/trust-model.md`, with correlation and key-holder limits recorded consistently    | pending  | —                                                                                                    | 18         |
+| **HP-6** | **Operator and capacity acceptance — the owner signs**   | An owner unfamiliar with the code deploys each mode from current documentation, understands the network and trust limits, recovers a backup, rotates trust and interprets failure                                | pending  | —                                                                                                    | HP-6       |
+| B6-16    | Register and roadmap reconciliation                      | The issue register and roadmap match what B6 actually shipped                                                                                                                                                    | pending  | —                                                                                                    | exit       |
 
 **Ordering.** Unlike HP-5, **HP-6 sits at the end of the phase**, not in the
 middle: it gates B7's client expansion rather than later B6 steps. B6-14 and
@@ -139,30 +154,68 @@ and **one** data-fixture set.
 
 ## Open Questions
 
-- [ ] What is the "stated hardware" for the 250/100/25 profile? Without it the
-      headline metric is unfalsifiable.
-- [ ] Who owns the 25-participant LiveKit voice load harness? Workstream 14
-      calls it a real gap needing a named owner before HP-6.
-- [ ] What are the p95/p99 latency budgets HP-6 measures against?
-- [ ] Do ARM64 assets ship in B6, or does B6 only qualify them?
+- [x] **Decided 2026-09-11:** the "stated hardware" is a 2 vCPU / 4 GB RAM /
+      SSD Linux x64 machine — the cheapest VPS or single-board class an owner
+      is likely to buy. It is reproduced, not owned: the load job runs the
+      server in a `docker run --cpus=2 --memory=4g` cgroup on the
+      `load-baseline.yml` runner, so anyone can re-run it. The developer's
+      16-core box (B3 bench baseline) is a ceiling check, never the reference.
+- [x] **Decided 2026-09-11:** the repository owner (J3vb) owns the voice load
+      harness, as B6-9 task 1. It is not written from scratch: LiveKit's CLI
+      already ships `lk load-test` (simulated audio/video publishers and
+      subscribers with per-track latency and packet-loss stats). B6-9 wraps it
+      in a script that drives 25 audio publishers + 25 subscribers against the
+      bundled `livekit-server`, while k6 drives the OwnCord join/leave/token
+      path. The "no harness exists" claim in workstream 14 was about k6; it is
+      closed by using the SFU vendor's own tool.
+- [x] **Decided 2026-09-11:** initial p95/p99 budgets are in "Initial latency
+      budgets" under Success Metrics. Tighten from data; never loosen.
+- [x] **Decided 2026-09-11:** ARM64 assets ship in B6. B6-1 (PR #1580) added
+      Windows ARM64 and Linux ARM64 server assets, ARM64-aware self-update and
+      the shared `cmd/smoke` harness to the release matrix. The first tag run
+      is the remaining proof (manifest, checksums, signatures for all four
+      assets); B6-12's rehearsed tag is where that evidence is recorded.
 - [x] **Decided 2026-09-08:** generated step plans live at ECC's default
       `.claude/plans/`, whitelisted in `.gitignore` so they are tracked and
       reviewable in the PR. Prettier reads `.gitignore`, so those plans are
       format-gated like any other tracked markdown; `npm run format` fixes
       drift. This PRD stays in `docs/plans/` as the tracked entry point.
-- [ ] Are public-IP certificates still gated on short-lived certificate
-      handling per current Let's Encrypt guidance? Re-check before B6-3.
+- [x] **Re-checked 2026-09-11:** yes, and it is now settled rather than
+      pending. Let's Encrypt made IP-address certificates generally available
+      on 2026-01-15. They are issued only under the `shortlived` profile
+      (160 h validity, roughly 6.7 days), validated by `http-01` or
+      `tls-alpn-01` only (no `dns-01`), for public IPv4 and IPv6. Consequences
+      for B6-3, B6-5 and B6-6 are in "Public-IP certificate consequences"
+      below.
+
+### Public-IP certificate consequences (2026-09-11)
+
+- **The current client cannot do it.** `golang.org/x/crypto/acme/autocert`
+  (v0.56.0, `Server/auth/tls.go` `loadACME`) has no profile selection and its
+  `Manager` accepts hostnames only; `loadACME` explicitly rejects IPs today.
+  B6-3 needs an ACME client that sets the order profile. `certmagic` (v0.25.x)
+  exposes `ACMEIssuer.Profile`; B6-3 starts with a spike proving it issues for
+  a public IP against the Let's Encrypt staging directory, and falls back to a
+  thin issuer on `x/crypto/acme` (which already has IP authorizations but no
+  profile field) only if certmagic refuses public-IP subjects.
+- **Renewal is every ~4 days, not every ~60.** B6-5's "renewal state survives
+  restart" becomes a hard requirement, and a server that was off for more than
+  a week boots with an expired certificate: it must re-issue before serving,
+  and B6-6 must report a failed re-issue as a reachability problem, not as
+  application success.
+- **Domain mode stays on the 90-day `classic` profile.** The two modes must
+  not share a renewal schedule.
 
 ## Risks
 
-| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                               |
-| ---------------------------------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------------- |
-| The 25-participant voice number cannot be measured because no harness exists | High       | High   | Name an owner and scope the LiveKit harness as the first task of B6-9, before any load run               |
-| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                            |
-| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently |
-| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                       |
-| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                     |
-| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                  |
+| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                                  |
+| ---------------------------------------------------------------------------- | ---------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| The 25-participant voice number cannot be measured because no harness exists | High       | High   | Owner named 2026-09-11; B6-9 task 1 wraps `lk load-test` rather than writing a harness, before any load run |
+| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                               |
+| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently    |
+| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                          |
+| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                        |
+| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                     |
 
 ---
 
