@@ -52,6 +52,12 @@ server's internals were reorganised behind service boundaries.
 - The client and server now agree on a protocol version ("epoch") when
   connecting. This release is epoch 1; clients from v1.2.0-alpha.4 and earlier
   still connect.
+- **A server now says what it is before you connect.** `GET /api/v1/server-info`
+  returns the server name, the protocol epoch it speaks, and whether the owner
+  has switched on browser-client hosting — so a client can tell it is too old
+  for a server without opening a connection and being turned away. No version
+  number is included, on this or any other endpoint that does not require
+  logging in.
 - A client too old for its server is told "update the client" on the connect
   screen, with the usual Update Now button — instead of failing in confusing
   ways. The saved login is kept, so the updated client signs back in by
