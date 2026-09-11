@@ -188,7 +188,6 @@ export class LiveKitSession {
   private _tokenManager = new VoiceTokenManager({
     getWs: () => this.ws,
     isRoomConnected: () => this._room !== null,
-    onRefreshTimerRestart: () => this._tokenManager.startRefreshTimer(),
     onRefreshTimeout: () => this._tokenManager.startRefreshTimer(),
   });
 

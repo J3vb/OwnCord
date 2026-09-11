@@ -3583,7 +3583,10 @@ describe("LiveKitSession", () => {
       };
       session.handleVoiceTokenRefresh("fresh-token");
       expect((session as any)._state.latestToken).toBe("fresh-token");
-      expect((session as any).tokenRefreshTimer).not.toBeNull();
+      // Timer lives on VoiceTokenManager since the refactor. Asserting on the
+      // old `session.tokenRefreshTimer` read `undefined` and passed vacuously,
+      // so the "restarts timer" half of this test guarded nothing.
+      expect((session as any)._tokenManager._refreshTimer).not.toBeNull();
     });
 
     it("clearTokenRefreshTimer prevents pending refresh from firing", async () => {
