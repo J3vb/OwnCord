@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 168 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 169 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -172,6 +172,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/reports/`                                                   |
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
+| GET     | `/api/v1/server-info`                                                |
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
@@ -2780,6 +2781,39 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
   "name": "My OwnCord Server"
 }
 ```
+
+### GET /api/v1/server-info
+
+Answers "what is this server, and is the browser client on" in one call, so a
+client can decide whether it can connect before opening a WebSocket.
+
+**Auth:** None
+
+| Field                    | Type    | Meaning                                                                                       |
+| ------------------------ | ------- | --------------------------------------------------------------------------------------------- |
+| `name`                   | string  | The operator's server name (`server.name`)                                                    |
+| `protocol_epoch`         | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect       |
+| `browser_client_enabled` | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`) |
+
+```json
+{
+  "name": "My OwnCord Server",
+  "protocol_epoch": 1,
+  "browser_client_enabled": false
+}
+```
+
+**No version is returned**, here or on `/api/v1/info` or `/health`. C-2 keeps
+build identity off every unauthenticated endpoint so a server cannot be matched
+against a CVE list; the protocol epoch does not leak it, because every server on
+a given wire contract reports the same number. The version is available on the
+admin-authenticated `GET /api/v1/diagnostics/connectivity`.
+
+**`browser_client_enabled: true` does not mean a client is being served.** The
+flag reports the operator's setting; the bundle, its route and its own CSP
+arrive in B8. Until then no route is mounted and no asset is served in either
+state — `Server/api/browser_hosting_posture_test.go` proves it by route walk and
+by wire probe.
 
 ---
 

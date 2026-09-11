@@ -32,7 +32,12 @@ import (
 var publicSurface = map[string]string{
 	"GET /health":        "liveness probe; unauthenticated by design and answers status/uptime only (TestHealthEndpoint*)",
 	"GET /api/v1/health": "the same probe under the versioned prefix",
-	"GET /api/v1/info":   "server name and protocol epoch for the client's handshake (B2-2); no user data",
+	// This entry claimed "server name and protocol epoch" from B2-2 onward while
+	// the handler only ever returned the name — B2-2 dropped the epoch and left
+	// the description behind. Corrected in B6-7, which adds the endpoint that
+	// does carry the epoch rather than quietly widening this one.
+	"GET /api/v1/info":        "server name only, for the client's handshake; no version (C-2) and no user data (TestAPIV1Info*)",
+	"GET /api/v1/server-info": "server name, protocol epoch and the browser-hosting flag (B6-7); no version (C-2), no user data (TestAPIV1ServerInfo*)",
 
 	"POST /api/v1/auth/login":       "the credential entry point; rate-limited and lockout-guarded (TestLogin_*)",
 	"POST /api/v1/auth/register":    "the invite-gated account entry point (TestRegister_*); registration_mode is B4-1's",

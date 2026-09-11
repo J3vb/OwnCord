@@ -112,10 +112,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	go limiter.StartCleanup(rateLimiterCleanupInterval, limiterStopCh)
 
 	// Versioned API routes.
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", healthHandler)
-		r.Get("/info", handleInfo(cfg))
-	})
+	mountPublicV1(r, cfg, healthHandler)
 
 	// Service layer — centralizes business logic for REST and WS handlers.
 	// Built by internal/app alongside the hub, which holds the same instance.
@@ -588,9 +585,41 @@ const (
 	healthDBPingTimeout = 1 * time.Second
 )
 
+// mountPublicV1 registers the unauthenticated /api/v1 routes.
+//
+// Every route here is reachable without a session, so each one must also be
+// declared in publicSurface (auth_posture_test.go) and must honour C-2: no
+// version, build or commit on an unauthenticated endpoint.
+func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc) {
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/health", healthHandler)
+		r.Get("/info", handleInfo(cfg))
+		r.Get("/server-info", handleServerInfo(cfg))
+	})
+}
+
 // infoResponse is the JSON shape returned by GET /api/v1/info.
 type infoResponse struct {
 	Name string `json:"name"`
+}
+
+// serverInfoResponse is the JSON shape returned by GET /api/v1/server-info
+// (B6-7): the one public answer to "what is this server, and is the browser
+// client on".
+//
+// ProtocolEpoch is here because a client — a browser client above all — has to
+// know whether it can speak to this server BEFORE it opens a WebSocket; without
+// it the only way to find out is a rejected connection, which is the confusing
+// failure B2-2 set out to remove.
+//
+// There is deliberately no version field. C-2 keeps build identity off every
+// unauthenticated endpoint so a server cannot be matched against a CVE list;
+// an epoch does not leak that (every 1.2.x server reports epoch 1). Version
+// lives on the admin-gated diagnostics endpoint. See handleServerInfo.
+type serverInfoResponse struct {
+	Name                 string `json:"name"`
+	ProtocolEpoch        int    `json:"protocol_epoch"`
+	BrowserClientEnabled bool   `json:"browser_client_enabled"`
 }
 
 func handleHealth(deps healthDeps) http.HandlerFunc {
@@ -661,6 +690,27 @@ func handleInfo(cfg *config.Config) http.HandlerFunc {
 		// C-2: Version removed from unauthenticated info endpoint.
 		writeJSON(w, http.StatusOK, infoResponse{
 			Name: cfg.Server.Name,
+		})
+	}
+}
+
+func handleServerInfo(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// C-2: no version, build or commit on an unauthenticated endpoint —
+		// that is what lets a scanner match this server to a CVE list. If you
+		// are here to add one, it belongs on the admin-gated diagnostics
+		// endpoint instead (TestAPIV1ServerInfoOmitsVersion enforces this).
+		//
+		// ws.ProtocolEpoch is GENERATED from protocol/schema.json. Read the
+		// constant; a literal would keep reporting the old number after the
+		// next epoch bump and silently lie to every client.
+		//
+		// Reporting BrowserClientEnabled is not hosting: no route is mounted
+		// and no asset is served either way (browser_hosting_posture_test.go).
+		writeJSON(w, http.StatusOK, serverInfoResponse{
+			Name:                 cfg.Server.Name,
+			ProtocolEpoch:        ws.ProtocolEpoch,
+			BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -209,6 +214,92 @@ func TestBrowserHostingPosture_DefaultServesNoBrowserClientAsset(t *testing.T) {
 	}
 	t.Fatalf("paths a browser client would occupy do not answer as unmounted routes (BG-01):\n  %s",
 		strings.Join(lines, "\n  "))
+}
+
+// enabledBrowserHostingRouter builds the production router with
+// browser_client_enabled ON — the state no other test in this file exercises,
+// because until B8 lands it is a state an owner can reach and nothing else can.
+func enabledBrowserHostingRouter(t *testing.T) http.Handler {
+	t.Helper()
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open error: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate error: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Name:                 "Test Server",
+			Port:                 8443,
+			DataDir:              dir,
+			BrowserClientEnabled: true,
+		},
+		Upload: config.UploadConfig{MaxSizeMB: 1, StorageDir: filepath.Join(dir, "uploads")},
+	}
+
+	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	if rtErr != nil {
+		t.Fatalf("app.StartRuntime: %v", rtErr)
+	}
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
+	t.Cleanup(cleanup)
+	return handler
+}
+
+// TestBrowserHostingPosture_EnabledReportsTrueButStillHostsNothing is B6-7's
+// half of BG-01, and the distinction the milestone turns on: /api/v1/server-info
+// REPORTS the flag, which is not the same as HOSTING a client.
+//
+// Both halves are asserted in one test on purpose. Split across two, a future
+// change that starts serving a bundle the moment the flag flips would leave the
+// reporting test green and only break a test in another file — and the two
+// would never be read together. Here the claim is one sentence: it says true,
+// and there is still nothing there.
+//
+// When B8 mounts a real bundle this test is the one that must change, and
+// changing it should require saying so out loud.
+func TestBrowserHostingPosture_EnabledReportsTrueButStillHostsNothing(t *testing.T) {
+	h := enabledBrowserHostingRouter(t)
+
+	// It reports the flag.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/server-info status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+	if body["browser_client_enabled"] != true {
+		t.Errorf("browser_client_enabled = %v, want true — the endpoint must report the owner's setting",
+			body["browser_client_enabled"])
+	}
+
+	// And it still hosts nothing: the same two checkers the default-state
+	// tests use, so enabling the flag cannot quietly widen the surface.
+	total, adminRoutes, hits := walkBrowserHostingRoutes(t, h)
+	assertWalkedTheRealTree(t, total, adminRoutes)
+	if len(hits) > 0 {
+		t.Fatalf("enabling browser_client_enabled mounted browser-client routes; B8 owns the bundle, not this flag:\n  %s",
+			strings.Join(hits, "\n  "))
+	}
+
+	wireHits := probeBrowserHostingWire(t, h)
+	if len(wireHits) > 0 {
+		lines := make([]string, 0, len(wireHits))
+		for _, hit := range wireHits {
+			lines = append(lines, hit.Path+" -> "+http.StatusText(hit.Status)+" ("+hit.ContentType+")")
+		}
+		t.Fatalf("enabling browser_client_enabled served browser-client assets:\n  %s",
+			strings.Join(lines, "\n  "))
+	}
 }
 
 // TestBrowserHostingPosture_WalkNegativeControl proves the walk checker can
