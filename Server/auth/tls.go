@@ -228,8 +228,14 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 	}, nil
 }
 
-// logCertificateFailures reports the first certificate-issuance failure per
-// server name, then stays quiet.
+// certFailureLogInterval bounds how often an issuance failure is logged. Long
+// enough that a client retrying in a loop cannot flood the log, short enough
+// that an operator watching the log while they fix their port forwarding sees
+// the state change.
+const certFailureLogInterval = 10 * time.Minute
+
+// logCertificateFailures reports certificate-issuance failures, at most once
+// per certFailureLogInterval.
 //
 // Without it these failures are invisible. internal/app sets the HTTP server's
 // ErrorLog to io.Discard — deliberately, to suppress per-handshake TLS noise,
@@ -240,8 +246,18 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 // success, and this is the clearest instance of it in the tree.
 //
 // It observes and returns the underlying error unchanged, so autocert's own
-// retry and caching are untouched. One line per name, because a client
-// retrying a failing connection must not be able to fill the disk.
+// retry and caching are untouched.
+//
+// Two things it deliberately does not do, because this runs on an
+// unauthenticated path — every ClientHello reaches it, before any handshake
+// completes:
+//
+//   - It keeps no per-name state. Deduplicating by hello.ServerName would let
+//     an unauthenticated peer grow a map without bound by varying SNI, so the
+//     throttle is a single timestamp instead.
+//   - It never logs hello.ServerName. That field is whatever the peer sent;
+//     the operator already knows which domain they configured, so the log
+//     carries that instead and no attacker-supplied bytes reach it.
 func logCertificateFailures(
 	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	domain string,
@@ -250,7 +266,7 @@ func logCertificateFailures(
 		return nil
 	}
 	var mu sync.Mutex
-	reported := map[string]bool{}
+	var lastReported time.Time
 
 	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		cert, err := next(hello)
@@ -258,18 +274,15 @@ func logCertificateFailures(
 			return cert, nil
 		}
 
-		name := hello.ServerName
-		if name == "" {
-			name = domain
-		}
 		mu.Lock()
-		first := !reported[name]
-		reported[name] = true
+		report := lastReported.IsZero() || time.Since(lastReported) >= certFailureLogInterval
+		if report {
+			lastReported = time.Now()
+		}
 		mu.Unlock()
 
-		if first {
+		if report {
 			slog.Error("TLS certificate issuance failed — clients cannot connect over HTTPS until this is fixed",
-				"server_name", name,
 				"configured_domain", domain,
 				"error", err,
 				"likely_cause", "Let's Encrypt validates over HTTP-01, which needs inbound TCP :80 reachable "+

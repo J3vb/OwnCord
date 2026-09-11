@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -381,8 +382,8 @@ func TestLoadACME_LogsIssuanceFailureWithReachabilityCause(t *testing.T) {
 		}
 	}
 
-	// Logged once per domain, not once per handshake: a client retrying a
-	// failing connection must not be able to fill the disk.
+	// Throttled, not once-per-handshake: a client retrying a failing
+	// connection must not be able to fill the disk.
 	before := buf.Len()
 	for range 5 {
 		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"})
@@ -408,5 +409,39 @@ func TestLoadACME_SuccessIsNotLogged(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("a successful issuance logged something:\n%s", buf.String())
+	}
+}
+
+// TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI covers the two
+// properties this wrapper needs because it runs before any handshake
+// completes, on input from an unauthenticated peer.
+//
+// Deduplicating by hello.ServerName would have let a peer grow a map without
+// bound by varying SNI, and echoing that field would have put attacker-chosen
+// bytes in the operator's log. Neither happens: the throttle is a single
+// timestamp, and only the configured domain is logged.
+func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("acme/autocert: unable to satisfy authorization")
+	}, "chat.example.com")
+
+	// A peer varying SNI on every connection must not extend the log.
+	for i := range 500 {
+		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: fmt.Sprintf("attacker-%d.example.invalid", i)})
+	}
+
+	if n := strings.Count(buf.String(), "TLS certificate issuance failed"); n != 1 {
+		t.Errorf("500 handshakes with distinct SNI produced %d log lines, want 1 — the throttle must not be per-name", n)
+	}
+	if strings.Contains(buf.String(), "attacker-") {
+		t.Errorf("the log echoes the peer-supplied server name:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "chat.example.com") {
+		t.Errorf("the log does not name the configured domain:\n%s", buf.String())
 	}
 }
