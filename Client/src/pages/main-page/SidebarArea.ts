@@ -13,6 +13,7 @@ import type { ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
+import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
@@ -50,6 +51,8 @@ import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
+
+const log = createLogger("SidebarArea");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -773,8 +776,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             name: p.name,
             host: p.host,
           }));
-        } catch {
-          // If profiles fail to load (e.g., outside Tauri), show empty list
+        } catch (err) {
+          log.warn("Failed to load profiles for quick-switch", err);
           profiles = [];
         }
 

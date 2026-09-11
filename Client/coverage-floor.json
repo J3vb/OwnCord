@@ -1,0 +1,4 @@
+{
+  "_doc": "Coverage floors for the client. Vitest enforces these via vitest.config.ts thresholds; this file and scripts/coverage-floor.sh provide an explicit CI-visible check mirroring the server pattern.",
+  "aggregate": 70.0
+}

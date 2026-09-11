@@ -15,7 +15,6 @@ import {
 } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
-import { invoke } from "@tauri-apps/api/core";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
 import { E2EEManager } from "@lib/livekitE2EE";
@@ -47,6 +46,9 @@ import {
   attachDiagnosticListeners,
 } from "@lib/livekitDiagnostics";
 import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventHandlers";
+import { VoiceTokenManager } from "@lib/voiceTokenManager";
+import { LiveKitUrlResolver } from "@lib/livekitUrlResolver";
+import { attemptAutoReconnect } from "@lib/livekitReconnect";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -136,21 +138,6 @@ export class LiveKitSession {
   private serverHost: string | null = null;
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
-  private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  /** BUG-146: Guard timer — fires if the server never responds to voice_token_refresh. */
-  private tokenRefreshTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  /** OC-0029: epoch ms of the last voice_token_refresh actually sent. The
-   *  server budgets this request to 1 per 60s per user (Server/ws/voice_join.go);
-   *  requestTokenRefresh() has multiple independent callers (the 4-minute
-   *  timer AND attemptAutoReconnect's post-recovery refresh) that can land
-   *  within seconds of each other, so this shared entry point — not each
-   *  caller — is what enforces the budget. 0 (never sent) never blocks. */
-  private _lastTokenRefreshSentAt = 0;
-  /** Max auto-reconnect attempts before giving up and showing error. */
-  private static readonly MAX_RECONNECT_ATTEMPTS = 2;
-  private static readonly RECONNECT_DELAY_MS = 3000;
-  /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
-  private liveKitProxyPort: number | null = null;
   /** An explicit unmute waiting for this room's SFU publishing grant. */
   private pendingMicrophoneRoom: Room | null = null;
 
@@ -195,6 +182,17 @@ export class LiveKitSession {
   private rotateKeyPeriodically(): Promise<void> {
     return this._e2ee.rotateKeyPeriodically();
   }
+
+  // --- Extracted modules ---
+
+  private _tokenManager = new VoiceTokenManager({
+    getWs: () => this.ws,
+    isRoomConnected: () => this._room !== null,
+    onRefreshTimerRestart: () => this._tokenManager.startRefreshTimer(),
+    onRefreshTimeout: () => this._tokenManager.startRefreshTimer(),
+  });
+
+  private _urlResolver = new LiveKitUrlResolver();
 
   // --- State transition (single writer) ---
 
@@ -473,40 +471,20 @@ export class LiveKitSession {
 
   // --- Module wiring helper ---
 
-  /** Update all extracted modules with the current room reference. */
-  private syncModuleRooms(): void {
-    const room = this._room;
+  /** Update all extracted modules with a room reference.
+   *
+   *  Defaults to the room in the CURRENT shared state. Pass `room` explicitly
+   *  from mid-attempt code (the reconnect loop), where the state is still
+   *  "reconnecting" and therefore room-less — the default would wire every
+   *  module to null. Either way the DeviceManager callbacks are re-installed
+   *  here, so there is exactly one place that knows the full wiring. */
+  private syncModuleRooms(room: Room | null = this._room): void {
     this._audioPipeline.setRoom(room);
     this._audioElements.setRoom(room);
     this._deviceManager.setRoom(room);
     this._deviceManager.setAudioPipeline(room !== null ? this._audioPipeline : null);
     this._deviceManager.setOnError(this.onErrorCallback);
     this._deviceManager.setOnToast(this.onErrorCallback);
-  }
-
-  /** True when an in-flight reconnect attempt for `channelId` has been
-   *  superseded and must stop touching shared state: the signal was
-   *  aborted, OR a newer connectAndSetup() already claimed `_state` (whether
-   *  by moving to "idle"/"connected" for a DIFFERENT channel, or — the
-   *  airtight case — by reaching "connected" for the SAME channel, since
-   *  connectAndSetup()'s entry-point leaveVoice(false) never runs while
-   *  `_room` reads null during "reconnecting" and so never aborts our
-   *  signal). State is always "reconnecting" during this loop's own
-   *  legitimate run (it only transitions to "connected" at the end of a
-   *  successful attempt), so the type check can never false-positive on a
-   *  still-current attempt. Checked at every checkpoint in the loop, in the
-   *  loop's own state-restore branch, and in the post-loop give-up path. */
-  private reconnectSuperseded(
-    signal: AbortSignal,
-    channelId: number,
-    owner: AbortController | null,
-  ): boolean {
-    return (
-      signal.aborted ||
-      this._state.type !== "reconnecting" ||
-      this._currentChannelId !== channelId ||
-      this._state.ac !== owner
-    );
   }
 
   /** Attempt to auto-reconnect after unexpected disconnect using stored token.
@@ -519,371 +497,50 @@ export class LiveKitSession {
     directUrl: string | undefined,
     signal: AbortSignal,
   ): Promise<void> {
-    const owner = this._reconnectAc;
-    const superseded = () => this.reconnectSuperseded(signal, channelId, owner);
-    for (let attempt = 1; attempt <= LiveKitSession.MAX_RECONNECT_ATTEMPTS; attempt++) {
-      log.info("Auto-reconnect attempt", {
-        attempt,
-        maxAttempts: LiveKitSession.MAX_RECONNECT_ATTEMPTS,
-      });
-      // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
-      await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
-      // If user manually left or joined a different channel during the delay, abort.
-      if (superseded()) {
-        log.info("Auto-reconnect aborted — user left or channel changed");
-        return;
-      }
-      // Aliased outside the try so the catch can tear down the attempt's own
-      // room: this._room is null while state is "reconnecting".
-      let attemptRoom: Room | null = null;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must create+arm E2EE before connect
-        const newRoom = await this.createRoom();
-        attemptRoom = newRoom;
-        const cleanupAbortedReconnect = async (): Promise<void> => {
-          newRoom.removeAllListeners();
-          try {
-            await newRoom.disconnect();
-          } catch (disconnectErr) {
-            log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
-          }
-          // Re-sync from the CURRENT shared state instead of unconditionally
-          // nulling: by the time this runs, a newer attempt may already own
-          // `_state` (and its room), and this attempt's own room is never the
-          // one referenced there (we are aborting before reaching "connected").
-          // A newer "connecting" attempt already wires its own room before
-          // that room appears in `_state`; preserve that wiring as well.
-          if (!superseded() || this._state.type === "idle" || this._state.type === "connected")
-            this.syncModuleRooms();
-        };
-        if (superseded()) {
-          log.info("Auto-reconnect aborted after room creation");
-          await cleanupAbortedReconnect();
-          return;
-        }
-        // Set state to reconnecting with the fresh room-less attempt info;
-        // the actual room appears in "connected" state after connect succeeds.
-        if (this._state.type === "reconnecting") {
-          this.setState({ ...this._state, ac: this._state.ac });
-        }
-        this._audioPipeline.setRoom(newRoom);
-        this._audioElements.setRoom(newRoom);
-        this._deviceManager.setRoom(newRoom);
-        this._deviceManager.setAudioPipeline(this._audioPipeline);
-
-        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
-        const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
-
-        if (superseded()) {
-          log.info("Auto-reconnect aborted before room connect");
-          await cleanupAbortedReconnect();
-          return;
-        }
-
-        // E2EE: Regenerate ECDH keypair for the new session (forward secrecy)
-        // and re-announce so other participants can re-wrap the room key for us.
-        // If we still have the room key from before disconnect, re-apply it now
-        // so audio works immediately; the key holder will send a fresh offer if
-        // the key was rotated during our absence.
-        // oxlint-disable-next-line no-await-in-loop -- must set up E2EE before connect
-        await this._e2ee.reannounceForReconnect();
-
-        if (superseded()) {
-          await cleanupAbortedReconnect();
-          return;
-        }
-
-        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
-        await newRoom.connect(resolvedUrl, token);
-
-        if (superseded()) {
-          log.info("Auto-reconnect aborted after room connect");
-          await cleanupAbortedReconnect();
-          return;
-        }
-
-        log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
-        // Transition to "connected" — this is the single atomic write.
-        this.setState({
-          type: "connected",
-          room: newRoom,
-          channelId,
-          latestToken: token,
-          lastUrl: url,
-          lastDirectUrl: directUrl,
-        });
-        setVoiceStatus("connected");
-        this._deviceManager.setOnError(this.onErrorCallback);
-        this._deviceManager.setOnToast(this.onErrorCallback);
-        logIceConnectionInfo(newRoom);
-        newRoom
-          .startAudio()
-          .catch((err) => log.debug("Failed to start audio after reconnect", err));
-        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
-        await this.restoreLocalVoiceState("reconnect");
-
-        // OC-0009: mirrors connectAndSetup's post-connect checkpoints
-        // (3/4/5) — this tail keeps awaiting (restoreLocalVoiceState,
-        // switchActiveDevice) after already installing "connected" into the
-        // shared state, so `reconnectSuperseded` (which expects "reconnecting")
-        // can no longer tell a still-current attempt from a superseded one.
-        // A newer connectAndSetup()/attemptAutoReconnect() may have since
-        // claimed `_state` for a different channel; isStateConnected() reads
-        // through a method call so it always sees the live value.
-        if (!this.isStateConnected(channelId, newRoom)) {
-          log.info("Auto-reconnect: superseded after restoreLocalVoiceState — aborting tail", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(newRoom);
-          return;
-        }
-
-        // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
-        const savedInput = loadPref<string>("audioInputDevice", "");
-        if (savedInput) {
-          try {
-            await newRoom.switchActiveDevice("audioinput", savedInput);
-          } catch (err) {
-            log.warn("Reconnect: saved input device unavailable, using default", err);
-          }
-        }
-
-        if (!this.isStateConnected(channelId, newRoom)) {
-          log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(newRoom);
-          return;
-        }
-
-        const savedOutput = loadPref<string>("audioOutputDevice", "");
-        if (savedOutput) {
-          try {
-            await newRoom.switchActiveDevice("audiooutput", savedOutput);
-          } catch (err) {
-            log.warn("Reconnect: saved output device unavailable, using default", err);
-          }
-        }
-
-        if (!this.isStateConnected(channelId, newRoom)) {
-          log.info("Auto-reconnect: superseded after audiooutput switch — aborting tail", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(newRoom);
-          return;
-        }
-
-        this._audioPipeline.setupAudioPipeline();
-        this.reapplyMuteGain();
-        this.startTokenRefreshTimer();
-        // Signal the setReconnectAc callback that the reconnect is done.
-        // ac === null clears the pending state in the callback.
+    return attemptAutoReconnect(token, url, channelId, directUrl, signal, {
+      getState: () => this._state,
+      setState: (s) => this.setState(s),
+      syncModuleRooms: () => this.syncModuleRooms(),
+      setModuleRooms: (room) => this.syncModuleRooms(room),
+      createRoom: () => this.createRoom(),
+      resolveUrl: (p, d) => this.resolveLiveKitUrl(p, d),
+      reannounceE2EE: () => this._e2ee.reannounceForReconnect(),
+      restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
+      startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
+      requestTokenRefresh: () => this.requestTokenRefresh(),
+      leaveVoice: () => this.leaveVoice(true),
+      onError: (msg) => this.onErrorCallback?.(msg),
+      isStateConnected: (channelId, room) => this.isStateConnected(channelId, room),
+      disconnectSupersededLocalRoom: (room) => this.disconnectSupersededLocalRoom(room),
+      setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
+      reapplyMuteGain: () => this.reapplyMuteGain(),
+      clearPendingReconnectFields: () => {
         this._pendingReconnectFields = null;
-        // Request a fresh token since the stored one may be close to expiry.
-        this.requestTokenRefresh();
-        return;
-      } catch (err) {
-        log.warn("Auto-reconnect failed", { attempt, url, error: err });
-        // Tear down this attempt's room (this._room is null in "reconnecting"
-        // state) — a leaked room keeps its listeners, and its synchronous
-        // Disconnected event would spawn a second, uncancellable reconnect
-        // loop. null only if createRoom() itself threw.
-        if (attemptRoom !== null) {
-          attemptRoom.removeAllListeners();
-          attemptRoom
-            .disconnect()
-            .catch((disconnectErr) =>
-              log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
-            );
-        }
-        // Return to idle so the next attempt starts fresh.
-        if (this._state.type === "reconnecting") {
-          this.setState({
-            type: "reconnecting",
-            channelId: this._state.channelId,
-            latestToken: this._state.latestToken,
-            lastUrl: this._state.lastUrl,
-            lastDirectUrl: this._state.lastDirectUrl,
-            ac: this._state.ac,
-          });
-        }
-        // See the matching comment in cleanupAbortedReconnect above: sync from
-        // the current shared state rather than unconditionally nulling, so a
-        // stale failed attempt cannot clobber a newer session's module wiring.
-        if (!superseded() || this._state.type === "idle" || this._state.type === "connected")
-          this.syncModuleRooms();
-      }
-    }
-    // All attempts exhausted — give up and clean up. But first check this
-    // loop is still current: the user may have left voice or joined a
-    // different channel during the last attempt's delay/connect, in which
-    // case `leaveVoice(true)` below would tear down the LIVE session that
-    // replaced this one (CLAUDE.md: voice sessions are superseded, not
-    // cancelled — cleanup here must be scoped to this attempt, not global).
-    // The state-type check is what catches a re-join of the SAME channel:
-    // connectAndSetup() overwrites `_state` without aborting our signal (the
-    // `_room` getter is null while "reconnecting", so its entry-point
-    // leaveVoice(false) never runs), leaving both `signal.aborted` false and
-    // `_currentChannelId` equal to ours once that join reaches "connected".
-    if (superseded()) {
-      log.info("Auto-reconnect give-up skipped — superseded");
-      return;
-    }
-    // Send voice_leave over WS so the server removes our voice state;
-    // without this the server and other clients see us as a ghost participant.
-    log.error("Auto-reconnect exhausted all attempts, giving up");
-    this.leaveVoice(true);
-    leaveVoiceChannel();
-    this.onErrorCallback?.("Voice connection lost — failed to reconnect");
+      },
+    });
   }
 
-  // --- URL resolution ---
+  // --- URL resolution (delegated to LiveKitUrlResolver) ---
 
   private async resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
-    if (this.serverHost !== null) {
-      // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
-      // and bare IPv6 (e.g. "::1").
-      let host: string;
-      if (this.serverHost.startsWith("[")) {
-        host = this.serverHost.slice(1, this.serverHost.indexOf("]"));
-      } else if ((this.serverHost.match(/:/g) ?? []).length > 1) {
-        // Bare IPv6 address (multiple colons, no brackets) — use as-is
-        host = this.serverHost;
-      } else {
-        host = this.serverHost.split(":")[0] ?? "";
-      }
-      const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (isLocal && directUrl) {
-        log.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
-        return directUrl;
-      }
-      if (proxyPath.startsWith("/")) {
-        // Remote server: route through the local Rust TLS proxy so WebView2
-        // doesn't reject self-signed certificates on the LiveKit signal WS.
-        const port = await this.ensureLiveKitProxy();
-        const resolved = `ws://127.0.0.1:${port}${proxyPath}`;
-        log.debug("LiveKit URL resolved via TLS proxy", {
-          url: resolved,
-          remoteHost: this.serverHost,
-        });
-        return resolved;
-      }
-    }
-    log.debug("LiveKit URL resolved as passthrough", { url: proxyPath });
-    return proxyPath;
+    return this._urlResolver.resolve(proxyPath, directUrl);
   }
 
-  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit.
-   *
-   *  Always invokes start_livekit_proxy — never cache the port here. Only the
-   *  Rust side can compare the running proxy's TOFU pin against certs.json,
-   *  so after the user accepts a rotated cert a JS port cache would keep
-   *  every voice rejoin tunneling into the stale pin until logout. The Rust
-   *  reuse branch dedups unchanged host+pin, so the repeat call is cheap. */
-  private async ensureLiveKitProxy(): Promise<number> {
-    if (this.serverHost === null) throw new Error("no server host for LiveKit proxy");
-    // Ensure host:port format — default to 443 (standard HTTPS) when the
-    // server is behind a reverse proxy. Without an explicit port, the Rust
-    // proxy would default to 8443 which may not be exposed.
-    // Handle IPv6: "[::1]:7880" has port, "[::1]" and bare "::1" do not.
-    let hostWithPort: string;
-    if (this.serverHost.startsWith("[")) {
-      // Bracketed IPv6 — check for "]:port" suffix
-      hostWithPort = this.serverHost.includes("]:") ? this.serverHost : `${this.serverHost}:443`;
-    } else if ((this.serverHost.match(/:/g) ?? []).length > 1) {
-      // Bare IPv6 (multiple colons) — wrap in brackets and add default port
-      hostWithPort = `[${this.serverHost}]:443`;
-    } else {
-      hostWithPort = this.serverHost.includes(":") ? this.serverHost : `${this.serverHost}:443`;
-    }
-    this.liveKitProxyPort = await invoke<number>("start_livekit_proxy", {
-      remoteHost: hostWithPort,
-    });
-    log.info("LiveKit TLS proxy started on localhost", { port: this.liveKitProxyPort });
-    return this.liveKitProxyPort;
-  }
-
-  // --- Token refresh ---
-
-  /** Token refresh interval: 4 minutes (refresh 1 min before the server's
-   *  5-minute TTL expiry — see Server/ws/livekit.go tokenTTL). Must stay
-   *  below that TTL or a network blip after minute 5 hands attemptAutoReconnect
-   *  an already-expired token and every reconnect attempt fails (OC-0014). */
-  private static readonly TOKEN_REFRESH_MS = 4 * 60 * 1000;
+  // --- Token refresh (delegated to VoiceTokenManager) ---
 
   private startTokenRefreshTimer(): void {
-    this.clearTokenRefreshTimer();
-    this.tokenRefreshTimer = setTimeout(() => {
-      this.requestTokenRefresh();
-    }, LiveKitSession.TOKEN_REFRESH_MS);
-    log.debug("Token refresh timer started", { refreshInMs: LiveKitSession.TOKEN_REFRESH_MS });
+    this._tokenManager.startRefreshTimer();
   }
 
   private clearTokenRefreshTimer(): void {
-    if (this.tokenRefreshTimer !== null) {
-      clearTimeout(this.tokenRefreshTimer);
-      this.tokenRefreshTimer = null;
-    }
-    // BUG-146: Also cancel any in-flight refresh response timeout so it does
-    // not fire after the session is torn down (leaveVoice / cleanupAll both
-    // call this method, so one clearing point covers all cleanup paths).
-    if (this.tokenRefreshTimeoutTimer !== null) {
-      clearTimeout(this.tokenRefreshTimeoutTimer);
-      this.tokenRefreshTimeoutTimer = null;
-    }
+    this._tokenManager.clearTimers();
   }
 
   private requestTokenRefresh(): void {
-    if (this.ws === null || this._room === null) {
-      log.debug("Skipping token refresh — no active session");
-      return;
-    }
-    // OC-0029: the server refuses more than 1 voice_token_refresh per 60s
-    // per user (ErrCodeRateLimited). requestTokenRefresh() is called both by
-    // the routine 4-minute timer and by attemptAutoReconnect's unconditional
-    // post-recovery refresh, which can land only seconds after the timer's
-    // own refresh — without this guard the second request is rejected and
-    // surfaces as a bare "token refresh rate limited" error toast right as
-    // the user's call recovers.
-    if (Date.now() - this._lastTokenRefreshSentAt < 60_000) {
-      log.debug("Skipping token refresh — one was already sent within the last 60s");
-      return;
-    }
-    log.info("Requesting voice token refresh");
-    this._lastTokenRefreshSentAt = Date.now();
-    this.ws.send({ type: "voice_token_refresh", payload: {} });
-    // NOTE: startTokenRefreshTimer is called from handleVoiceTokenRefresh
-    // (the server response handler), not here, to avoid scheduling two
-    // competing timers per cycle.
-
-    // BUG-146: Arm a 60-second response deadline. If the server never replies,
-    // the token stalls silently. On timeout we log a warning and reschedule the
-    // next refresh attempt rather than disconnecting — the current live session
-    // is unaffected (LiveKit keeps active connections alive beyond token expiry);
-    // the risk is only that a network blip during the stale window would fail to
-    // reconnect. Reconnecting for a refresh timeout is intentionally NOT done here
-    // because the WS connection itself may be degraded; a forced disconnect would
-    // make the UX worse than leaving the existing (still-valid) token in place.
-    if (this.tokenRefreshTimeoutTimer !== null) {
-      clearTimeout(this.tokenRefreshTimeoutTimer);
-    }
-    this.tokenRefreshTimeoutTimer = setTimeout(() => {
-      this.tokenRefreshTimeoutTimer = null;
-      log.warn(
-        "Voice token refresh timed out — server did not respond within 60 s. " +
-          "Rescheduling refresh; existing token remains in use.",
-      );
-      // Re-arm the next scheduled refresh so the client keeps trying.
-      this.startTokenRefreshTimer();
-    }, 60_000);
+    this._tokenManager.requestRefresh();
   }
 
   handleVoiceTokenRefresh(token?: string): void {
-    // BUG-146: Cancel the response-deadline timer — the server replied in time.
-    if (this.tokenRefreshTimeoutTimer !== null) {
-      clearTimeout(this.tokenRefreshTimeoutTimer);
-      this.tokenRefreshTimeoutTimer = null;
-    }
     // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
     // rotate the token on an active connection. We store the fresh token so
     // that reconnection (auto-reconnect or manual rejoin) uses it, but the
@@ -899,8 +556,7 @@ export class LiveKitSession {
     } else if (token && this._state.type === "reconnecting") {
       this.setState({ ...this._state, latestToken: token });
     }
-    this.startTokenRefreshTimer();
-    log.info("Voice token refreshed, timer restarted");
+    this._tokenManager.handleRefreshResponse();
   }
 
   // --- Volume helpers ---
@@ -1010,6 +666,7 @@ export class LiveKitSession {
       this._e2ee.clearIdentityKeyPair();
     }
     this.serverHost = host;
+    this._urlResolver.setServerHost(host);
   }
   setOnError(cb: (message: string) => void): void {
     this.onErrorCallback = cb;
@@ -1354,8 +1011,8 @@ export class LiveKitSession {
         localRoom.removeAllListeners();
         try {
           void localRoom.disconnect();
-        } catch {
-          /* ignore */
+        } catch (disconnectErr) {
+          log.debug("Room disconnect during error cleanup failed (safe to ignore)", disconnectErr);
         }
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
@@ -1572,7 +1229,7 @@ export class LiveKitSession {
     // OC-0029: a fresh join must never inherit the outgoing session's refresh
     // budget — otherwise a rejoin shortly after a leave could get silently
     // throttled for up to 60s with no refresh sent at all.
-    this._lastTokenRefreshSentAt = 0;
+    this._tokenManager.resetBudget();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
     // OC-0042: bump first, mirroring doDisableCamera/doDisableScreenshare —
@@ -1622,10 +1279,10 @@ export class LiveKitSession {
     this.onRemoteVideoRemovedCallback = null;
     this.ws = null;
     this.serverHost = null;
-    this.liveKitProxyPort = null;
+    this._urlResolver.setServerHost(null);
     this._e2ee.clearIdentityKeyPair();
     // Stop the Rust-side TLS proxy (fire-and-forget).
-    invoke("stop_livekit_proxy").catch((err) => log.warn("Failed to stop LiveKit proxy", err));
+    this._urlResolver.stopProxy();
   }
 
   setMuted(muted: boolean): void {

@@ -217,8 +217,8 @@ export function createWsClient() {
       if (proxyOpen) {
         try {
           sendRaw(JSON.stringify({ type: "ping", payload: {} }));
-        } catch {
-          // Connection may have dropped
+        } catch (err) {
+          log.warn("Heartbeat ping send failed", err);
         }
       }
     }, HEARTBEAT_INTERVAL_MS);
@@ -509,8 +509,8 @@ export function createWsClient() {
             log.warn("Failed to unsubscribe Tauri event listener", err);
           });
         }
-      } catch {
-        // Sync errors also safe to ignore.
+      } catch (err) {
+        log.debug("Sync unsubscribe error (safe to ignore)", err);
       }
     }
   }
@@ -647,8 +647,8 @@ export function createWsClient() {
     if (tauriInvoke !== null) {
       try {
         await tauriInvoke("ws_disconnect");
-      } catch {
-        // ignore
+      } catch (err) {
+        log.debug("ws_disconnect error during cleanup (safe to ignore)", err);
       }
     }
     proxyOpen = false;

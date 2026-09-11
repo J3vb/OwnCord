@@ -53,6 +53,11 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "tests/browser/**"],
     coverage: {
       provider: "v8",
+      // json-summary emits coverage/coverage-summary.json, which
+      // scripts/coverage-floor.sh reads. It is NOT in vitest's defaults
+      // (text, html, clover, json), so without it the floor gate exits 2 with
+      // "no such file" — a broken gate that looks like a coverage failure.
+      reporter: ["text", "html", "clover", "json", "json-summary"],
       include: ["src/**/*.ts"],
       // Keep this list minimal and justified. An unexplained entry hides a
       // real gap: window-state.ts, credentials.ts, updater.ts and

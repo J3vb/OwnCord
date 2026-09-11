@@ -363,8 +363,8 @@ async function stopBinding(clearKey: boolean): Promise<void> {
   try {
     await stopping;
     log.info("PTT stopped");
-  } catch {
-    // ignore
+  } catch (err) {
+    log.debug("PTT stop command failed (state already cleaned up)", err);
   }
 }
 
