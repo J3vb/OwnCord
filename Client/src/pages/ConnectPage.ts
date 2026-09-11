@@ -3,11 +3,14 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
 import type { HealthStatus } from "@lib/profiles";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { loadCredential } from "@lib/credentials";
+
+const log = createLogger("ConnectPage");
 
 // ---------------------------------------------------------------------------
 // Re-exports (public API must not change)
@@ -341,8 +344,11 @@ export function createConnectPage(
             // Prefill the saved password so the user isn't retyping it.
             loginForm.setCredentials(cred.username, cred.password);
           }
-        } catch {
-          // Credential loading is best-effort; user can type manually
+        } catch (err) {
+          log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+            host,
+            err,
+          });
         }
       })();
     },

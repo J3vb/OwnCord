@@ -5,7 +5,7 @@
 # buildx run would otherwise emulate the whole Go toolchain under QEMU for the
 # arm64 leg. Nothing here is cgo (modernc.org/sqlite is pure Go), so the host
 # toolchain cross-compiles both targets natively via GOARCH below.
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
 
 ARG VERSION=dev
 # Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a

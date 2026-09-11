@@ -5,6 +5,10 @@
  * depend on these utilities without importing from the component layer.
  */
 
+import { createLogger } from "./logger";
+
+const log = createLogger("preferences");
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -35,8 +39,8 @@ export function savePref(key: string, value: unknown): void {
     // Dispatch a custom event so same-window listeners can invalidate caches.
     // The native `storage` event only fires for cross-tab changes.
     window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
-  } catch {
-    // localStorage may throw on quota exceeded or when storage is disabled.
+  } catch (err) {
+    log.warn("Failed to save preference (localStorage may be full or disabled)", { key, err });
   }
 }
 

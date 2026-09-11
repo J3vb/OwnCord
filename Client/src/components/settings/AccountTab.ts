@@ -6,11 +6,14 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
+import { createLogger } from "@lib/logger";
 import { authStore } from "@stores/auth.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+
+const log = createLogger("AccountTab");
 
 /** Mirrors the server's caps so the form can bound itself instead of learning
  *  about the limits from a rejected request. */
@@ -832,8 +835,8 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     .then(() => {
       if ((authStore.getState().user?.totp_enabled === true) !== shownEnabled) render();
     })
-    .catch(() => {
-      // Offline or refused: keep showing what the store knows.
+    .catch((err) => {
+      log.warn("Failed to refresh TOTP status — showing cached state", err);
     });
 
   appendChildren(wrapper, separator, headerRow, contentArea);

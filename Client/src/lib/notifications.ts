@@ -157,7 +157,8 @@ function fireDesktopNotification(title: string, body: string): void {
       if (permitted) {
         sendNotification({ title, body });
       }
-    } catch {
+    } catch (err) {
+      log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
       // Fallback to Web Notification API (dev mode / non-Tauri)
       try {
         if (Notification.permission === "granted") {
@@ -168,8 +169,8 @@ function fireDesktopNotification(title: string, body: string): void {
             void new Notification(title, { body });
           }
         }
-      } catch {
-        log.debug("Notifications not available");
+      } catch (err) {
+        log.debug("Notifications not available", err);
       }
     }
   })();
@@ -182,8 +183,8 @@ function flashTaskbar(): void {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
       await win.requestUserAttention(2); // Informational attention
-    } catch {
-      log.debug("Taskbar flash not available");
+    } catch (err) {
+      log.debug("Taskbar flash not available", err);
     }
   })();
 }
@@ -245,7 +246,7 @@ function playNotificationSound(): void {
 
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.2);
-  } catch {
-    log.debug("Notification sound not available");
+  } catch (err) {
+    log.debug("Notification sound not available", err);
   }
 }

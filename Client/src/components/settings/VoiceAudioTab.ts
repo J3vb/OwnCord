@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
+import { createLogger } from "@lib/logger";
 import {
   switchInputDevice,
   switchOutputDevice,
@@ -12,6 +13,8 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
 } from "@lib/livekitSession";
+
+const log = createLogger("VoiceAudioTab");
 
 export interface VoiceAudioTabHandle {
   /**
@@ -554,8 +557,8 @@ function buildVoiceAudioTabInner(
       }
       latestFrame = requestAnimationFrame(updateMeter);
       registerMic(stream, audioCtx, latestFrame);
-    } catch {
-      // Mic access denied or unavailable — meter stays empty
+    } catch (err) {
+      log.warn("Mic access denied or unavailable — meter stays empty", err);
     }
   })();
 

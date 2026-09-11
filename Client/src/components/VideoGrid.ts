@@ -5,6 +5,7 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createLogger } from "@lib/logger";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -14,6 +15,8 @@ import {
   setUserVolume,
 } from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
+
+const log = createLogger("VideoGrid");
 
 export interface TileConfig {
   /** True if this is the local user's own tile (no audio controls) */
@@ -274,7 +277,9 @@ export function createVideoGrid(): VideoGridComponent {
           oldTracks.every((t, i) => t.id === newTracks[i]?.id);
         if (!tracksMatch) {
           video.srcObject = stream;
-          video.play()?.catch(() => {});
+          video.play()?.catch((err) => {
+            log.debug("Video autoplay rejected (track replacement)", { userId, err });
+          });
           attachTrackLifecycle(userId, stream);
         }
       }
@@ -294,7 +299,9 @@ export function createVideoGrid(): VideoGridComponent {
     });
     video.muted = true;
     video.srcObject = stream;
-    video.play()?.catch(() => {});
+    video.play()?.catch((err) => {
+      log.debug("Video autoplay rejected (new tile)", { userId, err });
+    });
 
     const label = createElement("div", { class: "video-username" }, username);
 
