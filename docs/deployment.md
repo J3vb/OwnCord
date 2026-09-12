@@ -455,8 +455,15 @@ curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
 sudo systemctl stop owncord          # or: nssm stop OwnCord
 
 # 3. Copy the state off this disk, not into the directory being upgraded.
+#    The destination must exist: `cp` with two sources refuses to create it.
+sudo mkdir -p /mnt/backup-disk/owncord-pre-upgrade
 sudo cp -a /opt/owncord/data /opt/owncord/config.yaml \
   /mnt/backup-disk/owncord-pre-upgrade/
+
+# 4. Keep the binary you are upgrading FROM. Step 3 is only half a rollback
+#    without it -- see "Rolling back" below.
+sudo cp -a /opt/owncord/chatserver \
+  /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous
 ```
 
 **Docker:** `data/` lives in the named volume and `config.yaml` does not —
@@ -469,11 +476,18 @@ curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
   https://localhost:8443/admin/api/backup
 docker compose down
 
-# 2. The host-side config.yaml.
+# 2. The host-side config.yaml. Note the tag you are upgrading FROM: without
+#    it there is nothing to pin the rollback to.
+mkdir -p /mnt/backup-disk/owncord-pre-upgrade
 cp config.yaml /mnt/backup-disk/owncord-pre-upgrade/config.yaml
+docker image inspect ghcr.io/j3vb/owncord-server:latest \
+  --format '{{index .RepoDigests 0}}' > /mnt/backup-disk/owncord-pre-upgrade/image
 
 # 3. The volume, through a throwaway container -- the only way to read a named
-#    volume from the host.
+#    volume from the host. alpine because the OwnCord image is distroless and
+#    ships no shell and no `cp`. The rm -rf keeps a re-run from nesting the
+#    copy inside the previous one.
+rm -rf /mnt/backup-disk/owncord-pre-upgrade/data
 docker run --rm \
   -v server_owncord-data:/app/data:ro \
   -v /mnt/backup-disk/owncord-pre-upgrade:/archive \
@@ -498,24 +512,43 @@ and what leaving each one out costs you:
   messages still show their attachments; the bytes are gone and the download
   returns 404. The built-in backup covers the database only
   ([Backup Strategy](#backup-strategy)); this directory is never in it.
-- **`data/totp.key`** — every enrolled authenticator stops working. Stored
-  TOTP secrets are AES-256 ciphertext under this key; a server that cannot find
-  the file generates a fresh one and boots, and every second factor on it is
-  then undecryptable. Affected users get back in only by spending an emergency
-  recovery code, and anyone without one is locked out.
+- **`data/totp.key`** — every 2FA user is locked out, and emergency recovery
+  codes do not help. Stored TOTP secrets are AES-256 ciphertext under this key;
+  a server that cannot find the file generates a fresh one and boots happily,
+  and every second factor on it is then undecryptable. The verify path decrypts
+  the stored secret _before_ it will look at the submitted code, so it fails
+  first and never reaches the recovery-code branch
+  (`Server/service/auth.go:673`). There is no admin endpoint and no CLI
+  subcommand that clears a user's second factor — disabling 2FA needs an
+  already-authenticated session, which is exactly what the user cannot get. The
+  only way back is to put this file back from the archive.
 - **`data/erasure.key`** — a restore cannot recognise erased accounts. A
   deletion marker names its subject as `HMAC-SHA256(key, user id)`, so without
   the key the markers name no one and a restore can resurrect what they guard.
+- **`data/erasure/markers.sqlite`** — worse than losing the key, because the
+  file carries two more things. It holds `sequence_floors`: without them an
+  erased account's id is handed out again, and its innocent new holder is
+  erased by the old marker. It also holds the account markers that keep the
+  first-run setup gate closed against a restore of a pre-owner backup. The
+  server refuses rather than adopting a mismatched file, so this is an outage
+  you resolve by hand, not one you can delete your way out of.
 - **`data/push_vapid.key`** — every push subscription is invalidated. Each
   `push_subscriptions` row records the key id it was created under; under a new
   key those rows are invisible and the maintenance sweep removes them. Every
   device has to subscribe again, and no push is delivered until it does.
 - **`config.yaml`** — the server boots on compiled-in defaults instead: port
   8443, self-signed TLS, and freshly generated LiveKit credentials, which
-  breaks every voice token and every certificate your clients have pinned.
+  breaks every voice token. It does **not** rotate a self-signed certificate:
+  `self_signed` loads an existing `data/cert.pem` / `data/key.pem` and
+  generates only on confirmed absence, and those are in the archive. Clients
+  lose their pinned certificate only if the lost config said
+  `tls.mode: acme` or `manual`, because the fallback to self-signed then
+  serves a different one.
 
-None of these are in a database backup. Back them up on the same schedule as
-the database, not only before an upgrade.
+None of these are in a database backup. `data/uploads/`, the three key files
+and `data/erasure/` all live under the data directory, so copying `data/`
+wholesale covers every one of them. Back them up on the same schedule as the
+database, not only before an upgrade.
 
 ### Performing the upgrade
 
@@ -557,6 +590,12 @@ uploads, accounts, settings, every backup created since. That is the price of a
 rollback, nothing about the procedure avoids it, and the only lever you have is
 how recent the archive is.
 
+You also need the version you are rolling back **to**. Keep the binary, or the
+image tag, you upgraded from: GitHub Releases usually still has it, but an
+in-place self-update leaves nothing local (it rotates the old binary to `.old`
+and the replacement deletes that), and a yanked or air-gapped release leaves
+you no rollback at all. Step 4 of the archive above is that copy.
+
 **Standalone:**
 
 ```bash
@@ -564,14 +603,15 @@ sudo systemctl stop owncord
 sudo rm -rf /opt/owncord/data
 sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /opt/owncord/data
 sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /opt/owncord/config.yaml
-sudo install -m 0755 ./chatserver-previous /opt/owncord/chatserver
+sudo install -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
+  /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
 
-**Replace `data/`; never merge into it.** The newer version wrote files the
-archive has never heard of — `data/erasure.key`, `data/push_vapid.key` and
-`data/erasure/` all arrived after alpha.4 — and copying over the top leaves
-them behind. The result is half one version and half the other, a state no
+**Replace `data/`; never merge into it.** The newer version can write files the
+archive has never heard of — upgrading out of alpha.4, `data/erasure.key`,
+`data/push_vapid.key` and `data/erasure/` all arrive that way — and copying
+over the top leaves them behind. The result is half one version and half the other, a state no
 release has ever been tested in. Remove the directory first, then restore.
 
 **Docker** — the same shape, except the volume has to be emptied rather than
@@ -582,7 +622,8 @@ docker compose down
 docker volume rm server_owncord-data
 docker volume create server_owncord-data
 
-# Restore into the empty volume, owned by the image's uid.
+# Restore into the empty volume, owned by the image's uid -- alpine again
+# because the OwnCord image has no shell to run this in.
 docker run --rm \
   -v server_owncord-data:/app/data \
   -v /mnt/backup-disk/owncord-pre-upgrade:/archive:ro \
@@ -601,11 +642,13 @@ and only that.
 
 ### How this procedure is checked
 
-Both halves are executed rather than asserted. `Server/cmd/smoke` drives the
-newest published release through exactly this sequence — populate, stop,
-archive, upgrade, verify, stop, restore, downgrade — in both shapes an owner
-deploys: two binaries in one install directory, and two images on a named
-volume. `.github/workflows/upgrade-rehearsal.yml` runs it nightly, on demand,
+Both halves are executed on every run, not merely described.
+`Server/cmd/smoke` drives the newest published release through exactly this
+sequence — populate, stop, archive, upgrade, verify, stop, restore,
+downgrade — in both shapes an owner deploys: two binaries in one install
+directory, and two images on a named volume. It runs on **every pull request**
+(the standalone leg, inside `ci.yml`'s server build job), and
+`.github/workflows/upgrade-rehearsal.yml` runs both legs nightly, on demand,
 and from the release workflow before anything is signed or pushed, so a red
 rehearsal stops the release.
 
