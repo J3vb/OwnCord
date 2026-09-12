@@ -128,9 +128,15 @@ describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", 
     const second = FakeEventSource.instances[1];
     expect(second).toBeDefined();
 
-    // Before the server's replay arrives on the new connection, the old
-    // backfill must already be gone from the buffer — the replay is a
-    // superset of anything already held, so nothing is lost by clearing.
+    // The old backfill is still on screen: nothing has replaced it yet, and
+    // a new stream that never connects must not leave the operator with a
+    // blank view (OC-0443).
+    expect(bridge.state.logEntries.length).toBe(5);
+
+    // The replacement stream opens — now the buffer is replaced, before a
+    // single replayed line has been pushed. The replay is a superset of
+    // anything already held, so nothing is lost by clearing at this point.
+    second?.onopen?.();
     expect(bridge.state.logEntries.length).toBe(0);
 
     for (let i = 0; i < 5; i++) {
@@ -138,6 +144,70 @@ describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", 
     }
 
     // Not 10: each backfilled line must appear once, not once per connect.
+    expect(bridge.state.logEntries.length).toBe(5);
+  });
+
+  // OC-0443: the OC-0435 replacement used to happen as soon as the ticket
+  // came back, before the replacement EventSource had connected. An SSE
+  // outage retries every 1.5s, so every retry blanked the operator's log
+  // view and left it blank for as long as the server stayed unreachable —
+  // exactly when those buffered lines are most worth reading.
+  it("keeps the existing entries on screen when a reconnect's new stream never connects", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    expect(bridge).toBeTruthy();
+    bridge.state.section = "logs";
+
+    await bridge.connectLogStream();
+    const first = FakeEventSource.instances[0];
+    expect(first).toBeDefined();
+    for (let i = 0; i < 5; i++) {
+      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+    }
+    expect(bridge.state.logEntries.length).toBe(5);
+
+    // The stream drops and the reconnect's own stream fails too: no open,
+    // no message, just an error.
+    await bridge.connectLogStream();
+    const second = FakeEventSource.instances[1];
+    expect(second).toBeDefined();
+    second?.onerror?.();
+
+    expect(bridge.state.logEntries.length).toBe(5);
+  });
+
+  // The replacement must also survive a stream that delivers without ever
+  // firing onopen — the clear is owed to the first sign of the new stream,
+  // whichever arrives, and must happen exactly once.
+  it("replaces the buffer on the first replayed line when no open event fires", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    expect(bridge).toBeTruthy();
+    bridge.state.section = "logs";
+
+    await bridge.connectLogStream();
+    const first = FakeEventSource.instances[0];
+    for (let i = 0; i < 5; i++) {
+      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+    }
+
+    await bridge.connectLogStream();
+    const second = FakeEventSource.instances[1];
+    expect(second).toBeDefined();
+    for (let i = 0; i < 5; i++) {
+      second?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+    }
+
     expect(bridge.state.logEntries.length).toBe(5);
   });
 });

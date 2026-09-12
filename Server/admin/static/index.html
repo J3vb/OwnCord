@@ -1755,14 +1755,26 @@ async function connectLogStream(){
      view, not append to it — otherwise a reconnect (tab re-entry, an SSE
      error) duplicates every backfilled line still held from the last
      connection. The replay is always a superset of anything already held
-     (ring capacity == state.logMaxLines), so nothing is lost by clearing. */
-  state.logEntries=[];renderLogLines();
-  const c0=document.getElementById('logCount');if(c0)c0.textContent='0 entries';
+     (ring capacity == state.logMaxLines), so nothing is lost by clearing.
+
+     Clear only once the REPLACEMENT stream is actually live, not here: a
+     failed connect retries every 1.5s, and clearing up front blanked the
+     operator's log view on every retry and kept it blank for as long as the
+     server stayed unreachable. Either sign of life will do — onopen, or a
+     first delivered line if no open event fires — and the flag makes it
+     happen exactly once per connection. */
+  let bufferReplaced=false;
+  const replaceBufferOnce=function(){
+    if(bufferReplaced)return;
+    bufferReplaced=true;
+    state.logEntries=[];renderLogLines();
+    const c0=document.getElementById('logCount');if(c0)c0.textContent='0 entries';
+  };
   const es=new EventSource('/admin/api/logs/stream?ticket='+encodeURIComponent(ticket));
   state.logEventSource=es;
-  es.onopen=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
+  es.onopen=function(){replaceBufferOnce();const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
   es.onmessage=function(e){
-    try{const entry=JSON.parse(e.data);state.logEntries.push(entry);
+    try{const entry=JSON.parse(e.data);replaceBufferOnce();state.logEntries.push(entry);
       while(state.logEntries.length>state.logMaxLines)state.logEntries.shift();
       appendLogLine(entry);
       const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length+' entries';
