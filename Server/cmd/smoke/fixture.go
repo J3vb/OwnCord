@@ -99,15 +99,6 @@ type fixture struct {
 	backupName string
 }
 
-// The rehearsal phases that call these land in B6-8 Task 3. Until then
-// nothing in the package references them and `unused` reports every function
-// the fixture is built from; these two entry points are what Task 3 calls, so
-// wiring the phases up deletes this block.
-var (
-	_ = installFixture
-	_ = captureState
-)
-
 // installFixture populates a freshly booted server. It runs against the OLD
 // version, so everything it creates is state the upgrade has to carry over.
 func installFixture(baseURL string) (fixture, error) {

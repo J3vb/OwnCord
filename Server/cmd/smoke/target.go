@@ -15,9 +15,19 @@ type target interface {
 	start(version string) error // "old" | "new" — reaches healthy or errors
 	drain() error               // graceful stop, exit 0 inside drainBudget
 	baseURL() string
+	// installDir is the local directory captureState reads: config.yaml at its
+	// root, data/ beneath. Part of the seam rather than a field the phases
+	// reach into, because the container leg's install is not this harness's
+	// own temp directory.
+	installDir() string
 	archive(dir string) error // copy the live data dir out, as an owner would
 	restore(dir string) error // put it back
-	cleanup()                 // release the temp dir or volume; safe on a half-built target
+	// annotate attaches the running server's log tail to a phase failure, the
+	// way server.annotate does for the plain smoke. Phases assert through the
+	// API, so without this a failed assertion arrives with no sight of what
+	// the server said while failing it.
+	annotate(phase string, cause error) error
+	cleanup() // release the temp dir or volume; safe on a half-built target
 }
 
 var (
@@ -137,6 +147,21 @@ func (t *standaloneTarget) drain() error {
 
 func (t *standaloneTarget) baseURL() string { return defaultBaseURL }
 
+// installDir is the one directory both versions serve from: the upgrade is a
+// binary swap underneath it, so it is also what the state captures read.
+func (t *standaloneTarget) installDir() string { return t.dir }
+
+// annotate delegates to the running server. Between a drain and the next
+// start there is no log to attach, so the phase and cause are returned alone
+// rather than dereferencing a nil server inside the harness that is already
+// reporting a failure.
+func (t *standaloneTarget) annotate(phase string, cause error) error {
+	if t.running == nil {
+		return fmt.Errorf("%s: %w", phase, cause)
+	}
+	return t.running.annotate(phase, cause)
+}
+
 // archive copies out exactly what the rollback documentation will tell an owner
 // to keep: the whole data directory (database, uploads, backups, the three
 // on-disk key files) plus config.yaml. The database is copied as files rather
@@ -255,6 +280,14 @@ func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 func (t *dockerTarget) start(string) error   { return errDockerLeg }
 func (t *dockerTarget) drain() error         { return errDockerLeg }
 func (t *dockerTarget) baseURL() string      { return "" }
+func (t *dockerTarget) installDir() string   { return "" }
 func (t *dockerTarget) archive(string) error { return errDockerLeg }
 func (t *dockerTarget) restore(string) error { return errDockerLeg }
 func (t *dockerTarget) cleanup()             {}
+
+// annotate returns the cause unchanged apart from its phase: swallowing it
+// into errDockerLeg would hide the real failure. Task 5 replaces this with
+// the container's `docker logs`.
+func (t *dockerTarget) annotate(phase string, cause error) error {
+	return fmt.Errorf("%s: %w", phase, cause)
+}
