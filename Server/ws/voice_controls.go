@@ -232,14 +232,17 @@ func enableVideoSlot(
 	logPrefix, kind string,
 ) *Result {
 	ch, chErr := d.Reader.GetChannel(ctx, voiceChID)
-	if chErr != nil {
-		// Fail closed: an unreadable channel row is not "no cap
+	if chErr != nil || ch == nil {
+		// Fail closed: an unreadable OR missing channel row is not "no cap
 		// configured" — falling through to the unconditional enable
-		// bypasses the per-channel video limit.
+		// bypasses the per-channel video limit. GetChannel returns (nil,
+		// nil) for a channel that no longer exists (e.g. deleted while the
+		// user was still in its voice room), so that outcome must refuse
+		// exactly like the error case above, not skip the cap check.
 		slog.Error(logPrefix+" GetChannel", "err", chErr, "channel_id", voiceChID)
 		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
 	}
-	if ch != nil && ch.VoiceMaxVideo > 0 {
+	if ch.VoiceMaxVideo > 0 {
 		ok, limitErr := tryReserve(ctx, userID, voiceChID, ch.VoiceMaxVideo)
 		if limitErr != nil {
 			slog.Error(logPrefix+" EnableIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
