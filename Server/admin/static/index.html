@@ -1372,7 +1372,7 @@ async function saveChannelPerms(){
       const box=document.getElementById('permRole'+role.role_id);
       if(!box)continue;
       const wasHidden=(role.deny&0x2)!==0;
-      if(!box.checked){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}
+      if(!box.checked){if(!wasHidden){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}}
       else if(wasHidden){await api('DELETE','/channels/'+pc.id+'/permissions/'+role.role_id);touchedRoles.add(role.role_id)}
     }
     /* Then the matrix, if a target is selected — unless the quick-toggle loop
@@ -1750,6 +1750,14 @@ async function connectLogStream(){
   let ticket;
   try{const res=await api('POST','/logs/ticket');ticket=res.ticket}catch(err){const t=document.getElementById('logStatusText');const d=document.getElementById('logDot');const msg=(err&&err.message)||'';if(/authorization|invalid or expired session|session has expired|missing or invalid|administrator permission required/i.test(msg)){state.logPaused=true;state.logConnectSeq++;if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}state.token='';localStorage.removeItem('admin_token');if(t)t.textContent='Session expired';if(d)d.className='dot-off';showOverlay('loginOverlay');return}if(t)t.textContent='Reconnect failed';if(d)d.className='dot-off';scheduleLogReconnect();return}
   if(connectSeq!==state.logConnectSeq||state.logPaused||state.section!=='logs')return;
+  /* The server replays its whole ring-buffer backfill to every new
+     subscriber with no event ids, so a (re)connect must replace the buffered
+     view, not append to it — otherwise a reconnect (tab re-entry, an SSE
+     error) duplicates every backfilled line still held from the last
+     connection. The replay is always a superset of anything already held
+     (ring capacity == state.logMaxLines), so nothing is lost by clearing. */
+  state.logEntries=[];renderLogLines();
+  const c0=document.getElementById('logCount');if(c0)c0.textContent='0 entries';
   const es=new EventSource('/admin/api/logs/stream?ticket='+encodeURIComponent(ticket));
   state.logEventSource=es;
   es.onopen=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
@@ -1831,8 +1839,22 @@ async function saveSettings(){
   const body={};
   ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention','registration_mode'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
   ['require_2fa'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
+  /* Send only what actually changed. The server's require_2fa enrollment
+     precondition (service.validateRequire2FAUpdate) keys on the key's mere
+     presence in the PATCH, not on whether its value moved — so resending it
+     unchanged re-runs that precondition for a save that never touched it and
+     can wedge the whole page once any TOTP-less user exists. */
+  const cur=state._settings||{};
+  Object.keys(body).forEach(k=>{
+    const curNorm=(k==='require_2fa')?((cur[k]==='1'||cur[k]==='true')?'true':'false'):(cur[k]||'');
+    if(body[k]===curNorm)delete body[k];
+  });
   const btn=document.getElementById('saveSettingsBtn');
   if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(!Object.keys(body).length){
+    state.settingsChanged=false;renderNav();showToast('Settings saved');
+    return;
+  }
   try{
     await api('PATCH','/settings',body);
     state.settingsChanged=false;renderNav();showToast('Settings saved');
