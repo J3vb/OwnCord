@@ -435,6 +435,31 @@ func TestSave_ExceedsMaxSize(t *testing.T) {
 	}
 }
 
+// TestSave_NegativeMaxSize_RejectsRatherThanSilentlyTruncating pins OC-0425:
+// a negative maxSizeMB (as would leak in from an unvalidated negative
+// upload.max_size_mb) must not make Save silently write a zero-byte file and
+// report success. io.LimitReader treats a negative N as "read nothing", so
+// io.Copy returns (0, nil) and the old over-size probe (`written == maxBytes`)
+// never fires for a negative maxBytes, letting a real upload's bytes vanish
+// with no error anywhere.
+func TestSave_NegativeMaxSize_RejectsRatherThanSilentlyTruncating(t *testing.T) {
+	tmpDir := t.TempDir()
+	s, err := storage.New(tmpDir, -1)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	data := []byte("hello world, this should not vanish")
+	n, err := s.Save("neg-max", bytes.NewReader(data))
+	if err == nil {
+		t.Fatalf("Save with negative max size = (%d, nil), want an error instead of silently discarding the upload", n)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "neg-max")); !os.IsNotExist(statErr) {
+		t.Error("file written under a negative max size should not remain on disk")
+	}
+}
+
 func TestSave_ReadError(t *testing.T) {
 	s := newTestStorage(t)
 	_, err := s.Save("read-err", &failReader{})

@@ -114,6 +114,16 @@ func (s *Storage) resolvedPath(name string) (string, error) {
 // and scripts) before writing the full content to disk.
 // The caller is responsible for generating a UUID filename.
 func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
+	if s.maxSizeMB < 0 {
+		// A negative limit must never reach io.LimitReader: it treats a
+		// negative N as "read nothing", so io.Copy would report a clean
+		// (0, nil) and the over-size probe below (gated on
+		// written == maxBytes) would never fire for a negative maxBytes —
+		// silently discarding every uploaded byte while claiming success.
+		// Config validation should never hand this function a negative
+		// value, but fail loudly here rather than trust that invariant.
+		return 0, fmt.Errorf("invalid storage max size: %d MB", s.maxSizeMB)
+	}
 	if err := sanitizeFilename(uuid); err != nil {
 		return 0, err
 	}

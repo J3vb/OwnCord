@@ -482,6 +482,32 @@ func TestLoadUploadBoundaryValues(t *testing.T) {
 	}
 }
 
+// TestLoadUploadNegativeMaxSizeMB pins OC-0425: upload.max_size_mb was never
+// range-checked, so a negative value reached storage.Save's
+// int64(maxSizeMB)*1024*1024 unchanged. There, a negative N makes
+// io.LimitReader read nothing, so io.Copy writes 0 bytes with a nil error and
+// the over-size probe (gated on written == maxBytes) never fires for a
+// negative maxBytes — the upload is silently discarded and acknowledged as a
+// 0-byte success. A negative value must instead fall back to the compiled
+// default, the same way every other bounded key does.
+func TestLoadUploadNegativeMaxSizeMB(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := "upload:\n  max_size_mb: -1\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.MaxSizeMB != 100 {
+		t.Errorf("Upload.MaxSizeMB = %d, want 100 (the compiled default)", cfg.Upload.MaxSizeMB)
+	}
+}
+
 func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 	// event_persistence is the only multi-word config section; cutting the
 	// env key at the first underscore produces the dead path
