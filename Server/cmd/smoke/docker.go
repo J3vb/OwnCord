@@ -416,6 +416,10 @@ func copyRestoredConfig(src, dst string) error {
 // server.annotate does for a process. Between a drain and the next boot the
 // container still exists, so unlike the standalone leg there is a log to read
 // even then — a stopped container keeps its logs until it is removed.
+//
+// Which is the limit of it: restore() removes the container and clears t.name
+// before it touches the volume, so a phase-7 failure on this leg arrives bare
+// too. Phases 3 and 6 are the ones that keep their tail here.
 func (t *dockerTarget) annotate(phase string, cause error) error {
 	if t.name == "" {
 		return fmt.Errorf("%s: %w", phase, cause)

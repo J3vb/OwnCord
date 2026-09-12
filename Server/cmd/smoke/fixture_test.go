@@ -228,6 +228,16 @@ func TestAnchor(t *testing.T) {
 			wantErr: "chatserver_20260912_101500.db",
 		},
 		{
+			// The other vacuous case, and the quieter one: with no key files
+			// captured, compare()'s credential branch iterates nothing and
+			// additions() reports the post-upgrade ones as a green
+			// informational line. OWNCORD_TOTP_KEY in the harness environment
+			// is enough to produce it.
+			name:    "a capture with no credential files does not anchor",
+			mutate:  func(s *state) { s.keys = map[string]string{} },
+			wantErr: "would hold over nothing",
+		},
+		{
 			// captureState pointed at a directory that is not the install:
 			// every upload is "missing" in both captures, so compare() sees
 			// no difference and reports none.

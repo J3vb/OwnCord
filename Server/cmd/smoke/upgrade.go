@@ -110,9 +110,12 @@ func runUpgrade(oldRef, newRef string, useDocker bool) error {
 	// this directory and compares the result against the capture above, so a
 	// file the archive silently missed fails there, by name.
 	//
-	// A failure here carries the phase but no log tail: phase 2 drained the
-	// server, and annotate has no log to attach once t.running is nil. The
-	// same is true of phases 6 and 7 between the drain and the next boot.
+	// On the STANDALONE leg a failure here carries the phase but no log tail:
+	// phase 2 drained the server, and annotate has no log to attach once
+	// t.running is nil. The same is true of phases 6 and 7 between the drain
+	// and the next boot. The container leg keeps its log across a drain — a
+	// stopped container still has one — until restore() removes the
+	// container, so there the gap is phase 7 alone (see dockerTarget.restore).
 	if err := t.archive(archiveDir); err != nil {
 		return t.annotate(phaseArchive, err)
 	}
@@ -176,7 +179,10 @@ func rollBack(t target, f fixture, before, after state, archiveDir string) error
 	// rollback an owner performs is "put the copy back", and that is what an
 	// owner's copy of data/ restores to.
 	//
-	// Note the failure here arrives without a log tail — see phase 3.
+	// Note the failure here arrives without a log tail on either leg — see
+	// phase 3. The container leg still had one during phase 6, but restore()
+	// removes the container as its first act, so from here to the next boot
+	// there is nothing left to read.
 	if err := t.restore(archiveDir); err != nil {
 		return t.annotate(phaseRestore, err)
 	}

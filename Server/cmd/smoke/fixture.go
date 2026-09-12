@@ -350,7 +350,21 @@ func captureState(dir, baseURL, token, attachmentID string) (state, error) {
 // over nothing at all. Anchoring the first capture to known values is what
 // gives the delta something to be a delta of.
 func (f fixture) anchor(s state) error {
-	problems := make([]error, 0, 3)
+	problems := make([]error, 0, 4)
+	// The credential branch of compare() is the one assertion that can go
+	// vacuous without leaving a trace: it iterates before.keys, so an empty
+	// map compares nothing, and additions() then prints the post-upgrade key
+	// files as a cheerful informational line. That is reachable, not
+	// theoretical — start() hands the server the harness's own environment,
+	// and OWNCORD_TOTP_KEY set on a runner makes loadOrGenerateKeyFile
+	// (Server/auth/totp_encrypt.go) take the env branch and never write
+	// data/totp.key. An install with none of these files is not an install
+	// this rehearsal can say anything about.
+	if len(s.keys) == 0 {
+		problems = append(problems, fmt.Errorf(
+			"the pre-upgrade capture found none of %v: the credential assertion would hold over nothing",
+			credentialFiles))
+	}
 	if !slices.Contains(s.backups, f.backupName) {
 		problems = append(problems, fmt.Errorf(
 			"the pre-upgrade capture does not list backup %s, only %v", f.backupName, s.backups))
