@@ -601,6 +601,41 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("preserves submission order between a persisted plain-text send and a synchronous reply/attachment send (OC-0433)", async () => {
+      // A plain text send (no reply, no attachment) with dedup support takes
+      // an async path: it awaits savePendingText's persistence round-trip
+      // before handing the frame to the socket. A send with a reply or
+      // attachment always dispatches synchronously. If the two paths are not
+      // ordered against each other, a second message submitted right after a
+      // first plain-text one can reach the socket first, inverting the order
+      // every client renders for both messages.
+      const owner = { host: "chat.example", userId: 1 };
+      const user = { id: 1, username: "tester", avatar: null };
+      activatePendingMessages(owner, user, true);
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
+      let next = 0;
+      const sentContents: string[] = [];
+      vi.mocked(opts.ws.send).mockImplementation((frame) => {
+        if ((frame as { type: string }).type === "chat_send") {
+          sentContents.push((frame as { payload: { content: string } }).payload.content);
+        }
+        return `cid-${++next}`;
+      });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // "A" is plain text and takes the persisted async path.
+      capturedMessageInputOpts.onSend("A", null, []);
+      // "B" carries a reply, submitted right after A while A's persist IPC
+      // is still in flight — it must not be sent to the socket before A.
+      capturedMessageInputOpts.onSend("B", 7, []);
+
+      await vi.waitFor(() => expect(sentContents).toHaveLength(2));
+      expect(sentContents).toEqual(["A", "B"]);
+      ctrl.destroyChannel();
+    });
+
     it("ignores a stale composer callback after its server session changes", () => {
       let current = true;
       const opts = makeOpts();

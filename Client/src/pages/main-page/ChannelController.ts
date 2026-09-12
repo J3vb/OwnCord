@@ -141,6 +141,26 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       clientMessageId?: string;
     }
   >();
+  // OC-0433: performSend has two dispatch paths — a plain text send with a
+  // client_message_id awaits savePendingText's persistence IPC before it
+  // reaches the socket, while a send with a reply or attachment dispatches
+  // synchronously. Left unordered, a second send submitted while the first
+  // one's persist IPC is still in flight reaches the socket (and the server)
+  // first, so the server assigns it the lower message id/timestamp and every
+  // client renders the two out of submission order. Routing every send
+  // through this one controller-scoped FIFO chain — rather than guarding
+  // either branch individually — orders both against each other and against
+  // themselves, and survives a channel switch the same way draftByCorrelation
+  // does (a send from the channel just left can still be persisting).
+  // sendChainBusy/sendChainGen let a send with nothing ahead of it dispatch
+  // fully synchronously (as every non-persisting send always has) instead of
+  // always taking a microtask detour through the chain: sendChainGen tags
+  // each chain entry so its settle handler only clears the busy flag when it
+  // is still the last one queued (a later entry may have queued behind it in
+  // the meantime).
+  let sendChain: Promise<void> = Promise.resolve();
+  let sendChainBusy = false;
+  let sendChainGen = 0;
   const sendTimers = new Map<string, { timer: number; release?: () => void }>();
   function clearSendTimer(id: string): void {
     const owned = sendTimers.get(id);
@@ -341,21 +361,49 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }, 20_000);
         sendTimers.set(cid, { timer, release: session?.addCleanup(() => clearSendTimer(cid)) });
       };
-      if (clientMessageId && replyTo === null && attachments.length === 0) {
-        // Persist before handing text to the socket, so a process crash after
-        // commit but before ACK can recover the same logical identity.
-        void savePendingText(owner, {
-          clientMessageId,
-          channelId,
-          content,
-          createdAt: Number(clientMessageId.split(":", 1)[0]),
+      const needsPersist =
+        clientMessageId !== undefined && replyTo === null && attachments.length === 0;
+      // OC-0433: both branches go through the single controller-scoped
+      // sendChain so a synchronous reply/attachment send can never jump a
+      // plain-text send whose persist IPC (below) is still in flight — and
+      // vice versa. Without this, only guarding the branch a given finding
+      // named would still leave the two branches racing each other. When
+      // nothing is already in flight and this send needs no persistence,
+      // dispatch stays fully synchronous — unchanged from before, and relied
+      // on by every caller (e.g. a same-tick read of ws.send's return value).
+      if (!needsPersist && !sendChainBusy) {
+        sendNow();
+        return;
+      }
+      sendChainBusy = true;
+      const myGen = ++sendChainGen;
+      sendChain = sendChain
+        .then(() => {
+          if (clientMessageId && replyTo === null && attachments.length === 0) {
+            // Persist before handing text to the socket, so a process crash
+            // after commit but before ACK can recover the same logical
+            // identity.
+            return savePendingText(owner, {
+              clientMessageId,
+              channelId,
+              content,
+              createdAt: Number(clientMessageId.split(":", 1)[0]),
+            }).catch(() => {
+              if (ownsSession())
+                showToast(
+                  "Could not save this pending message for recovery after restart",
+                  "error",
+                );
+            });
+          }
+          return undefined;
         })
-          .catch(() => {
-            if (ownsSession())
-              showToast("Could not save this pending message for recovery after restart", "error");
-          })
-          .then(sendNow);
-      } else sendNow();
+        .then(() => {
+          sendNow();
+          // Only the still-last-queued entry may clear the flag — a newer
+          // send may have queued behind this one while it was persisting.
+          if (sendChainGen === myGen) sendChainBusy = false;
+        });
     }
 
     function retrySend(correlationId: string): void {
