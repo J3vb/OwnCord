@@ -78,7 +78,11 @@ func runUpgrade(oldRef, newRef string, useDocker bool) error {
 	if err != nil {
 		return t.annotate(phasePopulate, err)
 	}
-	before, err := captureState(t.installDir(), t.baseURL(), f.token, f.attachmentID)
+	dir, err := t.installDir()
+	if err != nil {
+		return t.annotate(phasePopulate, err)
+	}
+	before, err := captureState(dir, t.baseURL(), f.token, f.attachmentID)
 	if err != nil {
 		return t.annotate(phasePopulate, err)
 	}
@@ -124,7 +128,14 @@ func runUpgrade(oldRef, newRef string, useDocker bool) error {
 	fmt.Println(phaseUpgrade + ": the new version booted on the untouched install directory")
 
 	// --- Phase 5: the upgrade preserved the install -------------------------
-	after, err := captureState(t.installDir(), t.baseURL(), f.token, f.attachmentID)
+	// installDir() is where the container leg copies the live state out, so
+	// its error is a failed capture, not a missing path: read past it and
+	// this phase would compare phase 1's bytes with themselves.
+	dir, err = t.installDir()
+	if err != nil {
+		return t.annotate(phaseVerify, err)
+	}
+	after, err := captureState(dir, t.baseURL(), f.token, f.attachmentID)
 	if err != nil {
 		return t.annotate(phaseVerify, err)
 	}
@@ -175,7 +186,11 @@ func rollBack(t target, f fixture, before, after state, archiveDir string) error
 	fmt.Println(phaseRestore + ": the archive is back in place and the old version booted on it")
 
 	// --- Phase 8: the rollback landed on the pre-upgrade state --------------
-	rolledBack, err := captureState(t.installDir(), t.baseURL(), f.token, f.attachmentID)
+	dir, err := t.installDir()
+	if err != nil {
+		return t.annotate(phaseRollback, err)
+	}
+	rolledBack, err := captureState(dir, t.baseURL(), f.token, f.attachmentID)
 	if err != nil {
 		return t.annotate(phaseRollback, err)
 	}

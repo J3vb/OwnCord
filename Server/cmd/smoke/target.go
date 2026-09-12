@@ -19,7 +19,13 @@ type target interface {
 	// root, data/ beneath. Part of the seam rather than a field the phases
 	// reach into, because the container leg's install is not this harness's
 	// own temp directory.
-	installDir() string
+	//
+	// It returns an error because for the container leg it is not a getter:
+	// it copies the live state out of the container, and a copy that failed
+	// would hand back the PREVIOUS phase's state. Every assertion would then
+	// pass over bytes the phase never read, which is the one failure mode
+	// worth failing the run for.
+	installDir() (string, error)
 	archive(dir string) error // copy the live data dir out, as an owner would
 	restore(dir string) error // put it back
 	// annotate attaches the running server's log tail to a phase failure, the
@@ -148,8 +154,10 @@ func (t *standaloneTarget) drain() error {
 func (t *standaloneTarget) baseURL() string { return defaultBaseURL }
 
 // installDir is the one directory both versions serve from: the upgrade is a
-// binary swap underneath it, so it is also what the state captures read.
-func (t *standaloneTarget) installDir() string { return t.dir }
+// binary swap underneath it, so it is also what the state captures read. The
+// error is always nil here — nothing has to be copied to answer — and it
+// exists for the container leg, which does.
+func (t *standaloneTarget) installDir() (string, error) { return t.dir, nil }
 
 // annotate delegates to the running server. Between a drain and the next
 // start there is no log to attach, so the phase and cause are returned alone

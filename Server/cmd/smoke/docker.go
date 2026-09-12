@@ -32,8 +32,11 @@ const (
 	containerData = "/app/data"
 	// containerConfig is where the server loads its configuration from:
 	// config.DefaultPath is "config.yaml", resolved against the image's
-	// WORKDIR. It is in the image layer, NOT in the volume — which is why it
-	// is handled separately everywhere below.
+	// WORKDIR. It is NOT in the volume, so a copy of the volume does not
+	// contain it — which is why it is handled separately everywhere below.
+	// The image would put its own there on first boot; this leg shadows that
+	// with the operator-owned bind mount the compose file describes (see
+	// writeMountedConfig), so the file at this path is a host file.
 	containerConfig = "/app/config.yaml"
 	// containerUser is the image's USER. Files this harness pushes into the
 	// volume must be owned by it or the server cannot read its own data.
@@ -67,12 +70,6 @@ type dockerTarget struct {
 	version string // "old" | "new"
 	running bool
 	runs    int // one container name per launch, so a stale one cannot be reused
-	// snapErr carries the last installDir() snapshot failure. installDir has
-	// no error return — it is a path — so the failure is surfaced through
-	// annotate, which every phase that calls installDir also calls on the way
-	// out. It is rewritten on every snapshot, so it can only ever be as stale
-	// as the phase currently failing.
-	snapErr error
 }
 
 // newDockerTarget prepares the volume and the operator-owned config.yaml. The
@@ -121,9 +118,28 @@ func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 // the first time that template changes.
 //
 // 0644, not the 0600 the rest of this harness uses: the container runs as uid
-// 65532 and cannot read a file the harness user owns 0600. These three lines
+// 65532 and cannot read a file the harness user owns 0600. These four lines
 // hold no secret — the generated config.yaml of the standalone leg does, and
 // copyFile keeps that one at 0600.
+//
+// WHAT THIS COSTS THE ASSERTION, because a reader of compare() cannot see it
+// from there. compare() fails on "config.yaml changed: <hash> -> <hash>", and
+// in the STANDALONE leg that catches any rewrite: the file is the server's own
+// generated default and config.Save can replace it. In THIS leg it cannot
+// fail for a rename: config.Save writes a temp file and renames it over the
+// target, and a rename over a single-file bind mount is refused by the kernel
+// ("device or resource busy"). So the container leg's config assertion catches
+// an in-place rewrite and nothing else, and a green phase 5 here is NOT
+// evidence that the upgrade left config.yaml alone.
+//
+// That is a property of the documented deployment rather than of this
+// harness — Server/docker-compose.yml mounts the file :ro, so a Docker owner
+// cannot save settings into it either, and the setup wizard's attempt shows up
+// as a 201 with a warning and one ERROR line in the container log. The mount
+// here is deliberately read-WRITE anyway: :ro would move the weakening from
+// the assertion to the mount, where nothing could ever be caught. Note too
+// that this leg therefore never hashes a config.yaml the server itself wrote;
+// it hashes these four lines.
 func writeMountedConfig(path string) error {
 	const minimal = "# OwnCord upgrade rehearsal — the operator-owned config.yaml that\n" +
 		"# Server/docker-compose.yml bind-mounts at /app/config.yaml.\n" +
@@ -162,12 +178,16 @@ func (t *dockerTarget) start(version string) error {
 		t.name = ""
 	}
 	t.runs++
-	name := fmt.Sprintf("owncord-upgrade-%d-%d-%s", os.Getpid(), t.runs, version)
+	// Recorded BEFORE the run, not after it: `docker run -d` creates the
+	// container and only then fails — a port conflict on 8443 is the case
+	// this harness is most exposed to, with both legs binding it — and a name
+	// this target never learned is a container cleanup() cannot remove.
+	t.name = fmt.Sprintf("owncord-upgrade-%d-%d-%s", os.Getpid(), t.runs, version)
 	// The flags are docker-smoke.sh's start(), plus the published port the
 	// fixture needs and the LiveKit override every launch in this rehearsal
 	// gets. Anything more (a user override, an extra capability) would test a
 	// posture no owner is told to run.
-	if _, err := docker("run", "-d", "--name", name,
+	if _, err := docker("run", "-d", "--name", t.name,
 		"-v", t.vol+":"+containerData,
 		"-v", filepath.ToSlash(t.configPath())+":"+containerConfig,
 		"-p", containerPublish,
@@ -177,7 +197,7 @@ func (t *dockerTarget) start(version string) error {
 		image); err != nil {
 		return err
 	}
-	t.name, t.image, t.version, t.running = name, image, version, true
+	t.image, t.version, t.running = image, version, true
 	return t.waitHealthy(version + " boot")
 }
 
@@ -278,19 +298,25 @@ func serving(baseURL string) bool {
 // fixture.token) — so a torn copy of a live SQLite database is not something
 // any assertion reads. The archive, which does carry the database, is taken
 // from a STOPPED container instead.
-func (t *dockerTarget) installDir() string {
-	t.snapErr = t.snapshot()
-	return t.dir
-}
-
-func (t *dockerTarget) snapshot() error {
+//
+// A snapshot that fails FAILS THE PHASE, and that is why this returns an
+// error rather than reporting one somewhere. The dangerous case is the quiet
+// one: if the removal below fails — a Windows file lock, an antivirus scanner
+// — the directory still holds the previous phase's snapshot, and a capture
+// taken from it would compare an earlier phase's bytes with themselves and
+// pass every assertion. Re-taking the copy would not help; the operation that
+// failed IS the removal.
+func (t *dockerTarget) installDir() (string, error) {
 	// Removed rather than copied over: a file the container deleted must
 	// disappear from the snapshot too, or the capture reports state that no
 	// longer exists.
 	if err := os.RemoveAll(filepath.Join(t.dir, "data")); err != nil {
-		return err
+		return "", fmt.Errorf("clearing the previous state snapshot: %w", err)
 	}
-	return t.copyOut(containerData, t.dir)
+	if err := t.copyOut(containerData, t.dir); err != nil {
+		return "", fmt.Errorf("snapshotting the container's data directory: %w", err)
+	}
+	return t.dir, nil
 }
 
 // archive copies out what the rollback documentation tells an owner to keep.
@@ -319,7 +345,10 @@ func (t *dockerTarget) archive(dir string) error {
 	// compose file replaces that with an operator-owned host file. A copy of
 	// the volume therefore does not contain it, and an owner's backup that
 	// forgot it would restore a server with somebody else's configuration.
-	return copyFile(t.configPath(), filepath.Join(dir, "config.yaml"))
+	if err := copyFile(t.configPath(), filepath.Join(dir, "config.yaml")); err != nil {
+		return fmt.Errorf("archiving config.yaml: %w", err)
+	}
+	return nil
 }
 
 // restore puts the archive back. Same precondition as archive — THE CONTAINER
@@ -350,7 +379,12 @@ func (t *dockerTarget) restore(dir string) error {
 	}
 	// The image is irrelevant here — the container never runs — so the one
 	// the last container used is reused rather than picking a version and
-	// implying it matters.
+	// implying it matters. It is not entirely inert, though: Docker seeds an
+	// EMPTY named volume from the image's directory when a container mounts
+	// it, so this create would merge image content into the restore. It is
+	// safe only because Server/Dockerfile:33 ships /app/data empty. If that
+	// directory ever gains seed content, this becomes the half-alpha.4,
+	// half-HEAD merge Ruling C forbids, silently.
 	scratch := fmt.Sprintf("owncord-upgrade-%d-%d-restore", os.Getpid(), t.runs)
 	if _, err := docker("create", "--name", scratch, "-v", t.vol+":"+containerData, t.image); err != nil {
 		return err
@@ -383,9 +417,6 @@ func copyRestoredConfig(src, dst string) error {
 // container still exists, so unlike the standalone leg there is a log to read
 // even then — a stopped container keeps its logs until it is removed.
 func (t *dockerTarget) annotate(phase string, cause error) error {
-	if t.snapErr != nil {
-		cause = errors.Join(cause, fmt.Errorf("the state snapshot for this phase failed: %w", t.snapErr))
-	}
 	if t.name == "" {
 		return fmt.Errorf("%s: %w", phase, cause)
 	}
