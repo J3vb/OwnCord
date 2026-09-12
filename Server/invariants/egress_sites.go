@@ -12,9 +12,11 @@ import (
 const egressSitesID = "egress-sites"
 
 // EgressEntry is one row of the B4-8 egress inventory (BPR-055): why a
-// production file may open an outbound network connection, what triggers
-// it, where it goes, and the configuration that gates it. docs/architecture/
-// diagnostics.md is the prose form of this map — keep the two in step.
+// production file — or the cmd/smoke CI harness, which the syntactic rule
+// sees like any other — may open an outbound network connection, what
+// triggers it, where it goes, and the configuration that gates it.
+// docs/architecture/diagnostics.md is the prose form of this map — keep the
+// two in step.
 type EgressEntry struct {
 	// Trigger is what makes the code run: "manual" (an admin or user acts),
 	// "config" (only when an operator sets the named key), or "loopback"
@@ -30,9 +32,10 @@ type EgressEntry struct {
 	Sites []string
 }
 
-// EgressAllow is the inventory. A production file that constructs an
-// outbound client, request or dial and is not listed here fails
-// egress-sites; a listed file that stops doing so fails TestEgressAllowIsLive.
+// EgressAllow is the inventory. A file that constructs an outbound client,
+// request or dial and is not listed here fails egress-sites — the server's
+// own production files, and the cmd/smoke harness that ships in no release;
+// a listed file that stops doing so fails TestEgressAllowIsLive.
 // Nothing here runs on its own with the compiled defaults: every row is
 // manual, configuration-gated or loopback — which is what "no automatic
 // telemetry" means at the code level, and what the runtime capture in
