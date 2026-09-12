@@ -50,8 +50,20 @@ func (h *Hub) handleReconnect(
 	// allowed set. It is never added to allowedChannelIDs itself — that map
 	// also gates the ChannelTopic subscription in registerNow and would leak
 	// the channel's chat to a user who cannot read it.
+	//
+	// old is nil on almost every ORDINARY reconnect, not just a rare race:
+	// readPump's own disconnect-teardown defer (unregisterNow, then
+	// handleVoiceLeave) has already deleted h.clients[userID] and broadcast
+	// the room's own voice_leave by the time the server observes the new
+	// socket and gets here. liveVoiceChID would then stay 0 and this whole
+	// supplement would be skipped — exactly when the resuming client most
+	// needs that voice_leave, since it is the only frame that runs the
+	// client's VOICE_LEAVE dispatch and tears down its local voice UI
+	// (OC-0428). See liveVoiceEventsSinceForUser below for the fallback used
+	// when old is nil.
 	var liveVoiceChID int64
-	if old := h.GetClient(c.userID); old != nil {
+	old := h.GetClient(c.userID)
+	if old != nil {
 		liveVoiceChID = old.getVoiceChID()
 	}
 
@@ -154,8 +166,24 @@ func (h *Hub) handleReconnect(
 	// Tries the ring buffer first, then the cold-tier store; a miss on both
 	// just leaves this one supplement as a no-op, not a regression versus the
 	// pre-fix behaviour.
-	if liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID] {
+	switch {
+	case liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID]:
 		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
+	case old == nil:
+		// OC-0428: no still-registered old *Client to source the room from —
+		// the ordinary case, since readPump's own disconnect-teardown defer
+		// has almost always already run by the time we get here. That
+		// teardown's own voice_leave already has a seq and sits in the ring
+		// buffer/cold tier tagged with the room's channel ID, which this
+		// branch does not know in advance, so it scans by the resuming
+		// user's OWN id instead of by channel. A frame whose channel IS in
+		// allowedChannelIDs is skipped here — the main replay above already
+		// carries it, and re-adding it would duplicate the frame on the wire.
+		for _, evt := range h.liveVoiceEventsSinceForUser(ctx, lastSeq, c.userID) {
+			if !allowedChannelIDs[payloadChannelID(evt)] {
+				events = append(events, evt)
+			}
+		}
 	}
 
 	// Settle the session's status BEFORE the auth_ok write below, mirroring
@@ -579,6 +607,70 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 		case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
 			filtered = append(filtered, evt)
 		}
+	}
+	return filtered
+}
+
+// liveVoiceEventsSinceForUser returns voice_state/voice_leave events at or
+// after afterSeq whose OWN payload names userID (eventNamesUser's payload.user_id
+// check), bypassing the READ-gated channel filter — used, unlike
+// liveVoiceEventsSince above, when handleReconnect has no still-registered
+// old *Client to learn the resuming user's live voice channel from (OC-0428).
+// readPump's disconnect-teardown defer (unregisterNow, then handleVoiceLeave)
+// has almost always already run by the time an ordinary reconnect reaches
+// here, and that teardown's own voice_leave already has a seq and sits in the
+// ring buffer/cold tier tagged with the room's channel ID — a channel this
+// function does not need to know in advance, since it filters on the frame's
+// user_id instead of scoping the query to one channel. Tries the ring buffer
+// first, then the cold-tier store; returns nil, not an error, on a miss in
+// both or on a lookup failure, since this is a best-effort supplement to the
+// main replay (same posture as liveVoiceEventsSince).
+func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, userID int64) [][]byte {
+	if userID == 0 {
+		return nil
+	}
+	var raw [][]byte
+	if buf := h.ReplayBuffer().EventsSince(afterSeq); buf != nil {
+		raw = buf
+	} else if esp := h.eventStore.Load(); esp != nil {
+		es := *esp
+		coldCap := h.maxColdReplayLimit()
+		// Fetch one row past the cap so truncation is decided by the presence
+		// of that extra row, not by len == cap (see liveVoiceEventsSince).
+		// Unlike that function this cannot scope the query to one channel —
+		// not knowing the channel is the whole reason this fallback exists —
+		// so the cap is shared with every event of every type in the range; a
+		// busy server can exhaust it before a voice frame is even reached, in
+		// which case this degrades to nil exactly like any other best-effort
+		// miss, never to a truncated window presented as complete.
+		persisted, err := es.GetEventsSince(ctx, int64(afterSeq), coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+		if err != nil {
+			return nil
+		}
+		if len(persisted) > coldCap {
+			slog.Warn("ws liveVoiceEventsSinceForUser: cold-tier supplement exceeds the row cap, skipping truncated window",
+				"user_id", userID, "after_seq", afterSeq, "cap", coldCap)
+			return nil
+		}
+		raw = make([][]byte, 0, len(persisted))
+		for _, p := range persisted {
+			raw = append(raw, p.Payload)
+		}
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	filtered := make([][]byte, 0, len(raw))
+	for _, evt := range raw {
+		switch extractEventType(evt) {
+		case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
+			if eventNamesUser(evt, userID) {
+				filtered = append(filtered, evt)
+			}
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
 	}
 	return filtered
 }
