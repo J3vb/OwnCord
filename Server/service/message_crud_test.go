@@ -461,3 +461,45 @@ func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
 			"broadcast a blank message bubble", result.Attachments)
 	}
 }
+
+// OC-0419: sendMessageDMSideEffects used to read isGroup and ignore a
+// lookup error, so gErr != nil left isGroup at its false zero value and the
+// loop below treated a group DM as a one-to-one DM — every other member was
+// pushed through dmFirstContactGate, which (since group DMs never write
+// trusted_senders) staged a message_requests row and a trusted_senders
+// "sent_first" edge instead of delivering, and OpenDM was skipped for all of
+// them. This must fail the same way the participant-lookup failure already
+// does: bail out of the DM side effects entirely (message stays saved,
+// nothing more decided) rather than misclassify a group DM as untrusted 1:1.
+func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testing.T) {
+	database, _ := newDMFixture(t)
+	// Promote channel 50 to a 3-person group DM. None of the three trust
+	// each other — group DMs never populate trusted_senders — which is
+	// exactly the state that lets the bug's first-contact gate engage.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE channels SET is_group = 1 WHERE id = ?`, int64(50)); err != nil {
+		t.Fatal(err)
+	}
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	seedUserRole(t, database, 3, permissions.MemberRoleID)
+	seedDMParticipant(t, database, 50, 3)
+
+	svc := New(&erroringIsGroupDMStore{DB: database}, nil)
+
+	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi all",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if result == nil || result.MessageID == 0 {
+		t.Fatalf("SendMessage result = %+v, want the message still saved despite the lookup failure", result)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM message_requests`); n != 0 {
+		t.Errorf("message_requests rows = %d, want 0 — a group DM must never fall through to the "+
+			"one-to-one first-contact gate on an IsGroupDM lookup error", n)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE source = 'sent_first'`); n != 0 {
+		t.Errorf("trusted_senders 'sent_first' rows = %d, want 0", n)
+	}
+}

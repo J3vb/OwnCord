@@ -271,10 +271,26 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	} else {
 		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 	}
+	// OC-0419: a failed lookup must not fall through with isGroup at its
+	// false zero value — that misclassifies a group DM as one-to-one, and
+	// the loop below then runs every other member through
+	// dmFirstContactGate (staging a message_requests row and a
+	// trusted_senders "sent_first" edge instead of delivering, since group
+	// DMs never populate trusted_senders) while skipping OpenDM for all of
+	// them. Nor may it fail closed to isGroup=true, the sibling lookups'
+	// posture (ws/voice_broadcast.go filterDMAudience, service/dm.go
+	// RingTargets, service/push_dispatch.go Notify): that would skip the
+	// first-contact gate and OpenDM/deliver to an untrusted 1:1 recipient,
+	// the opposite privacy regression. This is the one "cannot decide" case
+	// the caller already handles — bail out the same way the
+	// participant-lookup failure above does: message stays saved, the
+	// remaining DM side effects are skipped entirely.
 	isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID)
-	if gErr == nil {
-		result.DMIsGroup = isGroup
+	if gErr != nil {
+		slog.Error("MessageService.SendMessage IsGroupDM", "err", gErr, "channel_id", p.ChannelID)
+		return false
 	}
+	result.DMIsGroup = isGroup
 
 	for _, pid := range participantIDs {
 		if pid == p.UserID {
