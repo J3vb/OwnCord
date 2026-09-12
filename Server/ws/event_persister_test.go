@@ -220,3 +220,55 @@ func TestEventPersisterEnqueueAfterStopDropsLoudly(t *testing.T) {
 		t.Fatalf("expected 0 rows persisted post-stop, got %d", len(rows))
 	}
 }
+
+// TestEventPersisterStopSweepsStrandedQueue pins OC-0426: EventPersister.Stop
+// must sweep any event stranded in p.queue after run() has exited, exactly as
+// db.AuditWriter.Stop already does. The race it guards: run()'s stop-drain
+// loop finds the queue empty, takes the default branch, and returns — closing
+// p.done via its deferred close — in the same window a concurrent Enqueue
+// observed p.done still open (via its own `select { case <-p.done: default:
+// }` guard) and then landed its send in the buffered queue a moment later.
+// run() is already gone by then, so nothing will ever read that slot: the
+// event is neither persisted nor counted nor logged.
+//
+// The race is timing-dependent between two goroutines, so this reproduces it
+// deterministically instead of hoping to hit the window: force the internal
+// state to "run() has already exited" (started + done closed) without ever
+// launching the goroutine, and land one event directly in the queue — the
+// same slot a racing Enqueue would have used. Stop must still find it.
+func TestEventPersisterStopSweepsStrandedQueue(t *testing.T) {
+	mem := openPersisterTestDB(t)
+	p := NewEventPersister(mem, 64, 50, time.Hour)
+
+	p.started.Store(true)
+	close(p.done)
+	p.queue <- pendingEvent{seq: 42, eventType: "broadcast", channelID: 7, payload: []byte(`{"type":"x"}`)}
+
+	_, droppedBefore, _, _ := p.Stats()
+
+	out := captureLogs(t, func() {
+		p.Stop(context.Background())
+	})
+
+	_, droppedAfter, _, _ := p.Stats()
+	if droppedAfter != droppedBefore+1 {
+		t.Errorf("dropped counter = %d, want %d (Stop must sweep an event stranded in the queue by the shutdown race)", droppedAfter, droppedBefore+1)
+	}
+	for _, want := range []string{
+		"event dropped",
+		"seq=42",
+		"channel_id=7",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q: %s", want, out)
+		}
+	}
+
+	rows, err := mem.GetEventsSince(context.Background(), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows persisted for a stranded event Stop must drop, got %d", len(rows))
+	}
+}
