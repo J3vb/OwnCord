@@ -37,7 +37,8 @@ support-bundle contract below treats log excerpts as sensitive.
 
 ## Egress inventory
 
-Every production site that can open an outbound connection, as the
+Every site that can open an outbound connection — every production one, and
+the two `cmd/smoke` rows below that are not — as the
 `egress-sites` invariant (`Server/invariants/egress_sites.go`) enforces:
 a function that constructs an HTTP client, request or dial and is not an
 inventoried site of its file fails CI — a listed file exempts only the
@@ -48,7 +49,10 @@ The invariant is syntactic, so it also catches code behind build tags.
 construction; the two LiveKit rows are `config` because `voice.livekit_url`
 may name a remote LiveKit, and then the health probes and each voice
 session's signalling leave the machine — an operator's choice, never the
-default.
+default. The two `cmd/smoke` rows are the exception to "production": that
+binary is the B6-8 upgrade-and-rollback rehearsal harness, run in CI and
+shipped in no release, and it is inventoried because the invariant is
+syntactic and correctly refuses to make an exception it cannot see.
 
 | File                                                                           | Trigger  | Destination                                                                                                | Gate                                                                                                                         | What is sent                                                                                                                                               |
 | ------------------------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -63,6 +67,8 @@ default.
 | `safefetch/fetch.go` — `(*Fetcher).roundTrip`                                  | config   | the same, one redirect hop at a time                                                                       | the caller's gate: `gif.api_key`, or `plugins.http_allowlist`                                                                | the GIF proxy's search terms, or whatever a plugin asks — bounded by the C-09 ceilings below                                                               |
 | `service/push_dispatch.go` — `(*PushDispatcher).sendOne`                       | config   | the push service named in each stored subscription's `endpoint`                                            | `push.dispatch_enabled` **and** `push.enabled` (both false by default)                                                       | a Web Push message: an encrypted `{"t":"activity"}` payload (RFC 8291) and a VAPID `Authorization` header — no message text, channel name or sender        |
 | `internal/app/healthcheck.go` — `RunHealthcheckCLI`                            | loopback | this server's `/health`                                                                                    | the `--healthcheck` flag                                                                                                     | nothing                                                                                                                                                    |
+| `cmd/smoke/fixture.go` — file scope, `request`, `fetchAttachment`              | loopback | this harness's own server (`defaultBaseURL`, `https://127.0.0.1:8443`)                                     | someone invoking `cmd/smoke`                                                                                                 | the rehearsal fixture's own setup, upload, backup and re-download calls, to a server this harness launched moments earlier                                 |
+| `cmd/smoke/docker.go` — `serving`                                              | loopback | the same address, published on `127.0.0.1` by the container under test                                     | someone invoking `cmd/smoke`                                                                                                 | one `/health` probe confirming the drained container stopped answering                                                                                     |
 | `telemetry/telemetry_otel.go` — the OTLP exporter import                       | config   | `telemetry.otlp_endpoint`                                                                                  | `-tags otel` + `telemetry.enabled` + `exporter: otlp`                                                                        | traces and metrics, to the operator's own collector                                                                                                        |
 
 B5-11's dispatcher row is deliberately **not** a code-level entry in

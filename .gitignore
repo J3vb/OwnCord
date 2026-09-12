@@ -55,6 +55,8 @@ Server/owncord-server.exe
 Server/server.exe
 Server/config.yaml
 Server/data/
+# Released asset the upgrade rehearsal downloads (ci.yml, B6-8).
+Server/.rehearsal-from/
 
 # Prebuilt plugin example (RL-08). Built from the main.go beside it with the
 # TinyGo toolchain that directory's README pins. Read by nothing in the build

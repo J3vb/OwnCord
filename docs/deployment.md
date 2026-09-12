@@ -143,21 +143,10 @@ docker compose pull
 docker compose up -d
 ```
 
-The named volume is preserved — no data loss.
-
-Upgrade rehearsals do not need a donated production database:
-`Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` is a committed, anonymised,
-alpha.4-schema dataset shaped like a month-old server (see the README beside
-it), and `Server/db/alpha_snapshot_test.go` proves on every test run that the
-current migrations still apply to it cleanly.
-
-**Upgrade the server before the clients.** Desktop clients fetch updates from
-the server they connect to, and the server only offers releases whose protocol
-epoch it can speak itself (`docs/protocol.md`, Compatibility). A release that
-changes the wire protocol therefore reaches your users' clients only once the
-server runs it; releases that do not change the protocol reach them regardless.
-A client that is already too old for the server sees "update the client" on
-its connect screen, with the usual Update Now button.
+The named volume is preserved — no data loss. Take the pre-upgrade archive
+first, and know what a rollback costs before you need one:
+[Upgrade and Rollback](#upgrade-and-rollback) covers both, for Docker and for a
+standalone install.
 
 Pulling the image is the **only** upgrade path in Docker: the admin panel's
 in-place "Apply Update & Restart" is refused in container deployments (503
@@ -436,6 +425,261 @@ Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backup" -Method POST -H
 ### Restore
 
 Restoring replaces the live database file. A pre-restore safety backup is created automatically. A server restart is recommended after restore.
+
+## Upgrade and Rollback
+
+An upgrade swaps the binary (or the image) under an install directory that
+nothing else touches. A **rollback is restore-then-downgrade**: put the
+pre-upgrade copy back, then run the old version on it. Migrations are
+forward-only. There is no down-migration and no supported way to run an older
+binary against a database a newer one has already migrated — doing it anyway
+is how you lose the database, not how you go back. The copy you take before
+upgrading is therefore the only rollback that exists.
+
+### Before upgrading: take the archive
+
+Take it with the server **stopped**. The archive carries `data/chatserver.db`
+as a file, and the database runs in WAL mode — a copy taken out from under a
+running server is not a consistent snapshot (see
+[SQLite WAL Considerations](#sqlite-wal-considerations)).
+
+**Standalone:**
+
+```bash
+# 1. Backup while the server is still up. It is verified with integrity_check
+#    as it is written and lands in data/backups/, inside the copy at step 3.
+curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
+  https://localhost:8443/admin/api/backup
+
+# 2. Stop the server -- not "quiesce it", stop it.
+sudo systemctl stop owncord          # or: nssm stop OwnCord
+
+# 3. Copy the state off this disk, not into the directory being upgraded.
+#    The destination must exist: `cp` with two sources refuses to create it.
+sudo mkdir -p /mnt/backup-disk/owncord-pre-upgrade
+sudo cp -a /opt/owncord/data /opt/owncord/config.yaml \
+  /mnt/backup-disk/owncord-pre-upgrade/
+
+# 4. Keep the binary you are upgrading FROM. Step 3 is only half a rollback
+#    without it -- see "Rolling back" below.
+sudo cp -a /opt/owncord/chatserver \
+  /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous
+```
+
+**Docker:** `data/` lives in the named volume and `config.yaml` does not —
+the compose file bind-mounts it from the host, so a copy of the volume does
+not contain it. Both have to be taken, separately:
+
+```bash
+# 1. Backup, then stop. `down` also releases the volume for step 3.
+curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
+  https://localhost:8443/admin/api/backup
+docker compose down
+
+# 2. The host-side config.yaml. Note the tag you are upgrading FROM: without
+#    it there is nothing to pin the rollback to.
+mkdir -p /mnt/backup-disk/owncord-pre-upgrade
+cp config.yaml /mnt/backup-disk/owncord-pre-upgrade/config.yaml
+docker image inspect ghcr.io/j3vb/owncord-server:latest \
+  --format '{{index .RepoDigests 0}}' > /mnt/backup-disk/owncord-pre-upgrade/image
+
+# 3. The volume, through a throwaway container -- the only way to read a named
+#    volume from the host. alpine because the OwnCord image is distroless and
+#    ships no shell and no `cp`. The rm -rf keeps a re-run from nesting the
+#    copy inside the previous one.
+rm -rf /mnt/backup-disk/owncord-pre-upgrade/data
+docker run --rm \
+  -v server_owncord-data:/app/data:ro \
+  -v /mnt/backup-disk/owncord-pre-upgrade:/archive \
+  alpine cp -a /app/data /archive/data
+```
+
+`server_owncord-data` is the name Compose gives the `owncord-data` volume when
+it runs in `Server/` (project name plus volume name); run `docker volume ls` to
+confirm yours.
+
+Copy `data/` **wholesale**, not a list of names. A version you have not
+installed yet is allowed to add files to it, and a hand-written list is exactly
+what silently misses one. If you copy selectively anyway, these are the pieces,
+and what leaving each one out costs you:
+
+- **The backup from `POST /admin/api/backup`** — without it your only copy of
+  the database is the file-level one, and nothing verified it. The backup
+  endpoint runs `integrity_check` when it writes the file and again before it
+  is allowed to overwrite a live database, and the admin panel can put it back
+  on its own. See [Admin Backup Endpoint](#admin-backup-endpoint).
+- **`data/uploads/`** — every attachment 404s. The database rows survive, so
+  messages still show their attachments; the bytes are gone and the download
+  returns 404. The built-in backup covers the database only
+  ([Backup Strategy](#backup-strategy)); this directory is never in it.
+- **`data/totp.key`** — every 2FA user is locked out, and emergency recovery
+  codes do not help. Stored TOTP secrets are AES-256 ciphertext under this key;
+  a server that cannot find the file generates a fresh one and boots happily,
+  and every second factor on it is then undecryptable. The verify path decrypts
+  the stored secret _before_ it will look at the submitted code, so it fails
+  first and never reaches the recovery-code branch
+  (`Server/service/auth.go:673`). There is no admin endpoint and no CLI
+  subcommand that clears a user's second factor — disabling 2FA needs an
+  already-authenticated session, which is exactly what the user cannot get. The
+  only way back is to put this file back from the archive.
+- **`data/erasure.key`** — a restore cannot recognise erased accounts. A
+  deletion marker names its subject as `HMAC-SHA256(key, user id)`, so without
+  the key the markers name no one and a restore can resurrect what they guard.
+- **`data/erasure/markers.sqlite`** — worse than losing the key, because the
+  file carries two more things. It holds `sequence_floors`: without them an
+  erased account's id is handed out again, and its innocent new holder is
+  erased by the old marker. It also holds the account markers that keep the
+  first-run setup gate closed against a restore of a pre-owner backup. The
+  server refuses rather than adopting a mismatched file, so this is an outage
+  you resolve by hand, not one you can delete your way out of.
+- **`data/push_vapid.key`** — every push subscription is invalidated. Each
+  `push_subscriptions` row records the key id it was created under; under a new
+  key those rows are invisible and the maintenance sweep removes them. Every
+  device has to subscribe again, and no push is delivered until it does.
+- **`config.yaml`** — the server boots on compiled-in defaults instead: port
+  8443, self-signed TLS, and freshly generated LiveKit credentials, which
+  breaks every voice token. It does **not** rotate a self-signed certificate:
+  `self_signed` loads an existing `data/cert.pem` / `data/key.pem` and
+  generates only on confirmed absence, and those are in the archive. Clients
+  lose their pinned certificate only if the lost config said
+  `tls.mode: acme` or `manual`, because the fallback to self-signed then
+  serves a different one.
+
+None of these are in a database backup. `data/uploads/`, the three key files
+and `data/erasure/` all live under the data directory, so copying `data/`
+wholesale covers every one of them. Back them up on the same schedule as the
+database, not only before an upgrade.
+
+### Performing the upgrade
+
+**Standalone** — replace the binary and start it again. Nothing else moves: no
+directory is renamed, no configuration is rewritten, and the new version
+migrates the database forward on its first boot.
+
+```bash
+sudo systemctl stop owncord
+sudo install -m 0755 ./chatserver /opt/owncord/chatserver
+sudo systemctl start owncord
+```
+
+The admin panel's in-place update performs the same swap for you, including the
+supervisor handoff — see [Auto-Update](#auto-update). Take the archive first
+either way; the panel does not take one for you.
+
+**Docker** — `docker compose pull && docker compose up -d`, with the container
+specifics under [Upgrading](#upgrading) in the Docker section.
+
+**Upgrade the server before the clients.** Desktop clients fetch updates from
+the server they connect to, and the server only offers releases whose protocol
+epoch it can speak itself (`docs/protocol.md`, Compatibility). A release that
+changes the wire protocol therefore reaches your users' clients only once the
+server runs it; releases that do not change the protocol reach them regardless.
+A client that is already too old for the server sees "update the client" on its
+connect screen, with the usual Update Now button.
+
+Upgrade rehearsals do not need a donated production database:
+`Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` is a committed, anonymised,
+alpha.4-schema dataset shaped like a month-old server (see the README beside
+it), and `Server/db/alpha_snapshot_test.go` proves on every test run that the
+current migrations still apply to it cleanly.
+
+### Rolling back
+
+**Everything written after the archive was taken is lost** — messages,
+uploads, accounts, settings, every backup created since. That is the price of a
+rollback, nothing about the procedure avoids it, and the only lever you have is
+how recent the archive is.
+
+You also need the version you are rolling back **to**. Keep the binary, or the
+image tag, you upgraded from: GitHub Releases usually still has it, but an
+in-place self-update leaves nothing local (it rotates the old binary to `.old`
+and the replacement deletes that), and a yanked or air-gapped release leaves
+you no rollback at all. Step 4 of the archive above is that copy.
+
+**Standalone:**
+
+```bash
+sudo systemctl stop owncord
+sudo rm -rf /opt/owncord/data
+sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /opt/owncord/data
+sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /opt/owncord/config.yaml
+sudo install -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
+  /opt/owncord/chatserver
+sudo systemctl start owncord
+```
+
+**Replace `data/`; never merge into it.** The newer version can write files the
+archive has never heard of — upgrading out of alpha.4, `data/erasure.key`,
+`data/push_vapid.key` and `data/erasure/` all arrive that way — and copying
+over the top leaves them behind. The result is half one version and half the other, a state no
+release has ever been tested in. Remove the directory first, then restore.
+
+**Docker** — the same shape, except the volume has to be emptied rather than
+copied into, because a copy into a volume can only add files:
+
+```bash
+docker compose down
+docker volume rm server_owncord-data
+docker volume create server_owncord-data
+
+# Restore into the empty volume, owned by the image's uid -- alpine again
+# because the OwnCord image has no shell to run this in.
+docker run --rm \
+  -v server_owncord-data:/app/data \
+  -v /mnt/backup-disk/owncord-pre-upgrade:/archive:ro \
+  alpine sh -c "cp -a /archive/data/. /app/data/ && chown -R 65532:65532 /app/data"
+
+cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml config.yaml
+# Pin the previous tag in docker-compose.yml -- `:latest` pulls forward again --
+# then bring the stack back up on the restored volume.
+docker compose up -d
+```
+
+The admin panel's backup restore is not a rollback. It puts a database back
+under **the version that is running**, which migrates it forward again on the
+spot — see [Restore](#restore). Going back a version is the procedure above,
+and only that.
+
+### How this procedure is checked
+
+Both halves are executed on every run, not merely described.
+`Server/cmd/smoke` drives the newest published release through exactly this
+sequence — populate, stop, archive, upgrade, verify, stop, restore,
+downgrade, verify the rollback — in both shapes an owner deploys: two binaries in one install
+directory, and two images on a named volume. It runs on **every pull request**
+(the standalone leg, inside `ci.yml`'s server build job), and
+`.github/workflows/upgrade-rehearsal.yml` runs both legs nightly, on demand,
+and from the release workflow before anything is pushed or published, so a red
+rehearsal stops the release.
+
+What it asserts across the swap, by name: `config.yaml`, every credential key
+file the pre-upgrade install had, and every file under `data/uploads/`
+byte-identical; every pre-upgrade backup
+still listed; the attachment uploaded before the upgrade still downloading
+byte-identical through the API; the session token issued before the upgrade
+still authenticating as the same owner; and the reported version actually
+changing — then changing back across the rollback, with the old binary still
+stopping cleanly on the restored install.
+
+Two things it does not cover, stated because a rehearsal you misread is worse
+than none:
+
+- **ARM64 upgrades are not rehearsed.** `v1.2.0-alpha.4` published no ARM64
+  server asset, so there is no published alpha to upgrade _from_. The ARM64
+  assets are covered by the per-architecture lifecycle check described under
+  [Building from Source](#building-from-source) and [Docker](#docker-linux) —
+  boot, migrate, drain, restart — but not by an upgrade out of a previous
+  release. That becomes rehearsable one release after the ARM64 assets ship.
+- **In Docker, `config.yaml` is yours alone to manage.** The compose file
+  mounts it read-only, so nothing inside the container can rewrite it: the
+  admin panel and the setup wizard cannot persist a startup setting there, and
+  an attempt comes back as a warning plus an `ERROR` line in the container log.
+  Edit the host file and recreate the container instead. The rehearsal's
+  "`config.yaml` is untouched" check is correspondingly weaker on that leg —
+  it catches an in-place rewrite, but the kernel refuses the rename over a
+  single-file bind mount that the server actually uses to save configuration.
+  The standalone leg is the one that proves an upgrade leaves `config.yaml`
+  alone.
 
 ## Monitoring
 
