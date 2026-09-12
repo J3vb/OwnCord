@@ -3102,6 +3102,46 @@ describe("LiveKitSession", () => {
       };
       expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
     });
+
+    // OC-0441: publishDefaults alone is not enough on a channel's FIRST join.
+    // The server sends voice_token before voice_config (an ordering frozen by
+    // the epoch-1 golden transcripts), and createRoom runs synchronously from
+    // the voice_token handler — so voiceConfigs is still empty when the Room
+    // is built and the configured bitrate is silently lost until a rejoin.
+    // The mic is published much later, after the LiveKit connect round-trip,
+    // by which point voice_config has arrived: read the bitrate there and
+    // pass it as explicit publish options.
+    it("applies a voice_config that arrives after the Room is built to the mic publish", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      // voice_config is processed while the LiveKit connect is in flight —
+      // after createRoom read an empty map, before the mic is published.
+      mockRoom.connect.mockImplementation(async () => {
+        mockVoiceState.voiceConfigs = new Map([[1, { bitrate: 128000 }]]);
+      });
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      // The Room really was built without it — this is the first join.
+      expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, undefined, {
+        audioPreset: { maxBitrate: 128000 },
+      });
+    });
+
+    it("publishes the mic with no explicit encoding when no voice_config exists for the channel", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
   });
 
   describe("attemptAutoReconnect (lifecycle)", () => {

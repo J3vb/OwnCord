@@ -217,6 +217,24 @@ export class LiveKitSession {
       : null;
   }
 
+  /** Explicit publish options for the microphone track, or undefined to let
+   *  the Room's publishDefaults decide.
+   *
+   *  OC-0441: createRoom folds the channel's configured audio bitrate into
+   *  publishDefaults, but it runs synchronously from the voice_token handler
+   *  and the server sends voice_config only afterwards — an ordering frozen by
+   *  the epoch-1 golden transcripts, so it cannot be swapped on the wire. On a
+   *  channel's first join the Room is therefore built before any config
+   *  arrived. Every microphone publish happens later, past the LiveKit connect
+   *  round-trip, so reading voiceConfigs here picks up the bitrate the Room
+   *  missed; publishDefaults stays the fallback for every other track. */
+  private micPublishOptions(): { audioPreset: { maxBitrate: number } } | undefined {
+    const channelId = this._currentChannelId;
+    if (channelId === null) return undefined;
+    const bitrate = voiceStore.getState().voiceConfigs.get(channelId)?.bitrate;
+    return bitrate === undefined ? undefined : { audioPreset: { maxBitrate: bitrate } };
+  }
+
   /** Latest token from state, or null when idle/connecting. */
   private get _latestToken(): string | null {
     return this._state.type === "connected" || this._state.type === "reconnecting"
@@ -611,7 +629,7 @@ export class LiveKitSession {
     const shouldEnableMicrophone = !muted;
 
     try {
-      await room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
+      await this.enableMicrophone(room, shouldEnableMicrophone);
       if (this._room !== room) return;
       if (shouldEnableMicrophone) {
         log.info(
@@ -1200,7 +1218,7 @@ export class LiveKitSession {
     const room = this._room;
     if (room === null) return;
     try {
-      await room.localParticipant.setMicrophoneEnabled(true);
+      await this.enableMicrophone(room, true);
       if (this._room !== room) return;
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
@@ -1328,6 +1346,19 @@ export class LiveKitSession {
     log.debug("Deafen state changed", { deafened });
   }
 
+  /** Enable or disable the microphone, carrying the channel's configured
+   *  audio bitrate on any publish (OC-0441). Disabling publishes nothing, and
+   *  a channel with no voice_config keeps LiveKit's own default, so both leave
+   *  the call shaped exactly as it was before. */
+  private async enableMicrophone(room: Room, enabled: boolean): Promise<void> {
+    const publishOptions = enabled ? this.micPublishOptions() : undefined;
+    if (publishOptions === undefined) {
+      await room.localParticipant.setMicrophoneEnabled(enabled);
+      return;
+    }
+    await room.localParticipant.setMicrophoneEnabled(enabled, undefined, publishOptions);
+  }
+
   private microphonePublishingAllowed(room: Room): boolean {
     const permissions = room.localParticipant.permissions;
     return (
@@ -1381,7 +1412,7 @@ export class LiveKitSession {
       // the existing "Grant Microphone" affordance (gated on listenOnly)
       // reappears as the recovery path.
       try {
-        await room.localParticipant.setMicrophoneEnabled(true);
+        await this.enableMicrophone(room, true);
         if (this._room !== room) return;
         // Rebuild the audio pipeline on the fresh track
         this._audioPipeline.setupAudioPipeline();
