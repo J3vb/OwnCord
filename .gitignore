@@ -47,6 +47,12 @@ docs/security-findings/
 Client/.stryker-tmp/
 Client/reports/
 
+# Load-test output (B6-9): k6's summary JSON and voice-load.sh's report. The
+# numbers that matter are published in docs/capacity.md and uploaded by
+# load-baseline.yml as a run artifact; a local run's copy is scratch.
+Server/scripts/k6/reports/
+Server/scripts/reports/
+
 # Server runtime artifacts
 Server/chatserver.exe
 dbinventory.exe
