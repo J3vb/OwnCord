@@ -68,6 +68,50 @@ server's internals were reorganised behind service boundaries.
   protocol are offered as before.
 - Signing in from a new device is flagged, so the client can tell you about a
   session you did not start.
+- **The startup banner stopped calling a LAN address reachable.** It printed
+  whatever address it found first — your `192.168.x` address on a home server,
+  or the Docker bridge address on a container host — under the heading of an
+  address the server can be reached at. Share that URL and it works for you and
+  nobody else. It now prefers a public address when the machine has one, and
+  says in one line what kind of address it printed and what that means for
+  anyone outside the machine.
+- **A failed HTTPS certificate is no longer silent.** With `tls.mode: acme`, a
+  server that could not get a certificate logged nothing at all: it reported a
+  healthy start and then failed every connection. It now logs the failure once,
+  naming the usual cause — inbound port 80 has to be reachable from the
+  internet.
+- The error for `tls.mode: acme` with an IP address said Let's Encrypt does not
+  issue certificates for IP addresses. It has since January 2026; the limit is
+  OwnCord's certificate client. The message now says so, and names the two
+  options that do work on a raw IP.
+
+### Voice
+
+- **Voice that joins and then carries no sound is now warned about at start-up.**
+  If `voice.node_ip` is not a public address, remote callers connect and hear
+  nothing, because it is the address LiveKit gives them to send audio to. The
+  server says so at boot instead of leaving it to be discovered on a call. It
+  warns, never refuses — a LAN-only or Tailscale-only server has a good reason
+  to use a private address there.
+
+### Accounts & admin
+
+- The connectivity diagnostics now name the kind of address a client connected
+  from (`address_class`), so a Tailscale peer is no longer reported as coming
+  from the public internet. Addresses in `100.64.0.0/10` were previously counted
+  as public.
+- New optional `server.reachability_report_enabled` adds a `reachability`
+  section to the admin connectivity diagnostics: this host's addresses, the
+  ports that need forwarding, and an explicit list of what the server **cannot**
+  determine about its own reachability. Off by default. It makes no network
+  request of any kind — see below.
+- **[docs/port-forwarding.md](docs/port-forwarding.md) now covers what actually
+  goes wrong**: blocked ISP ports, CGNAT, hairpin NAT, changing public IPs, and
+  the LiveKit UDP range that causes most "voice connects but nobody can hear me"
+  reports. It states plainly which cases OwnCord cannot detect for you, and how
+  to check each one yourself. A server cannot test whether the outside world can
+  reach it without asking the outside world, and OwnCord does not ask anyone —
+  so it tells you what it does not know instead of guessing.
 - Under heavy load the server now refuses expensive sign-in work with a "busy,
   try again" instead of queueing it until everything slows down.
 

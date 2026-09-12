@@ -767,3 +767,32 @@ func TestLoadStorageBoundsAreClamped(t *testing.T) {
 		t.Errorf("UserQuotaBytes() = %d after the clamp; the byte helper overflowed", cfg.Upload.UserQuotaBytes())
 	}
 }
+
+// TestLoadReachabilityReportDisabledByDefault pins B6-6's owner gate, modelled
+// on TestLoadBrowserClientHostingDisabledByDefault.
+//
+// The reachability block enumerates every address on every interface. H-8
+// already restricted the diagnostics endpoint to admins because it reveals
+// network topology; this is the owner's second switch over the most
+// topology-revealing part of it, and it is off until they ask for it.
+func TestLoadReachabilityReportDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Server.ReachabilityReportEnabled {
+		t.Error("server.reachability_report_enabled is true on a fresh install; the interface enumeration must be owner opt-in (B6-6)")
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "reachability_report_enabled:") {
+			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}

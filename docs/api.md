@@ -4126,10 +4126,66 @@ Returns connectivity diagnostics for debugging voice/network issues.
   },
   "client": {
     "remote_addr": "192.168.1.100",
-    "is_private_network": true
+    "is_private_network": true,
+    "address_class": "private"
   }
 }
 ```
+
+`client.address_class` is one of `loopback`, `private`, `cgnat`, `link_local`,
+`unique_local`, `global` or `other`. It exists because `is_private_network`
+alone cannot distinguish a LAN host from a tailnet peer from a carrier-NAT
+client — `cgnat` covers `100.64.0.0/10`, which is both the carrier-NAT range
+and the range Tailscale allocates from.
+
+#### The `reachability` block (optional)
+
+When `server.reachability_report_enabled` is set, the response carries an
+extra `reachability` object. It is **off by default**: it enumerates every
+address on every interface, which is the most topology-revealing part of an
+endpoint that is already admin-only for that reason. With the flag off the key
+is absent rather than empty, so "switched off" cannot be misread as "nothing to
+report".
+
+```json
+{
+  "reachability": {
+    "listen_port": 8443,
+    "binds_all_interfaces": true,
+    "local_addresses": [
+      { "addr": "127.0.0.1", "kind": "loopback" },
+      { "addr": "192.168.1.50", "kind": "private" }
+    ],
+    "has_global_address": false,
+    "cgnat_range_present": false,
+    "required_ports": [
+      { "port": "8443", "protocol": "tcp", "purpose": "OwnCord HTTPS, REST API and WebSocket" }
+    ],
+    "tls_mode": "self_signed",
+    "public_ip_https_supported": false,
+    "public_ip_https_reason": "This build cannot obtain a certificate for a bare IP address: ...",
+    "undeterminable": [
+      {
+        "fact": "Whether TCP port 8443 is reachable from the internet",
+        "why": "Proving inbound reachability needs something outside your network to connect back in. ...",
+        "how_to_check": "Test from a network that is not your own — a phone on mobile data works — ..."
+      }
+    ]
+  }
+}
+```
+
+The `undeterminable` list is the point of the block, and it is never empty —
+not even on a host where everything looks correct. **The server performs no
+network probe of any kind**: it opens no socket and resolves no name, so it
+cannot and does not claim to know whether anything outside can reach it.
+Blocked ports, CGNAT, hairpin NAT and a changing public IP are all invisible
+from inside the network, and each entry names the check the owner runs
+instead. `cgnat_range_present` is reported with a `cgnat_note` giving both
+explanations for a `100.64.0.0/10` address, never a verdict.
+
+See [docs/port-forwarding.md](port-forwarding.md) for the operator-facing
+version of the same material.
 
 ---
 

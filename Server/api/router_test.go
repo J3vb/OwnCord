@@ -1,7 +1,9 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -269,5 +271,96 @@ func TestHealthMethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /health status = %d, want 405", rec.Code)
+	}
+}
+
+// ─── B6-6: a non-global voice.node_ip fails silently ────────────────────────
+
+// TestWarnOnServerConfig_NonGlobalNodeIP — voice.node_ip is written straight
+// into livekit.yaml, which validates it only for YAML-unsafe characters. A
+// private or CGNAT value hands remote clients an ICE candidate they cannot
+// route to, so the call connects and then carries no audio: the join succeeds,
+// the media never arrives, and nothing says why.
+//
+// It warns rather than refuses. A LAN-only or tailnet-only operator has a
+// legitimate reason to point node_ip at a private address, and B6-6 is about
+// reporting limits honestly, not about narrowing what an owner may configure.
+func TestWarnOnServerConfig_NonGlobalNodeIP(t *testing.T) {
+	cases := []struct {
+		name     string
+		nodeIP   string
+		wantWarn bool
+	}{
+		{"private LAN address", "192.168.1.50", true},
+		{"CGNAT or tailnet address", "100.64.1.2", true},
+		{"loopback", "127.0.0.1", true},
+		{"link-local", "169.254.1.1", true},
+		{"not an address", "chat.example.com", true},
+		{"public IPv4", "93.184.216.34", false},
+		{"public IPv6", "2606:4700::1111", false},
+		{"unset", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			api.WarnOnServerConfigForTest(&config.Config{
+				Voice: config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: tc.nodeIP},
+			})
+
+			got := strings.Contains(buf.String(), "voice.node_ip")
+			if got != tc.wantWarn {
+				t.Errorf("warned = %v, want %v for node_ip %q; log:\n%s", got, tc.wantWarn, tc.nodeIP, buf.String())
+			}
+			if tc.wantWarn && !strings.Contains(buf.String(), "no audio") {
+				t.Errorf("the warning does not name the symptom an owner will actually see:\n%s", buf.String())
+			}
+		})
+	}
+}
+
+// TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff — an unused key is not a
+// misconfiguration, and a warning an operator cannot act on is noise.
+func TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	api.WarnOnServerConfigForTest(&config.Config{
+		Voice: config.VoiceConfig{NodeIP: "192.168.1.50"}, // no LiveKitURL
+	})
+
+	if strings.Contains(buf.String(), "voice.node_ip") {
+		t.Errorf("warned about node_ip with voice switched off:\n%s", buf.String())
+	}
+}
+
+// TestReachabilityWarningsAreNotGatedByTheFlag pins how far
+// server.reachability_report_enabled reaches.
+//
+// The owner's decision was that the detailed interface enumeration is opt-in.
+// The honest reporting is not: a limit that only surfaces once someone finds a
+// config key is not "reported actionably", which is the milestone's outcome.
+// So the flag gates the diagnostics block and nothing else — the startup
+// warnings fire with it off, and the banner's address qualifier does not take
+// the config at all. A later edit that moves either behind the flag fails here.
+func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	api.WarnOnServerConfigForTest(&config.Config{
+		Server: config.ServerConfig{ReachabilityReportEnabled: false},
+		Voice:  config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: "192.168.1.50"},
+	})
+
+	if !strings.Contains(buf.String(), "voice.node_ip") {
+		t.Errorf("the node_ip warning was silenced by the report flag being off:\n%s", buf.String())
 	}
 }

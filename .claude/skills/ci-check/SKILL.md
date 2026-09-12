@@ -33,7 +33,7 @@ go vet ./...
 go test -race ./...
 go test -tags deadlock -count=1 ./ws/    # deadlock detector; ws is where lock order actually varies
 go test -count=1 ./admin/...             # untagged leg: admin/logstream_alloc_test.go is !race && !deadlock
-golangci-lint run                        # CI pins v2.11.3
+golangci-lint run                        # CI pins v2.11.3 — check `golangci-lint --version` first
 
 # Generated output must not be stale. These are what `make sqlc-verify` and
 # `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
@@ -42,6 +42,22 @@ go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/s
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
+
+**A `golangci-lint` already on PATH may be the wrong one, and says so
+confusingly.** A build older than this module's Go target refuses outright:
+
+```
+can't load config: the Go language version (go1.25) used to build
+golangci-lint is lower than the targeted Go version (1.26.7)
+```
+
+That is the binary's age, not a missing gate — it reads like "cannot run
+here" and is not. Fetch the pinned version rather than skipping the step:
+
+```bash
+curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.11.3/golangci-lint-2.11.3-linux-amd64.tar.gz
+tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.11.3-linux-amd64/golangci-lint --version
+```
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`
 or `runtime.(*unwinder).next` is a Go 1.26.5 runtime GC fault, not your change.

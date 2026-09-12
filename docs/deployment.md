@@ -573,7 +573,17 @@ The Tauri client uses NSIS installer updates:
 | `7881`        | TCP      | LiveKit server (RTC/TURN over TCP)                |
 | `50000-60000` | UDP      | LiveKit WebRTC media (ICE candidates)             |
 
-For remote access, see the [Port Forwarding Guide](port-forwarding.md) or [Tailscale Guide](tailscale.md).
+For remote access, see the [Port Forwarding Guide](port-forwarding.md) or
+[Tailscale Guide](tailscale.md). The port-forwarding guide also covers the
+limits OwnCord cannot detect from inside your network — blocked ports, CGNAT,
+hairpin NAT and a changing public IP — and how to check each one yourself.
+
+**Not qualified in this build.** Certificate work is deferred to the release,
+so there is no HTTPS on a bare public IP (`tls.mode: acme` requires a
+hostname), no guided LAN or offline device-trust install, and no qualified
+certificate lifecycle. Domain ACME is implemented but has not been exercised
+against expiry, rotation and restart at release quality. See
+[What this build does not do](port-forwarding.md#what-this-build-does-not-do).
 
 ## Hardening Checklist
 

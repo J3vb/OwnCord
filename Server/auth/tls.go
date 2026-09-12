@@ -10,12 +10,14 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
@@ -172,7 +174,16 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 
 	// Validate domain is not an IP address.
 	if ip := net.ParseIP(cfg.Domain); ip != nil {
-		return nil, fmt.Errorf("TLS mode 'acme': domain must be a hostname, not an IP address (%s); Let's Encrypt does not issue certificates for IP addresses", cfg.Domain)
+		// The limit is this client, not the CA. Let's Encrypt has issued
+		// certificates for IP addresses since 2026-01-15, under a
+		// short-lived profile that golang.org/x/crypto/acme/autocert cannot
+		// request: its Manager accepts hostnames only and has no profile
+		// selection. Naming the CA sent owners to check the wrong thing.
+		// A public-IP certificate flow is B6-3, which is deferred.
+		return nil, fmt.Errorf("TLS mode 'acme': domain must be a hostname, not an IP address (%s); "+
+			"this build's ACME client cannot request a certificate for an IP address. Use a hostname, "+
+			"or set tls.mode to \"manual\" with your own certificate, or stay on \"self_signed\" and "+
+			"trust it on each client", cfg.Domain)
 	}
 
 	// Reject wildcard domains (HTTP-01 does not support them).
@@ -209,9 +220,75 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 
 	tlsCfg := m.TLSConfig()
 	tlsCfg.MinVersion = tls.VersionTLS12
+	tlsCfg.GetCertificate = logCertificateFailures(tlsCfg.GetCertificate, cfg.Domain)
 
 	return &TLSResult{
 		TLSConfig:   tlsCfg,
 		HTTPHandler: m.HTTPHandler(redirect),
 	}, nil
+}
+
+// certFailureLogInterval bounds how often an issuance failure is logged. Long
+// enough that a client retrying in a loop cannot flood the log, short enough
+// that an operator watching the log while they fix their port forwarding sees
+// the state change.
+const certFailureLogInterval = 10 * time.Minute
+
+// logCertificateFailures reports certificate-issuance failures, at most once
+// per certFailureLogInterval.
+//
+// Without it these failures are invisible. internal/app sets the HTTP server's
+// ErrorLog to io.Discard — deliberately, to suppress per-handshake TLS noise,
+// and that comment is right — which also discarded the one error an operator
+// needs: a server whose port 80 cannot be reached from the internet logs
+// "server starting", reports healthy, and then fails every TLS handshake in
+// silence. B6-6 exists to stop a reachability limit reading as application
+// success, and this is the clearest instance of it in the tree.
+//
+// It observes and returns the underlying error unchanged, so autocert's own
+// retry and caching are untouched.
+//
+// Two things it deliberately does not do, because this runs on an
+// unauthenticated path — every ClientHello reaches it, before any handshake
+// completes:
+//
+//   - It keeps no per-name state. Deduplicating by hello.ServerName would let
+//     an unauthenticated peer grow a map without bound by varying SNI, so the
+//     throttle is a single timestamp instead.
+//   - It never logs hello.ServerName. That field is whatever the peer sent;
+//     the operator already knows which domain they configured, so the log
+//     carries that instead and no attacker-supplied bytes reach it.
+func logCertificateFailures(
+	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
+	domain string,
+) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if next == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	var lastReported time.Time
+
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		cert, err := next(hello)
+		if err == nil {
+			return cert, nil
+		}
+
+		mu.Lock()
+		report := lastReported.IsZero() || time.Since(lastReported) >= certFailureLogInterval
+		if report {
+			lastReported = time.Now()
+		}
+		mu.Unlock()
+
+		if report {
+			slog.Error("TLS certificate issuance failed — clients cannot connect over HTTPS until this is fixed",
+				"configured_domain", domain,
+				"error", err,
+				"likely_cause", "Let's Encrypt validates over HTTP-01, which needs inbound TCP :80 reachable "+
+					"from the internet and resolving to this host. Check the DNS record, the port-forwarding "+
+					"rule for :80, and any firewall in front of it — see docs/port-forwarding.md")
+		}
+		return cert, err
+	}
 }
