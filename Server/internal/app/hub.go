@@ -65,6 +65,11 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		// reads the ring unlocked.
 		ReplayRingSize:  cfg.EventPersistence.ReplayRingSize,
 		ReplayColdLimit: cfg.EventPersistence.ReplayColdLimit,
+		// voice_join's fallback for a channel with no per-channel
+		// voice_quality override (OC-0439). Startup-only, like the rest of
+		// this options struct: the setup wizard already treats voice.quality
+		// as requiring a restart to take effect.
+		VoiceQuality: cfg.Voice.Quality,
 	})
 	if err != nil {
 		return api.Runtime{}, fmt.Errorf("app: building hub: %w", err)

@@ -66,16 +66,40 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 
 	state, ok := h.voiceJoinPersist(ctx, c, ch, channelID)
 	if !ok {
+		// OC-0420: voiceJoinLeaveCurrent already took the moderator
+		// mute/deafen stash off the client (or read it off the row it just
+		// deleted) with nothing yet written for voiceJoinRestoreModFlags to
+		// have applied — put it back so it survives for a retried join, or
+		// the client's next unrelated one, instead of vanishing here.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 
 	if !h.voiceJoinGrantToken(ctx, c, channelID, state) {
+		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
+		// the row voiceJoinGrantToken's own failure path is about to roll
+		// back (rollbackVoiceJoin deletes it) — re-stash for the same reason
+		// as the persist branch above.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 
 	h.voiceJoinComplete(ctx, c, ch, channelID, state)
+}
+
+// restorePendingModFlags puts a moderator mute/deafen stash back onto c after
+// an aborted join consumed it (voiceJoinLeaveCurrent's take-and-clear) or read
+// it off a row that is being deleted, but could not carry it through to a
+// persisted voice_states row for a later join to read back. The
+// wasServerMuted || wasServerDeafened guard mirrors stashPendingModFlags' own
+// early return (voice_moderation.go): a join with nothing stashed or muted
+// must not overwrite an unrelated moderator action's stash with false/false/nil.
+func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64) {
+	if wasServerMuted || wasServerDeafened {
+		c.setPendingModFlags(wasServerMuted, wasServerDeafened, wasServerMutedBy)
+	}
 }
 
 // voiceJoinPrecheck runs every gate that must pass before handleVoiceJoin
@@ -520,8 +544,12 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
 
-	// Send voice_config to the joiner.
-	quality := "medium"
+	// Send voice_config to the joiner. h.defaultVoiceQuality (set at
+	// construction from the operator's voice.quality config, HubOptions.
+	// VoiceQuality) is the fallback for a channel with no per-channel
+	// override — which is every channel today, since CreateChannel never
+	// writes voice_quality and the column has no DEFAULT (OC-0439).
+	quality := h.defaultVoiceQuality
 	if ch.VoiceQuality != nil && *ch.VoiceQuality != "" {
 		q := *ch.VoiceQuality
 		if validVoiceQuality(q) {
