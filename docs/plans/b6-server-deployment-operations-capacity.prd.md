@@ -63,34 +63,40 @@ is met on stated hardware with published p95/p99 measurements.**
 
 ## Success Metrics
 
-| Metric                   | Target                                                                      | How measured                                                                                                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Registered users         | ≥ 250                                                                       | `Server/scripts/k6/ws-load.js` on stated hardware                                                                                                                                    |
-| Simultaneous connections | ≥ 100                                                                       | same k6 profile                                                                                                                                                                      |
-| Concurrent voice         | ≥ 25                                                                        | `lk load-test` (LiveKit CLI) wrapper script, 25 audio publishers + subscribers, plus k6 driving the OwnCord join/leave path; decided 2026-09-11                                      |
-| Latency budgets          | see "Initial latency budgets" below (decided 2026-09-11)                    | load-test dataset + reproducible commands                                                                                                                                            |
-| Reference hardware       | 2 vCPU / 4 GB RAM / SSD, Linux x64 (decided 2026-09-11)                     | B6-9 adds a `docker run --cpus=2 --memory=4g` leg to `load-baseline.yml` (today it boots the server unconstrained on `ubuntu-latest`); numbers publish only from the constrained leg |
-| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                  | network-mode integration matrix                                                                                                                                                      |
-| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores | artifact and container install/boot matrix                                                                                                                                           |
-| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone               | HP-6 operator usability record                                                                                                                                                       |
+| Metric                   | Target                                                                                    | How measured                                                                                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registered users         | ≥ 250 — **met 2026-09-12**                                                                | `Server/scripts/k6/ws-load.js` on stated hardware; run 34701291805, published in [capacity.md](../capacity.md)                                                                                                                          |
+| Simultaneous connections | ≥ 100 — **met 2026-09-12** (100 held for the 180 s sustain)                               | same k6 profile                                                                                                                                                                                                                         |
+| Concurrent voice         | ≥ 25 — **met 2026-09-12** (625/625 tracks, 0% loss)                                       | `Server/scripts/voice-load.sh` wrapping `lk load-test`, 25 audio publishers + 25 subscribers, plus k6 driving the OwnCord join/leave/token path; decided 2026-09-11                                                                     |
+| Latency budgets          | tightened from the first run — see [capacity.md](../capacity.md) (initial set 2026-09-11) | load-test dataset + reproducible commands                                                                                                                                                                                               |
+| Reference hardware       | 2 vCPU / 4 GB RAM / SSD, Linux x64 (decided 2026-09-11)                                   | B6-9's constrained leg in `load-baseline.yml` (`--cpuset-cpus=0,1 --cpus=2 --memory=4g --memory-swap=4g`); numbers publish only from that leg, and the ceiling leg is explicitly non-gating. Published in [capacity.md](../capacity.md) |
+| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                                | network-mode integration matrix                                                                                                                                                                                                         |
+| Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores               | artifact and container install/boot matrix                                                                                                                                                                                              |
+| Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone                             | HP-6 operator usability record                                                                                                                                                                                                          |
 
 ### Initial latency budgets (decided 2026-09-11)
 
 Measured at the 100-connection profile on the reference hardware. These are
 starting budgets: HP-6 measures against them, and B6-9 may tighten (never
-loosen) them once the first dataset exists. Anything looser than this is a
-finding, not a number to publish. Where the source column says "new", the k6
-script does not record that path yet; adding the metric and its p95/p99
-thresholds is B6-9 work, before the first qualifying run.
+loosen) them once the first dataset exists.
 
-| Path                                                    | p95      | p99      | Source of the number                                                            |
-| ------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------- |
-| REST login (`auth_time`)                                | < 1 s    | < 2 s    | existing k6 p95 threshold; p99 is new                                           |
-| WebSocket open → `auth_ok` received                     | < 1 s    | < 2 s    | new k6 metric in B6-9: `ws_connect_time` stops at socket open, before `auth_ok` |
-| Message send → sender acknowledgement (REST)            | < 200 ms | < 500 ms | B3 bench baseline order of magnitude, with headroom                             |
-| Message send → recipient delivery (all 100 connections) | < 250 ms | < 500 ms | new: the B3 carryover said sender ack was measured, not this                    |
-| Voice join (token + LiveKit room join)                  | < 2 s    | < 4 s    | LiveKit connect on a LAN plus one REST round trip                               |
-| Graceful drain to exit 0                                | < 20 s   | —        | `Server/cmd/smoke` `drainBudget`                                                |
+> **Superseded 2026-09-12 by the first qualifying run.** Every row below was met
+> on the constrained leg with between 3x and 1000x margin, so all five were
+> tightened. The live budgets, the measured figures and the run's provenance are
+> in [capacity.md](../capacity.md); this table is kept as the record of where
+> they started. HP-6 measures against capacity.md, not against this. Anything looser than this is a
+> finding, not a number to publish. Where the source column says "new", the k6
+> script does not record that path yet; adding the metric and its p95/p99
+> thresholds is B6-9 work, before the first qualifying run.
+
+| Path                                                     | p95      | p99      | Source of the number                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REST login (`auth_time`)                                 | < 1 s    | < 2 s    | existing k6 p95 threshold; p99 is new                                                                                                                                                                                                                                                                                                                                           |
+| WebSocket open → `auth_ok` received                      | < 1 s    | < 2 s    | new k6 metric in B6-9: `ws_connect_time` stops at socket open, before `auth_ok`                                                                                                                                                                                                                                                                                                 |
+| Message send → sender acknowledgement (WebSocket)        | < 200 ms | < 500 ms | B3 bench baseline order of magnitude, with headroom. **Corrected in B6-9:** said "(REST)", but no REST endpoint creates a message — every write reaches `service/message_delivery.go` from the WS read pump, so the only send acknowledgement is `chat_send` → `chat_send_ok`                                                                                                   |
+| Message send → recipient delivery (all 100 connections)  | < 250 ms | < 500 ms | new: the B3 carryover said sender ack was measured, not this                                                                                                                                                                                                                                                                                                                    |
+| Voice join — OwnCord half (`voice_join` → `voice_token`) | < 2 s    | < 4 s    | **Corrected in B6-9:** the combined token-plus-room-join figure is not obtainable as a percentile. k6 has no WebRTC stack and `lk load-test` publishes no join-latency distribution, so the OwnCord half is the budgeted percentile and the LiveKit half is published as the cohort's ramp-inclusive connect wall clock. Voice join is a WS path (`voice_join`), not a REST one |
+| Graceful drain to exit 0                                 | < 20 s   | —        | `Server/cmd/smoke` `drainBudget`                                                                                                                                                                                                                                                                                                                                                |
 
 ## Scope
 
@@ -137,7 +143,7 @@ gates client expansion.
 | B6-6     | Direct port-forward operation and honest limits          | A reverse proxy is never required; blocked-port, CGNAT, hairpin-NAT, dynamic-IP and firewall limits are reported actionably, never disguised as application success                                              | complete | [b6-6-port-forward-honest-limits.plan.md](../../.claude/plans/b6-6-port-forward-honest-limits.plan.md) | 4          |
 | B6-7     | `GET /api/v1/server-info` and the browser-hosting switch | One endpoint answers "what is this server, and is the browser client on"; hosting is off by default and exposes no route or asset when disabled                                                                  | complete | [b6-7-server-info-browser-switch.plan.md](../../.claude/plans/b6-7-server-info-browser-switch.plan.md) | 6, 16      |
 | B6-8     | Alpha-to-beta upgrade and rollback rehearsal             | An owner upgrades and rolls back database, attachments, configuration, credentials and backups on both Docker and standalone, with authenticated downloads still working afterwards                              | complete | [b6-8-upgrade-rollback-rehearsal.plan.md](../../.claude/plans/b6-8-upgrade-rollback-rehearsal.plan.md) | 7          |
-| B6-9     | Published capacity profile                               | The 250/100/25 profile is met and published with hardware, configuration and reproducible commands                                                                                                               | pending  | —                                                                                                      | 8, 14      |
+| B6-9     | Published capacity profile                               | The 250/100/25 profile is met and published with hardware, configuration and reproducible commands                                                                                                               | complete | [b6-9-published-capacity-profile.plan.md](../../.claude/plans/b6-9-published-capacity-profile.plan.md) | 8, 14      |
 | B6-10    | Operational performance measurements                     | Reconnect storms, database-pool wait deltas, recipient-receipt fan-out latency, voice control, upload admission through quota and storage, TLS overhead and graceful shutdown are all measured and published     | pending  | —                                                                                                      | 9          |
 | B6-11    | Failure and recovery drills                              | Backup/restore, deletion-marker restore, disk-full, low-headroom, corrupt input, unhealthy dependency, interrupted migration and rollback all pass, with byte-level erasure evidence under active readers        | pending  | —                                                                                                      | 10         |
 | B6-12    | Signed, traceable release inputs and outputs             | Containers and build inputs are pinned or auto-reviewed; SBOM, provenance, checksums and a source snapshot are signed; one tag is rehearsed against `gate-evidence` and `environment: release`                   | pending  | —                                                                                                      | 11, 15     |
@@ -194,11 +200,18 @@ point:
       SSD Linux x64 machine — the cheapest VPS or single-board class an owner
       is likely to buy. It is reproduced, not owned: B6-9 adds a leg to
       `load-baseline.yml` that runs the server inside a
-      `docker run --cpus=2 --memory=4g` cgroup, so anyone can re-run it. That
-      leg does not exist yet — today the job boots the server directly on an
-      unconstrained `ubuntu-latest` runner and its header says so — and no
-      capacity number is published until it does. The developer's 16-core box
-      (B3 bench baseline) is a ceiling check, never the reference.
+      `docker run --cpus=2 --memory=4g` cgroup, so anyone can re-run it. **Built
+      in B6-9** as `--cpuset-cpus=0,1 --cpus=2 --memory=4g --memory-swap=4g`,
+      with the load generators pinned by `taskset` to the two CPUs the server
+      does not have. `--cpus` alone was not sufficient and the decision's
+      wording understated it: `--cpus` is a CFS quota, while `runtime.NumCPU()`
+      reads the affinity mask, so without the cpuset the server sizes
+      `GOMAXPROCS` and its bcrypt admission budget for cores the cgroup will
+      not give it (verified: `--cpus=2` alone reported 32 CPUs on a 32-core
+      host, the cpuset reported 2). The hardware, the configuration and the
+      commands are published in [capacity.md](../capacity.md), committed before
+      the first qualifying run. The developer's 16-core box (B3 bench baseline)
+      is a ceiling check, never the reference.
 - [x] **Decided 2026-09-11:** the repository owner (J3vb) owns the voice load
       harness, as B6-9 task 1. It is not written from scratch: LiveKit's CLI
       already ships `lk load-test` (simulated audio/video publishers and
@@ -249,14 +262,14 @@ point:
 
 ## Risks
 
-| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                                  |
-| ---------------------------------------------------------------------------- | ---------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| The 25-participant voice number cannot be measured because no harness exists | High       | High   | Owner named 2026-09-11; B6-9 task 1 wraps `lk load-test` rather than writing a harness, before any load run |
-| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                               |
-| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently    |
-| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                          |
-| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                        |
-| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                     |
+| Risk                                                                         | Likelihood | Impact | Mitigation                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------- | ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The 25-participant voice number cannot be measured because no harness exists | Closed     | High   | `Server/scripts/voice-load.sh` (B6-9) wraps `lk load-test` at 25 + 25 and **asserts** the subscriber summary: `lk` exits 0 over a fully lossy room, and its default `--layout speaker` silently caps each subscriber at ~6 tracks, so a 25x25 room reports 150/625 with 0% loss unless the layout is set and the total checked |
+| Reference hardware is chosen to fit the numbers rather than stated up front  | Medium     | High   | Publish hardware and commands before the first qualifying run                                                                                                                                                                                                                                                                  |
+| Public-IP ACME eligibility changes under the CA/B Forum or Let's Encrypt     | Medium     | Medium | Keep manual-certificate mode first-class; document the limitation honestly rather than retrying silently                                                                                                                                                                                                                       |
+| Parallel workstreams qualify against different release candidates            | Medium     | High   | Freeze one RC and one fixture set before HP-6; record its SHA in the exit evidence                                                                                                                                                                                                                                             |
+| Byte-level erasure evidence contradicts the already-published privacy claim  | Low        | High   | B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse                                                                                                                                                                                                                                           |
+| Audit carryovers get re-planned as new work                                  | Medium     | Low    | Satisfied preconditions above are re-verified at the RC, not re-planned                                                                                                                                                                                                                                                        |
 
 ---
 
