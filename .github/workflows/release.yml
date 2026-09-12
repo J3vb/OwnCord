@@ -487,6 +487,11 @@ jobs:
   # and at this point in the run that is the previous one — the publish job has
   # not created this tag's release yet.
   #
+  # It upgrades TO a plain source build of this tag, not to the signed asset
+  # release-server produces, so what it proves is that the TREE upgrades
+  # cleanly. The gap is the ldflags stamp alone, and release-server already
+  # runs the exact shipped binary through the full lifecycle smoke.
+  #
   # A `uses:` job takes no timeout-minutes (GitHub rejects the key on a
   # reusable-workflow call); the timeout lives on the called workflow's job.
   upgrade-rehearsal:

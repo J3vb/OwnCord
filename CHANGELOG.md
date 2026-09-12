@@ -173,6 +173,13 @@ server's internals were reorganised behind service boundaries.
 - **The shipped compose file drops every Linux capability** and blocks
   privilege escalation. If you run the container by hand, pass
   `--cap-drop=ALL --security-opt=no-new-privileges:true`.
+- **Upgrading and rolling back are rehearsed before a release ships.**
+  Nothing previously checked that a new server takes over an install that is
+  already in use, rather than an empty one. Every release now upgrades the
+  previously published version to the one being shipped and rolls back out of
+  it again, as standalone binaries and as containers, and is blocked unless a
+  signed-in session, an uploaded file, the configuration, the credential keys
+  and the backups all survive both directions intact.
 
 ### Privacy & data
 
@@ -228,6 +235,10 @@ server's internals were reorganised behind service boundaries.
   has and where its data goes, and states the support-bundle contract.
 - `docs/architecture/server-boundaries.md` records which parts of the server
   may talk to the database directly.
+- `docs/deployment.md` now covers upgrading and rolling back: stop the server,
+  archive the install, swap the binary or image, and — because migrations only
+  ever run forward — restore that archive first if you need the old version
+  back.
 
 ### Repository
 

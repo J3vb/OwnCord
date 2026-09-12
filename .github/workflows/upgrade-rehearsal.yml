@@ -185,13 +185,18 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth 1 origin "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"
+          # A re-used runner keeps .git/worktrees/from-src from the last run
+          # while $RUNNER_TEMP has been cleaned, and `add` then refuses with
+          # "missing but already registered". Free on a hosted runner, load-
+          # bearing on a self-hosted one.
+          git worktree prune
           git worktree add --detach "$RUNNER_TEMP/from-src" "$FROM_TAG"
           docker build --build-arg "VERSION=$FROM_VERSION" \
             -t owncord-rehearsal:from "$RUNNER_TEMP/from-src/Server"
 
       # Deliberately unstamped, so it reports `dev` against the stamped image
       # above. Plain `docker build`, not the buildx cache the release jobs use:
-      # this image is thrown away at the end of the job, and borrowing their
+      # both images are removed by the cleanup step below, and borrowing their
       # cache scopes would let a rehearsal evict layers a release run needs.
       - name: Build the image to upgrade to (this revision)
         run: docker build -t owncord-rehearsal:head Server/
@@ -199,3 +204,10 @@ jobs:
       - name: Rehearse upgrade and rollback (containers)
         working-directory: Server
         run: go run ./cmd/smoke -upgrade -docker -from owncord-rehearsal:from owncord-rehearsal:head
+
+      # A hosted runner is discarded with its images; a self-hosted one is not,
+      # and would accumulate two rehearsal images per run. `always()` so a
+      # failed rehearsal does not leak them either.
+      - name: Remove the rehearsal images
+        if: always()
+        run: docker image rm -f owncord-rehearsal:from owncord-rehearsal:head
