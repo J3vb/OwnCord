@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // target is one deployment mode under rehearsal. The fixture and every
@@ -148,7 +149,13 @@ func (t *standaloneTarget) archive(dir string) error {
 	if err := os.CopyFS(filepath.Join(dir, "data"), os.DirFS(filepath.Join(t.dir, "data"))); err != nil {
 		return fmt.Errorf("archiving the data directory: %w", err)
 	}
-	return copyFile(filepath.Join(t.dir, "config.yaml"), filepath.Join(dir, "config.yaml"))
+	if err := tightenModes(filepath.Join(dir, "data")); err != nil {
+		return fmt.Errorf("archiving the data directory: %w", err)
+	}
+	if err := copyFile(filepath.Join(t.dir, "config.yaml"), filepath.Join(dir, "config.yaml")); err != nil {
+		return fmt.Errorf("archiving config.yaml: %w", err)
+	}
+	return nil
 }
 
 // restore puts the archive back, replacing the live data directory rather than
@@ -163,14 +170,47 @@ func (t *standaloneTarget) restore(dir string) error {
 	if err := os.CopyFS(live, os.DirFS(filepath.Join(dir, "data"))); err != nil {
 		return fmt.Errorf("restoring the data directory: %w", err)
 	}
-	return copyFile(filepath.Join(dir, "config.yaml"), filepath.Join(t.dir, "config.yaml"))
+	if err := tightenModes(live); err != nil {
+		return fmt.Errorf("restoring the data directory: %w", err)
+	}
+	if err := copyFile(filepath.Join(dir, "config.yaml"), filepath.Join(t.dir, "config.yaml")); err != nil {
+		return fmt.Errorf("restoring config.yaml: %w", err)
+	}
+	return nil
+}
+
+// tightenModes narrows a freshly copied tree to owner-only. os.CopyFS creates
+// files 0666&^umask and directories 0777&^umask regardless of the source, so on
+// Linux a copied data/totp.key comes back 0644 — and a data directory is a
+// bundle of credentials (totp.key, erasure.key, push_vapid.key, the database,
+// every upload). The rollback recipe the docs will give owners is this copy, so
+// it must not be the step that world-reads their keys.
+func tightenModes(root string) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(0o600)
+		if d.IsDir() {
+			mode = 0o700
+		}
+		return os.Chmod(path, mode)
+	})
 }
 
 func (t *standaloneTarget) cleanup() {
 	// A failed phase leaves a server running; kill it before removing the
-	// directory it has open, or Windows refuses the removal.
+	// directory it has open, or Windows refuses the removal. Kill returns
+	// before the process is reaped and its handles released, so wait for the
+	// exit as well — otherwise this is the very race the kill is here to avoid.
+	// waitErr is buffered and nobody has consumed it on this branch (exited is
+	// false), so the receive cannot deadlock against the goroutine in start().
 	if t.running != nil && !t.running.exited {
 		_ = t.running.cmd.Process.Kill()
+		select {
+		case <-t.running.waitErr:
+		case <-time.After(drainBudget):
+		}
 	}
 	if t.dir != "" {
 		_ = os.RemoveAll(t.dir)
@@ -207,6 +247,7 @@ var errDockerLeg = errors.New("the container leg is not implemented yet (B6-8 Ta
 // Server/scripts/docker-smoke.sh phase 5 replaces rather than restarts.
 type dockerTarget struct{}
 
+//nolint:unparam // always-error until Task 5 builds the container leg; this is the final signature
 func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 	return nil, fmt.Errorf("%w (asked for %s -> %s)", errDockerLeg, oldImage, newImage)
 }
