@@ -31,7 +31,7 @@ default-build pass proves nothing about the others:
 go build ./... && go build -tags otel ./... && go build -tags wazero ./... && go build -tags otel,wazero ./...
 go vet ./...
 go test -race ./...
-go test -tags deadlock -count=1 ./ws/    # deadlock detector; ws is where lock order actually varies
+go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
 go test -count=1 ./admin/...             # untagged leg: admin/logstream_alloc_test.go is !race && !deadlock
 golangci-lint run                        # CI pins v2.11.3 — check `golangci-lint --version` first
 
@@ -42,6 +42,14 @@ go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/s
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
+
+**The deadlock leg is the whole tree, not `./ws/`.** This line used to say `./ws/` —
+"where lock order actually varies" — and a B6-8 branch that touched no `Server/admin`
+file still went red on `Server Build & Test (windows-latest)` in that leg, on an
+`admin` test the narrower local command never ran. `ci.yml`'s step is
+`go test -tags deadlock -count=1 ./...`; mirror it or the local run is not a mirror.
+`./ws/` alone is still the right quick check while iterating on lock order — just not
+the thing to call green before pushing.
 
 **A `golangci-lint` already on PATH may be the wrong one, and says so
 confusingly.** A build older than this module's Go target refuses outright:

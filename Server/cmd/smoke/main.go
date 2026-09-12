@@ -19,12 +19,21 @@
 // OS actually offers needs process-group control, so the harness lives where
 // that is expressible. See stop_windows.go and stop_other.go.
 //
+// With -upgrade it instead rehearses the upgrade an owner actually performs —
+// install the new version over a populated install, then roll back out of it —
+// which is a different question from "does the new asset boot" (B6-8). Both
+// deployment modes share one fixture through the target seam in target.go.
+//
 // Usage: go run ./cmd/smoke <path-to-server-binary>
+//
+//	go run ./cmd/smoke -upgrade -from <old-binary> <new-binary>
+//	go run ./cmd/smoke -upgrade -docker -from <old-image> <new-image>
 package main
 
 import (
 	"crypto/sha256"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,32 +50,59 @@ const (
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: smoke <path-to-server-binary>")
-		os.Exit(2)
+	upgrade := flag.Bool("upgrade", false, "rehearse an upgrade from -from to the positional target, then roll back out of it")
+	from := flag.String("from", "", "the version to upgrade FROM: a server binary, or an image reference with -docker")
+	useDocker := flag.Bool("docker", false, "rehearse containers on a named volume instead of processes in a temporary directory")
+	flag.Usage = usage
+	flag.Parse()
+
+	// One positional argument in both modes: the binary (or image) under test.
+	// -from and -docker only mean anything to the rehearsal, so accepting them
+	// without -upgrade would silently run the plain smoke instead.
+	args := flag.Args()
+	switch {
+	case len(args) != 1:
+		usageError("want exactly one positional argument, got %d", len(args))
+	case !*upgrade && (*from != "" || *useDocker):
+		usageError("-from and -docker are only meaningful together with -upgrade")
+	case *upgrade && *from == "":
+		usageError("-upgrade needs -from <old-binary|old-image> to upgrade from")
 	}
-	if err := run(os.Args[1]); err != nil {
+
+	action := func() error { return run(args[0]) }
+	summary := "standalone smoke passed: boot, migrate, healthy, drain, restart"
+	if *upgrade {
+		action = func() error { return runUpgrade(*from, args[0], *useDocker) }
+		summary = "upgrade rehearsal passed"
+	}
+	if err := action(); err != nil {
 		// ::error:: is the GitHub Actions annotation prefix, matching
 		// docker-smoke.sh so a failure is surfaced on the run summary.
 		fmt.Printf("::error::%v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("standalone smoke passed: boot, migrate, healthy, drain, restart")
+	fmt.Println(summary)
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: smoke <path-to-server-binary>")
+	fmt.Fprintln(os.Stderr, "       smoke -upgrade -from <old-binary> <new-binary>")
+	fmt.Fprintln(os.Stderr, "       smoke -upgrade -docker -from <old-image> <new-image>")
+	flag.PrintDefaults()
+}
+
+// usageError exits 2, the code the flag package already uses for a bad command
+// line, so a CI step can tell "you invoked me wrong" from "the smoke failed".
+func usageError(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "smoke: "+format+"\n", args...)
+	usage()
+	os.Exit(2)
 }
 
 func run(binArg string) error {
-	bin, err := filepath.Abs(binArg)
+	bin, err := serverBinary(binArg)
 	if err != nil {
 		return err
-	}
-	// The server runs with its own directory as the working directory, so the
-	// binary must be addressed absolutely or it would resolve against that.
-	info, err := os.Stat(bin)
-	if err != nil {
-		return fmt.Errorf("%s is not readable: %w", binArg, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("%s is a directory, not a server binary", binArg)
 	}
 
 	dir, err := os.MkdirTemp("", "owncord-smoke-")
@@ -144,7 +180,11 @@ type server struct {
 	exited  bool
 }
 
-func start(bin, dir, logName string) (*server, error) {
+// start launches the server. extraEnv is variadic so the plain smoke keeps
+// inheriting the harness environment untouched — that is the deployment the
+// release asset is tested as — while the rehearsal can add the settings it
+// needs (see noLiveKitDownload).
+func start(bin, dir, logName string, extraEnv ...string) (*server, error) {
 	logPath := filepath.Join(dir, logName)
 	logFile, err := os.Create(logPath)
 	if err != nil {
@@ -152,6 +192,9 @@ func start(bin, dir, logName string) (*server, error) {
 	}
 	cmd := exec.Command(bin)
 	cmd.Dir = dir
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = newProcessGroup()

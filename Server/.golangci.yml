@@ -102,9 +102,12 @@ linters:
       # binary named on its command line and read the log it wrote inside a
       # directory the harness itself created. gosec's taint analysis flags that
       # argument reaching exec.Command and os.Stat (G702/G703) — which is the
-      # tool's purpose, not a defect. It never runs in the server.
+      # tool's purpose, not a defect. It never runs in the server. The upgrade
+      # rehearsal (B6-8) additionally copies that install directory out and back
+      # to prove a rollback works, so the same taint now reaches file reads in
+      # more than one file — hence the whole package rather than main.go alone.
       - linters: [gosec]
-        path: cmd/smoke/main\.go
+        path: cmd/smoke/
 
 # gofmt is the required Go formatting gate (S-05). It lives here rather than as a
 # standalone CI step because `gofmt -l` prints offenders and still exits 0, so a
