@@ -113,6 +113,25 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
+	// OC-0423: reconnectRegister just made c reachable via h.clients, so this
+	// is the earliest point a sign-out-everywhere / account-recovery
+	// revocation racing reconnectPrecheck's DB work could have found this
+	// socket — DisconnectRevokedUser inspects h.clients at one instant, and
+	// a revocation landing before registerNow ran kicked nothing. Re-read
+	// the session now (see postRegisterSessionRecheck's doc for why this
+	// ordering closes the race). Deliberately outside reconnectRegister's
+	// h.seqMu section: it only needs to run after that section's
+	// registerNow, and a DB round trip has no business extending the
+	// critical section that serializes every broadcast.
+	if h.postRegisterSessionRecheck(ctx, c) {
+		// Mirrors reconnectWriteReplay's own handshake-failure path below:
+		// the teardown already ran (inside postRegisterSessionRecheck), so
+		// only the conn needs closing. startPumps=false — readPump must
+		// never start on this closed conn (OC-0051).
+		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
+		return true, false
+	}
+
 	// P1 (Codex round 2): nsfwReadableChannelIDs was snapshotted back in
 	// reconnectPrecheck, several DB round trips and a seqMu section ago — a
 	// batch-wide recheck taken once more right here would still trust that

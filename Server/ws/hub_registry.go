@@ -1,6 +1,11 @@
 package ws
 
-import "log/slog"
+import (
+	"context"
+	"log/slog"
+
+	"github.com/J3vb/OwnCord/Server/auth"
+)
 
 // Register queues a client for registration with the hub.
 func (h *Hub) Register(c *Client) {
@@ -214,6 +219,60 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, key, sig))
 		}
 	}
+}
+
+// postRegisterSessionRecheck re-validates c's session token immediately
+// after registerNow makes c reachable via h.clients, closing OC-0423: a
+// session revoked (sign-out-everywhere, POST /users/me/sessions/revoke-all;
+// or account recovery, RedeemRecoveryKit) while this handshake's earlier DB
+// work — computeAllowedChannels, computeReadableChannels, cold-tier replay
+// queries, buildReady's own queries — was still in flight is invisible to
+// DisconnectRevokedUser: that call inspects h.clients at one instant, and a
+// connection is not in h.clients until registerNow runs. Without this
+// re-check the handshake sails through to a live, fully authorized socket on
+// a session row that no longer exists, until sweepRevokedSessions' next tick
+// (up to 60s) or the client's 10th inbound frame (handleMessageSessionRecheck,
+// SessionCheckInterval).
+//
+// Calling this AFTER registerNow, rather than narrowing the window by
+// calling it earlier (e.g. from refreshUserSnapshot, which both handshake
+// paths already call pre-register for the equivalent ban check, OC-0272),
+// is what closes the race rather than merely shrinking it: a revocation
+// whose DELETE is visible to the read below is acted on right here, and one
+// whose DELETE commits later necessarily does so after registerNow already
+// ran, so that revocation's own DisconnectRevokedUser call finds c in
+// h.clients and kicks it normally. There is no ordering left in which
+// neither catches it.
+//
+// It returns true when the caller must abort the handshake instead of
+// continuing to send auth_ok/ready: c has already been torn back out of the
+// hub (mirroring unregisterFailedHandshake's post-registerNow teardown) and
+// its session is gone, so nothing behind it should be disclosed. Skips the
+// check when c carries no token (never true for a real client) and fails
+// open on a transient DB error — a failed read says nothing about the
+// session's validity, matching handleMessageSessionRecheck's identical rule
+// (OC-0211) and sweepRevokedSessions' rule for a failed batch lookup.
+//
+// Deliberately narrower than handleMessageSessionRecheck: it does not also
+// check ban status, because refreshUserSnapshot already re-reads the user
+// row earlier in this same handshake and fails closed on a ban (OC-0272) —
+// duplicating that here would just re-run the same verdict a few DB calls
+// later.
+func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
+	if c.tokenHash == "" {
+		return false
+	}
+	result, err := h.readers.Dispatch.GetSessionWithBanStatus(ctx, c.tokenHash)
+	if err != nil {
+		slog.Warn("ws post-register session recheck: lookup failed, skipping", "user_id", c.userID, "err", err)
+		return false
+	}
+	if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+		slog.Info("ws post-register session recheck: session revoked during handshake, aborting", "user_id", c.userID)
+		h.unregisterFailedHandshake(ctx, c)
+		return true
+	}
+	return false
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {

@@ -525,6 +525,20 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	}
 	h.registerNow(c, allowedChannelIDs)
 
+	// OC-0423: a sign-out-everywhere / account-recovery revocation racing the
+	// DB work above (computeAllowedChannels, the role lookup, etc.) finds
+	// h.clients empty for this user and kicks nothing — registerNow just
+	// above is the earliest point a live revocation could have found this
+	// socket. Re-read the session right here, now that c is reachable: see
+	// postRegisterSessionRecheck's doc for why this ordering closes the race
+	// rather than merely narrowing it. When it reports true it has already
+	// run the full failed-handshake teardown (unregisterFailedHandshake);
+	// only closing conn is left to do here.
+	if h.postRegisterSessionRecheck(ctx, c) {
+		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
+		return fmt.Errorf("handleFreshConnect: session revoked for user %d during handshake", c.userID)
+	}
+
 	// The re-read above and registerNow are not atomic: a role reassignment
 	// committing in between finds this socket absent from h.clients (so its
 	// revokeUnreadableChannels pass early-returns) yet builds our inherited

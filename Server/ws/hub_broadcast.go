@@ -258,6 +258,16 @@ func (h *Hub) DisconnectUser(userID int64) {
 // notice on its next tick. No frame precedes the close — the same treatment
 // the sweep gives a revoked session — so the client's reconnect meets the
 // 401 that tells it to sign in again. No-op if the user is not connected.
+//
+// This inspects h.clients at one instant, so a revocation landing while a
+// connection's handshake is still in flight (registered nowhere yet — a
+// handshake can spend real DB time in computeAllowedChannels,
+// computeReadableChannels, cold-tier replay queries, or buildReady's own
+// queries before registerNow runs) finds nothing to kick here. That window
+// is closed on the other side instead: postRegisterSessionRecheck
+// (hub_registry.go) re-validates the session immediately after registerNow,
+// from both production callers (handleFreshConnect, reconnectRegister), so
+// either this call or that recheck catches any given revocation (OC-0423).
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
