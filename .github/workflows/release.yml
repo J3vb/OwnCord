@@ -475,11 +475,33 @@ jobs:
       - name: Lifecycle-smoke Docker image
         run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
 
+  # B6-8. An upgrade is the path every existing install takes to this release,
+  # and a failed one is the path back out — neither is exercised by any job
+  # above, which all start from an empty directory or an empty volume. This
+  # drives the PREVIOUS release through an upgrade to the tag being built and
+  # back, in both deployment shapes, before anything is signed or pushed. Same
+  # placement as smoke-server-docker, and the same reason: a release that
+  # cannot be upgraded into, or rolled back out of, must not ship.
+  #
+  # No `from-tag`: the rehearsal resolves the newest published release itself,
+  # and at this point in the run that is the previous one — the publish job has
+  # not created this tag's release yet.
+  #
+  # A `uses:` job takes no timeout-minutes (GitHub rejects the key on a
+  # reusable-workflow call); the timeout lives on the called workflow's job.
+  upgrade-rehearsal:
+    name: Rehearse Upgrade and Rollback
+    needs: verify-versions
+    uses: ./.github/workflows/upgrade-rehearsal.yml
+    permissions:
+      contents: read
+
   release-server-docker:
     name: Build & Push Server Docker Image
     # Nothing reaches ghcr.io until BOTH architectures have been smoked on
-    # native hardware.
-    needs: smoke-server-docker
+    # native hardware and the upgrade+rollback rehearsal has passed. `publish`
+    # needs this job, so that edge gates the GitHub Release too.
+    needs: [smoke-server-docker, upgrade-rehearsal]
     # The `release` environment carries a required reviewer; naming it here
     # is what gates this job's ghcr.io push behind that approval, the same
     # way it gates the `publish` job below — without this line the push to

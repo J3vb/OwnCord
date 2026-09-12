@@ -1,0 +1,201 @@
+# Upgrade + rollback rehearsal (B6-8). Drives the PUBLISHED previous release
+# through an upgrade to this revision and back out of it again, in both shapes
+# an owner deploys: two binaries in a directory, and two images on a named
+# volume. Server/cmd/smoke owns the eight phases (populate, drain, archive,
+# upgrade, verify, drain, restore, verify the rollback); this file only
+# supplies it with an old artifact, a new artifact and a daemon.
+#
+# The Go harness never talks to GitHub — it takes paths and image references —
+# so it stays hermetic and an owner can run the same rehearsal offline. Every
+# line below that reaches the network is in THIS file, on purpose.
+#
+# Its own file, with a job name that is no required status context, for the
+# reason nightly-docker-smoke.yml's header spells out: a `schedule:` only ever
+# runs from the default branch and its check runs land on that branch's tip, so
+# a scheduled job under a required name leaves a `skipped` (or a red) context
+# there, and scripts/verify-gate-evidence.mjs — which does not count `skipped`
+# as success — would then refuse to let release.yml tag that commit.
+#
+# ci.yml runs the STANDALONE leg on every PR, inside server-build-test, so a
+# regression in the harness fails pre-merge. The container leg is here only: it
+# costs building an image from the released tag's source tree, which is not a
+# price worth paying per push.
+#
+# No `concurrency:` group. Both legs bind 127.0.0.1:8443, so they must not run
+# at the same time — which is why they are sequential steps of ONE job rather
+# than two jobs. Two runs of this workflow get two runners and never share that
+# port, and a rehearsal called from release.yml must not be cancellable by a
+# later run anyway (release.yml queues, never cancels).
+#
+# Two things the container leg needs, both learned the hard way:
+#
+#   * The image it upgrades FROM must be built with
+#     `--build-arg VERSION=<the released version>`. Server/Dockerfile defaults
+#     VERSION to `dev`, and so does HEAD's image, so an unstamped FROM image
+#     makes the rehearsal's "the version actually changed" assertion compare
+#     `dev` with `dev`. It fails today — and the day someone softens it, it
+#     would pass while proving nothing. release.yml stamps the image it pushes
+#     exactly this way.
+#   * It bind-mounts a host temp path (the operator-owned config.yaml, the way
+#     Server/docker-compose.yml does) into every container, so it needs a
+#     daemon that shares this runner's filesystem. True on GitHub-hosted
+#     runners. On a remote or DinD daemon, `docker` would instead create a
+#     DIRECTORY at that path and the server would die unable to read its
+#     config.
+name: Upgrade Rehearsal
+
+on:
+  schedule:
+    # Off-peak, and an hour after nightly-docker-smoke.yml so the two are not
+    # competing for runners.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      from-tag:
+        description: "Release tag to upgrade FROM (default: the newest published release)"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      from-tag:
+        description: "Release tag to upgrade FROM (default: the newest published release)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-rehearsal:
+    # Not a required status context — see the header.
+    name: Upgrade and Rollback Rehearsal
+    runs-on: ubuntu-latest
+    # Two image builds plus two eight-phase rehearsals; ~15 minutes when the
+    # runner is cold. Anything past this is a hung server, not a slow one.
+    timeout-minutes: 30
+    permissions:
+      # Only to read a release's assets with `gh`. Nothing here publishes.
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # A schedule can only run from the default branch, and main moves
+          # only at a release: dev is where a harness regression lands first,
+          # so the nightly rehearses dev (same choice, same reason, as
+          # nightly-docker-smoke.yml). Every other trigger takes the ref it was
+          # started on — for a workflow_call from release.yml that is the tag
+          # being built, which is precisely the version being upgraded TO.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+
+      # So the log of a scheduled run states what was rehearsed instead of
+      # leaving it to be re-derived from the trigger.
+      - name: Print checked-out revision
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          git rev-parse HEAD
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+
+      - name: Resolve the release to upgrade from
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_TAG_INPUT: ${{ inputs.from-tag }}
+          # Empty unless a tag push started this (directly or through
+          # release.yml's workflow_call).
+          CURRENT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          tag="$FROM_TAG_INPUT"
+          if [ -z "$tag" ]; then
+            # At tag time this runs BEFORE the publish job creates the release,
+            # so the newest published release is the previous one. Except on a
+            # re-pushed tag whose release already exists — rehearsing an
+            # upgrade from a tag to itself compares a version with itself, so
+            # that one entry is skipped rather than left to fail confusingly.
+            tag=$(gh release list --limit 5 --exclude-drafts --json tagName \
+              --jq 'first(.[] | select(.tagName != env.CURRENT_TAG) | .tagName)')
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::no published release to upgrade from — pass from-tag, or publish one first"
+            exit 1
+          fi
+          echo "upgrading from $tag"
+          echo "FROM_TAG=$tag" >> "$GITHUB_ENV"
+          echo "FROM_VERSION=${tag#v}" >> "$GITHUB_ENV"
+
+      - name: Download and verify the released server binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/from"
+          mkdir -p "$dir"
+          gh release download "$FROM_TAG" --dir "$dir" \
+            --pattern chatserver-linux-amd64.tar.gz --pattern checksums.sha256
+          # The release's own checksums.sha256 is the whole difference between
+          # "we rehearsed the previous release" and "we rehearsed whatever
+          # bytes came back". A missing line is as fatal as a mismatch: it
+          # means nothing verified the download.
+          awk -v a=chatserver-linux-amd64.tar.gz '$2 == a' \
+            "$dir/checksums.sha256" > "$dir/asset.sha256"
+          if [ ! -s "$dir/asset.sha256" ]; then
+            echo "::error::$FROM_TAG publishes no checksum for chatserver-linux-amd64.tar.gz — refusing to rehearse an unverified binary"
+            exit 1
+          fi
+          if ! ( cd "$dir" && sha256sum -c asset.sha256 ); then
+            echo "::error::chatserver-linux-amd64.tar.gz from $FROM_TAG does not match its published checksum — refusing to rehearse an unknown binary"
+            exit 1
+          fi
+          tar xzf "$dir/chatserver-linux-amd64.tar.gz" -C "$dir"
+          chmod +x "$dir/chatserver"
+          echo "FROM_BINARY=$dir/chatserver" >> "$GITHUB_ENV"
+
+      # No -X main.version: a source build reports `dev`, which is what lets
+      # the rehearsal see the version change against the released asset's own
+      # version. Stamping this build with the tag would only make the two
+      # sides differ for a second reason.
+      - name: Build the server at this revision
+        working-directory: Server
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/chatserver-head" .
+          echo "HEAD_BINARY=$RUNNER_TEMP/chatserver-head" >> "$GITHUB_ENV"
+
+      # Cheaper leg first: it needs no image, so a harness regression fails
+      # here before two image builds have been paid for.
+      - name: Rehearse upgrade and rollback (standalone binaries)
+        working-directory: Server
+        run: go run ./cmd/smoke -upgrade -from "$FROM_BINARY" "$HEAD_BINARY"
+
+      # There is no published container image for the release being upgraded
+      # from: the GHCR push job (B6-2) merged after the newest tag, so the only
+      # way to have that version as an image is to build the tag's own source
+      # tree. A worktree keeps this checkout — the version being upgraded TO —
+      # untouched, and the tag is fetched at depth 1 rather than un-shallowing
+      # the whole clone.
+      #
+      # --build-arg VERSION is load-bearing, not cosmetic; see the header.
+      - name: Build the image to upgrade from (released tag's source)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth 1 origin "refs/tags/$FROM_TAG:refs/tags/$FROM_TAG"
+          git worktree add --detach "$RUNNER_TEMP/from-src" "$FROM_TAG"
+          docker build --build-arg "VERSION=$FROM_VERSION" \
+            -t owncord-rehearsal:from "$RUNNER_TEMP/from-src/Server"
+
+      # Deliberately unstamped, so it reports `dev` against the stamped image
+      # above. Plain `docker build`, not the buildx cache the release jobs use:
+      # this image is thrown away at the end of the job, and borrowing their
+      # cache scopes would let a rehearsal evict layers a release run needs.
+      - name: Build the image to upgrade to (this revision)
+        run: docker build -t owncord-rehearsal:head Server/
+
+      - name: Rehearse upgrade and rollback (containers)
+        working-directory: Server
+        run: go run ./cmd/smoke -upgrade -docker -from owncord-rehearsal:from owncord-rehearsal:head

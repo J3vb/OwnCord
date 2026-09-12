@@ -28,8 +28,12 @@ jobs:
         include:
           - os: windows-latest
             binary: chatserver.exe
+            # The published asset this OS upgrades FROM. Windows ships a bare
+            # .exe, Linux a tarball that has to be extracted first.
+            release_asset: chatserver.exe
           - os: ubuntu-latest
             binary: chatserver
+            release_asset: chatserver-linux-amd64.tar.gz
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -53,6 +57,64 @@ jobs:
       # clean exit, then restart on the same data directory.
       - name: Smoke server binary (boot, migrate, drain, restart)
         run: go run ./cmd/smoke ./${{ matrix.binary }}
+
+      # B6-8, standalone leg. The smoke above proves this build boots on an
+      # EMPTY directory; this proves it takes over a PUBLISHED release's
+      # populated one — migrated database, uploads, credential files, a live
+      # session — and that restoring the pre-upgrade archive puts the old
+      # version back on it. Upgrade and rollback are the two paths every
+      # existing install takes, and nothing else here walks either one.
+      #
+      # Here rather than at tag time for the reason the smoke above is: a
+      # regression in the harness should fail pre-merge. The CONTAINER leg
+      # stays out of PR time — it costs building an image from the released
+      # tag's source tree — and runs nightly and at release in
+      # upgrade-rehearsal.yml, which also owns the workflow-level notes.
+      #
+      # Everything lands in a dot-directory under Server/: the go tool ignores
+      # it, and a workspace-relative path is the one form Git Bash on Windows
+      # and the Go harness read identically — an MSYS /tmp-style path from
+      # mktemp would not resolve once Go handed it to CreateProcess.
+      - name: Rehearse upgrade and rollback from the latest release
+        shell: bash
+        env:
+          # Read-only, and only to fetch a release asset.
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ matrix.release_asset }}
+        run: |
+          set -euo pipefail
+          dir=.rehearsal-from
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          tag=$(gh release list --limit 1 --exclude-drafts --json tagName --jq '.[0].tagName')
+          if [ -z "$tag" ]; then
+            echo "::error::no published release to rehearse an upgrade from"
+            exit 1
+          fi
+          echo "upgrading from $tag"
+          gh release download "$tag" --dir "$dir" --pattern "$ASSET" --pattern checksums.sha256
+          # The release's own checksums.sha256 is the whole difference between
+          # "we rehearsed the previous release" and "we rehearsed whatever
+          # bytes came back". A missing line is as fatal as a mismatch: it
+          # means nothing verified the download.
+          awk -v a="$ASSET" '$2 == a' "$dir/checksums.sha256" > "$dir/asset.sha256"
+          if [ ! -s "$dir/asset.sha256" ]; then
+            echo "::error::$tag publishes no checksum for $ASSET — refusing to rehearse an unverified binary"
+            exit 1
+          fi
+          if ! ( cd "$dir" && sha256sum -c asset.sha256 ); then
+            echo "::error::$ASSET from $tag does not match its published checksum — refusing to rehearse an unknown binary"
+            exit 1
+          fi
+          from="$dir/$ASSET"
+          case "$ASSET" in
+            *.tar.gz)
+              tar xzf "$from" -C "$dir"
+              from="$dir/chatserver"
+              ;;
+          esac
+          chmod +x "$from"
+          go run ./cmd/smoke -upgrade -from "$from" "./${{ matrix.binary }}"
 
       # Phase B + C build-tag matrix. Each tag variant must compile so the
       # tag boundaries don't drift.
