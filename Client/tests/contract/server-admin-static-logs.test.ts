@@ -63,7 +63,11 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
           return { ok: true, status: 200, json: async () => ({ needs_setup: false }) } as Response;
         }
         if (p === "/logs/ticket") {
-          return { ok: true, status: 200, json: async () => ({ ticket: "t-" + fetchCalls.length }) } as Response;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ticket: "t-" + fetchCalls.length }),
+          } as Response;
         }
         return { ok: true, status: 200, json: async () => ({}) } as Response;
       }) as typeof fetch;
@@ -77,7 +81,13 @@ interface Bridge {
 }
 
 function backfillEntry(i: number) {
-  return { ts: "2026-09-12T00:00:00Z", level: "INFO", source: "server", msg: "line " + i, attrs: "{}" };
+  return {
+    ts: "2026-09-12T00:00:00Z",
+    level: "INFO",
+    source: "server",
+    msg: "line " + i,
+    attrs: "{}",
+  };
 }
 
 describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", () => {
@@ -104,8 +114,9 @@ describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", 
     await bridge.connectLogStream();
     expect(FakeEventSource.instances.length).toBe(1);
     const first = FakeEventSource.instances[0];
+    expect(first).toBeDefined();
     for (let i = 0; i < 5; i++) {
-      first.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
     }
     expect(bridge.state.logEntries.length).toBe(5);
 
@@ -115,6 +126,7 @@ describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", 
     await bridge.connectLogStream();
     expect(FakeEventSource.instances.length).toBe(2);
     const second = FakeEventSource.instances[1];
+    expect(second).toBeDefined();
 
     // Before the server's replay arrives on the new connection, the old
     // backfill must already be gone from the buffer — the replay is a
@@ -122,7 +134,7 @@ describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", 
     expect(bridge.state.logEntries.length).toBe(0);
 
     for (let i = 0; i < 5; i++) {
-      second.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+      second?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
     }
 
     // Not 10: each backfilled line must appear once, not once per connect.

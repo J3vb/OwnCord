@@ -79,7 +79,10 @@ interface Bridge {
   saveSettings: () => Promise<void>;
 }
 
-async function boot(fetchCalls: FetchCall[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
+async function boot(
+  fetchCalls: FetchCall[],
+  respond: Responder,
+): Promise<{ dom: JSDOM; bridge: Bridge }> {
   const dom = loadAdminPanel(fetchCalls, respond);
   // Let the page's own bootstrap (checkAuth -> GET /setup/status) settle.
   await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
