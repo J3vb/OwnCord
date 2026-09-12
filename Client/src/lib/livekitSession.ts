@@ -188,7 +188,9 @@ export class LiveKitSession {
   private _tokenManager = new VoiceTokenManager({
     getWs: () => this.ws,
     isRoomConnected: () => this._room !== null,
-    onRefreshTimeout: () => this._tokenManager.startRefreshTimer(),
+    // OC-0429: retry at the rate-limit cadence, not the full periodic one —
+    // see VoiceTokenManager.startRetryTimer.
+    onRefreshTimeout: () => this._tokenManager.startRetryTimer(),
   });
 
   private _urlResolver = new LiveKitUrlResolver();
@@ -391,7 +393,7 @@ export class LiveKitSession {
    *  through the process-lifetime key provider's setKey fan-out. */
   private _e2eeWorker: Worker | null = null;
 
-  private async createRoom(): Promise<Room> {
+  private async createRoom(channelId?: number): Promise<Room> {
     // livekit's per-room E2EEManager registers a SetKey listener on the
     // shared key provider and never removes it; only those managers
     // subscribe, so clear them all before the new Room re-registers.
@@ -400,6 +402,16 @@ export class LiveKitSession {
     this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
     const quality = getStreamQuality();
     const isSource = quality === "source";
+    // OC-0438: the server computes an audio bitrate from the channel's voice
+    // quality and delivers it via voice_config (setVoiceConfig ->
+    // voiceStore.voiceConfigs). Apply it to the published mic track here —
+    // undefined (no config has arrived yet for this channel, or no channelId
+    // was given) falls back to LiveKit's own built-in audio default by
+    // omitting audioPreset entirely below.
+    const configuredAudioBitrate =
+      channelId !== undefined
+        ? voiceStore.getState().voiceConfigs.get(channelId)?.bitrate
+        : undefined;
     const newRoom = new Room({
       // Adaptive features reduce quality based on subscriber viewport —
       // disable for "source" quality to maintain full resolution.
@@ -422,6 +434,9 @@ export class LiveKitSession {
           maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
           maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
         },
+        ...(configuredAudioBitrate !== undefined
+          ? { audioPreset: { maxBitrate: configuredAudioBitrate } }
+          : {}),
       },
       // End-to-end encryption: SFrame-based E2EE using a server-distributed
       // per-channel symmetric key. The SFU only sees encrypted frames.
@@ -501,7 +516,7 @@ export class LiveKitSession {
       setState: (s) => this.setState(s),
       syncModuleRooms: () => this.syncModuleRooms(),
       setModuleRooms: (room) => this.syncModuleRooms(room),
-      createRoom: () => this.createRoom(),
+      createRoom: () => this.createRoom(channelId),
       resolveUrl: (p, d) => this.resolveLiveKitUrl(p, d),
       reannounceE2EE: () => this._e2ee.reannounceForReconnect(),
       restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
@@ -762,7 +777,7 @@ export class LiveKitSession {
     // been claimed by a newer attempt).
     let localRoom: Room | null = null;
     try {
-      localRoom = await this.createRoom();
+      localRoom = await this.createRoom(channelId);
       if (!this.ownsConnectAttempt(myGeneration)) {
         this.disconnectSupersededLocalRoom(localRoom);
         return "superseded";
@@ -907,7 +922,7 @@ export class LiveKitSession {
             if (localRoom === null) throw connectErr;
             localRoom.removeAllListeners();
             // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
-            localRoom = await this.createRoom();
+            localRoom = await this.createRoom(channelId);
             if (!this.ownsConnectAttempt(myGeneration)) {
               this.disconnectSupersededLocalRoom(localRoom);
               return "superseded";

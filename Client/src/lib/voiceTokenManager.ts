@@ -44,6 +44,22 @@ export class VoiceTokenManager {
     log.debug("Token refresh timer started", { refreshInMs: TOKEN_REFRESH_MS });
   }
 
+  /** OC-0429: re-arm at the retry cadence (RATE_LIMIT_MS) instead of the full
+   *  periodic interval. Used after an unanswered voice_token_refresh (see
+   *  onRefreshTimeout below) — re-arming at TOKEN_REFRESH_MS there would leave
+   *  the stored token expired for up to another full cycle, since the server's
+   *  token TTL is only 1 minute above TOKEN_REFRESH_MS. RATE_LIMIT_MS is safe
+   *  against the server's 1-per-60s budget: requestRefresh() stamps
+   *  _lastSentAt at the same moment this retry's predecessor deadline was
+   *  armed, 60s before it fires. */
+  startRetryTimer(): void {
+    this.clearTimers();
+    this._refreshTimer = setTimeout(() => {
+      this.requestRefresh();
+    }, RATE_LIMIT_MS);
+    log.debug("Token refresh retry timer started", { retryInMs: RATE_LIMIT_MS });
+  }
+
   /** Clear all timers. Called on leave, cleanup, and before restarting. */
   clearTimers(): void {
     if (this._refreshTimer !== null) {
