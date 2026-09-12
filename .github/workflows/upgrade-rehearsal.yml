@@ -208,6 +208,11 @@ jobs:
       # A hosted runner is discarded with its images; a self-hosted one is not,
       # and would accumulate two rehearsal images per run. `always()` so a
       # failed rehearsal does not leak them either.
+      #
+      # `|| true` because `always()` also runs this after a failure BEFORE the
+      # two builds — the standalone leg, say — where neither image exists and
+      # `docker image rm` exits 1. Without it a single real failure shows up as
+      # two red steps, and the second one is noise.
       - name: Remove the rehearsal images
         if: always()
-        run: docker image rm -f owncord-rehearsal:from owncord-rehearsal:head
+        run: docker image rm -f owncord-rehearsal:from owncord-rehearsal:head || true

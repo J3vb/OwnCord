@@ -75,7 +75,12 @@ jobs:
       # it, and a workspace-relative path is the one form Git Bash on Windows
       # and the Go harness read identically — an MSYS /tmp-style path from
       # mktemp would not resolve once Go handed it to CreateProcess.
-      - name: Rehearse upgrade and rollback from the latest release
+      #
+      # Two steps rather than one so GH_TOKEN's scope stops at the download.
+      # A single step would put a GitHub token in the environment of the
+      # released binary the harness spawns, which reads only OWNCORD_* and has
+      # no business being handed one.
+      - name: Download the release to upgrade from
         shell: bash
         env:
           # Read-only, and only to fetch a release asset.
@@ -114,7 +119,13 @@ jobs:
               ;;
           esac
           chmod +x "$from"
-          go run ./cmd/smoke -upgrade -from "$from" "./${{ matrix.binary }}"
+          echo "REHEARSAL_FROM=$from" >> "$GITHUB_ENV"
+
+      - name: Rehearse upgrade and rollback from the latest release
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/smoke -upgrade -from "$REHEARSAL_FROM" "./${{ matrix.binary }}"
 
       # Phase B + C build-tag matrix. Each tag variant must compile so the
       # tag boundaries don't drift.

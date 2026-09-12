@@ -479,7 +479,7 @@ jobs:
   # and a failed one is the path back out — neither is exercised by any job
   # above, which all start from an empty directory or an empty volume. This
   # drives the PREVIOUS release through an upgrade to the tag being built and
-  # back, in both deployment shapes, before anything is signed or pushed. Same
+  # back, in both deployment shapes, before anything is pushed or published. Same
   # placement as smoke-server-docker, and the same reason: a release that
   # cannot be upgraded into, or rolled back out of, must not ship.
   #

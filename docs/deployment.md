@@ -645,11 +645,11 @@ and only that.
 Both halves are executed on every run, not merely described.
 `Server/cmd/smoke` drives the newest published release through exactly this
 sequence — populate, stop, archive, upgrade, verify, stop, restore,
-downgrade — in both shapes an owner deploys: two binaries in one install
+downgrade, verify the rollback — in both shapes an owner deploys: two binaries in one install
 directory, and two images on a named volume. It runs on **every pull request**
 (the standalone leg, inside `ci.yml`'s server build job), and
 `.github/workflows/upgrade-rehearsal.yml` runs both legs nightly, on demand,
-and from the release workflow before anything is signed or pushed, so a red
+and from the release workflow before anything is pushed or published, so a red
 rehearsal stops the release.
 
 What it asserts across the swap, by name: `config.yaml`, every credential key
