@@ -342,10 +342,120 @@ build-tag variants and runs a deadlock pass.
 
 ## Acceptance
 
-- [ ] A published alpha.4 server is upgraded to HEAD and back, on standalone and Docker, by one harness
-- [ ] Data, attachments, configuration, all three credential files and backups are asserted byte-identical across the upgrade
-- [ ] A pre-upgrade session token still authenticates, and the pre-upgrade attachment still downloads byte-identical, after the upgrade
-- [ ] The reported version actually changed across the upgrade, and changed back across the rollback
-- [ ] The rollback procedure is documented with what each omission costs, and the forward-only migration limit is stated plainly
-- [ ] The rehearsal runs nightly, on `workflow_dispatch`, and at release before anything is signed
-- [ ] `ci-check` green across all four build-tag variants
+Ticked only where a run actually happened. Two boxes cannot be closed from a
+branch and are left unticked deliberately — see the note under them.
+
+- [x] A published alpha.4 server is upgraded to HEAD and back, on standalone and Docker, by one harness
+      — both legs exit 0 through all eight phases, `1.2.0-alpha.4 -> dev -> 1.2.0-alpha.4`.
+      Dropping `data/uploads` from the archive makes each leg fail at phase 8 naming the
+      attachment, which is what proves the assertion has teeth.
+- [~] Data, attachments, configuration, all three credential files and backups are asserted byte-identical across the upgrade
+  — **partially, and the wording overreached.** Attachments, backups and configuration
+  are asserted; "data" is the owner row (through the pre-upgrade session), the uploads
+  and the backup list. **No message content is compared**: messages are created over the
+  WebSocket only — there is no REST endpoint that creates one (`Server/api/channel_handler.go`
+  mounts reads, purge and pins; every write reaches `service/message_delivery.go` from the
+  read pump) — so a fixture that posts one needs a protocol client, which is its own task.
+  And **only `data/totp.key` has a pre-upgrade digest**: alpha.4 ships no
+  `Server/auth/erasure_key.go` and no `push_vapid_key.go`, so `erasure.key` and
+  `push_vapid.key` are files HEAD _adds_, not values preserved. The harness asserts
+  "every credential key file the pre-upgrade install had", which is the honest form, and
+  `anchor()` now fails the run if that set is empty rather than holding over nothing.
+  All three become assertable one release after alpha.4.
+- [x] A pre-upgrade session token still authenticates, and the pre-upgrade attachment still downloads byte-identical, after the upgrade
+      — `sessionSurvived` checks the returned username, not merely a 200, and the download is
+      re-fetched with the pre-upgrade token in every capture.
+- [x] The reported version actually changed across the upgrade, and changed back across the rollback
+      — `upgraded()` asserts difference, `restored()` asserts equality; both unit-covered. The
+      trap that would have made the container leg compare `dev` with `dev` is closed: the FROM
+      image must be built with `--build-arg VERSION=`, which the workflow passes and its header
+      explains.
+- [x] The rollback procedure is documented with what each omission costs, and the forward-only migration limit is stated plainly
+      — `docs/deployment.md`, "Upgrade and Rollback". The archive list gained
+      `data/erasure/markers.sqlite` and the old binary/image, and the `totp.key` cost is stated
+      at full strength: recovery codes do not help, because the verify path decrypts the stored
+      secret before it will look at one.
+- [ ] The rehearsal runs nightly, on `workflow_dispatch`, and at release **before anything is pushed or published**
+      — **not executed, and cannot be from a branch.** A `schedule:` only ever fires from the
+      default branch, `workflow_dispatch` needs the workflow on a pushed ref, and the release
+      path needs a tag. The wiring is in place and `actionlint` passes; the first real evidence
+      is the first nightly after this reaches `main`, and the next release. The original wording
+      said "before anything is signed", which was false — client artifacts are signed in
+      parallel with the rehearsal; what it gates is the GHCR push and the publish job.
+- [x] `ci-check` green across all four build-tag variants
+      — builds ×4, `go vet`, `golangci-lint` (0 issues), `go test -race ./...`,
+      `-tags deadlock ./ws/`, the untagged `./admin/...` leg, `check:docs`, `check:hygiene`, and
+      ShellCheck 0.9.0 on every tracked script. The race suite caught one real defect a plain
+      `go build && go test` could not: `cmd/smoke`'s loopback HTTP was missing from the B4-8
+      egress inventory.
+
+## Post-merge notes
+
+Things that were not visible when this plan was written, recorded so the next
+milestone does not rediscover them.
+
+**alpha.4 has no `erasure.key` and no `push_vapid.key`.** The plan's fact table
+lists three on-disk credential files and asks for all three to be byte-identical
+across the upgrade. `Server/auth/erasure_key.go` and `push_vapid_key.go` do not
+exist at `v1.2.0-alpha.4` at all, so on an upgrade _out of_ alpha.4 HEAD
+legitimately creates two key files the archive never had. `compare` therefore
+asserts **subset preservation, not equality**: everything the pre-upgrade capture
+recorded must come back byte-identical, and anything the newer version adds is
+reported informationally. Byte-equality would have failed every run for a server
+doing exactly what it should. The same asymmetry will disappear one release after
+alpha.4, when the from-side has all three.
+
+**Archive after the drain, not before.** The plan ordered archive (phase 2) before
+drain (phase 3). The archive copies `data/chatserver.db`, and `docs/deployment.md`
+already forbids copying that file while the server runs — SQLite WAL. The phases
+were swapped; an owner stops the server before taking the archive, so the
+rehearsal must too.
+
+**There is no REST endpoint that creates a message.** Every write reaches
+`service/message_delivery.go` from the WebSocket read pump. A fixture that wanted
+to prove message rows survive a migration needs a protocol client — auth
+handshake, envelope, ack — which is a task of its own. That is why "data survives"
+is proven through the owner row, the uploads and the backup list, and why the
+Acceptance box above says so rather than claiming more.
+
+**The container image must be built with `--build-arg VERSION=`.** Without it a
+locally built alpha.4 image reports `dev` — identical to HEAD's image — and the
+version assertion compares `dev` with `dev`, so the whole rehearsal passes
+vacuously. There is no published alpha container image to avoid this (the GHCR
+push job is B6-2 work, merged after the alpha.4 tag), so the FROM image is built
+from the released tag's source tree and the build-arg is not optional. This cost a
+rebuild to discover.
+
+**In the container leg `config.yaml` is a bind mount, and that weakens one
+assertion.** HEAD's default template differs substantially from alpha.4's, so a
+replacement container writing its own default would fail phase 5 on every run.
+Mounting the operator's file is also what `Server/docker-compose.yml` actually
+does (`:ro`). The consequence: `config.Save` writes temp-file-plus-rename, and a
+rename over a single-file bind mount is impossible, so a rename-based rewrite
+cannot be detected on that leg. It is stated in the code and in the docs' limits
+list. A side effect worth knowing: in Docker the admin panel and the setup wizard
+genuinely cannot persist a startup setting, which was undocumented before B6-8.
+
+**`MSYS_NO_PATHCONV=1` is global to a command, not to one argument.** The B6-2 note
+said so and it bit again: it is required for the container side of every `docker`
+argument and simultaneously breaks the host side. The harness therefore never
+hands `docker` a host path — every copy streams tar through stdin/stdout.
+
+**`go test -race ./...` caught what a package build could not.** `cmd/smoke`'s
+loopback HTTP client tripped the B4-8 egress-sites invariant, which lives in
+`Server/invariants`' test rather than in the package under change. It was
+inventoried with `Trigger: "loopback"` beside `internal/app/healthcheck.go` rather
+than exempted, because adding `cmd/smoke` to `skipDirs` would hide the next dial
+anyone adds there. This is the concrete case for the repo's "verify with ci-check,
+not an ad-hoc build and test" rule.
+
+**A `compare` between two equally-wrong captures is a pass.** `captureState`
+cannot validate itself — the post-upgrade capture is _allowed_ to have lost things,
+which is how `compare` names them. So the pre-upgrade capture is anchored
+separately (`anchor()`): the backup must be listed, the attachment must be on disk
+with the uploaded digest, the download must equal the pinned payload, and the
+credential set must be non-empty. Without that, an empty first capture made three
+of the six promises vacuous.
+
+**Two legs, one port.** Both bind loopback 8443, so they must never run
+concurrently on one runner. The nightly runs them in sequence for that reason.
