@@ -968,6 +968,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       autoIdle = null;
       presenceSender.destroy();
       setActivePresenceSender(null);
+      // Drop the mark-read sender (and, via setMarkReadSender's own
+      // cancelPendingMarkAll, any still-armed "Mark All as Read" burst
+      // timers) at the moment this connection is abandoned. Without this,
+      // a paced burst survives teardown and fires against whichever server
+      // is live when its timer elapses — channel ids are per-server, so
+      // that can silently mark an unrelated channel read on the NEXT
+      // connection (OC-0418).
+      setMarkReadSender(null);
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 

@@ -201,6 +201,7 @@ import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
 import { openImageLightbox } from "../../src/components/message-list/media";
 import { saveUserStatus } from "../../src/lib/userStatus";
+import { markAllRead } from "../../src/lib/read-state";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -1205,5 +1206,74 @@ describe("MainPage — server restart banner", () => {
     vi.advanceTimersByTime(2000);
     expect(banner.textContent).not.toBe("Reconnecting...");
     expect(banner.classList.contains("visible")).toBe(false);
+  });
+});
+
+describe("MainPage — mark-all-read teardown (OC-0418)", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it("cancels a queued Mark All as Read burst on destroy instead of letting it fire after the page is torn down", () => {
+    // Five unread channels: read-state.ts paces sends in bursts of 4 per
+    // 1100ms, so the 5th send is queued behind a timer instead of going out
+    // synchronously.
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, { ...textChannel(1, "c1"), unreadCount: 1 });
+      ch.set(2, { ...textChannel(2, "c2"), unreadCount: 1 });
+      ch.set(3, { ...textChannel(3, "c3"), unreadCount: 1 });
+      ch.set(4, { ...textChannel(4, "c4"), unreadCount: 1 });
+      ch.set(5, { ...textChannel(5, "c5"), unreadCount: 1 });
+      return { ...prev, channels: ch, activeChannelId: null };
+    });
+
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // Mount can itself send (e.g. a presence re-sync) — clear those so the
+    // counts below track only the mark_read burst.
+    (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+    markAllRead();
+
+    // Only the first burst (4 channels) goes out synchronously; channel 5's
+    // send is still sitting in the paced tail.
+    const sendCallsAtClick = (ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(sendCallsAtClick).toBe(4);
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(1);
+
+    // The user logs out / switches server before the paced tail fires. With
+    // no next MainPage having mounted yet to re-register the mark-read
+    // sender, this connection has been abandoned and the queued send has
+    // nowhere legitimate to go.
+    page.destroy?.();
+
+    vi.advanceTimersByTime(2000);
+
+    // The stale timer must not have fired a mark_read for channel 5 against
+    // this (now-torn-down) connection, and must not have wiped its local
+    // unread badge either.
+    expect((ws.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(sendCallsAtClick);
+    expect(
+      (ws.send as ReturnType<typeof vi.fn>).mock.calls.some(
+        (call) =>
+          (call[0] as { type: string; payload: { channel_id: number } }).type === "mark_read" &&
+          call[0].payload.channel_id === 5,
+      ),
+    ).toBe(false);
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(1);
   });
 });
