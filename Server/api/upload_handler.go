@@ -424,8 +424,13 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	fileID := uuid.New().String()
 
 	// Detect MIME type from actual file bytes (never trust client header).
+	// file is a *multipart.Part in production, and Part.Read may return
+	// fewer bytes than requested even when more remain — a genuine short
+	// read, not EOF — so io.ReadFull is required here instead of a single
+	// Read call to fill the sniff buffer (or hit real EOF/ErrUnexpectedEOF
+	// for a file shorter than it).
 	var sniffBuf [512]byte
-	n, readErr := file.Read(sniffBuf[:])
+	n, readErr := io.ReadFull(file, sniffBuf[:])
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{
 			Error:   "BAD_REQUEST",
