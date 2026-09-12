@@ -237,13 +237,17 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 
 		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
+			// dm_channel_close is unsequenced and targeted like
+			// dm_channel_open — see markDMVisibilityChanged. Bump BEFORE the
+			// send, same ordering broadcastDMOpen and the NSFW handlers use: a
+			// socket that warm-reconnects in the gap between these two calls
+			// must already observe the bumped watermark, since the close frame
+			// itself can never be redelivered by seq replay.
+			markDMVisibilityChanged(broadcaster)
 			closeMsg := fmt.Appendf(nil, `{"type":%q,"payload":{"channel_id":%d}}`, ws.MsgTypeDMChannelClose, channelID)
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
-			// dm_channel_close is unsequenced and targeted like
-			// dm_channel_open — see markDMVisibilityChanged.
-			markDMVisibilityChanged(broadcaster)
 			// A group leave changes the membership everyone else renders, so
 			// the survivors get a refreshed dm_channel_open rather than being
 			// left showing a member who has gone.
