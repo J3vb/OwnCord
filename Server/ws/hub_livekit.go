@@ -8,11 +8,11 @@ import (
 // GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
 // is not configured (HubOptions.LiveKit was nil). Satisfies
 // VoiceTokenGenerator so the Hub can be passed as a dep at registration time.
-func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error) {
+func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canVideo, canScreenShare bool) (string, error) {
 	if h.livekit == nil {
 		return "", fmt.Errorf("voice not configured")
 	}
-	return h.livekit.GenerateToken(userID, username, channelID, voiceJoinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+	return h.livekit.GenerateToken(userID, username, channelID, voiceJoinToken, canPublish, canVideo, canScreenShare)
 }
 
 // URL delegates to the LiveKit client. Returns empty string if not configured.

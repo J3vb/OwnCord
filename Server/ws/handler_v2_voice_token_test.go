@@ -22,7 +22,7 @@ type mockTokenGen struct {
 
 func (m *mockTokenGen) GenerateToken(
 	_ int64, _ string, _ int64, _ string,
-	_, _, _, _ bool,
+	_, _, _ bool,
 ) (string, error) {
 	return m.token, m.err
 }
@@ -276,10 +276,11 @@ func TestVoiceTokenRefreshV2_PermissionsPassedToTokenGen(t *testing.T) {
 	if captureMock.canScreenShare {
 		t.Error("expected canScreenShare=false without permissions")
 	}
-	// canSubscribe should always be true.
-	if !captureMock.canSubscribe {
-		t.Error("expected canSubscribe=true always")
-	}
+	// CanSubscribe is no longer a GenerateToken parameter — it is a constant
+	// of the grant (livekit.go, canSubscribeAlways), so there is nothing for
+	// this mock to observe. The property it asserted is pinned harder by
+	// TestVoiceToken_ModerationRestrictsMicrophoneGrant, which verifies
+	// GetCanSubscribe() on the actual signed JWT for every moderation state.
 }
 
 // TestVoiceTokenRefreshV2_RevokedConnectVoiceRefusedAndEvicts locks the
@@ -327,17 +328,15 @@ type capturingTokenGen struct {
 	token          string
 	url            string
 	canPublish     bool
-	canSubscribe   bool
 	canVideo       bool
 	canScreenShare bool
 }
 
 func (m *capturingTokenGen) GenerateToken(
 	_ int64, _ string, _ int64, _ string,
-	canPublish, canSubscribe, canVideo, canScreenShare bool,
+	canPublish, canVideo, canScreenShare bool,
 ) (string, error) {
 	m.canPublish = canPublish
-	m.canSubscribe = canSubscribe
 	m.canVideo = canVideo
 	m.canScreenShare = canScreenShare
 	return m.token, nil

@@ -402,8 +402,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		// Carry it into the SFU grant too: muting an existing track cannot stop
 		// a replacement microphone track from being published with this token.
 		canPublish = voiceMicrophoneAllowed(canPublish, state)
-		canSubscribe := true
-		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
+		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
 			h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, false)
@@ -640,7 +639,6 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// populated the user's entry. Microphone moderation is independent of
 	// camera/screenshare permissions; deafen still leaves stream audio available.
 	canPublish := voiceMicrophoneAllowed(hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice), state)
-	canSubscribe := true
 	canVideo := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.UseVideo)
 	canScreenShare := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.ShareScreen)
 
@@ -651,7 +649,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		result.SetVoiceJoinToken = &joinToken
 	}
 
-	token, err := d.TokenGen.GenerateToken(userID, info.Username, channelID, joinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+	token, err := d.TokenGen.GenerateToken(userID, info.Username, channelID, joinToken, canPublish, canVideo, canScreenShare)
 	if err != nil {
 		slog.Error("ws handleVoiceTokenRefreshV2 GenerateToken", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to generate voice token"}}
