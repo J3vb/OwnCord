@@ -1364,8 +1364,14 @@ export class E2EEManager {
     // any point during this call.
     if (departingKey && !channelUsers?.has(userId)) {
       const departingKeyBase64 = await exportPublicKey(departingKey);
-      if (!isCurrent()) return;
-      this.retirePeerKey(userId, departingKeyBase64);
+      // Scope the bail-out to the retirement write only: a duplicate
+      // handleParticipantLeft for the same peer landing during this await
+      // bumps this peer's generation and makes isCurrent() false here, but
+      // this invocation's own hadPeerKey/wasKeyHolder below were captured
+      // before the await and remain correct — returning the whole method
+      // would drop the membership-forward-secrecy rekey a few lines down
+      // (OC-0416).
+      if (isCurrent()) this.retirePeerKey(userId, departingKeyBase64);
     }
 
     if (!channelId) return;

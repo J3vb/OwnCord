@@ -2375,4 +2375,49 @@ describe("E2EE operation ownership", () => {
       vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
     }
   });
+
+  it("[OC-0416] still rotates the room key when a second voice_leave for the same peer lands mid-retirement", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1); // epoch 1, holder
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+      let releaseExport!: (v: string) => void;
+      vi.mocked(exportPublicKey).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseExport = resolve;
+          }),
+      );
+
+      // First voice_leave for PEER_ID: deletes the peer key synchronously,
+      // then suspends on exportPublicKey(departingKey) before reaching the
+      // election / membership-forward-secrecy rekey block.
+      const firstLeave = mgr.handleParticipantLeft(PEER_ID);
+      await vi.waitFor(() => expect(releaseExport).toBeDefined());
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // A second voice_leave for the SAME peer (server resend + local
+      // reconciliation both firing handleParticipantLeft) lands and runs to
+      // completion before the first resumes: departingKey is already gone,
+      // so its own hadPeerKey is false and it rotates nothing — but it DOES
+      // bump this peer's generation counter.
+      await mgr.handleParticipantLeft(PEER_ID);
+
+      releaseExport("bW9ja2VwaGVtZXJhbA==");
+      await firstLeave;
+
+      // The first invocation observed hadPeerKey=true while still the key
+      // holder — membership forward secrecy requires it to still rotate the
+      // room key even though the peer generation moved on under it during
+      // the await, which must only skip the (now-redundant) retirement
+      // write, not the whole handler.
+      expect(mgr.epoch).toBe(2);
+      expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+    } finally {
+      mgr.clearState();
+    }
+  });
 });
