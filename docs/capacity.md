@@ -103,14 +103,24 @@ Starting budgets are from the B6 PRD. They may be **tightened from data and
 never loosened**; anything looser than these is a finding, not a number to
 publish.
 
-| Path                                                    | p95      | p99      | Measured by                      |
-| ------------------------------------------------------- | -------- | -------- | -------------------------------- |
-| REST login                                              | < 1 s    | < 2 s    | k6 `auth_time`                   |
-| WebSocket open → `auth_ok` received                     | < 1 s    | < 2 s    | k6 `ws_auth_ok_time`             |
-| Message send → sender acknowledgement                   | < 200 ms | < 500 ms | k6 `ws_broadcast_latency_ms`     |
-| Message send → recipient delivery (every connection)    | < 250 ms | < 500 ms | k6 `ws_delivery_latency_ms`      |
-| Voice join, OwnCord half (`voice_join` → `voice_token`) | < 2 s    | < 4 s    | k6 `voice_join_time`             |
-| Graceful drain to exit 0                                | < 20 s   | —        | `Server/cmd/smoke` `drainBudget` |
+These are the budgets **as tightened from the first qualifying run**; the
+"initial" column is what the PRD started from, kept so the tightening is
+auditable.
+
+| Path                                                    | p95      | p99      | Initial          | Measured by                      |
+| ------------------------------------------------------- | -------- | -------- | ---------------- | -------------------------------- |
+| REST login                                              | < 600 ms | < 1 s    | < 1 s / < 2 s    | k6 `auth_time`                   |
+| WebSocket open → `auth_ok` received                     | < 200 ms | < 500 ms | < 1 s / < 2 s    | k6 `ws_auth_ok_time`             |
+| Message send → sender acknowledgement                   | < 150 ms | < 300 ms | < 200 / < 500 ms | k6 `ws_broadcast_latency_ms`     |
+| Message send → recipient delivery (every connection)    | < 200 ms | < 400 ms | < 250 / < 500 ms | k6 `ws_delivery_latency_ms`      |
+| Voice join, OwnCord half (`voice_join` → `voice_token`) | < 250 ms | < 500 ms | < 2 s / < 4 s    | k6 `voice_join_time`             |
+| Graceful drain to exit 0                                | < 20 s   | —        | unchanged        | `Server/cmd/smoke` `drainBudget` |
+
+Each tightened budget keeps at least twice the measured p99 as headroom, so a
+busier runner does not turn a published promise into a flake. `auth_time` is
+the one with the least room on purpose: its floor is bcrypt at cost 12, roughly
+a quarter-second of one core, and that is a deliberate security cost rather
+than something to tune away.
 
 Two of the PRD's rows are corrected rather than satisfied, because as written
 they ask for measurements that cannot exist:
@@ -203,30 +213,58 @@ assertions offline, with no SFU and no `lk` binary.
 
 ## Measured
 
-_Not yet run against this document. The first qualifying run fills this section
-from the `capacity-constrained` artifact, and only from that artifact._
+Every number below comes from the **constrained** leg and from nothing else.
 
 ```
-commit:
-date (UTC):
-workflow run:
-runner:
-container nproc / cpu.max / memory.max / memory.swap.max:
-livekit-server:
-lk:
-k6:
+commit:          593c764b
+date (UTC):      2026-09-12
+workflow run:    34701291805  (.github/workflows/load-baseline.yml)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container:
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
 ```
 
-| Path                          | p95 | p99 | Budget met? |
-| ----------------------------- | --- | --- | ----------- |
-| REST login                    |     |     |             |
-| WebSocket open → `auth_ok`    |     |     |             |
-| Send → sender acknowledgement |     |     |             |
-| Send → recipient delivery     |     |     |             |
-| Voice join (OwnCord half)     |     |     |             |
+| Profile target                       | Achieved                                                   | Met? |
+| ------------------------------------ | ---------------------------------------------------------- | ---- |
+| 250 registered users                 | 250 seeded, all registrations accepted                     | Yes  |
+| 100 simultaneous connections (180 s) | 100 authenticated and ready, `vus_max` 100 for the sustain | Yes  |
+| 25 concurrent voice participants     | 625/625 tracks at 12.5 mbps, 0% packet loss, 0 errors      | Yes  |
 
-| Profile target                       | Achieved | Met? |
-| ------------------------------------ | -------- | ---- |
-| 250 registered users                 |          |      |
-| 100 simultaneous connections (180 s) |          |      |
-| 25 concurrent voice participants     |          |      |
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 307 ms | 344 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 13 ms  | 29 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 57 ms  | 83 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 60 ms  | 85 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 3 ms   | 4 ms   | 250 ms / 500 ms    | Yes  |
+
+Volumes behind those percentiles, so nobody has to take the distribution on
+trust: 12,137 messages sent and 12,131 acknowledged, **1,139,476
+cross-connection deliveries**, 25 voice tokens issued, **0 WebSocket errors**.
+The voice cohort's connect-and-teardown wall clock was 5 s for all 50
+participants, ramp-inclusive — not a percentile, and not comparable with the
+OwnCord half above.
+
+### What this run also says
+
+- **The reference hardware is not the limiting factor at this profile.** The
+  ceiling leg — same run, same commit, no cgroup, the whole 4-CPU runner — came
+  out within noise of the constrained leg (recipient delivery p95 58 ms vs
+  60 ms, p99 83 ms vs 85 ms). Two CPUs and 4 GB are not saturated by 100
+  connections and 25 voice participants, so the profile is met with room rather
+  than met at the edge. It follows that these figures say little about where the
+  real ceiling is; finding that is B6-10's job, not this document's.
+- **The budgets were tightened, not met-and-left.** Every initial budget was
+  between 3× and 1000× the measured figure, which would have let a large
+  regression land without failing anything.
+- **The `--layout` trap was not hypothetical.** The first 25×25 room measured
+  during development reported 150/625 tracks at 0% loss and exit status 0 under
+  `lk load-test`'s default layout. Every figure above comes from a run that
+  asserted the track total.

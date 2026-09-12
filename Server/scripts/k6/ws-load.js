@@ -120,15 +120,20 @@ export const options = {
     ws_connect_time: ["p(95)<2000"], // 95% connect under 2s
     ws_message_success: ["rate>0.95"], // 95% of sends acked
     ws_errors: ["count<50"], // fewer than 50 errors
-    // docs/capacity.md, "REST login". p99 is new in B6-9.
-    auth_time: ["p(95)<1000", "p(99)<2000"],
-    // docs/capacity.md, "WebSocket open -> auth_ok received". Both new.
-    ws_auth_ok_time: ["p(95)<1000", "p(99)<2000"],
+    // docs/capacity.md, "REST login". Tightened from the first qualifying run
+    // (measured p95 307 / p99 344 on the constrained leg); bcrypt cost 12 is
+    // the floor here, so the headroom left is deliberate and not generous.
+    auth_time: ["p(95)<600", "p(99)<1000"],
+    // docs/capacity.md, "WebSocket open -> auth_ok received". Tightened from
+    // measured p95 13 / p99 29 — the initial budget was 70x the real figure.
+    ws_auth_ok_time: ["p(95)<200", "p(99)<500"],
     // docs/capacity.md, "message send -> sender acknowledgement". The metric
-    // existed with no threshold at all, so it could not fail.
-    ws_broadcast_latency_ms: ["p(95)<200", "p(99)<500"],
-    // docs/capacity.md, "message send -> recipient delivery". Both new.
-    ws_delivery_latency_ms: ["p(95)<250", "p(99)<500"],
+    // existed with no threshold at all, so it could not fail. Tightened from
+    // measured p95 57 / p99 83.
+    ws_broadcast_latency_ms: ["p(95)<150", "p(99)<300"],
+    // docs/capacity.md, "message send -> recipient delivery". Tightened from
+    // measured p95 60 / p99 85 over 1.14 million deliveries.
+    ws_delivery_latency_ms: ["p(95)<200", "p(99)<400"],
     // A run where nobody authenticated, went ready, or received anyone
     // else's message is a broken run, no matter how green everything else
     // looks — this is the assertion that was missing when the script drifted
@@ -141,7 +146,9 @@ export const options = {
     // p95 over zero samples would pass a run where voice was silently off.
     ...(VOICE_VUS > 0
       ? {
-          voice_join_time: ["p(95)<2000", "p(99)<4000"],
+          // Tightened from measured p95 3 ms / p99 4 ms: this is an HMAC JWT
+          // and a session lookup, not a network round trip to an SFU.
+          voice_join_time: ["p(95)<250", "p(99)<500"],
           voice_tokens: ["count>0"],
         }
       : {}),

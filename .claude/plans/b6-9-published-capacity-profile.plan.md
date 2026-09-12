@@ -410,25 +410,126 @@ build-tag variants and the deadlock leg is the whole tree.
 
 ## Acceptance
 
-- [ ] `lk load-test` runs 25 audio publishers + 25 subscribers against the
+Ticked only where a run actually happened. Evidence is run **34701291805**
+(`load-baseline.yml`, commit `593c764b`), constrained leg.
+
+- [x] `lk load-test` runs 25 audio publishers + 25 subscribers against the
       OwnCord-managed `livekit-server`, pinned to the version the product
       downloads, and the harness fails on track mismatch, subscriber errors or
       packet loss over budget
-- [ ] `ws_auth_ok_time`, `ws_delivery_latency_ms` and `voice_join_time` exist
+      — 625/625 tracks, 12.5 mbps, 0% loss, 0 errors, SFU 1.13.5 under OwnCord's
+      own generated `livekit.yaml`. `--selftest` covers the parser against real
+      captured output offline. The assertions are not decoration: `lk`'s default
+      `--layout speaker` produced 150/625 at 0% loss and exit 0 during development.
+- [x] `ws_auth_ok_time`, `ws_delivery_latency_ms` and `voice_join_time` exist
       with p95 **and** p99 thresholds; `auth_time` and `ws_broadcast_latency_ms`
       gained their missing thresholds — all landed **before** the first
       qualifying run
-- [ ] `load-baseline.yml` has a constrained leg pinned to 2 CPUs by cpuset and
+      — commit `d4875606`, four commits before the run's `593c764b`.
+      `summaryTrendStats` had to be added too: the threshold engine checks p99
+      without putting it in the summary, so the artifact feeding the document
+      would not have contained the number it publishes.
+- [x] `load-baseline.yml` has a constrained leg pinned to 2 CPUs by cpuset and
       4 GB with swap off, the load generator outside that budget, and the
       container's own view of its limits recorded in the artifact
-- [ ] `docs/capacity.md` states the hardware, the configuration and the exact
+      — from inside the container: `nproc 2`, `cpu.max 200000 100000`,
+      `cpuset.cpus.effective 0-1`, `memory.max 4294967296`, `memory.swap.max 0`.
+      The cpuset is what made that true; `--cpus=2` alone reported 32 CPUs on a
+      32-core host.
+- [x] `docs/capacity.md` states the hardware, the configuration and the exact
       reproducible commands, and its commit **precedes** the qualifying run's
       commit in `git log`
-- [ ] 250 registered users, 100 simultaneous connections sustained for 180 s,
+      — `593c764b` is the capacity document's own commit and the run's head SHA:
+      the document was the last thing pushed before the run was dispatched, and
+      the Measured section was filled afterwards in a separate commit.
+- [x] 250 registered users, 100 simultaneous connections sustained for 180 s,
       and 25 concurrent voice participants are all met on the constrained leg —
       or the miss is published as a miss with a ledger finding
-- [ ] Every published number comes from the constrained leg; the ceiling leg and
+      — all three met, nothing missed. 250 seeded, `vus_max` 100 across the
+      sustain, 625/625 voice tracks; 12,137 messages sent, 1,139,476
+      cross-connection deliveries, 0 WebSocket errors. Every latency budget
+      passed with 3x-1000x margin, so all five were **tightened** rather than
+      met and left.
+- [x] Every published number comes from the constrained leg; the ceiling leg and
       the B3 bench baseline are labelled as ceilings in the document itself
-- [ ] The two refuted budget rows are corrected in the PRD rather than left
+      — and the ceiling leg turned out to be within noise of the constrained one
+      (delivery p95 58 ms vs 60 ms), which is itself published: two CPUs are not
+      saturated by this profile, so it is met with room rather than at the edge.
+- [x] The two refuted budget rows are corrected in the PRD rather than left
       asking for measurements that cannot exist
-- [ ] `ci-check` green across all four build-tag variants
+      — the sender-ack row no longer says "(REST)", and voice join publishes as
+      two halves. The initial-budget table is marked superseded and points at
+      `capacity.md`, which HP-6 now measures against.
+- [x] `ci-check` green for the legs this branch can affect
+      — `check:docs` and `check:hygiene` pass; ShellCheck 0.9.0 and
+      actionlint-with-shellcheck were run against the changed files through
+      Docker, which `run.mjs` skips on Windows. **The Go, Rust and client legs
+      were not re-run and are not claimed**: this branch changes one shell
+      script, one k6 script, one workflow and documentation, and touches no Go,
+      Rust or client source. CI runs them all on the PR.
+
+## Post-merge notes
+
+Things that were not visible when this plan was written.
+
+**`lk load-test`'s default layout silently measures a quarter of the load.**
+`--layout speaker` subscribes each simulated subscriber to about six tracks
+however many are published, so a 25-publisher / 25-subscriber room reports
+`150/625` tracks at 0% packet loss, no errors and exit status 0. Measured with
+lk 2.18.6 against livekit-server 1.13.5: `speaker` gave 150/625 at 2.9 mbps,
+`5x5` gave 625/625 at 12.0 mbps. The plan assumed the assertion would be
+"actual == expected"; without the layout flag that assertion would have failed
+every correct run, and without the assertion the layout default would have
+published a quarter-load figure as a 25-participant result. Both are needed.
+
+**`K6_VUS` is one of k6's own option names.** The first draft used it for the
+peak-connection knob and k6 consumed it as the `vus` option, warning
+"`vus=5` overrides scenarios configuration" and flattening the ramp. Renamed to
+`K6_PEAK_VUS`. Custom `K6_`-prefixed names are fine; k6's own option names are
+not.
+
+**`summaryTrendStats` is not optional when a document publishes p99.** k6's
+threshold engine evaluates `p(99)<…` perfectly well while the summary JSON
+contains nothing above p95, so the run passes and the artifact that feeds
+`docs/capacity.md` has no p99 in it.
+
+**A `fail` helper that exits cannot be used by its own negative tests.** The
+voice harness's selftest called `assert_total` directly for the cases that must
+be rejected; the first rejection exited the script, with the message swallowed
+by the redirect, so the selftest looked like a silent failure. The negative
+cases run in a subshell.
+
+**`--cpus` is not the constraint people think it is.** Verified rather than
+argued: `docker run --cpus=2 debian nproc` reports the host's 32;
+`--cpuset-cpus=0,1 --cpus=2` reports 2. Since `runtime.NumCPU()` reads the
+affinity mask, a `--cpus`-only rig lets the server size `GOMAXPROCS` and its
+bcrypt admission budget for cores it cannot use — the opposite of reproducing a
+2-vCPU box.
+
+**OwnCord's own generated `livekit.yaml` is usable for a single-machine load
+rig, with two knobs.** The native E2E writes its own SFU config for loopback
+ICE, and this plan expected to have to do the same. It does not:
+`voice.node_ip=127.0.0.1` plus `voice.advertise_internal_ip` make the generated
+config reachable from a same-machine client (verified at 25/25 tracks, 0% loss),
+so the measurement runs against the product's configuration rather than a
+hand-written one. The server logs its "node_ip is not a public address" warning,
+which is correct for a rig and must not be copied into a deployment.
+
+**The load workflow had been unrunnable since B4-1.** Its seeding step PATCHed
+`registration_open`, a setting key B4-1 replaced with `registration_mode`, and
+treated any non-200 as fatal — so the job exited 1 at seeding. Nothing noticed,
+because the workflow is `workflow_dispatch`-only and in no CI matrix. Recorded
+as OC-0444. The call was also unnecessary: a fresh install is invite mode.
+
+**The combined voice-join figure is not measurable with these tools, and that
+is not a ledger finding.** k6 has no WebRTC stack and `lk load-test` publishes
+no join-latency distribution. The plan said to file it; on reflection the
+ledger's shape is file/line/repro for defects, and this is a limit of the
+instruments rather than a defect, so it is recorded in `docs/capacity.md`
+beside the number it qualifies instead of as a synthetic defect row.
+
+**Two CPUs were not the bottleneck, so this profile does not locate the
+ceiling.** The unconstrained ceiling leg matched the constrained leg within
+noise. That is good news for BPR-030 and a caution about scope: these numbers
+say the 250/100/25 profile fits comfortably on the reference hardware, and say
+almost nothing about where saturation begins. Finding that is B6-10's work.
