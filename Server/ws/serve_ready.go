@@ -138,7 +138,14 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 // affordance, so the client can pre-disable the composer without a
 // round-trip. It is permissions.CanSendMessage, the same predicate the send
 // path enforces, so the affordance cannot drift from the rule (S-12).
-func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
+//
+// timedOut is the caller's live HasActiveTimeout verdict (via subjectFor),
+// not recomputed here: threading it through as a plain bool, rather than
+// looking it up per channel, keeps this the same one-lookup-per-ready-payload
+// shape as the rest of buildReady while still matching
+// refreshChannelVisibilityCanSend's per-channel verdict on a live socket
+// (OC-0434) — a timed-out user must not see can_send: true anywhere.
+func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
 	if role == nil {
 		return false
 	}
@@ -146,6 +153,7 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 		RolePerms: role.Permissions,
 		Override:  permOverride(o),
 		Channel:   permissions.ChannelRef{Type: chanType},
+		TimedOut:  timedOut,
 	}) == nil
 }
 
@@ -197,8 +205,11 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // carries the caller's own acknowledgement per NSFW-labelled channel id
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there.
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool) []map[string]any {
+// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict
+// (OC-0434) — threaded into every channel's can_send the same way it feeds
+// refreshChannelVisibilityCanSend's live-refresh sibling, so a timed-out
+// user's connect-time payload cannot claim can_send: true anywhere.
+func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -213,7 +224,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// ± channel overrides must grant READ|SEND, and announcement
 			// channels additionally require MANAGE_MESSAGES; admins bypass. The
 			// server remains the authority — this only pre-disables the UI.
-			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
+			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type, timedOut),
 			// Cooldown in seconds (0 = off). Lets the composer disable itself
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
@@ -375,9 +386,22 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
+	// Live, uncached timeout verdict (OC-0434): channelCanSend's Subject must
+	// carry the same TimedOut refreshChannelVisibilityCanSend resolves for a
+	// live socket (via the identical subjectFor), or a just-timed-out user's
+	// fresh-connect ready payload ships can_send: true on every channel right
+	// up until their next send bounces off TIMED_OUT. Channel 0 is fine here:
+	// only TimedOut is consulted below, and subjectFor already skips the
+	// lookup entirely for an administrator. A lookup failure fails the whole
+	// handshake closed, like every other buildReady read.
+	sub, err := h.subjectFor(ctx, userID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
+	}
+
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap)
+	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
