@@ -1,7 +1,8 @@
 package main
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -172,19 +173,118 @@ func TestCompare(t *testing.T) {
 // attachment assertion rests on: the same bytes on every run and on every
 // platform. crypto/rand here would make the pre-upgrade and post-upgrade
 // digests differ for a reason that has nothing to do with the upgrade.
+//
+// The assertion is against a pinned digest rather than a second call to
+// fixturePayload(), because a payload randomised once per process would agree
+// with itself all day and still be different tomorrow.
 func TestFixturePayloadIsDeterministic(t *testing.T) {
-	first, second := fixturePayload(), fixturePayload()
-	if len(first) != fixturePayloadSize {
-		t.Fatalf("fixturePayload() is %d bytes, want %d", len(first), fixturePayloadSize)
+	payload := fixturePayload()
+	if len(payload) != fixturePayloadSize {
+		t.Fatalf("fixturePayload() is %d bytes, want %d", len(payload), fixturePayloadSize)
 	}
-	if !bytes.Equal(first, second) {
-		t.Fatal("fixturePayload() returned different bytes on two calls")
+	if got := fmt.Sprintf("%x", sha256.Sum256(payload)); got != fixturePayloadDigest {
+		t.Fatalf("sha256(fixturePayload()) = %s, want the pinned %s", got, fixturePayloadDigest)
 	}
 	// The upload path rejects known-executable magic bytes, and it is the
 	// server's own table that decides which — so ask it rather than copying
 	// the list. A payload that happened to start with one would fail the
 	// fixture with a 400 that reads like a server defect.
-	if err := storage.ValidateFileType(first[:8]); err != nil {
+	if err := storage.ValidateFileType(payload[:8]); err != nil {
 		t.Fatalf("fixturePayload() is not uploadable: %v", err)
+	}
+}
+
+// TestAnchor is the check that compare() cannot make: that the pre-upgrade
+// capture is a real capture. Every case here is a state that compare() would
+// happily call unchanged, because an equally-wrong "after" is an equal one.
+// No server is started — anchor is a pure function over a captured state.
+func TestAnchor(t *testing.T) {
+	f := fixture{
+		token:        "session-token",
+		attachmentID: "9f1c-attachment",
+		backupName:   "chatserver_20260912_101500.db",
+	}
+	// anchored is what installFixture's own work looks like once captured.
+	anchored := func() state {
+		s := clone(baseState())
+		s.uploads["9f1c-attachment"] = fixturePayloadDigest
+		s.download = download{id: "9f1c-attachment", digest: fixturePayloadDigest, length: fixturePayloadSize}
+		return s
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(s *state)
+		wantErr string
+	}{
+		{
+			name: "a real capture of the fixture anchors",
+		},
+		{
+			// The vacuous case: POST /admin/api/backup answered 200, no file
+			// appeared, and "every backup survived" then holds over nothing.
+			name:    "an empty backup list does not anchor",
+			mutate:  func(s *state) { s.backups = nil },
+			wantErr: "chatserver_20260912_101500.db",
+		},
+		{
+			// captureState pointed at a directory that is not the install:
+			// every upload is "missing" in both captures, so compare() sees
+			// no difference and reports none.
+			name:    "an uploads map without the attachment does not anchor",
+			mutate:  func(s *state) { s.uploads = map[string]string{} },
+			wantErr: "9f1c-attachment",
+		},
+		{
+			name:    "an on-disk attachment that is not what we uploaded does not anchor",
+			mutate:  func(s *state) { s.uploads["9f1c-attachment"] = "something-else" },
+			wantErr: "on disk",
+		},
+		{
+			// A download that was already wrong before the upgrade comes back
+			// equally wrong afterwards, and compare() calls that unchanged.
+			name:    "a download that never matched the upload does not anchor",
+			mutate:  func(s *state) { s.download.digest = "something-else" },
+			wantErr: "9f1c-attachment",
+		},
+		{
+			name:    "a truncated download does not anchor",
+			mutate:  func(s *state) { s.download.length = 10 },
+			wantErr: "want " + fixturePayloadDigest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := anchored()
+			if tt.mutate != nil {
+				tt.mutate(&s)
+			}
+			err := f.anchor(s)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("anchor() = %v, want no error", err)
+			case tt.wantErr != "" && err == nil:
+				t.Fatalf("anchor() = nil, want an error naming %q", tt.wantErr)
+			case tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr):
+				t.Fatalf("anchor() = %q, want it to name %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestAnchoredStateAlsoComparesClean keeps the two halves honest about each
+// other: the state anchor accepts is the state compare sees no change in, so
+// neither check is quietly asserting a different shape from the other.
+func TestAnchoredStateAlsoComparesClean(t *testing.T) {
+	f := fixture{attachmentID: "9f1c-attachment", backupName: "chatserver_20260912_101500.db"}
+	s := clone(baseState())
+	s.uploads["9f1c-attachment"] = fixturePayloadDigest
+	s.download = download{id: "9f1c-attachment", digest: fixturePayloadDigest, length: fixturePayloadSize}
+	if err := f.anchor(s); err != nil {
+		t.Fatalf("anchor() = %v, want no error", err)
+	}
+	if err := compare(s, clone(s)); err != nil {
+		t.Fatalf("compare() = %v, want no error", err)
 	}
 }

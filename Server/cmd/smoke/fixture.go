@@ -39,6 +39,14 @@ const (
 	fixturePayloadSize = 64 * 1024
 	fixtureFilename    = "rehearsal-attachment.bin"
 
+	// fixturePayloadDigest is sha256(fixturePayload()), pinned as a literal
+	// rather than recomputed. Recomputing it would make every assertion that
+	// uses it agree with whatever fixturePayload happens to return — a
+	// once-per-process random payload would satisfy a self-consistency check
+	// and nothing else. A literal is what makes "these are the bytes we
+	// uploaded" checkable at all.
+	fixturePayloadDigest = "de3f3404598736bd6abece44ed40b347febf99becf1a476f0d18fdc9a32a6166"
+
 	// fixtureTimeout bounds every call. Without it a server that accepted the
 	// connection and then stopped answering would hang the whole rehearsal
 	// instead of failing the phase that hung.
@@ -55,9 +63,6 @@ var credentialFiles = []string{
 	"data/push_vapid.key",
 }
 
-// fixtureClient talks to the server this harness launched moments ago on
-// loopback.
-//
 // The generated certificate carries no SANs at all (Server/auth/tls.go), so
 // no RootCAs pool can verify it. This client talks to a server this harness
 // just launched on loopback; there is nothing to be MITM'd by.
@@ -75,10 +80,23 @@ type fixture struct {
 	// upgrade: "authenticated downloads still work afterwards" is only a real
 	// assertion if the session that was open before the upgrade is the one
 	// making the request.
+	//
+	// It is also how "the database survived" is asserted, and that is the
+	// least obvious assertion in this file. data/chatserver.db is NOT hashed
+	// — WAL churn and the upgrade's own forward migrations rewrite it by
+	// design, so a digest would fail for the right reason and prove nothing.
+	// What proves it instead is that this token still authenticates after the
+	// swap: the session row, its user, and the schema they are read through
+	// all came out of the pre-upgrade database. A restored-or-recreated
+	// database would 401 every call captureState makes.
 	token string
 	// attachmentID is both the /api/v1/files/{id} path segment and the file
 	// name under data/uploads (Server/storage saves under the id verbatim).
 	attachmentID string
+	// backupName is the backup created before the upgrade, recorded so the
+	// first capture can be checked for it rather than compared against
+	// whatever it happened to contain.
+	backupName string
 }
 
 // The rehearsal phases that call these land in B6-8 Task 3. Until then
@@ -101,14 +119,53 @@ func installFixture(baseURL string) (fixture, error) {
 	if err != nil {
 		return fixture{}, err
 	}
-	// A backup taken before the upgrade is the artefact the rollback recipe
-	// tells owners to take, so the rehearsal has to prove the upgrade keeps
-	// it rather than sweeping it.
-	if err := request(http.MethodPost, baseURL+"/admin/api/backup", token, "", nil, http.StatusOK, nil); err != nil {
-		return fixture{}, fmt.Errorf("creating a database backup: %w", err)
+	backup, err := createBackup(baseURL, token)
+	if err != nil {
+		return fixture{}, err
 	}
-	fmt.Printf("fixture: owner %q, attachment %s, one database backup\n", fixtureUser, id)
-	return fixture{token: token, attachmentID: id}, nil
+	// Prove the attachment round-trips NOW, against the version that stored
+	// it. compare() is a pure delta, so a download that was already wrong
+	// before the upgrade would come back equally wrong afterwards and pass.
+	got, err := fetchAttachment(baseURL, token, id)
+	if err != nil {
+		return fixture{}, err
+	}
+	if got.digest != fixturePayloadDigest || got.length != fixturePayloadSize {
+		return fixture{}, fmt.Errorf(
+			"the fixture attachment does not round-trip: downloaded %s (%d bytes), uploaded %s (%d bytes)",
+			got.digest, got.length, fixturePayloadDigest, fixturePayloadSize)
+	}
+	fmt.Printf("fixture: owner %q, attachment %s, backup %s\n", fixtureUser, id, backup)
+	return fixture{token: token, attachmentID: id, backupName: backup}, nil
+}
+
+// createBackup takes the database backup the rollback recipe tells owners to
+// take, and returns its name.
+//
+// The POST is not enough on its own: it reports the name it wrote, and the
+// rehearsal then has to prove the upgrade KEEPS that backup rather than
+// sweeping it. So the list is read back here and the new name has to be in
+// it — otherwise a 200 that produced no file would leave the first capture
+// with an empty backup list, and "every backup survived" would hold
+// vacuously over nothing.
+func createBackup(baseURL, token string) (string, error) {
+	var created struct {
+		Path string `json:"path"`
+	}
+	if err := request(http.MethodPost, baseURL+"/admin/api/backup", token, "", nil, http.StatusOK, &created); err != nil {
+		return "", fmt.Errorf("creating a database backup: %w", err)
+	}
+	if created.Path == "" {
+		return "", errors.New("the backup endpoint returned 200 with no name")
+	}
+	names, err := listBackups(baseURL, token)
+	if err != nil {
+		return "", err
+	}
+	if !slices.Contains(names, created.Path) {
+		return "", fmt.Errorf("backup %s was reported as created but is not in the backup list %v", created.Path, names)
+	}
+	return created.Path, nil
 }
 
 // runSetup creates the owner account through the first-run wizard.
@@ -291,6 +348,41 @@ func captureState(dir, baseURL, token, attachmentID string) (state, error) {
 	return s, nil
 }
 
+// anchor checks the FIRST capture against what installFixture actually
+// created. Task 3 calls it once, on the pre-upgrade state.
+//
+// It exists because compare() is a pure delta: a difference between two
+// equally-wrong captures is a pass for the wrong reason. An empty backup
+// list, an uploads map read from the wrong directory, or a download that was
+// already broken before the upgrade would all make "nothing was lost" true
+// over nothing at all. Anchoring the first capture to known values is what
+// gives the delta something to be a delta of.
+func (f fixture) anchor(s state) error {
+	problems := make([]error, 0, 3)
+	if !slices.Contains(s.backups, f.backupName) {
+		problems = append(problems, fmt.Errorf(
+			"the pre-upgrade capture does not list backup %s, only %v", f.backupName, s.backups))
+	}
+	switch digest, ok := s.uploads[f.attachmentID]; {
+	case !ok:
+		// Server/storage saves under the attachment id verbatim, so the id is
+		// the relative path. Missing here with the upload having succeeded
+		// means captureState was pointed somewhere that is not the install.
+		problems = append(problems, fmt.Errorf(
+			"the pre-upgrade capture has no data/uploads/%s (it found %d file(s)): is it reading the install directory?",
+			f.attachmentID, len(s.uploads)))
+	case digest != fixturePayloadDigest:
+		problems = append(problems, fmt.Errorf(
+			"data/uploads/%s is %s on disk, want the uploaded %s", f.attachmentID, digest, fixturePayloadDigest))
+	}
+	if s.download.digest != fixturePayloadDigest || s.download.length != fixturePayloadSize {
+		problems = append(problems, fmt.Errorf(
+			"the pre-upgrade download of %s is %s (%d bytes), want %s (%d bytes)",
+			f.attachmentID, s.download.digest, s.download.length, fixturePayloadDigest, fixturePayloadSize))
+	}
+	return errors.Join(problems...)
+}
+
 // hashUploads digests every file under root, keyed by its path relative to
 // root. A missing directory is not an error here: it yields an empty map, and
 // compare then names each upload that went missing instead of failing with a
@@ -353,9 +445,13 @@ func fetchAttachment(baseURL, token, id string) (download, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return download{}, fmt.Errorf("downloading attachment %s: got %s, want 200", id, resp.Status)
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return download{}, fmt.Errorf("downloading attachment %s: got %s, want 200: %s", id, resp.Status, bytes.TrimSpace(detail))
 	}
-	data, err := io.ReadAll(resp.Body)
+	// Bounded at one byte over the payload: the length is recorded and
+	// compared, so an over-long body still reads as the mismatch it is —
+	// without this harness buffering whatever a wrong endpoint streams at it.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, fixturePayloadSize+1))
 	if err != nil {
 		return download{}, fmt.Errorf("downloading attachment %s: %w", id, err)
 	}
@@ -408,7 +504,10 @@ func compare(before, after state) error {
 			problems = append(problems, fmt.Errorf("backup %s is gone from the backup list", name))
 		}
 	}
-	if before.download != after.download {
+	// Digest and length only: the id is an input both captures were handed,
+	// not an observation, and including it would let a mismatched id print as
+	// though the bytes had changed.
+	if before.download.digest != after.download.digest || before.download.length != after.download.length {
 		problems = append(problems, fmt.Errorf(
 			"the download of attachment %s changed: %s (%d bytes) -> %s (%d bytes)",
 			before.download.id, before.download.digest, before.download.length,
