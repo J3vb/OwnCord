@@ -10252,12 +10252,16 @@
       "why": "OC-0438 made createRoom read the channel's stored voice_config to set the audio publish bitrate, but createRoom runs synchronously from the voice_token handler and voiceJoinComplete sends voice_config AFTER voiceJoinGrantToken sends voice_token. connectAndSetup has no await between its entry and `await this.createRoom(channelId)`, so on the first join of a channel no voice_config has been processed yet, the lookup returns undefined and the Room is built with LiveKit's default audio bitrate. It self-corrects on any later rejoin or reconnect, which is why the OC-0438 unit tests (which pre-seed voiceConfigs) pass.",
       "repro": "Fresh client, join a voice channel whose quality is 'low' or 'high' for the first time this session: the published mic track uses LiveKit's default audio bitrate, not the 32000/128000 the server sent. Leave and rejoin the same channel and the configured bitrate is applied, because voiceConfigs now has an entry for it.",
       "evidence": "Client/src/lib/livekitSession.ts:780 (createRoom call, no preceding await); Server/ws/voice_join.go voiceJoinGrantToken sends voice_token, voiceJoinComplete sends voice_config afterwards",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-12",
       "hunt": "voice-path-2026-09-12",
       "lens": "audit-followup",
       "finder": "opus",
-      "fix": null,
+      "fix": {
+        "commit": "1672867",
+        "test": "Client/tests/unit/livekit-session.test.ts",
+        "revertProof": "pass"
+      },
       "suggestedFix": "Fix on the CLIENT, not by reordering the wire. The voice-join frame order is frozen by the epoch-1 golden transcripts (Server/ws/protocol_epoch1_contract_test.go, protocol/fixtures/epoch-1/), which compare frames in order and exist precisely to catch this kind of drift -- moving voice_config ahead of voice_token fails the voice-join-e2ee-leave journey, and regenerating the fixture would erase the record of what epoch 1 looked like. Instead apply the bitrate where the microphone is actually published rather than at Room construction: the mic publish happens well after connect, by which point voice_config has been processed. Pass explicit audio encoding on that publish, keeping publishDefaults as the fallback."
     }
   ]

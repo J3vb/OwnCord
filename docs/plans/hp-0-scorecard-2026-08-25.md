@@ -71,8 +71,8 @@ role family closed `OC-0374`, and its message/read-state family closed
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 435     |
-| open      | **1**   |
+| fixed     | 436     |
+| open      | **0**   |
 | declined  | 4       |
 | duplicate | 1       |
 | **total** | **441** |
