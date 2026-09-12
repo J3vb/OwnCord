@@ -10263,6 +10263,48 @@
         "revertProof": "pass"
       },
       "suggestedFix": "Fix on the CLIENT, not by reordering the wire. The voice-join frame order is frozen by the epoch-1 golden transcripts (Server/ws/protocol_epoch1_contract_test.go, protocol/fixtures/epoch-1/), which compare frames in order and exist precisely to catch this kind of drift -- moving voice_config ahead of voice_token fails the voice-join-e2ee-leave journey, and regenerating the fixture would erase the record of what epoch 1 looked like. Instead apply the bitrate where the microphone is actually published rather than at Room construction: the mic publish happens well after connect, by which point voice_config has been processed. Pass explicit audio encoding on that publish, keeping publishDefaults as the fallback."
+    },
+    {
+      "id": "OC-0442",
+      "title": "handleParticipantLeft survives a clearState() during the key export and writes holder/rotation state onto the torn-down session",
+      "file": "Client/src/lib/livekitE2EE.ts",
+      "line": 1374,
+      "severity": "high",
+      "why": "peerAttemptIsCurrent() returns false for two unrelated reasons: this peer's generation moved (a duplicate voice_leave) or the SESSION generation moved (clearState() ended the session). OC-0416 correctly stopped returning from the whole method on the first case, but scoping the bail-out to the retirement write also removed the abort for the second. After a clearState() during `await exportPublicKey(departingKey)`, the invocation resumes with the channelId and roster it captured before the await -- a room this manager has already torn down -- and falls through to the key-holder election, which sets _isKeyHolder and starts a rotation. clearState() had just reset both, so a room joined afterwards inherits holder and rotation state from a dead session.",
+      "repro": "Be the key holder in a voice channel with a peer present. A voice_leave for that peer suspends handleParticipantLeft on exportPublicKey; the local user leaves voice (or switches channels) before it resolves. The resumed invocation elects itself holder and rotates _roomKey against the old channelId: the manager's epoch advances from the post-teardown 0 and a room key is pushed to the key provider for a session that no longer exists.",
+      "evidence": "Client/src/lib/livekitE2EE.ts:787-793 (peerAttemptIsCurrent conflates _sessionGeneration and _peerGenerations); clearState() resets _isKeyHolder, _rotatingKey and _e2eeEpoch, all of which the resumed invocation then writes again; regression test [OC-0442] in Client/tests/unit/livekit-e2ee.test.ts observed epoch 1 on a torn-down manager.",
+      "status": "fixed",
+      "found": "2026-09-12",
+      "hunt": "voice-path-2026-09-12",
+      "lens": "external-review",
+      "finder": "codex-review-pr-1591",
+      "fix": {
+        "commit": "60a5140",
+        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "revertProof": "pass"
+      },
+      "suggestedFix": "Capture _sessionGeneration separately at method entry and return outright when it has moved, keeping the OC-0416 scoped guard for the peer-generation case only."
+    },
+    {
+      "id": "OC-0443",
+      "title": "The admin log viewer blanks its buffer on every reconnect attempt, including ones that never connect",
+      "file": "Server/admin/static/index.html",
+      "line": 1759,
+      "severity": "medium",
+      "why": "The OC-0435 fix replaced the buffered view as soon as the /logs/ticket request returned, before constructing the replacement EventSource. Clearing that early is only sound if the replacement actually delivers its backfill; when it does not, nothing refills the buffer. scheduleLogReconnect retries every 1500ms, so during an SSE outage each retry clears the view again and it stays empty for the whole outage.",
+      "repro": "Open the admin Logs tab, let the backfill render, then make the log stream fail (stop the server, or drop the SSE connection). connectLogStream runs, the ticket POST succeeds, state.logEntries is emptied, the new EventSource errors, and the operator is left with an empty log pane -- and it stays empty across every 1.5s retry until the stream comes back.",
+      "evidence": "Server/admin/static/index.html connectLogStream: `state.logEntries=[];renderLogLines();` ran between the ticket fetch and `new EventSource(...)`, with es.onerror routing straight to scheduleLogReconnect.",
+      "status": "fixed",
+      "found": "2026-09-12",
+      "hunt": "voice-path-2026-09-12",
+      "lens": "external-review",
+      "finder": "codex-review-pr-1591",
+      "fix": {
+        "commit": "ed9bea2",
+        "test": "Client/tests/contract/server-admin-static-logs.test.ts",
+        "revertProof": "pass"
+      },
+      "suggestedFix": "Defer the replacement to the first sign of life on the new stream -- onopen, or the first delivered line if no open event fires -- behind a once-per-connection flag, so the OC-0435 no-duplicate-backfill property holds without blanking the view on a failed connect."
     }
   ]
 }
