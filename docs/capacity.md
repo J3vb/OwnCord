@@ -252,6 +252,24 @@ The voice cohort's connect-and-teardown wall clock was 5 s for all 50
 participants, ramp-inclusive — not a percentile, and not comparable with the
 OwnCord half above.
 
+### Reproduced, and the tightened budgets re-verified
+
+The tightened budgets above were set from run 34701291805 and then **run
+again** against them, because a threshold that has never been evaluated is not
+a gate. Run **34701991385**, same commit family, same constrained leg:
+
+| Path                          | run 1 p95 / p99 | run 2 p95 / p99 | Budget          |
+| ----------------------------- | --------------- | --------------- | --------------- |
+| REST login                    | 307 / 344 ms    | 315 / 331 ms    | 600 ms / 1 s    |
+| WebSocket open → `auth_ok`    | 13 / 29 ms      | 21 / 35 ms      | 200 ms / 500 ms |
+| Send → sender acknowledgement | 57 / 83 ms      | 51 / 78 ms      | 150 ms / 300 ms |
+| Send → recipient delivery     | 60 / 85 ms      | 53 / 79 ms      | 200 ms / 400 ms |
+| Voice join (OwnCord half)     | 3 / 4 ms        | 4 / 6 ms        | 250 ms / 500 ms |
+
+Run 2 again reached 100 connections, 1,139,491 cross-connection deliveries, 25
+voice tokens, 625/625 voice tracks at 0% loss, and 0 WebSocket errors. Run-to-run
+movement is a few milliseconds, so the budgets are not sitting on the noise.
+
 ### What this run also says
 
 - **The reference hardware is not the limiting factor at this profile.** The
