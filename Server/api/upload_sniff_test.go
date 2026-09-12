@@ -67,9 +67,9 @@ func TestUploadStoreFile_ShortReadStillSniffsFullHeader(t *testing.T) {
 	// + "WE" — four bytes short of the signature — even though the full
 	// header is available from the underlying stream a moment later.
 	data := make([]byte, 40)
-	copy(data, []byte("RIFF"))
+	copy(data, "RIFF")
 	data[4], data[5], data[6], data[7] = 0x1c, 0x00, 0x00, 0x00
-	copy(data[8:], []byte("WEBPVP"))
+	copy(data[8:], "WEBPVP")
 
 	reader := &shortReadReader{data: data, maxPerRead: 10}
 

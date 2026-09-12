@@ -106,8 +106,8 @@ func (c *LiveKitClient) GenerateToken(
 
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
 	grant := &auth.VideoGrant{
-		RoomJoin:     true,
-		Room:         roomName,
+		RoomJoin: true,
+		Room:     roomName,
 		// Always granted: a server-deafened or non-speaking participant must
 		// still receive other people's audio and streams, so subscription is
 		// never derived from the publish permissions above.
