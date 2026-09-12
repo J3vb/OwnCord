@@ -9738,7 +9738,7 @@
       "fix": {
         "commit": "04659e8",
         "test": "Client/tests/unit/livekit-e2ee.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Scope the bail-out to the retirement write instead of returning from the method: replace lines 1365-1369 with `if (departingKey && !channelUsers?.has(userId)) { const departingKeyBase64 = await exportPublicKey(departingKey); if (isCurrent()) this.retirePeerKey(userId, departingKeyBase64); }` so the invocation that actually observed hadPeerKey=true still reaches the election / `else if (wasKeyHolder && hadPeerKey)` rekey. The duplicate invocation (hadPeerKey=false) remains a no-op, so this cannot double-rotate."
     },
@@ -9759,7 +9759,7 @@
       "fix": {
         "commit": "dd92d56",
         "test": "Client/tests/unit/ws-cert.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Mirror the Rust guard in the one shared function (Client/src/lib/ws.ts:130): replace the unconditional `.replace(/:443$/, \"\")` with a conditional strip \u2014 e.g. `const stripped = host.endsWith(\":443\") ? (() => { const rest = host.slice(0, -4); return !rest.includes(\":\") || rest.endsWith(\"]\") ? rest : host; })() : host;` then apply the existing bracket-unwrap and toLowerCase to `stripped`. One guard in normalizeHostForCertCompare fixes all four call sites."
     },
@@ -9780,7 +9780,7 @@
       "fix": {
         "commit": "6db6287",
         "test": "Client/tests/unit/main-page.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "One line in MainPage.destroy() (Client/src/pages/MainPage.ts, next to setActivePresenceSender(null) at line 970): `setMarkReadSender(null);` \u2014 setMarkReadSender already calls cancelPendingMarkAll(), so nulling the sender at teardown both drops the stale ws closure and kills the armed timers at the moment the connection is abandoned instead of 800 ms after the next server is live."
     },
@@ -9801,7 +9801,7 @@
       "fix": {
         "commit": "bc2f6af",
         "test": "Server/service/message_crud_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Treat the lookup failure the same way sendMessageDMSideEffects already treats the participant-lookup failure \u2014 it is the one \"cannot decide\" exit the caller handles. Replace `if gErr == nil { result.DMIsGroup = isGroup }` with a fail-stop: `if gErr != nil { slog.Error(\"MessageService.SendMessage IsGroupDM\", \"err\", gErr, \"channel_id\", p.ChannelID); return false }; result.DMIsGroup = isGroup`. (Do NOT fail closed to isGroup=true here: that would skip the first-contact gate and OpenDM/deliver to an untrusted 1:1 recipient, the opposite privacy regression.)"
     },
@@ -9822,7 +9822,7 @@
       "fix": {
         "commit": "0332766",
         "test": "Server/ws/oc_0420_pending_mod_flags_join_failure_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Re-stash on the abort path in the shared caller rather than in each failure branch: in handleVoiceJoin (Server/ws/voice_join.go:66-70), when voiceJoinPersist returns !ok, put the snapshot back before returning \u2014 e.g.\n\n\tstate, ok := h.voiceJoinPersist(ctx, c, ch, channelID)\n\tif !ok {\n\t\tif wasServerMuted || wasServerDeafened {\n\t\t\tc.setPendingModFlags(wasServerMuted, wasServerDeafened, wasServerMutedBy)\n\t\t}\n\t\treturn\n\t}\n\nThe `wasServerMuted || wasServerDeafened` guard keeps an ordinary failed join (no stash, no prior row) from writing a false/false/nil stash, matching stashPendingModFlags' own early-return. Note the same one-line pattern also covers the voiceJoinGrantToken failure exit (token mint error / OC-0008 supersession), where RestoreModFlags has written the flags to the row but rollbackVoiceJoin's LeaveIfMatch then deletes it \u2014 worth restashing there too, but the persist branch is the minimum fix for this finding."
     },
@@ -9843,7 +9843,7 @@
       "fix": {
         "commit": "286c6df",
         "test": "Client/tests/contract/server-admin-static-channel-perms.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Only write (and mark touched) when the quick toggle actually changes state, so an unchanged hidden role neither gets its row rewritten nor suppresses the matrix write. In saveChannelPerms change `if(!box.checked){await api('PUT',...);touchedRoles.add(role.role_id)}` to `if(!box.checked){if(!wasHidden){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}}` \u2014 one guard in the one function; the else-if DELETE branch is already correctly conditioned on wasHidden."
     },
@@ -9864,7 +9864,7 @@
       "fix": {
         "commit": "286c6df",
         "test": "Client/tests/contract/server-admin-static-settings.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Send only the keys that actually changed. renderSettings already stashes the loaded values in state._settings (`state._settings={...settings}`), so in saveSettings drop any key whose new value equals the stored one before the PATCH \u2014 e.g. after building `body`, `Object.keys(body).forEach(k=>{const cur=state._settings[k];const curNorm=(k==='require_2fa')?((cur==='1'||cur==='true')?'true':'false'):(cur||'');if(body[k]===curNorm)delete body[k]});if(!Object.keys(body).length){...}`. That restores the server guard's intent for the panel without touching the service."
     },
@@ -9885,7 +9885,7 @@
       "fix": {
         "commit": "0ea2e31",
         "test": "Server/ws/oc_0423_session_revoke_handshake_race_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Make the two orderings meet the same way serve_ready.go:539 does for the role re-read: immediately AFTER registerNow (one shared helper called from handleFreshConnect and from handleReconnect/reconnectRegister), re-validate c.tokenHash with the read handleMessageSessionRecheck already uses \u2014 h.readers.Dispatch.GetSessionWithBanStatus(ctx, c.tokenHash) \u2014 and h.kickClient(c) when the result is nil or expired (skip on a DB error, matching the existing fail-open-on-transient-error rule in handlers.go:137 and hub_sweep.go). Post-register is what closes it: a revocation visible to that read is acted on by us, and one not yet visible necessarily commits after our registerNow, so its DisconnectRevokedUser finds the client. A check placed inside refreshUserSnapshot instead would only narrow the window, not close it, since it still runs pre-register."
     },
@@ -9906,7 +9906,7 @@
       "fix": {
         "commit": "bceb610",
         "test": "Server/api/dm_handler_close_watermark_order_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "In Server/api/dm_handler.go, move markDMVisibilityChanged(broadcaster) (currently line 246) above the closeMsg SendToUser at line 241, so the bump is the first statement inside the `if broadcaster != nil` block - matching broadcastDMOpen and handleNSFWAcknowledge. No other change is needed."
     },
@@ -9927,7 +9927,7 @@
       "fix": {
         "commit": "a579c56",
         "test": "Server/storage/storage_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Add one row to boundedKeys() in Server/config/config.go: {\"upload.max_size_mb\", &cfg.Upload.MaxSizeMB, 0, maxMiB, def.Upload.MaxSizeMB, \"the default, 100 MB\"}. min=0 keeps TestLoadUploadBoundaryValues green (0 stays 0) while applyBounds turns any negative into the compiled default with the standard warning. Defensively, Save could also refuse maxBytes < 0 rather than silently writing nothing, but the shared config bound is the single-point fix."
     },
@@ -9948,7 +9948,7 @@
       "fix": {
         "commit": "e3a6ecb",
         "test": "Server/ws/event_persister_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Append the same sweep AuditWriter.Stop uses to the end of EventPersister.Stop, after `<-p.done` at Server/ws/event_persister.go:205: `for { select { case evt := <-p.queue: p.dropped.Add(1); slog.Error(\"event dropped: persister stopped\", \"seq\", evt.seq, \"event_type\", evt.eventType, \"channel_id\", evt.channelID); default: return } }`. One guard in the shared Stop covers every caller."
     },
@@ -9969,7 +9969,7 @@
       "fix": {
         "commit": "39c88d5",
         "test": "Server/api/upload_sniff_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Fill the sniff buffer instead of assuming one Read does: `n, readErr := io.ReadFull(file, sniffBuf[:])` with the existing io.EOF / io.ErrUnexpectedEOF tolerance kept as-is (both are normal for a file shorter than 512 bytes). Everything downstream \u2014 the MultiReader rejoin, the store write \u2014 is unchanged."
     },
@@ -9990,7 +9990,7 @@
       "fix": {
         "commit": "03cb7a0",
         "test": "Server/ws/oc_0428_reconnect_voice_teardown_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Keep the supplement, but stop sourcing its channel only from a still-registered old client. Smallest correct change is inside handleReconnect/liveVoiceEventsSince rather than in callers: when h.GetClient(c.userID) == nil, fall back to scanning the same replay range for the resuming user's OWN voice frames \u2014 i.e. add a liveVoiceEventsSinceForUser(ctx, lastSeq, c.userID) that pulls ring-buffer/cold-tier frames of type voice_state/voice_leave whose payload user_id == c.userID and appends them regardless of allowedChannelIDs (the room still must not enter allowedChannelIDs, since that map also gates the ChannelTopic subscription in registerNow). That covers the disconnect-teardown voice_leave without widening what the client can read."
     },
@@ -10011,7 +10011,7 @@
       "fix": {
         "commit": "d5bbfff",
         "test": "Client/tests/unit/livekit-session.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Re-arm the post-timeout attempt at the retry cadence, not the periodic one. In voiceTokenManager.ts add startRetryTimer() { this.clearTimers(); this._refreshTimer = setTimeout(() => this.requestRefresh(), RATE_LIMIT_MS); } and change livekitSession.ts:192 to onRefreshTimeout: () => this._tokenManager.startRetryTimer(). RATE_LIMIT_MS (60s) is safe against the server's 1-per-60s budget because _lastSentAt was stamped 60s earlier when the deadline was armed."
     },
@@ -10050,7 +10050,7 @@
       "fix": {
         "commit": "8a891dc",
         "test": "Server/service/oc_0431_kick_disconnect_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "One guard in the shared service function, covering both call sites: in Server/service/moderation.go forceLogout, immediately after ForceLogoutWithAction succeeds (before or after the audit write), reuse the existing service-layer seam from Server/service/auth.go:32-34 \u2014 `if d, ok := s.notifier.(sessionDisconnector); ok { d.DisconnectRevokedUser(targetID) }`. s.notifier is wired to *ws.Hub at Server/api/router.go:385, and *ws.Hub implements DisconnectRevokedUser (Server/ws/hub_broadcast.go:261), so both the admin route and the moderation-queue \"kick\" arm are fixed with no signature or route changes; a nil/other notifier stays a silent no-op with the sweep as backstop."
     },
@@ -10071,7 +10071,7 @@
       "fix": {
         "commit": "a921808",
         "test": "Server/db/inventory_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Give class 6 in Server/db/inventory.go the same exact-suffix predicate as erasureDeleteLockouts: `SELECT COUNT(*) FROM rate_lockouts WHERE lower(substr(key, -(length(?1) + 1))) = ':' || lower(?1) OR substr(key, -(length(?2) + 1)) = ':' || ?2` keeping the existing Args func (uname, uid) \u2014 numbered parameters already match the arg order."
     },
@@ -10092,7 +10092,7 @@
       "fix": {
         "commit": "fce5efd",
         "test": "Client/tests/unit/channel-controller.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Route every send through one per-controller FIFO promise chain instead of only the text branch, so a reply/attachment send cannot jump an in-flight persist. In performSend, replace the `if (...) { void savePendingText(...).then(sendNow) } else sendNow()` split with a single chained dispatch, e.g. a controller-scoped `let sendChain = Promise.resolve();` and `sendChain = sendChain.then(() => needsPersist ? savePendingText(owner, draft).catch(toastOnce) : undefined).then(sendNow);`. One chain in the shared function orders both branches; guarding each caller would not."
     },
@@ -10113,7 +10113,7 @@
       "fix": {
         "commit": "7a44da8",
         "test": "Server/ws/serve_ready_timeout_can_send_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Resolve the timeout once in buildReady and thread it into the affordance rather than patching callers: in Hub.buildReady (Server/ws/serve_ready.go:351) call sub, err := h.subjectFor(ctx, userID, 0) \u2014 it already skips the lookup for administrators and returns a real error on lookup failure \u2014 propagate err like the other buildReady reads, and pass sub.TimedOut down through readyChannelPayloads into channelCanSend, which sets it on the permissions.Subject it builds (Server/ws/serve_ready.go:145). That makes the connect-time verdict identical to refreshChannelVisibilityCanSend's."
     },
@@ -10134,7 +10134,7 @@
       "fix": {
         "commit": "286c6df",
         "test": "Client/tests/contract/server-admin-static-logs.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Make a (re)connect replace the view instead of appending to it: in connectLogStream, immediately before `const es=new EventSource(...)` (after the ticket fetch and the connectSeq/paused re-check at :1753), reset the buffer and the DOM \u2014 `state.logEntries=[];renderLogLines();const c=document.getElementById('logCount');if(c)c.textContent='0 entries';` \u2014 since the server's replay is a superset of anything already held (ring capacity 2000 == state.logMaxLines), nothing is lost."
     },
@@ -10155,7 +10155,7 @@
       "fix": {
         "commit": "6241acf",
         "test": "Server/service/channel_focus_readfail_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Close the `if err == nil` block after the skip-decision return and make the write unconditional, so only the *skip* depends on a successful read:\n\n    latestID, err := s.st.GetLatestMessageID(ctx, channelID)\n    if err == nil {\n        lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)\n        if rsErr == nil && found && lastRead == latestID && mentions == 0 {\n            slog.Debug(...)\n            return ch, nil\n        }\n    }\n    if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {\n        slog.Warn(\"channel_focus: read-state write failed\", ...)\n    }\n\nOne dedent in the shared service function; no caller changes."
     },
@@ -10176,7 +10176,7 @@
       "fix": {
         "commit": "0346180",
         "test": "Client/tests/unit/livekit-diagnostics.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Route both functions through room.engine.pcManager?.publisher / .subscriber exactly as connectionStats.ts does, reading each transport's pc."
     },
@@ -10197,7 +10197,7 @@
       "fix": {
         "commit": "d5bbfff",
         "test": "Client/tests/unit/livekit-session.test.ts",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Apply the delivered bitrate to the Room's audio publish options (publishDefaults audio encoding) using the voice_config stored for the channel being joined, falling back to the current LiveKit default when no config has arrived yet."
     },
@@ -10218,7 +10218,7 @@
       "fix": {
         "commit": "0332766",
         "test": "Server/ws/oc_0439_voice_quality_fallback_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Carry the configured voice quality into the hub at construction (a HubOptions field fed from cfg.Voice.Quality, matching the startup-only/restart semantics the wizard already implements) and use it as voice_join's fallback in place of the hardcoded \"medium\". A per-channel ch.VoiceQuality still wins when set, and an unset or invalid configured value still degrades to \"medium\"."
     },
@@ -10239,7 +10239,7 @@
       "fix": {
         "commit": "00e1c29",
         "test": "Server/ws/oc_0440_missing_channel_video_slot_test.go",
-        "revertProof": "self-reported"
+        "revertProof": "pass"
       },
       "suggestedFix": "Treat ch == nil exactly as the GetChannel error branch already treats a failed read: refuse with ErrCodeInternal rather than falling through to the unconditional enable."
     },
