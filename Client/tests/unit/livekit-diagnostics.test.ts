@@ -41,23 +41,49 @@ function fakeRoom(extra: Record<string, unknown> = {}): {
   return { room, handlers };
 }
 
-function fakePeerConnection(over: Partial<RTCPeerConnection> = {}): RTCPeerConnection {
+/**
+ * A fake PCTransport exposing only the public getters livekitDiagnostics
+ * reads (OC-0437) — not a raw RTCPeerConnection. livekit-client 2.x's
+ * PCTransport keeps its RTCPeerConnection behind a private `_pc`/`pc`, so the
+ * module (and this fixture) go through `getICEConnectionState()` /
+ * `getConnectionState()` / `getSignallingState()` / `getStats()` instead.
+ */
+function fakeTransport(
+  over: {
+    iceConnectionState?: RTCIceConnectionState;
+    connectionState?: RTCPeerConnectionState;
+    signalingState?: RTCSignalingState;
+    getStats?: () => Promise<RTCStatsReport> | undefined;
+  } = {},
+): {
+  getICEConnectionState: () => RTCIceConnectionState;
+  getConnectionState: () => RTCPeerConnectionState;
+  getSignallingState: () => RTCSignalingState;
+  getStats: () => Promise<RTCStatsReport> | undefined;
+} {
   return {
-    iceConnectionState: "connected",
-    iceGatheringState: "complete",
-    connectionState: "connected",
-    signalingState: "stable",
-    getStats: vi.fn().mockResolvedValue(new Map()),
-    ...over,
-  } as unknown as RTCPeerConnection;
+    getICEConnectionState: () => over.iceConnectionState ?? "connected",
+    getConnectionState: () => over.connectionState ?? "connected",
+    getSignallingState: () => over.signalingState ?? "stable",
+    getStats: over.getStats ?? vi.fn().mockResolvedValue(new Map()),
+  };
 }
 
-/** Builds an engine object shaped the way the module expects to find it. */
-function withEngine(subscriberPc?: RTCPeerConnection, publisherPc?: RTCPeerConnection): Room {
+/**
+ * Builds an engine object shaped the way a real LiveKit 2.x Room has it:
+ * engine.pcManager.{subscriber,publisher} (PCTransportManager), not
+ * engine.{subscriber,publisher} directly (OC-0437).
+ */
+function withEngine(
+  subscriberTransport?: ReturnType<typeof fakeTransport>,
+  publisherTransport?: ReturnType<typeof fakeTransport>,
+): Room {
   return {
     engine: {
-      ...(subscriberPc !== undefined ? { subscriber: { pc: subscriberPc } } : {}),
-      ...(publisherPc !== undefined ? { publisher: { pc: publisherPc } } : {}),
+      pcManager: {
+        ...(subscriberTransport !== undefined ? { subscriber: subscriberTransport } : {}),
+        ...(publisherTransport !== undefined ? { publisher: publisherTransport } : {}),
+      },
     },
   } as unknown as Room;
 }
@@ -133,13 +159,40 @@ describe("logIceConnectionInfo", () => {
   });
 
   it("reads stats from both peer connections", () => {
-    const sub = fakePeerConnection();
-    const pub = fakePeerConnection();
+    const subGetStats = vi.fn().mockResolvedValue(new Map());
+    const pubGetStats = vi.fn().mockResolvedValue(new Map());
 
-    logIceConnectionInfo(withEngine(sub, pub));
+    logIceConnectionInfo(
+      withEngine(
+        fakeTransport({ getStats: subGetStats }),
+        fakeTransport({ getStats: pubGetStats }),
+      ),
+    );
 
-    expect(sub.getStats).toHaveBeenCalled();
-    expect(pub.getStats).toHaveBeenCalled();
+    expect(subGetStats).toHaveBeenCalled();
+    expect(pubGetStats).toHaveBeenCalled();
+  });
+
+  // OC-0437: livekit-client 2.x puts the transports on engine.pcManager, not
+  // directly on engine — see PCTransportManager.d.ts. This pins the real
+  // Room shape explicitly (rather than through the `withEngine` helper) so a
+  // future rewrite of that helper can't quietly resurrect the old bug.
+  it("OC-0437: reads stats from the real engine.pcManager.publisher/subscriber shape", () => {
+    const subGetStats = vi.fn().mockResolvedValue(new Map());
+    const pubGetStats = vi.fn().mockResolvedValue(new Map());
+    const room = {
+      engine: {
+        pcManager: {
+          subscriber: fakeTransport({ getStats: subGetStats }),
+          publisher: fakeTransport({ getStats: pubGetStats }),
+        },
+      },
+    } as unknown as Room;
+
+    logIceConnectionInfo(room);
+
+    expect(subGetStats).toHaveBeenCalled();
+    expect(pubGetStats).toHaveBeenCalled();
   });
 
   it("resolves the selected candidate pair from the stats report", async () => {
@@ -159,7 +212,7 @@ describe("logIceConnectionInfo", () => {
     ]);
     const getStats = vi.fn().mockResolvedValue(stats);
 
-    logIceConnectionInfo(withEngine(fakePeerConnection({ getStats } as never)));
+    logIceConnectionInfo(withEngine(fakeTransport({ getStats })));
     await vi.waitFor(() => {
       expect(getStats).toHaveBeenCalled();
     });
@@ -183,7 +236,7 @@ describe("logIceConnectionInfo", () => {
     const getStats = vi.fn().mockResolvedValue(stats);
 
     expect(() => {
-      logIceConnectionInfo(withEngine(fakePeerConnection({ getStats } as never)));
+      logIceConnectionInfo(withEngine(fakeTransport({ getStats })));
     }).not.toThrow();
     await vi.waitFor(() => {
       expect(getStats).toHaveBeenCalled();
@@ -194,7 +247,7 @@ describe("logIceConnectionInfo", () => {
     const getStats = vi.fn().mockRejectedValue(new Error("pc closed"));
 
     expect(() => {
-      logIceConnectionInfo(withEngine(fakePeerConnection({ getStats } as never)));
+      logIceConnectionInfo(withEngine(fakeTransport({ getStats })));
     }).not.toThrow();
     await vi.waitFor(() => {
       expect(getStats).toHaveBeenCalled();
@@ -234,8 +287,8 @@ describe("getIceConnectionState", () => {
   it("reports both peer connections", () => {
     const got = getIceConnectionState(
       withEngine(
-        fakePeerConnection({ iceConnectionState: "checking", connectionState: "connecting" }),
-        fakePeerConnection({ iceConnectionState: "connected", connectionState: "connected" }),
+        fakeTransport({ iceConnectionState: "checking", connectionState: "connecting" }),
+        fakeTransport({ iceConnectionState: "connected", connectionState: "connected" }),
       ),
     );
 
@@ -245,8 +298,31 @@ describe("getIceConnectionState", () => {
     });
   });
 
+  // OC-0437: same real-shape check as above, for the debug-panel summary path.
+  it("OC-0437: reports transports from the real engine.pcManager.publisher/subscriber shape", () => {
+    const room = {
+      engine: {
+        pcManager: {
+          subscriber: {
+            getICEConnectionState: () => "checking",
+            getConnectionState: () => "connecting",
+          },
+          publisher: {
+            getICEConnectionState: () => "connected",
+            getConnectionState: () => "connected",
+          },
+        },
+      },
+    } as unknown as Room;
+
+    expect(getIceConnectionState(room)).toEqual({
+      subscriber: { iceConnectionState: "checking", connectionState: "connecting" },
+      publisher: { iceConnectionState: "connected", connectionState: "connected" },
+    });
+  });
+
   it("reports only the peer connection that exists", () => {
-    const got = getIceConnectionState(withEngine(fakePeerConnection()));
+    const got = getIceConnectionState(withEngine(fakeTransport()));
 
     expect(got).toHaveProperty("subscriber");
     expect(got).not.toHaveProperty("publisher");
@@ -403,7 +479,7 @@ describe("buildSessionDebugInfo", () => {
         trackPublications: new Map(),
         getTrackPublication: () => undefined,
       },
-      engine: { subscriber: { pc: fakePeerConnection({ iceConnectionState: "failed" }) } },
+      engine: { pcManager: { subscriber: fakeTransport({ iceConnectionState: "failed" }) } },
     } as unknown as Room;
 
     expect(buildSessionDebugInfo({ ...baseDeps, room }).iceConnectionState).toEqual({
