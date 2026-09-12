@@ -115,8 +115,9 @@ func installFixture(baseURL string) (fixture, error) {
 		return fixture{}, err
 	}
 	// Prove the attachment round-trips NOW, against the version that stored
-	// it. compare() is a pure delta, so a download that was already wrong
-	// before the upgrade would come back equally wrong afterwards and pass.
+	// it. compare() is a delta and nothing more, so a download that was
+	// already wrong before the upgrade would come back equally wrong
+	// afterwards and pass.
 	got, err := fetchAttachment(baseURL, token, id)
 	if err != nil {
 		return fixture{}, err
@@ -342,9 +343,9 @@ func captureState(dir, baseURL, token, attachmentID string) (state, error) {
 // anchor checks the FIRST capture against what installFixture actually
 // created. Task 3 calls it once, on the pre-upgrade state.
 //
-// It exists because compare() is a pure delta: a difference between two
-// equally-wrong captures is a pass for the wrong reason. An empty backup
-// list, an uploads map read from the wrong directory, or a download that was
+// It exists because compare() is a delta and nothing more: a difference
+// between two equally-wrong captures is a pass for the wrong reason. An empty
+// backup list, an uploads map read from the wrong directory, or a download that was
 // already broken before the upgrade would all make "nothing was lost" true
 // over nothing at all. Anchoring the first capture to known values is what
 // gives the delta something to be a delta of.
@@ -542,7 +543,7 @@ func additions(before, after state) string {
 		return ""
 	}
 	slices.Sort(added)
-	return "the upgrade added: " + strings.Join(added, ", ")
+	return "added since the pre-upgrade capture: " + strings.Join(added, ", ")
 }
 
 func onlyIn(kind string, before, after map[string]string) []string {

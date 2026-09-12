@@ -32,7 +32,7 @@ type target interface {
 
 var (
 	_ target = (*standaloneTarget)(nil)
-	_ target = (*dockerTarget)(nil)
+	_ target = (*dockerTarget)(nil) // the container leg, in docker.go
 )
 
 // defaultBaseURL is where the default config.yaml puts the server: port 8443,
@@ -190,7 +190,7 @@ func (t *standaloneTarget) archive(dir string) error {
 func (t *standaloneTarget) restore(dir string) error {
 	live := filepath.Join(t.dir, "data")
 	if err := os.RemoveAll(live); err != nil {
-		return err
+		return fmt.Errorf("restoring the data directory: %w", err)
 	}
 	if err := os.CopyFS(live, os.DirFS(filepath.Join(dir, "data"))); err != nil {
 		return fmt.Errorf("restoring the data directory: %w", err)
@@ -259,35 +259,4 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0o600)
-}
-
-// errDockerLeg is returned by every dockerTarget method until B6-8 Task 5
-// builds it. The flag surface accepts -docker already so the workflow and the
-// docs can be written against the final command line.
-var errDockerLeg = errors.New("the container leg is not implemented yet (B6-8 Task 5)")
-
-// dockerTarget will rehearse the same upgrade as containers on a named volume.
-// Image replacement, not container restart: that is the only Docker upgrade
-// path OwnCord supports (docs/deployment.md), and the same reason
-// Server/scripts/docker-smoke.sh phase 5 replaces rather than restarts.
-type dockerTarget struct{}
-
-//nolint:unparam // always-error until Task 5 builds the container leg; this is the final signature
-func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
-	return nil, fmt.Errorf("%w (asked for %s -> %s)", errDockerLeg, oldImage, newImage)
-}
-
-func (t *dockerTarget) start(string) error   { return errDockerLeg }
-func (t *dockerTarget) drain() error         { return errDockerLeg }
-func (t *dockerTarget) baseURL() string      { return "" }
-func (t *dockerTarget) installDir() string   { return "" }
-func (t *dockerTarget) archive(string) error { return errDockerLeg }
-func (t *dockerTarget) restore(string) error { return errDockerLeg }
-func (t *dockerTarget) cleanup()             {}
-
-// annotate returns the cause unchanged apart from its phase: swallowing it
-// into errDockerLeg would hide the real failure. Task 5 replaces this with
-// the container's `docker logs`.
-func (t *dockerTarget) annotate(phase string, cause error) error {
-	return fmt.Errorf("%s: %w", phase, cause)
 }

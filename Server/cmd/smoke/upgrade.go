@@ -12,11 +12,18 @@ import (
 // and 8 — kept together because they are what a CI failure is grepped by.
 //
 // They are NOT what every phase prints. A drain or a boot fails under the
-// phase string standaloneTarget builds for it, so phase 2 is labelled
-// "drain old", phase 6 "drain new", phase 4 "new boot" and phase 7's restart
-// "old boot": grepping a red log for "phase 2" or "phase 6" finds nothing.
-// Each of those phases prints its own completion line instead, so the
-// progression is readable on a green run.
+// phase string the target builds for it, so phase 2 is labelled "drain old",
+// phase 6 "drain new", phase 4 "new boot" and phase 7's restart "old boot":
+// grepping a red log for "phase 2" or "phase 6" finds nothing. Each of those
+// phases prints its own completion line instead, so the progression is
+// readable on a green run.
+//
+// Those labels are not unique either: TWO boots print "old boot" (phase 1 and
+// phase 7's restart) and TWO drains print "drain old" (phase 2 and the
+// unnumbered final drain that closes rollBack). The completion line printed
+// immediately above the failure says which one it is — without it, a final-
+// drain failure reads as "::error::drain old: …" and sends the reader back to
+// a step that passed six phases earlier.
 const (
 	phasePopulate = "phase 1 (populate)"
 	phaseDrainOld = "phase 2 (drain old)"
