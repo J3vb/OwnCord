@@ -17,6 +17,10 @@ const mockVoiceState = vi.hoisted(() => ({
   // each need to restate it; tests that exercise a different channel (or the
   // "already left" guard itself) set this explicitly.
   currentChannelId: 1 as number | null,
+  // OC-0438: per-channel voice_config (quality bitrate etc.) as delivered by
+  // the server's voice_config event. Empty by default; tests exercising the
+  // audio-bitrate publish path populate an entry for the channel under test.
+  voiceConfigs: new Map<number, { bitrate: number }>(),
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -207,7 +211,7 @@ globalThis.Worker = vi.fn(function (this: { terminate: () => void }) {
 }) as unknown as typeof Worker;
 
 // Now import
-import { createLocalVideoTrack } from "livekit-client";
+import { createLocalVideoTrack, Room } from "livekit-client";
 import {
   parseUserId,
   LiveKitSession,
@@ -335,6 +339,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
     mockVoiceState.currentChannelId = 1;
+    mockVoiceState.voiceConfigs = new Map();
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -3064,6 +3069,81 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("voice_config audio bitrate applied to publishDefaults (OC-0438)", () => {
+    // OC-0438: the server computes an audio bitrate from the channel's voice
+    // quality (qualityBitrate) and delivers it via voice_config, stored in
+    // voiceStore.voiceConfigs. The Room's publishDefaults must apply it to
+    // the published mic track — otherwise the quality preset changes nothing
+    // a user hears.
+    it("applies the channel's voice_config bitrate to the room's audio publishDefaults", async () => {
+      mockVoiceState.voiceConfigs = new Map([[1, { bitrate: 32000 }]]);
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      expect(lastOptions.publishDefaults.audioPreset).toEqual({ maxBitrate: 32000 });
+    });
+
+    it("omits audioPreset (LiveKit default applies) when no voice_config has arrived yet for the channel", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
+    });
+
+    // OC-0441: publishDefaults alone is not enough on a channel's FIRST join.
+    // The server sends voice_token before voice_config (an ordering frozen by
+    // the epoch-1 golden transcripts), and createRoom runs synchronously from
+    // the voice_token handler — so voiceConfigs is still empty when the Room
+    // is built and the configured bitrate is silently lost until a rejoin.
+    // The mic is published much later, after the LiveKit connect round-trip,
+    // by which point voice_config has arrived: read the bitrate there and
+    // pass it as explicit publish options.
+    it("applies a voice_config that arrives after the Room is built to the mic publish", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      // voice_config is processed while the LiveKit connect is in flight —
+      // after createRoom read an empty map, before the mic is published.
+      mockRoom.connect.mockImplementation(async () => {
+        mockVoiceState.voiceConfigs = new Map([[1, { bitrate: 128000 }]]);
+      });
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      // The Room really was built without it — this is the first join.
+      expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, undefined, {
+        audioPreset: { maxBitrate: 128000 },
+      });
+    });
+
+    it("publishes the mic with no explicit encoding when no voice_config exists for the channel", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
@@ -3605,6 +3685,42 @@ describe("LiveKitSession", () => {
       expect(mockWs.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_token_refresh" }),
       );
+    });
+
+    // OC-0429: a single unanswered voice_token_refresh must not re-arm the
+    // full 4-minute periodic interval — that leaves _state.latestToken
+    // expired (server TTL is 5 minutes; the refresh fired at minute 4) for
+    // up to another 4 minutes, so any LiveKit disconnect in that window
+    // hands attemptAutoReconnect a dead token and every reconnect attempt
+    // fails (the exact OC-0014 failure mode the 4-minute cadence exists to
+    // avoid). The post-timeout retry must use the server's rate-limit
+    // cadence (60s), not the periodic one (240s).
+    it("re-arms at the 60s retry cadence, not the full 4-minute interval, after an unanswered refresh (OC-0429)", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      mockWs.send.mockClear();
+
+      // t=240s: the periodic timer fires the first refresh attempt. No
+      // response is ever delivered (handleVoiceTokenRefresh is never called),
+      // simulating a dropped frame / silently-closed WS proxy.
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+      mockWs.send.mockClear();
+
+      // t=300s: the 60s response-deadline timer fires (BUG-146) and
+      // reschedules the next attempt. Nothing sent exactly at this instant.
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+      expect(mockWs.send).not.toHaveBeenCalled();
+
+      // t=360s: the retry must fire 60s after the timeout (the server's
+      // rate-limit budget), not a further 240s later at t=540s.
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
     });
   });
 

@@ -1307,6 +1307,9 @@ export class E2EEManager {
   async handleParticipantLeft(userId: number): Promise<void> {
     this._peerGenerations.set(userId, (this._peerGenerations.get(userId) ?? 0) + 1);
     const isCurrent = this.peerAttemptIsCurrent(userId);
+    // peerAttemptIsCurrent() goes false for two unrelated reasons; only one of
+    // them is survivable here, so keep the session half separately (OC-0442).
+    const entrySessionGeneration = this._sessionGeneration;
     this._pendingAnnounces = this._pendingAnnounces.filter((entry) => entry.userId !== userId);
     this._blockedAnnounces.delete(userId);
     const departingKey = this._peerPublicKeys.get(userId);
@@ -1364,8 +1367,19 @@ export class E2EEManager {
     // any point during this call.
     if (departingKey && !channelUsers?.has(userId)) {
       const departingKeyBase64 = await exportPublicKey(departingKey);
-      if (!isCurrent()) return;
-      this.retirePeerKey(userId, departingKeyBase64);
+      // A clearState() during the await ended the session: channelId and
+      // channelUsers above describe a room this manager has already torn
+      // down, and the election below would set _isKeyHolder / rotate
+      // _roomKey off them, corrupting whatever room is joined next. Abandon
+      // the whole invocation, as this method did before OC-0416 (OC-0442).
+      if (this._sessionGeneration !== entrySessionGeneration) return;
+      // A duplicate handleParticipantLeft for the same peer is the other way
+      // isCurrent() goes false, and it is survivable: it bumps only this
+      // peer's generation, while this invocation's own hadPeerKey and the
+      // wasKeyHolder read below stay correct. Scope that bail-out to the
+      // now-redundant retirement write — returning would drop the
+      // membership-forward-secrecy rekey a few lines down (OC-0416).
+      if (isCurrent()) this.retirePeerKey(userId, departingKeyBase64);
     }
 
     if (!channelId) return;

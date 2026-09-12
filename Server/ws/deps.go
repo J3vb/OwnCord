@@ -63,7 +63,7 @@ type ReactionDeps struct {
 // VoiceTokenGenerator generates LiveKit access tokens. Abstracted so V2
 // handlers can be tested without a real LiveKit server.
 type VoiceTokenGenerator interface {
-	GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error)
+	GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canVideo, canScreenShare bool) (string, error)
 	URL() string
 }
 

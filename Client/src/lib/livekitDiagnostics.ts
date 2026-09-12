@@ -31,33 +31,51 @@ export function attachDiagnosticListeners(room: Room): void {
 
 // --- ICE helpers (no instance state) ---
 
+/**
+ * Resolve the publisher/subscriber PCTransports LiveKit's engine currently
+ * has. In livekit-client 2.x these live on `engine.pcManager`, not directly
+ * on `engine` (PCTransportManager.d.ts) — see connectionStats.ts, which reads
+ * the same transports the same way.
+ *
+ * Deliberately typed through inference rather than `Record<string, unknown>`
+ * casts: PCTransport is `@internal` and not exported from the package root,
+ * so it can't be named, but its public getters (used below) still make an
+ * SDK shape change a build error instead of a silent no-op. This also keeps
+ * us off `PCTransport.pc` — a private getter that *creates* a peer
+ * connection on first read when none exists yet, a side effect a passive
+ * diagnostic must never trigger.
+ */
+function getIceTransports(room: Room): Array<{
+  label: "subscriber" | "publisher";
+  transport: NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
+}> {
+  const pcManager = room.engine?.pcManager;
+  const transports: Array<{
+    label: "subscriber" | "publisher";
+    transport: NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
+  }> = [];
+  if (!pcManager) return transports;
+  if (pcManager.subscriber)
+    transports.push({ label: "subscriber", transport: pcManager.subscriber });
+  if (pcManager.publisher) transports.push({ label: "publisher", transport: pcManager.publisher });
+  return transports;
+}
+
 /** Log ICE connection details for debugging cross-network voice issues. */
 export function logIceConnectionInfo(room: Room | null): void {
   if (room === null) return;
-  // Access the underlying RTCPeerConnection via LiveKit's engine.
-  // LiveKit exposes the PeerConnection via room.engine.subscriber/publisher.
   try {
-    const engine = (room as unknown as Record<string, unknown>).engine as
-      Record<string, unknown> | undefined;
-    if (!engine) return;
-
-    const subscriber = engine.subscriber as Record<string, unknown> | undefined;
-    const publisher = engine.publisher as Record<string, unknown> | undefined;
-    const pcs: Array<{ label: string; pc: RTCPeerConnection }> = [];
-    if (subscriber?.pc) pcs.push({ label: "subscriber", pc: subscriber.pc as RTCPeerConnection });
-    if (publisher?.pc) pcs.push({ label: "publisher", pc: publisher.pc as RTCPeerConnection });
-
-    for (const { label, pc } of pcs) {
+    for (const { label, transport } of getIceTransports(room)) {
       log.info(`ICE ${label} connection state`, {
-        iceConnectionState: pc.iceConnectionState,
-        iceGatheringState: pc.iceGatheringState,
-        connectionState: pc.connectionState,
-        signalingState: pc.signalingState,
+        iceConnectionState: transport.getICEConnectionState(),
+        connectionState: transport.getConnectionState(),
+        signalingState: transport.getSignallingState(),
       });
 
       // Log selected candidate pair
-      pc.getStats()
-        .then((stats) => {
+      transport
+        .getStats()
+        ?.then((stats) => {
           stats.forEach((report) => {
             if (report.type === "candidate-pair" && report.state === "succeeded") {
               const localId = report.localCandidateId;
@@ -97,24 +115,12 @@ export function logIceConnectionInfo(room: Room | null): void {
 export function getIceConnectionState(room: Room | null): Record<string, unknown> | null {
   if (room === null) return null;
   try {
-    const engine = (room as unknown as Record<string, unknown>).engine as
-      Record<string, unknown> | undefined;
-    if (!engine) return null;
-    const subscriber = engine.subscriber as Record<string, unknown> | undefined;
-    const publisher = engine.publisher as Record<string, unknown> | undefined;
+    if (!room.engine) return null;
     const result: Record<string, unknown> = {};
-    if (subscriber?.pc) {
-      const pc = subscriber.pc as RTCPeerConnection;
-      result.subscriber = {
-        iceConnectionState: pc.iceConnectionState,
-        connectionState: pc.connectionState,
-      };
-    }
-    if (publisher?.pc) {
-      const pc = publisher.pc as RTCPeerConnection;
-      result.publisher = {
-        iceConnectionState: pc.iceConnectionState,
-        connectionState: pc.connectionState,
+    for (const { label, transport } of getIceTransports(room)) {
+      result[label] = {
+        iceConnectionState: transport.getICEConnectionState(),
+        connectionState: transport.getConnectionState(),
       };
     }
     return result;

@@ -563,6 +563,24 @@ describe("normalizeHostForCertCompare", () => {
     expect(normalizeHostForCertCompare("example.com:443")).toBe("example.com");
     expect(normalizeHostForCertCompare("example.com:4430")).toBe("example.com:4430");
   });
+
+  it("does not truncate a bare IPv6 literal ending in hextet 443 (OC-0215 guard)", () => {
+    // Mirrors src-tauri/src/tofu.rs's
+    // cert_store_key_does_not_truncate_bare_ipv6_ending_in_443. cert_store_key
+    // only strips a trailing ":443" when what's left has no remaining colon
+    // or ends in "]" — otherwise a bare IPv6 literal like "fd00::443" would
+    // have its last hextet eaten as if it were a port, truncating to
+    // "fd00:". This mirror must apply the same guard or every
+    // `evt.host === normalizeHostForCertCompare(host)` call site in main.ts
+    // silently takes the "unrelated host" branch for this host shape.
+    expect(normalizeHostForCertCompare("fd00::443")).toBe("fd00::443");
+    expect(normalizeHostForCertCompare("fd00::443")).toBe(
+      normalizeHostForCertCompare("[fd00::443]"),
+    );
+    expect(normalizeHostForCertCompare("fd00::443")).toBe(
+      normalizeHostForCertCompare("[fd00::443]:443"),
+    );
+  });
 });
 
 describe("cert-tofu non-mismatch statuses", () => {

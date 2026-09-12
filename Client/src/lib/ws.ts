@@ -126,12 +126,22 @@ function uuid(): string {
  *  proxies always emit the normalized form, so an un-normalized comparison
  *  here would silently miss the match. Order matters and matches the Rust:
  *  ":443" comes off first, so "[::1]:443" unwraps too, while a non-default
- *  port keeps its brackets as its own distinct key (OC-0163). */
+ *  port keeps its brackets as its own distinct key (OC-0163).
+ *
+ *  The ":443" strip only applies when what's left is unambiguously a host
+ *  (no remaining colon) or a bracketed IPv6 literal (ends in "]", as in
+ *  "[::1]:443"). Without this guard, a BARE IPv6 literal whose final hextet
+ *  is "443" — e.g. "fd00::443" — would have that hextet eaten as if it were
+ *  a port, truncating it to "fd00:" and missing the cert_store_key it's
+ *  compared against (OC-0215/OC-0417). */
 export function normalizeHostForCertCompare(host: string): string {
-  return host
-    .replace(/:443$/, "")
-    .replace(/^\[(.*)\]$/, "$1")
-    .toLowerCase();
+  const stripped = host.endsWith(":443")
+    ? (() => {
+        const rest = host.slice(0, -":443".length);
+        return !rest.includes(":") || rest.endsWith("]") ? rest : host;
+      })()
+    : host;
+  return stripped.replace(/^\[(.*)\]$/, "$1").toLowerCase();
 }
 
 /**

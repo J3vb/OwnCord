@@ -203,6 +203,25 @@ func (p *EventPersister) Stop(ctx context.Context) {
 	}
 	// Always wait for the goroutine to exit — never race it against ctx.
 	<-p.done
+
+	// A concurrent Enqueue can win the race between run()'s last drain
+	// attempt and the close of p.done above: it observes p.done not yet
+	// closed and sends into p.queue just as run() is exiting, so nothing
+	// ever reads that entry. Sweep whatever the race stranded here so it is
+	// dropped loudly instead of silently (mirrors db.AuditWriter.Stop).
+	for {
+		select {
+		case evt := <-p.queue:
+			p.dropped.Add(1)
+			slog.Error("event dropped: persister stopped",
+				"seq", evt.seq,
+				"event_type", evt.eventType,
+				"channel_id", evt.channelID,
+			)
+		default:
+			return
+		}
+	}
 }
 
 // drainQueued appends every event already sitting in the queue to batch

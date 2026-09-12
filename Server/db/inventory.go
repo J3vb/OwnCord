@@ -33,7 +33,12 @@ var SubjectInventory = []InventoryClass{
 		+ (SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?1)`, inventoryByUID},
 	{"5 recovery secrets", `SELECT (SELECT COUNT(*) FROM recovery_kits WHERE user_id = ?1)
 		+ (SELECT COUNT(*) FROM recovery_assists WHERE user_id = ?1 OR issued_by = ?1)`, inventoryByUID},
-	{"6 rate-limit keys", `SELECT COUNT(*) FROM rate_lockouts WHERE key LIKE '%:' || ? OR key LIKE '%:' || ?`,
+	// Exact-suffix match, not LIKE: matches erasureDeleteLockouts (db/erasure.go)
+	// so a username holding a LIKE metacharacter (`_` or `%`, both valid per
+	// auth.ValidateUsername) cannot widen the match onto another account's key.
+	{"6 rate-limit keys", `SELECT COUNT(*) FROM rate_lockouts
+		WHERE lower(substr(key, -(length(?1) + 1))) = ':' || lower(?1)
+		   OR substr(key, -(length(?2) + 1)) = ':' || ?2`,
 		func(uid int64, uname string) []any { return []any{uname, uid} }},
 	{"7 login attempts", `SELECT COUNT(*) FROM login_attempts WHERE username = ?`, inventoryByUname},
 	{"8a messages attributed", `SELECT COUNT(*) FROM messages WHERE user_id = ?`, inventoryByUID},

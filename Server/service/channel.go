@@ -275,18 +275,21 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 				"user_id", userID, "channel_id", channelID)
 			return ch, nil
 		}
-		// The write recomputes the watermark itself rather than taking
-		// latestID: that snapshot is two round trips old by now, and a mention
-		// raised for a newer message in the meantime would be cleared while
-		// last_message_id still pointed behind it — a badge that vanishes with
-		// nothing to recompute it (OC-0323). latestID is still exactly right
-		// for the skip decision above, which is a read, not a write.
-		if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {
-			// Self-heals on the next focus, but a persistently failing write
-			// means unread badges never clear — it must not be invisible.
-			slog.Warn("channel_focus: read-state write failed",
-				"user_id", userID, "channel_id", channelID, "err", wErr)
-		}
+	}
+	// The write recomputes the watermark itself rather than taking latestID:
+	// that snapshot is two round trips old by now, and a mention raised for a
+	// newer message in the meantime would be cleared while last_message_id
+	// still pointed behind it — a badge that vanishes with nothing to
+	// recompute it (OC-0323). latestID is only ever used for the skip
+	// decision above, which is a read, not a write — so a failed
+	// GetLatestMessageID (or GetReadState) must fall through to this write
+	// rather than skip it (OC-0436): the write is the load-bearing half, and
+	// only the optimisation above it is allowed to depend on a successful read.
+	if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {
+		// Self-heals on the next focus, but a persistently failing write
+		// means unread badges never clear — it must not be invisible.
+		slog.Warn("channel_focus: read-state write failed",
+			"user_id", userID, "channel_id", channelID, "err", wErr)
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)

@@ -147,4 +147,67 @@ describe("Server/admin/static/index.html — channel permissions save (OC-0154)"
     expect(last.method).not.toBe("DELETE");
     expect((last.body as { deny: number }).deny & 0x2).toBe(0x2);
   });
+
+  it("keeps the override matrix's write for an already-hidden role the quick toggle left unchanged (OC-0421)", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    fetchCalls.length = 0;
+
+    const bridge = (
+      window as unknown as {
+        __test: {
+          state: any;
+          renderChannelPermsModal: () => void;
+          renderPermMatrix: () => void;
+          saveChannelPerms: () => Promise<void>;
+        };
+      }
+    ).__test;
+    expect(bridge).toBeTruthy();
+
+    // "Moderator" is already hidden from #staff: deny carries
+    // READ_MESSAGES|CONNECT_VOICE (0x202) — exactly DENY_PRIVATE — so the
+    // quick "Can access" box renders unchecked, and the operator leaves it
+    // alone: only the override matrix is touched.
+    bridge.state.permChannel = {
+      id: 42,
+      name: "staff",
+      roles: [{ role_id: 5, role_name: "Moderator", permissions: 0, allow: 0, deny: 0x202 }],
+      users: [],
+      allUsers: [],
+    };
+    bridge.renderChannelPermsModal();
+
+    const accessBox = window.document.getElementById("permRole5") as HTMLInputElement;
+    expect(accessBox).toBeTruthy();
+    expect(accessBox.checked).toBe(false); // already hidden — nothing to toggle
+
+    // In the override matrix for that same role, additionally deny Manage
+    // Messages (0x10000).
+    const targetSelect = window.document.getElementById("permTarget") as HTMLSelectElement;
+    targetSelect.value = "r:5";
+    bridge.renderPermMatrix();
+    const manageMessagesDeny = window.document.querySelector(
+      'input[data-ovrbit="65536"][value="deny"]',
+    ) as HTMLInputElement;
+    expect(manageMessagesDeny).toBeTruthy();
+    manageMessagesDeny.checked = true;
+
+    await bridge.saveChannelPerms();
+
+    const rolePermCalls = fetchCalls.filter((c) => c.path === "/channels/42/permissions/5");
+    expect(rolePermCalls.length).toBeGreaterThan(0);
+    const last = rolePermCalls.at(-1);
+    if (!last) throw new Error("expected a /channels/42/permissions/5 call to assert on");
+    // The Manage Messages deny picked in the override matrix must survive the
+    // save — not be discarded because the quick-toggle loop unconditionally
+    // rewrote this role's row (and marked it touched) even though nothing
+    // about its quick-toggle state changed.
+    expect((last.body as { deny: number }).deny & 0x10000).toBe(0x10000);
+    // The pre-existing hidden bits must still be present too.
+    expect((last.body as { deny: number }).deny & 0x202).toBe(0x202);
+  });
 });

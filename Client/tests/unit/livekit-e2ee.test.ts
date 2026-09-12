@@ -2375,4 +2375,93 @@ describe("E2EE operation ownership", () => {
       vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
     }
   });
+
+  it("[OC-0416] still rotates the room key when a second voice_leave for the same peer lands mid-retirement", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1); // epoch 1, holder
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+      let releaseExport!: (v: string) => void;
+      vi.mocked(exportPublicKey).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseExport = resolve;
+          }),
+      );
+
+      // First voice_leave for PEER_ID: deletes the peer key synchronously,
+      // then suspends on exportPublicKey(departingKey) before reaching the
+      // election / membership-forward-secrecy rekey block.
+      const firstLeave = mgr.handleParticipantLeft(PEER_ID);
+      await vi.waitFor(() => expect(releaseExport).toBeDefined());
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // A second voice_leave for the SAME peer (server resend + local
+      // reconciliation both firing handleParticipantLeft) lands and runs to
+      // completion before the first resumes: departingKey is already gone,
+      // so its own hadPeerKey is false and it rotates nothing — but it DOES
+      // bump this peer's generation counter.
+      await mgr.handleParticipantLeft(PEER_ID);
+
+      releaseExport("bW9ja2VwaGVtZXJhbA==");
+      await firstLeave;
+
+      // The first invocation observed hadPeerKey=true while still the key
+      // holder — membership forward secrecy requires it to still rotate the
+      // room key even though the peer generation moved on under it during
+      // the await, which must only skip the (now-redundant) retirement
+      // write, not the whole handler.
+      expect(mgr.epoch).toBe(2);
+      expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("[OC-0442] abandons the whole handler when the SESSION is torn down mid-retirement", async () => {
+    // The companion to OC-0416. peerAttemptIsCurrent() conflates two very
+    // different reasons to go stale: a duplicate leave for the same peer
+    // (harmless — this invocation's own captures stay correct, so only the
+    // redundant retirement write is skipped) and a clearState() that ended
+    // the session entirely. The second must still abort everything: the
+    // captured channelId and roster now describe a room that no longer
+    // exists, and electing a holder or rotating _roomKey off them writes
+    // teardown-violating state that a freshly joined room then inherits.
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      let releaseExport!: (v: string) => void;
+      vi.mocked(exportPublicKey).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseExport = resolve;
+          }),
+      );
+
+      const leave = mgr.handleParticipantLeft(PEER_ID);
+      await vi.waitFor(() => expect(releaseExport).toBeDefined());
+
+      // The local user leaves voice (or switches rooms) while the export is
+      // still pending: clearState() bumps the session generation and resets
+      // _isKeyHolder, _roomKey and the epoch.
+      mgr.clearState();
+      mockSetKey.mockClear();
+
+      releaseExport("bW9ja2VwaGVtZXJhbA==");
+      await leave;
+
+      // Nothing from the dead session may land on the torn-down manager.
+      expect(mgr.epoch).toBe(0);
+      expect(mockSetKey).not.toHaveBeenCalled();
+      expect(mgr.rotatingKey).toBe(false);
+    } finally {
+      mgr.clearState();
+    }
+  });
 });

@@ -141,7 +141,7 @@ func TestGenerateToken_ValidToken(t *testing.T) {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true, true)
+	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 
 	// Subscribe-only token (canPublish=false).
-	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, true, false, false)
+	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, false, false)
 	if err != nil {
 		t.Fatalf("GenerateToken(subscribe-only): %v", err)
 	}
@@ -209,7 +209,7 @@ func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T)
 	}
 
 	// canPublish=false (SPEAK_VOICE denied), canVideo=true, canScreenShare=true.
-	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true, true)
+	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}

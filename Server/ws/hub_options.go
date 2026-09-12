@@ -81,6 +81,15 @@ type HubOptions struct {
 	// silently ignored.
 	ReplayRingSize  int
 	ReplayColdLimit int
+
+	// VoiceQuality is the operator-configured voice.quality (cfg.Voice.Quality)
+	// — voice_join's fallback for a channel with no per-channel voice_quality
+	// override, which is every channel today (CreateChannel never writes that
+	// column, and it has no DEFAULT). Startup-only, like the rest of this
+	// struct: the setup wizard already treats voice.quality as
+	// restart-required. Empty or not one of voiceQualities' keys falls back
+	// to "medium", same as an invalid per-channel override does.
+	VoiceQuality string
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
@@ -137,31 +146,41 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	reg := NewHandlerRegistry()
 
+	// Normalize once at construction, exactly like qualityBitrate's own
+	// fallback: an unset or invalid configured value degrades to "medium"
+	// rather than propagating a bad value into every voice_config this hub
+	// ever sends (OC-0439).
+	defaultVoiceQuality := "medium"
+	if validVoiceQuality(opts.VoiceQuality) {
+		defaultVoiceQuality = opts.VoiceQuality
+	}
+
 	h := &Hub{
-		clients:         make(map[int64]*Client),
-		db:              database,
-		limiter:         limiter,
-		settings:        settingsReader,
-		readers:         opts.Readers,
-		voice:           opts.Voice,
-		voiceMod:        newVoiceModLocks(),
-		presence:        opts.Presence,
-		authn:           opts.Auth,
-		broadcast:       make(chan broadcastMsg, 1024),
-		clientEvents:    make(chan clientEvent, 64),
-		stop:            make(chan struct{}),
-		pubsub:          NewPubSub(),
-		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
-		replayBuf:       NewEventRingBuffer(ringSize),
-		registry:        reg,
-		permChecker:     permissions.NewChecker(database),
-		settingsName:    "OwnCord Server",
-		settingsMotd:    "Welcome!",
-		voiceKeyHolders: make(map[int64]int64),
-		fatalFn:         func() { os.Exit(1) },
-		livekit:         opts.LiveKit,
-		lkProcess:       opts.LiveKitProcess,
-		pluginRegistry:  opts.PluginRegistry,
+		clients:             make(map[int64]*Client),
+		db:                  database,
+		limiter:             limiter,
+		settings:            settingsReader,
+		readers:             opts.Readers,
+		voice:               opts.Voice,
+		defaultVoiceQuality: defaultVoiceQuality,
+		voiceMod:            newVoiceModLocks(),
+		presence:            opts.Presence,
+		authn:               opts.Auth,
+		broadcast:           make(chan broadcastMsg, 1024),
+		clientEvents:        make(chan clientEvent, 64),
+		stop:                make(chan struct{}),
+		pubsub:              NewPubSub(),
+		topicLimiter:        NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
+		replayBuf:           NewEventRingBuffer(ringSize),
+		registry:            reg,
+		permChecker:         permissions.NewChecker(database),
+		settingsName:        "OwnCord Server",
+		settingsMotd:        "Welcome!",
+		voiceKeyHolders:     make(map[int64]int64),
+		fatalFn:             func() { os.Exit(1) },
+		livekit:             opts.LiveKit,
+		lkProcess:           opts.LiveKitProcess,
+		pluginRegistry:      opts.PluginRegistry,
 	}
 	if opts.ReplayColdLimit > 0 {
 		h.coldReplayLimit = opts.ReplayColdLimit

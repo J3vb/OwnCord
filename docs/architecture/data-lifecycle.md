@@ -546,8 +546,11 @@ SELECT (SELECT COUNT(*) FROM partial_auth_challenges WHERE user_id = :uid)
 -- 5 recovery secrets (the kit, and assisted credentials for or by the subject)
 SELECT (SELECT COUNT(*) FROM recovery_kits WHERE user_id = :uid)
      + (SELECT COUNT(*) FROM recovery_assists WHERE user_id = :uid OR issued_by = :uid);
--- 6 rate-limit keys
-SELECT COUNT(*) FROM rate_lockouts WHERE key LIKE '%:' || :uname OR key LIKE '%:' || :uid;
+-- 6 rate-limit keys (exact suffix, not LIKE, so a username holding a LIKE
+-- metacharacter such as `_` or `%` cannot widen the match)
+SELECT COUNT(*) FROM rate_lockouts
+  WHERE lower(substr(key, -(length(:uname) + 1))) = ':' || lower(:uname)
+     OR substr(key, -(length(:uid) + 1)) = ':' || :uid;
 -- 7 login attempts (always 0 at aabac60 — no writer)
 SELECT COUNT(*) FROM login_attempts WHERE username = :uname;
 -- 8 messages: attributed rows, rows with content, FTS hits

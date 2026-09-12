@@ -66,16 +66,40 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 
 	state, ok := h.voiceJoinPersist(ctx, c, ch, channelID)
 	if !ok {
+		// OC-0420: voiceJoinLeaveCurrent already took the moderator
+		// mute/deafen stash off the client (or read it off the row it just
+		// deleted) with nothing yet written for voiceJoinRestoreModFlags to
+		// have applied — put it back so it survives for a retried join, or
+		// the client's next unrelated one, instead of vanishing here.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 
 	if !h.voiceJoinGrantToken(ctx, c, channelID, state) {
+		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
+		// the row voiceJoinGrantToken's own failure path is about to roll
+		// back (rollbackVoiceJoin deletes it) — re-stash for the same reason
+		// as the persist branch above.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 
 	h.voiceJoinComplete(ctx, c, ch, channelID, state)
+}
+
+// restorePendingModFlags puts a moderator mute/deafen stash back onto c after
+// an aborted join consumed it (voiceJoinLeaveCurrent's take-and-clear) or read
+// it off a row that is being deleted, but could not carry it through to a
+// persisted voice_states row for a later join to read back. The
+// wasServerMuted || wasServerDeafened guard mirrors stashPendingModFlags' own
+// early return (voice_moderation.go): a join with nothing stashed or muted
+// must not overwrite an unrelated moderator action's stash with false/false/nil.
+func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64) {
+	if wasServerMuted || wasServerDeafened {
+		c.setPendingModFlags(wasServerMuted, wasServerDeafened, wasServerMutedBy)
+	}
 }
 
 // voiceJoinPrecheck runs every gate that must pass before handleVoiceJoin
@@ -378,8 +402,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		// Carry it into the SFU grant too: muting an existing track cannot stop
 		// a replacement microphone track from being published with this token.
 		canPublish = voiceMicrophoneAllowed(canPublish, state)
-		canSubscribe := true
-		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
+		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
 			h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, false)
@@ -520,8 +543,12 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
 
-	// Send voice_config to the joiner.
-	quality := "medium"
+	// Send voice_config to the joiner. h.defaultVoiceQuality (set at
+	// construction from the operator's voice.quality config, HubOptions.
+	// VoiceQuality) is the fallback for a channel with no per-channel
+	// override — which is every channel today, since CreateChannel never
+	// writes voice_quality and the column has no DEFAULT (OC-0439).
+	quality := h.defaultVoiceQuality
 	if ch.VoiceQuality != nil && *ch.VoiceQuality != "" {
 		q := *ch.VoiceQuality
 		if validVoiceQuality(q) {
@@ -612,7 +639,6 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// populated the user's entry. Microphone moderation is independent of
 	// camera/screenshare permissions; deafen still leaves stream audio available.
 	canPublish := voiceMicrophoneAllowed(hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice), state)
-	canSubscribe := true
 	canVideo := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.UseVideo)
 	canScreenShare := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.ShareScreen)
 
@@ -623,7 +649,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		result.SetVoiceJoinToken = &joinToken
 	}
 
-	token, err := d.TokenGen.GenerateToken(userID, info.Username, channelID, joinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+	token, err := d.TokenGen.GenerateToken(userID, info.Username, channelID, joinToken, canPublish, canVideo, canScreenShare)
 	if err != nil {
 		slog.Error("ws handleVoiceTokenRefreshV2 GenerateToken", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to generate voice token"}}

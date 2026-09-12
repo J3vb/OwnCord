@@ -675,7 +675,7 @@ func assertNotReceived(t *testing.T, ch <-chan []byte, label string) {
 // pre-B3-4 SetLiveKit nil-safety test — the setter no longer exists.
 func TestHub_NilLiveKitOption(t *testing.T) {
 	hub, _ := newTestHub(t)
-	if _, err := hub.GenerateToken(1, "u", 1, "", false, false, false, false); err == nil {
+	if _, err := hub.GenerateToken(1, "u", 1, "", false, false, false); err == nil {
 		t.Fatal("GenerateToken on a voiceless hub must error")
 	}
 }

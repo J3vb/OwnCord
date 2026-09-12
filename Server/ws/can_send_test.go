@@ -18,24 +18,33 @@ func TestChannelCanSend(t *testing.T) {
 	none := db.ChannelOverride{}
 
 	cases := []struct {
-		name  string
-		role  *db.Role
-		o     db.ChannelOverride
-		ctype string
-		want  bool
+		name     string
+		role     *db.Role
+		o        db.ChannelOverride
+		ctype    string
+		timedOut bool
+		want     bool
 	}{
-		{"nil role fails closed", nil, none, "text", false},
-		{"admin bypasses on text", admin, none, "text", true},
-		{"admin bypasses on announcement", admin, none, "announcement", true},
-		{"member can post in text", member, none, "text", true},
-		{"reader without SEND cannot post", reader, none, "text", false},
-		{"member without MANAGE cannot post in announcement", member, none, "announcement", false},
-		{"moderator can post in announcement", mod, none, "announcement", true},
-		{"override deny SEND blocks text", member, db.ChannelOverride{Deny: permissions.SendMessages}, "text", false},
-		{"override allow MANAGE enables announcement", member, db.ChannelOverride{Allow: permissions.ManageMessages}, "announcement", true},
+		{"nil role fails closed", nil, none, "text", false, false},
+		{"admin bypasses on text", admin, none, "text", false, true},
+		{"admin bypasses on announcement", admin, none, "announcement", false, true},
+		{"member can post in text", member, none, "text", false, true},
+		{"reader without SEND cannot post", reader, none, "text", false, false},
+		{"member without MANAGE cannot post in announcement", member, none, "announcement", false, false},
+		{"moderator can post in announcement", mod, none, "announcement", false, true},
+		{"override deny SEND blocks text", member, db.ChannelOverride{Deny: permissions.SendMessages}, "text", false, false},
+		{"override allow MANAGE enables announcement", member, db.ChannelOverride{Allow: permissions.ManageMessages}, "announcement", false, true},
+		// OC-0434: a timed-out member must not get can_send: true anywhere,
+		// even where the un-timed-out role would otherwise pass. TimedOut is
+		// checked ahead of everything else in permissions.CanSendMessage
+		// (predicates_test.go's "timed out beats admin"), so it beats even an
+		// Administrator role passed in directly here.
+		{"timed out member cannot post in text", member, none, "text", true, false},
+		{"timed out member cannot post in announcement despite MANAGE override", member, db.ChannelOverride{Allow: permissions.ManageMessages}, "announcement", true, false},
+		{"timed out beats admin", admin, none, "text", true, false},
 	}
 	for _, c := range cases {
-		if got := channelCanSend(c.role, c.o, c.ctype); got != c.want {
+		if got := channelCanSend(c.role, c.o, c.ctype, c.timedOut); got != c.want {
 			t.Errorf("%s: channelCanSend = %v, want %v", c.name, got, c.want)
 		}
 		// B2-5 parity: the affordance is the canonical send predicate.
@@ -44,7 +53,7 @@ func TestChannelCanSend(t *testing.T) {
 			bits = c.role.Permissions
 		}
 		want := permissions.CanSendMessage(permissions.Subject{
-			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: c.ctype},
+			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: c.ctype}, TimedOut: c.timedOut,
 		}) == nil
 		if want != c.want {
 			t.Errorf("%s: CanSendMessage = %v, channelCanSend table says %v", c.name, want, c.want)

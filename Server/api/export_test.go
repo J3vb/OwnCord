@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -16,6 +17,15 @@ import (
 // BroadcastDMOpenForTest exposes broadcastDMOpen for external tests.
 func BroadcastDMOpenForTest(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, targetIDs []int64) {
 	broadcastDMOpen(ctx, svc, broadcaster, channelID, targetIDs)
+}
+
+// UploadStoreFileForTest exposes uploadStoreFile for external tests, which
+// need to drive the MIME-sniffing path directly — e.g. with a reader that
+// hands back short reads like a *multipart.Part does — without assembling a
+// full HTTP multipart upload.
+func UploadStoreFileForTest(ctx context.Context, w http.ResponseWriter, file io.Reader, res *service.StorageReservation, store FileStore) (mimeType string, size int64, width, height *int, ok bool) {
+	stored, ok := uploadStoreFile(ctx, w, file, res, store)
+	return stored.mime, stored.size, stored.width, stored.height, ok
 }
 
 // HandleMetricsForTest exposes handleMetrics for use in external tests.
