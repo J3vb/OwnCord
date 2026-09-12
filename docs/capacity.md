@@ -99,13 +99,10 @@ ships would measure something no owner ever runs.
 
 ## Latency budgets
 
-Starting budgets are from the B6 PRD. They may be **tightened from data and
-never loosened**; anything looser than these is a finding, not a number to
-publish.
-
-These are the budgets **as tightened from the first qualifying run**; the
-"initial" column is what the PRD started from, kept so the tightening is
-auditable.
+Budgets may be **tightened from data and never loosened** — anything looser
+than a published figure is a finding, not a number to publish. These are the
+live budgets, already tightened from the first qualifying run; the "initial"
+column is where the B6 PRD started, kept so the tightening is auditable.
 
 | Path                                                    | p95      | p99      | Initial          | Measured by                      |
 | ------------------------------------------------------- | -------- | -------- | ---------------- | -------------------------------- |
