@@ -202,6 +202,10 @@ pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
 // key blob (base64 JWK private key) rather than a JSON credential struct,
 // and it is stored under account `identity:{host}` to keep it distinct from
 // the login credential entry (account `{host}`) in the same service.
+//
+// `host` here is an opaque scope string, not necessarily a bare host: the
+// only caller (`identity.ts`) passes `{userId}@{host}`, so the account
+// actually written is `identity:{userId}@{host}`.
 
 /// Save the long-term identity private key for `host`.
 ///
