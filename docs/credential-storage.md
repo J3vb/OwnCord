@@ -41,9 +41,15 @@ The login credential blob carries a password only when the user ticked
   still caught by a backstop `input` listener. Caret movement alone does not
   clear it, and no edit can be silently ignored. The placeholder text itself
   can still re-enter the field as literal characters — reveal the field,
-  copy the bullets, paste them back — so `validateForm()` separately rejects
-  the placeholder string outright whenever the internal flag is not set,
-  in both login and register mode.
+  copy the bullets, paste them back — with nothing left marking it as
+  anything but ordinary text. `validateForm()` refuses that exact string
+  unconditionally, but **only in register mode**, where it would otherwise
+  become a new account's password — a fixed, publicly known constant. Login
+  mode does not check it: the check is stateless (it does not depend on
+  whether this form ever showed a saved password), and a login submission of
+  the literal placeholder is not special-cased — it simply fails
+  authentication like any other wrong password, so an account whose real
+  password happens to be those bullets is never locked out.
 - `save_credential` distinguishes "no password supplied" from "erase the
   password": it preserves whatever is stored unless `clear_password` is set.
   Without that distinction every re-save had to carry the plaintext back

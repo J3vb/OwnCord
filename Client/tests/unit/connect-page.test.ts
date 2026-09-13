@@ -164,8 +164,11 @@ describe("ConnectPage", () => {
   //
   // The plaintext password no longer crosses IPC, so a remembered password is
   // shown as a placeholder and submitted through the Rust backend instead.
-  // Submission branches on internal state, never on the field's text, so the
-  // placeholder can never be sent as a literal password.
+  // Submission branches on internal state, never on the field's text — the
+  // ordinary saved-password path never sends the placeholder as literal text.
+  // A pasted-back copy of the placeholder is a separate case (below):
+  // register mode refuses it outright, login mode just treats it as an
+  // ordinary (almost certainly wrong) typed password.
 
   it("submits a remembered password through the backend, not as form text", async () => {
     mockLoadCredential.mockResolvedValue({
@@ -340,13 +343,15 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("rejects the placeholder pasted back in as literal text (login)", async () => {
+  it("logs in with the pasted placeholder text after editing a saved-password field (login)", async () => {
     // Reveal the field, copy the bullets, paste them back: `beforeinput`
     // clears `usingSavedPassword` and blanks the field before the paste
-    // lands, so the `input` listener sees the flag already false and does
-    // nothing further — the field ends up holding the placeholder string as
-    // literal text with `usingSavedPassword === false`. validateForm() must
-    // still reject it.
+    // lands, so the field ends up holding the placeholder string as literal
+    // text with `usingSavedPassword === false`. Login mode does not check the
+    // placeholder string at all — the account's real password could in
+    // principle be exactly those bullets, and rejecting it here would lock
+    // the owner out. Submitting it simply reaches onLogin like any other
+    // typed password; if it's not the real password, auth fails normally.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
@@ -376,18 +381,21 @@ describe("ConnectPage", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "saveduser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
     });
-    expect(onLogin).not.toHaveBeenCalled();
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
     page.destroy?.();
   });
 
   it("rejects the placeholder pasted back in as literal text (register)", async () => {
-    // Same round trip, but in Register mode there is no placeholder-clearing
-    // toggle to fall back on — this is the path that would otherwise create
-    // an account whose password is a fixed, publicly known constant.
+    // Same round trip as the login case, but in Register mode the check is
+    // unconditional: this is the path that would otherwise create an account
+    // whose password is a fixed, publicly known constant.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
@@ -459,11 +467,10 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("submits the bullet string as a real password when no placeholder was ever shown", async () => {
-    // The rejection is gated on a latch armed only by actually displaying the
-    // placeholder. A fresh form (no saved credential) never arms it, so a user
-    // whose real password happens to be exactly those twelve bullets can still
-    // log in — and register — with it.
+  it("submits the bullet string as a real password when no placeholder was ever shown (login)", async () => {
+    // Login mode never checks the placeholder string, so a user whose real
+    // password happens to be exactly those twelve bullets can log in with it,
+    // whether or not a saved password was ever shown on this form.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     const onLogin = vi.fn().mockResolvedValue(undefined);
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
@@ -491,7 +498,10 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("registers with the bullet string as a real password when no placeholder was ever shown", async () => {
+  it("rejects the placeholder string in register mode with no prior saved-password selection at all", async () => {
+    // Stateless: the check does not depend on any credential ever having
+    // been loaded or shown on this form. This is the case the old latch
+    // missed, because nothing had ever armed it.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     const onRegister = vi.fn().mockResolvedValue(undefined);
     const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
@@ -514,22 +524,18 @@ describe("ConnectPage", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith(
-        "localhost:8443",
-        "newuser",
-        SAVED_PASSWORD_PLACEHOLDER,
-        "invite-code",
-      );
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
     });
+    expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
   });
 
-  it("clears the placeholder lockout after switching to a server with no saved password", async () => {
-    // Regression: the latch used to be a one-way ratchet on the whole form
-    // object. Selecting server A (saved password) armed it; selecting server
-    // B (no saved password) must reset it, or B's real password would be
-    // rejected forever if it happened to equal the placeholder string.
+  it("logs in with the bullet string after switching to a server with no saved password", async () => {
+    // No lockout in any ordering: selecting server A (saved password) then
+    // server B (no saved password) and typing the twelve-bullet string as
+    // B's real password must reach onLogin like any other login-mode
+    // password — login mode never checks it.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     mockLoadCredential
       .mockResolvedValueOnce({ username: "saveduser", token: "tok", hasPassword: true })
@@ -569,11 +575,12 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("still rejects the pasted placeholder in Register after the reset was added", async () => {
-    // Pins that resetting the latch in setCredentials' else branch did not
-    // weaken the within-context protection: no server switch happens here,
-    // so the placeholder must still be caught after a copy/paste following a
-    // toggle to Register.
+  it("rejects the pasted placeholder in Register after reselecting the same host", async () => {
+    // The exact sequence that slipped through the old latch: select the
+    // saved-password host (arms it), switch to Register, then re-click the
+    // SAME server row — which used to reset the latch via setCredentials'
+    // else branch, since it runs for Register too. The stateless check does
+    // not care about any of that history.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
@@ -584,13 +591,21 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
     page.mount(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
+    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    serverItem.click();
     await vi.waitFor(() => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
     const toggle = container.querySelector(".form-switch a") as HTMLElement;
     toggle.click();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    // Reselect the same host while already in Register mode.
+    serverItem.click();
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
     expect(page.isUsingSavedPassword()).toBe(false);
 
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
@@ -600,8 +615,6 @@ describe("ConnectPage", () => {
 
     const inviteInput = container.querySelector("#invite") as HTMLInputElement;
     inviteInput.value = "invite-code";
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    usernameInput.value = "newuser";
     const form = container.querySelector(".connect-form") as HTMLFormElement;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
