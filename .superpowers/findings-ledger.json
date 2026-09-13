@@ -1,5 +1,5 @@
 {
-  "nextId": 442,
+  "nextId": 445,
   "findings": [
     {
       "id": "OC-0001",
@@ -10305,6 +10305,27 @@
         "revertProof": "pass"
       },
       "suggestedFix": "Defer the replacement to the first sign of life on the new stream -- onopen, or the first delivered line if no open event fires -- behind a once-per-connection flag, so the OC-0435 no-duplicate-backfill property holds without blanking the view on a failed connect."
+    },
+    {
+      "id": "OC-0444",
+      "title": "The load-baseline workflow's seeding step aborts: it opens registration with a setting key that no longer exists",
+      "file": ".github/workflows/load-baseline.yml",
+      "line": 78,
+      "severity": "low",
+      "why": "The step PATCHed /admin/api/settings with {\"registration_open\":\"true\"} and treated any status other than 200 as fatal. B4-1 replaced that boolean with registration_mode (closed/invite/approval/open), and /admin/api/settings accepts only registration_mode, backup_schedule, backup_retention and retention_days, so the call answers 400 and the step exits 1. The workflow is workflow_dispatch-only and in no CI matrix, so nothing noticed: it had been unrunnable since B4-1 landed. The PATCH was also unnecessary -- a fresh install is invite mode, and the invite the same step creates admits every registration.",
+      "repro": "Boot a server from a fresh data directory, complete /admin/api/setup, then: curl -sk -o /dev/null -w '%{http_code}' -X PATCH https://127.0.0.1:8443/admin/api/settings -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"registration_open\":\"true\"}' -- 400. Registering against the invite still returns 201, which is what shows the call was not needed.",
+      "evidence": "Observed 400 against dev 1d100f98 on 2026-09-12 while validating the B6-9 harness. docs/api.md lists the accepted PATCH keys as registration_mode, backup_schedule, backup_retention, retention_days; admin/setup_wizard.go carries RegistrationMode and no registration_open.",
+      "status": "fixed",
+      "found": "2026-09-12",
+      "hunt": "capacity-profile-2026-09-12",
+      "lens": "run-the-thing",
+      "finder": "b6-9-capacity-profile",
+      "fix": {
+        "commit": "bc19f5d1",
+        "test": ".github/workflows/load-baseline.yml (run 34701291805 seeds 250 users)",
+        "revertProof": "pass (manual: the pre-fix PATCH was observed returning 400 against dev before the step was removed, and the step's own `!= 200` guard made that fatal)"
+      },
+      "suggestedFix": "Delete the PATCH and rely on the invite, with a comment recording that a fresh install is invite mode -- which is what was done."
     }
   ]
 }

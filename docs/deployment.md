@@ -4,7 +4,8 @@ Production deployment guide for OwnCord server on Windows and Linux.
 
 ## Prerequisites
 
-- **Windows 10+** (x64) or **Linux** (x64)
+- **Windows 10+** (x64) or **Linux** (x64). For how much one server carries on
+  which hardware, see [Capacity](capacity.md)
 - **Go 1.26+** (only if building from source)
 - **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Required port: `8443` (OwnCord HTTPS/WebSocket)
@@ -864,6 +865,7 @@ The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 ## See Also
 
 - [Server Configuration](server-configuration.md) -- full config key reference
+- [Capacity](capacity.md) -- the measured 250/100/25 profile, its hardware and its commands
 - [LiveKit Setup](livekit-setup.md) -- voice/video setup
 - [Quick Start](quick-start.md) -- getting started
 - [Port Forwarding](port-forwarding.md) -- port forwarding for remote access

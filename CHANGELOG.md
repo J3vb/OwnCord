@@ -239,6 +239,11 @@ server's internals were reorganised behind service boundaries.
   archive the install, swap the binary or image, and — because migrations only
   ever run forward — restore that archive first if you need the old version
   back.
+- **`docs/capacity.md` says how much one server carries, and on what.** 250
+  registered accounts, 100 connections held for three minutes, and 25 people in
+  voice — measured on a 2 vCPU / 4 GB machine, with the exact commands to
+  re-run it yourself, and with the things the numbers do not mean written down
+  next to them.
 
 ### Repository
 
@@ -251,6 +256,11 @@ server's internals were reorganised behind service boundaries.
   simulation and fuzz targets, and four static invariant rules covering lock
   discipline, database-import boundaries, permission chokepoints and outbound
   network sites.
+- The load baseline now runs the server inside a 2-CPU, 4 GB cgroup with the
+  load generators pinned outside it, and a second, unconstrained leg kept only
+  as a headroom check. A voice harness drives 25 publishers and 25 subscribers
+  through LiveKit's own load tester and checks the result, rather than trusting
+  its exit status.
 
 ## v1.2.0-alpha.4
 

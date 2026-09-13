@@ -11,16 +11,17 @@ dated snapshots that were true when written and were never updated, and
 
 ## Start here
 
-| I want to…              | Read                                                        |
-| ----------------------- | ----------------------------------------------------------- |
-| Run a server            | [quick-start.md](quick-start.md)                            |
-| Deploy for real         | [deployment.md](deployment.md)                              |
-| Contribute a change     | [contributing.md](contributing.md)                          |
-| Understand the system   | [architecture/](architecture/README.md)                     |
-| Report a bug            | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) |
-| Ask, or suggest an idea | [Discussions](https://github.com/J3vb/OwnCord/discussions)  |
-| Report a vulnerability  | [security.md](security.md)                                  |
-| Know who can read what  | [trust-model.md](trust-model.md)                            |
+| I want to…                   | Read                                                        |
+| ---------------------------- | ----------------------------------------------------------- |
+| Run a server                 | [quick-start.md](quick-start.md)                            |
+| Deploy for real              | [deployment.md](deployment.md)                              |
+| Contribute a change          | [contributing.md](contributing.md)                          |
+| Understand the system        | [architecture/](architecture/README.md)                     |
+| Report a bug                 | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) |
+| Ask, or suggest an idea      | [Discussions](https://github.com/J3vb/OwnCord/discussions)  |
+| Report a vulnerability       | [security.md](security.md)                                  |
+| Know who can read what       | [trust-model.md](trust-model.md)                            |
+| Know what one server carries | [capacity.md](capacity.md)                                  |
 
 ## Guidance
 
@@ -31,6 +32,7 @@ dated snapshots that were true when written and were never updated, and
 | [contributing.md](contributing.md)       | Environment setup, **the branch and PR model**, coding standards, how to run the checks CI runs.               |
 | [security.md](security.md)               | How to report a vulnerability, and how findings are handled in public vs private.                              |
 | [trust-model.md](trust-model.md)         | Who can read what: operator-readable text and files, E2EE media, transport, at rest, what beta does not claim. |
+| [capacity.md](capacity.md)               | What one server carries: the measured 250/100/25 profile, its hardware and its commands.                       |
 | [livekit-setup.md](livekit-setup.md)     | Standing up the LiveKit SFU for voice and video.                                                               |
 | [port-forwarding.md](port-forwarding.md) | Making a server reachable from outside the LAN.                                                                |
 | [tailscale.md](tailscale.md)             | Remote access without port forwarding.                                                                         |

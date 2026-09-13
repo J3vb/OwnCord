@@ -1,30 +1,77 @@
-# Manual WebSocket load baseline against a locally booted server.
+# The BPR-030 capacity profile: 250 registered users, 100 simultaneous
+# connections, 25 concurrent voice participants — measured, not asserted (B6-9).
+#
+# TWO LEGS, AND ONLY ONE OF THEM PUBLISHES.
+#
+#   constrained — the server runs inside a cgroup pinned to 2 CPUs with 4 GB
+#                 and no swap: the reference hardware from the PRD (2 vCPU /
+#                 4 GB / SSD Linux x64), reproduced rather than owned. EVERY
+#                 published number in docs/capacity.md comes from this leg.
+#   ceiling     — the old unconstrained boot on the whole runner. Informational
+#                 only: it shows headroom, and its thresholds do not fail the
+#                 job. Quoting it as capacity is the exact mistake B6-9 exists
+#                 to prevent, and so is quoting the 16-core bench baseline in
+#                 docs/plans/b3-bench-baseline-2026-09-01.md.
+#
+# --cpuset-cpus is the flag that matters, not --cpus. --cpus is a CFS quota;
+# runtime.NumCPU() reads the CPU affinity mask, so under --cpus alone the
+# server would size GOMAXPROCS and its bcrypt admission budget
+# (auth/admission.go: 2 x NumCPU) for the runner's four cores — believing it
+# had hardware the cgroup will not let it use. Both are passed: the cpuset for
+# what the runtime sees, the quota for what it may consume.
+#
+# The load generators are deliberately OUTSIDE that budget and pinned to the
+# other two CPUs with taskset. A generator sharing the server's cores measures
+# the generator.
+#
+# debian:bookworm-slim with the release binary mounted, not the published
+# distroless image: that image ships no shell and cannot host the companion
+# livekit-server process this profile needs. The capacity claim is about the
+# machine budget; the packaging is qualified by B6-1's and B6-2's lifecycle
+# smokes (cmd/smoke, docker-smoke.sh).
 #
 # workflow_dispatch ONLY, and deliberately not part of the blocking CI matrix:
 # a perf run on shared runners is a flake source and a wall-clock tax the
-# 10-job/~15-min pipeline doesn't need. Run it before/after changes to the
-# hub, the write path, or the replay budget, and compare the uploaded
-# k6-summary.json + metrics snapshot between runs. Runner-grade hardware is
-# NOT a capacity promise for real deployments — treat results as relative
-# (before vs after), not absolute.
+# pipeline doesn't need. Like the bench baseline, these numbers are recorded
+# and published, never gated. Re-run it deliberately before a release, or
+# after changes to the hub, the write path or the replay budget.
 name: Load Baseline
 
 on:
   workflow_dispatch:
     inputs:
       users:
-        description: "Load-test users to register (max VUs in the script is 100)"
+        description: "Registered users to seed (BPR-030 says 250)"
+        required: false
+        default: "250"
+      connections:
+        description: "Peak simultaneous WebSocket connections (BPR-030 says 100)"
         required: false
         default: "100"
+      voice:
+        description: "Concurrent voice participants (BPR-030 says 25)"
+        required: false
+        default: "25"
 
 permissions:
   contents: read
 
+env:
+  # The livekit-server release OwnCord itself downloads
+  # (ws.DefaultLiveKitVersion). Measuring a different SFU release than the
+  # product ships would measure something no owner ever runs.
+  LIVEKIT_VERSION: "1.13.5"
+  LK_CLI_VERSION: "2.18.6"
+
 jobs:
-  k6-baseline:
-    name: k6 WebSocket baseline
+  baseline:
+    name: Capacity profile (${{ matrix.leg }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [constrained, ceiling]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -33,26 +80,133 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: Server/go.sum
 
+      # A four-CPU runner is a precondition, not a detail: --cpuset-cpus=0,1
+      # plus `taskset -c 2,3` needs four. On a two-CPU runner the generator and
+      # the server would silently share both cores and every number would be
+      # invalid while still looking plausible.
+      - name: Assert the runner can host the split
+        run: |
+          echo "nproc=$(nproc)"
+          if [ "$(nproc)" -lt 4 ]; then
+            echo "::error::this runner has $(nproc) CPUs; the constrained leg needs 4 (2 for the server, 2 for the load generators)"
+            exit 1
+          fi
+
       - name: Build server
         working-directory: Server
         env:
           CGO_ENABLED: "0"
         run: go build -o chatserver .
 
-      - name: Boot server
-        working-directory: Server
-        env:
-          # Registration/login are per-IP rate limited (3/min and 5/min by
-          # default) and every VU logs in from 127.0.0.1 — scale the auth
-          # limits up with the knob that exists for shared-IP scenarios.
-          OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER: "100"
+      # Downloaded on the host and mounted in, rather than letting the server
+      # auto-download it: the constrained container then needs no egress and no
+      # CA bundle, the version is pinned in one place, and the SFU is running
+      # before the first participant instead of arriving in the background.
+      - name: Fetch and verify livekit-server ${{ env.LIVEKIT_VERSION }}
         run: |
-          mkdir -p "$RUNNER_TEMP/loadtest"
-          cp chatserver "$RUNNER_TEMP/loadtest/"
-          cd "$RUNNER_TEMP/loadtest"
-          ./chatserver > server.log 2>&1 &
+          base="https://github.com/livekit/livekit/releases/download/v$LIVEKIT_VERSION"
+          asset="livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o checksums.txt "$base/checksums.txt"
+          grep " $asset\$" checksums.txt | sha256sum -c -
+          tar xzf "$asset" livekit-server
+          ./livekit-server --version
+
+      - name: Fetch the LiveKit CLI ${{ env.LK_CLI_VERSION }}
+        run: |
+          base="https://github.com/livekit/livekit-cli/releases/download/v$LK_CLI_VERSION"
+          asset="lk_${LK_CLI_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o lk-checksums.txt "$base/checksums.txt"
+          grep " $asset\$" lk-checksums.txt | sha256sum -c -
+          tar xzf "$asset" lk
+          sudo install -m 0755 lk /usr/local/bin/lk
+          lk --version
+
+      # Per-run credentials. OwnCord blanks the shipped dev key/secret at load
+      # and disables voice entirely (config.go), so a run on those would
+      # measure a server with no voice and report nothing about it.
+      - name: Generate LiveKit credentials
+        run: |
+          key="lk$(openssl rand -hex 8)"
+          secret="$(openssl rand -hex 24)"
+          echo "::add-mask::$secret"
+          {
+            echo "LIVEKIT_API_KEY=$key"
+            echo "LIVEKIT_API_SECRET=$secret"
+          } >>"$GITHUB_ENV"
+
+      - name: Stage the run directory
+        run: |
+          work="$RUNNER_TEMP/loadtest"
+          mkdir -p "$work"
+          cp Server/chatserver livekit-server "$work/"
+          echo "WORK=$work" >>"$GITHUB_ENV"
+
+      # --- boot, one step per leg -------------------------------------------
+      #
+      # Registration/login are per-IP rate limited and every connection comes
+      # from 127.0.0.1 — scale the auth limits with the knob that exists for
+      # shared-IP scenarios. voice.livekit_binary points at the mounted SFU, so
+      # the server runs it as its companion process exactly as an owner's would,
+      # from OwnCord's OWN generated livekit.yaml rather than a hand-written one.
+      #
+      # node_ip=127.0.0.1 with advertise_internal_ip is what makes that
+      # generated config usable by a load client on the same machine: the
+      # template sets `use_external_ip: true`, so without a node_ip LiveKit
+      # discovers the runner's public address via STUN and advertises ICE
+      # candidates no loopback peer can reach — the room connects and carries no
+      # media, which is the "voice works but nobody hears anything" failure
+      # warnOnVoiceNodeIP exists to shout about. Verified 2026-09-12: with these
+      # two knobs `lk load-test` gets 25/25 tracks at 0% loss against the
+      # generated config; the server logs the expected not-a-public-address
+      # warning, which is correct for a single-machine rig.
+      - name: Boot server (constrained — 2 CPUs, 4 GB, no swap)
+        if: matrix.leg == 'constrained'
+        run: |
+          docker run -d --name owncord-sut \
+            --network=host \
+            --cpuset-cpus=0,1 --cpus=2 \
+            --memory=4g --memory-swap=4g \
+            -v "$WORK:/app" -w /app \
+            -e OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER=100 \
+            -e OWNCORD_VOICE_LIVEKIT_API_KEY="$LIVEKIT_API_KEY" \
+            -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
+            -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
+            -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
+            -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
+            -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
+            debian:bookworm-slim /app/chatserver
+          for _ in $(seq 1 90); do
+            if docker exec owncord-sut /app/chatserver healthcheck >/dev/null 2>&1; then
+              echo "healthy"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' owncord-sut)" != "true" ]; then
+              echo "::error::container exited before reporting healthy"
+              docker logs owncord-sut
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::server never became healthy inside the cgroup"
+          docker logs owncord-sut
+          exit 1
+
+      - name: Boot server (ceiling — the whole runner, informational)
+        if: matrix.leg == 'ceiling'
+        run: |
+          cd "$WORK"
+          OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER=100 \
+          OWNCORD_VOICE_LIVEKIT_API_KEY="$LIVEKIT_API_KEY" \
+          OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
+          OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
+          OWNCORD_VOICE_LIVEKIT_BINARY="$WORK/livekit-server" \
+          OWNCORD_VOICE_NODE_IP=127.0.0.1 \
+          OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
+            ./chatserver > server.log 2>&1 &
           echo $! > server.pid
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 90); do
             sleep 1
             if ./chatserver healthcheck; then exit 0; fi
           done
@@ -60,8 +214,32 @@ jobs:
           tail -50 server.log
           exit 1
 
-      - name: Seed owner, channel, and load-test users
-        working-directory: Server
+      # What the server actually believes about its hardware. Recorded from
+      # INSIDE the cgroup, because a leg that is quietly unconstrained is
+      # indistinguishable from a constrained one in the numbers alone.
+      - name: Record the machine the numbers came from
+        run: |
+          {
+            echo "leg: ${{ matrix.leg }}"
+            echo "host_nproc: $(nproc)"
+            echo "host_mem_kb: $(awk '/MemTotal/{print $2}' /proc/meminfo)"
+            if [ "${{ matrix.leg }}" = "constrained" ]; then
+              echo "container_nproc: $(docker exec owncord-sut nproc)"
+              echo "container_cpu_max: $(docker exec owncord-sut cat /sys/fs/cgroup/cpu.max)"
+              echo "container_cpuset: $(docker exec owncord-sut cat /sys/fs/cgroup/cpuset.cpus.effective)"
+              echo "container_mem_max: $(docker exec owncord-sut cat /sys/fs/cgroup/memory.max)"
+              echo "container_swap_max: $(docker exec owncord-sut cat /sys/fs/cgroup/memory.swap.max)"
+            fi
+            echo "livekit_server: $LIVEKIT_VERSION"
+            echo "lk_cli: $LK_CLI_VERSION"
+          } | tee "$WORK/limits.txt"
+
+      # Seeding is not measured; it only has to produce the population the
+      # profile describes. No registration-mode change: a fresh install is
+      # `invite` mode (docs/api.md), so the invite below admits every
+      # registration. The old PATCH {"registration_open":"true"} predates
+      # B4-1's registration_mode and now returns 400.
+      - name: Seed owner, channels, invite and ${{ inputs.users }} users
         run: |
           BASE=https://127.0.0.1:8443
           TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
@@ -71,27 +249,24 @@ jobs:
             echo "::error::setup failed"
             exit 1
           fi
-
-          # A fresh database seeds registration_open=0 (migration 001), and
-          # /api/v1/auth/register 403s before reading the body while it is
-          # closed — invites do not bypass the gate. Open it before the loop.
-          code=$(curl -sk -o /dev/null -w '%{http_code}' -X PATCH "$BASE/admin/api/settings" \
-            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-            -d '{"registration_open":"true"}')
-          if [ "$code" != "200" ]; then
-            echo "::error::opening registration failed with $code"
-            exit 1
-          fi
+          echo "::add-mask::$TOKEN"
 
           CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"name":"loadtest","type":"text"}' | jq -r .id)
+          VOICE_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"name":"loadvoice","type":"voice"}' | jq -r .id)
           if [ -z "$CHANNEL_ID" ] || [ "$CHANNEL_ID" = "null" ]; then
-            echo "::error::channel create failed"
+            echo "::error::text channel create failed"
             exit 1
           fi
-          echo "CHANNEL_ID=$CHANNEL_ID" >> "$GITHUB_ENV"
-          echo "ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          if [ -z "$VOICE_ID" ] || [ "$VOICE_ID" = "null" ]; then
+            echo "::error::voice channel create failed"
+            exit 1
+          fi
+          echo "CHANNEL_ID=$CHANNEL_ID" >>"$GITHUB_ENV"
+          echo "VOICE_ID=$VOICE_ID" >>"$GITHUB_ENV"
 
           INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -102,14 +277,18 @@ jobs:
           fi
 
           USERS="${{ inputs.users }}"
-          for i in $(seq 1 "${USERS:-100}"); do
+          for i in $(seq 1 "${USERS:-250}"); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/auth/register" \
               -H 'Content-Type: application/json' \
               -d "{\"username\":\"loadtest$i\",\"password\":\"LoadTest123!\",\"invite_code\":\"$INVITE\"}")
-            if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            case "$code" in
+            200 | 201) ;;
+            *)
               echo "::error::registering loadtest$i failed with $code"
               exit 1
-            fi
+              ;;
+            esac
+            if [ $((i % 50)) -eq 0 ]; then echo "registered $i/${USERS:-250}"; fi
           done
 
       - name: Install k6
@@ -118,34 +297,83 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
           sudo apt-get update -qq && sudo apt-get install -y k6
 
-      - name: Run k6 baseline
-        working-directory: Server/scripts/k6
+      # Both halves of the profile run AT THE SAME TIME. The claim is 100
+      # connections and 25 voice participants on one server, not each in turn:
+      # measuring them separately would publish two numbers no single run ever
+      # held together. The SFU cohort's duration covers the whole k6 run
+      # (ramp + sustain + drain) so voice load is present throughout.
+      #
+      # taskset keeps both generators on CPUs 2-3, off the server's cpuset.
+      - name: Run the capacity profile
+        id: profile
         env:
           K6_WS_URL: wss://127.0.0.1:8443/api/v1/ws
           K6_HTTP_URL: https://127.0.0.1:8443
           K6_CHANNEL_ID: ${{ env.CHANNEL_ID }}
+          K6_VOICE_CHANNEL_ID: ${{ env.VOICE_ID }}
+          K6_VOICE_VUS: ${{ inputs.voice }}
+          K6_PEAK_VUS: ${{ inputs.connections }}
+          K6_RAMP: 60s
+          K6_SUSTAIN: 180s
         run: |
-          mkdir -p reports
-          k6 run --insecure-skip-tls-verify ws-load.js
+          mkdir -p Server/scripts/k6/reports
+          PUBLISHERS="${{ inputs.voice }}" SUBSCRIBERS="${{ inputs.voice }}" \
+          DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
+          LIVEKIT_URL=http://127.0.0.1:7880 \
+          REPORT="$WORK/voice-load.txt" \
+            taskset -c 2,3 bash Server/scripts/voice-load.sh &
+          voice_pid=$!
+
+          k6_rc=0
+          (cd Server/scripts/k6 && taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js) || k6_rc=$?
+          cp Server/scripts/k6/reports/k6-summary.json "$WORK/" 2>/dev/null || true
+
+          voice_rc=0
+          wait "$voice_pid" || voice_rc=$?
+
+          echo "k6_rc=$k6_rc voice_rc=$voice_rc"
+          if [ "${{ matrix.leg }}" != "constrained" ]; then
+            # The ceiling leg is informational: a breach here says "the big box
+            # is also busy", which is context, not a capacity result.
+            echo "::notice::ceiling leg finished with k6=$k6_rc voice=$voice_rc (not gating)"
+            exit 0
+          fi
+          if [ "$voice_rc" -ne 0 ]; then
+            echo "::error::the 25-participant voice leg did not meet its assertions — see the voice-load report"
+            exit 1
+          fi
+          if [ "$k6_rc" -eq 99 ]; then
+            echo "::error::a latency budget was missed on the constrained leg. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
+            exit 1
+          fi
+          exit "$k6_rc"
 
       - name: Snapshot server metrics
         if: always()
         run: |
-          curl -sk https://127.0.0.1:8443/api/v1/metrics | tee "$RUNNER_TEMP/loadtest/metrics-after.json" || true
+          curl -sk https://127.0.0.1:8443/api/v1/metrics | tee "$WORK/metrics-after.json" || true
 
       - name: Stop server
         if: always()
         run: |
-          kill "$(cat "$RUNNER_TEMP/loadtest/server.pid")" 2>/dev/null || true
-          sleep 3
+          if [ "${{ matrix.leg }}" = "constrained" ]; then
+            docker logs owncord-sut >"$WORK/server.log" 2>&1 || true
+            docker stop -t 20 owncord-sut || true
+            docker rm -f owncord-sut || true
+          else
+            kill "$(cat "$WORK/server.pid")" 2>/dev/null || true
+            sleep 3
+          fi
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: k6-baseline
+          name: capacity-${{ matrix.leg }}
           path: |
-            Server/scripts/k6/reports/k6-summary.json
+            ${{ runner.temp }}/loadtest/k6-summary.json
+            ${{ runner.temp }}/loadtest/voice-load.txt
+            ${{ runner.temp }}/loadtest/limits.txt
             ${{ runner.temp }}/loadtest/metrics-after.json
             ${{ runner.temp }}/loadtest/server.log
           retention-days: 30
