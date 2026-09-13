@@ -22,12 +22,12 @@ const PROFILE = {
   lastConnected: null,
 };
 
-function mockWithSavedPassword(
+async function mockWithSavedPassword(
   page: import("@playwright/test").Page,
   savedPasswordLogin: { status: number; body: unknown },
   simulateWsFlow = true,
 ): Promise<void> {
-  return page.addInitScript(
+  await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
