@@ -525,6 +525,94 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("clears the placeholder lockout after switching to a server with no saved password", async () => {
+    // Regression: the latch used to be a one-way ratchet on the whole form
+    // object. Selecting server A (saved password) armed it; selecting server
+    // B (no saved password) must reset it, or B's real password would be
+    // rejected forever if it happened to equal the placeholder string.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential
+      .mockResolvedValueOnce({ username: "saveduser", token: "tok", hasPassword: true })
+      .mockResolvedValueOnce({ username: "otheruser", token: "tok", hasPassword: false });
+
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    page.selectServer("server-a:8443", "saveduser");
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    page.selectServer("server-b:8443", "otheruser");
+    await vi.waitFor(() => {
+      const usernameInput = container.querySelector("#username") as HTMLInputElement;
+      expect(usernameInput.value).toBe("otheruser");
+    });
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "server-b:8443",
+        "otheruser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("still rejects the pasted placeholder in Register after the reset was added", async () => {
+    // Pins that resetting the latch in setCredentials' else branch did not
+    // weaken the within-context protection: no server switch happens here,
+    // so the placeholder must still be caught after a copy/paste following a
+    // toggle to Register.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    usernameInput.value = "newuser";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   it("never carries a remembered password into registration", async () => {
     // Regression: the placeholder is a fixed, publicly known constant. If it
     // survived a switch to Register it would be submitted as the NEW account's

@@ -100,10 +100,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
   let usingSavedPassword = false;
   // Latch, not a mirror of `usingSavedPassword`: once the placeholder has
-  // been in the field, its text can be copied back in at any later point,
-  // including after a switch to Register, even though `usingSavedPassword`
-  // itself gets cleared long before that. Never reset — the whole point is
-  // that this outlives the flag it sits next to.
+  // been in the field, its text can be copied back in at any later point
+  // within the same credential context — including after a switch to
+  // Register, even though `usingSavedPassword` itself gets cleared long
+  // before that. It is reset when `setCredentials` selects a new credential
+  // context that has no saved password, so switching to a different server
+  // doesn't leave a stale rejection behind for that server's real password.
   let savedPasswordWasShown = false;
 
   /** Drop the placeholder the moment the user edits the field. */
@@ -854,6 +856,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         rememberPasswordCheckbox.checked = true;
       } else {
         clearSavedPasswordPlaceholder();
+        savedPasswordWasShown = false;
       }
     },
 
