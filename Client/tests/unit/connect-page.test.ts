@@ -298,6 +298,48 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("falls back to a normal login when a password manager replaces the value without beforeinput", async () => {
+    // A password manager (and some webview autofill implementations) sets
+    // the value and fires only `input`, never `beforeinput`. The `input`
+    // listener is the backstop that must still clear the placeholder.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "manager-filled-password";
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "saveduser",
+        "manager-filled-password",
+      );
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   it("never carries a remembered password into registration", async () => {
     // Regression: the placeholder is a fixed, publicly known constant. If it
     // survived a switch to Register it would be submitted as the NEW account's

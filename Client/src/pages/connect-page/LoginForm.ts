@@ -104,7 +104,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function clearSavedPasswordPlaceholder(): void {
     if (!usingSavedPassword) return;
     usingSavedPassword = false;
-    passwordInput.value = "";
+    // Only wipe the field if it still holds the placeholder. `beforeinput`
+    // runs before the edit lands, so the field is still the placeholder
+    // there and this clears it so the edit lands in an empty field. The
+    // `input` backstop runs after a password manager has already replaced
+    // the value with the real password it wants to submit — wiping that
+    // unconditionally would blank a required field and block the login the
+    // manager was trying to help with.
+    if (passwordInput.value === SAVED_PASSWORD_PLACEHOLDER) {
+      passwordInput.value = "";
+    }
   }
 
   // --- internal state ---
@@ -272,11 +281,18 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
 
-    // `beforeinput` fires for every actual edit — typing, paste, drag-drop and
-    // autofill — and only for edits, so caret movement leaves the placeholder
-    // alone. It runs before the value changes, so clearing here means the edit
-    // lands in an empty field instead of mixing with the placeholder.
+    // `beforeinput` fires for every actual edit — typing, paste, drag-drop —
+    // and only for edits, so caret movement leaves the placeholder alone. It
+    // runs before the value changes, so clearing there means the edit lands in
+    // an empty field instead of mixing with the placeholder.
+    //
+    // `input` is the backstop: a password manager can replace the value and
+    // emit only `input`, and leaving the flag set there would submit the stored
+    // password while the field shows the one the manager just filled in. It is
+    // a no-op after `beforeinput` has already cleared the flag, so it cannot
+    // swallow a typed character.
     passwordInput.addEventListener("beforeinput", clearSavedPasswordPlaceholder, { signal });
+    passwordInput.addEventListener("input", clearSavedPasswordPlaceholder, { signal });
 
     autoConnectCheckbox.addEventListener(
       "change",

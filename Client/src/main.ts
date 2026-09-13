@@ -354,16 +354,6 @@ function runHealthChecks(
 // a stale mount is discarded when a newer navigation supersedes it.
 const navGuard = createNavigationGuard();
 
-/** Fold a username the way SQLite's NOCASE collation does — ASCII A-Z only.
- *  `users.username` is `UNIQUE COLLATE NOCASE`, so the server treats `Alice`
- *  and `alice` as one account; a case-sensitive compare here would skip the
- *  opt-out delete and leave the declined password stored. Deliberately NOT
- *  `toLowerCase()`, which also folds non-ASCII pairs SQLite keeps distinct
- *  and would delete a different account's credential. */
-function foldUsername(u: string): string {
-  return u.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
   const isCurrentNavigation = navGuard.begin();
@@ -423,40 +413,25 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // remember on.
     if (!rememberPassword && rememberIsUserChoice) {
       void (async () => {
-        try {
-          // Withdraw only THIS account's credential. The store is keyed by host
-          // alone, so an unconditional delete would let one account's decision
-          // not to be remembered destroy a different account's saved
-          // credential on the same server.
-          const stored = await loadCredential(host);
-          if (stored && foldUsername(stored.username) === foldUsername(username)) {
-            // A failed delete leaves the password the user just declined sitting
-            // on disk. Silence there would tell them the opt-out took effect
-            // when it did not, so it is surfaced the same way a failed save is.
-            const removed = await deleteCredential(host);
-            if (!removed && owner.isCurrent()) {
-              log.warn("Credential delete failed — the saved password is still stored", {
-                host,
-              });
-              setTransientError("Could not remove the saved password — it is still stored");
-            }
-          }
-        } catch (err) {
-          // loadCredential rejects (rather than returning null) when the
-          // credential store itself couldn't be read — a locked keychain, an
-          // unparseable blob, etc. That's not "nothing stored"; treat it the
-          // same as a failed delete so the user isn't told nothing while the
-          // declined password is still sitting on disk.
-          log.warn(
-            "Could not check the saved credential — the saved password may still be stored",
-            {
-              host,
-              error: String(err),
-            },
-          );
-          if (owner.isCurrent()) {
-            setTransientError("Could not remove the saved password — it could not be checked");
-          }
+        // The store holds one credential per host (`login_account(host) =
+        // host`), and `save_credential` already overwrites it with no
+        // username check — a remembered login by a second account on this
+        // host would have clobbered it anyway. The stored username is a
+        // stale copy, not an account identity, so guarding the delete on it
+        // can't protect a second account; it can only leave the password the
+        // user just declined sitting on disk. Delete unconditionally for the
+        // host. Cost: if two accounts share a host, opting out as one
+        // removes the credential the other saved.
+        //
+        // A failed delete leaves that password on disk. Silence there would
+        // tell the user the opt-out took effect when it did not, so it is
+        // surfaced the same way a failed save is.
+        const removed = await deleteCredential(host);
+        if (!removed && owner.isCurrent()) {
+          log.warn("Credential delete failed — the saved password is still stored", {
+            host,
+          });
+          setTransientError("Could not remove the saved password — it is still stored");
         }
       })();
     }
@@ -899,8 +874,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // credential store over IPC for security).
       const autoProfile = profileManager.getAutoConnectProfile();
       if (autoProfile) {
+        const attempt = api.getSession();
         try {
-          const attempt = api.getSession();
           const cred = await loadCredential(autoProfile.host);
           if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
           if (cred?.username && cred?.token && !autoLoginCancelled) {
@@ -937,7 +912,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             return;
           }
         } catch (err) {
-          if (!autoLoginCancelled && pageOwner.isCurrent()) {
+          // A superseded attempt (e.g. a manual login started while this
+          // credential read was still pending) must not paint an error over
+          // the login that superseded it.
+          if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
             const message = err instanceof Error ? err.message : "Auto-login failed";
             log.warn("Auto-login failed", { host: autoProfile.host, error: message });
             connectPage.showError(`Auto-login failed: ${message}`);

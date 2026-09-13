@@ -298,12 +298,15 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
     vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
   });
 
-  it("deletes the stored credential even when the saved username differs only by ASCII case", async () => {
-    // `users.username` is UNIQUE COLLATE NOCASE server-side, so a credential
-    // saved for "Alice" and a login typed as "alice" are the same account —
-    // a case-sensitive compare here would skip the opt-out delete.
+  it("deletes the stored credential unconditionally, regardless of what the stored username was", async () => {
+    // The store is keyed by host alone (one credential per host), and
+    // save_credential already overwrites it with no username check. The
+    // stored username is a stale copy, not an account identity, so the
+    // delete must not depend on comparing it to the login username — this
+    // stubs loadCredential to return a DIFFERENT username than the one
+    // logging in, the case that used to make the delete skip.
     vi.mocked(loadCredential).mockResolvedValue({
-      username: "Alice",
+      username: "Bob",
       token: "tok",
       hasPassword: true,
     });

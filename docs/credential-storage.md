@@ -35,9 +35,11 @@ The login credential blob carries a password only when the user ticked
   the frontend.
 - The login form branches on internal state, never on the text in the field,
   so the placeholder can never be submitted as a literal password. Any edit —
-  typing, paste, drag-and-drop or autofill — clears it outright rather than
-  mixing it with typed characters; caret movement alone does not, and no edit
-  can be silently ignored.
+  typing, paste, drag-and-drop — clears it outright via `beforeinput`, before
+  the edit lands, so it can never mix with typed characters; a password
+  manager that replaces the value without firing `beforeinput` is still
+  caught by a backstop `input` listener. Caret movement alone does not clear
+  it, and no edit can be silently ignored.
 - `save_credential` distinguishes "no password supplied" from "erase the
   password": it preserves whatever is stored unless `clear_password` is set.
   Without that distinction every re-save had to carry the plaintext back
@@ -46,10 +48,15 @@ The login credential blob carries a password only when the user ticked
   rewriting the blob without a password it could not read.
 - Declining "Remember password" on an interactive login **deletes** the stored
   credential rather than leaving an earlier one in place, so a password saved
-  under a previous opt-in does not outlive the opt-out. The username survives
-  in the server profile, so the form still prefills it. The auto-login path
-  never deletes: it is replaying a stored credential, not expressing a
-  preference.
+  under a previous opt-in does not outlive the opt-out. The delete is
+  unconditional for the host: the store holds one credential per host, so
+  there is nothing finer to target, and `save_credential` already overwrites
+  that one credential without a username check. If two accounts share a host,
+  opting out as one removes the credential the other saved — the same
+  credential a remembered login by either would have overwritten anyway. The
+  username survives in the server profile, so the form still prefills it. The
+  auto-login path never deletes: it is replaying a stored credential, not
+  expressing a preference.
 
 ## Pending message recovery
 

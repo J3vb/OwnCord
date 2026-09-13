@@ -682,12 +682,18 @@ fn decode_chunked(body: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(out);
         }
 
-        if out.len() as u64 + size > SAVED_LOGIN_MAX_RESPONSE {
+        // The size line is attacker-controlled: bound it on its own before any
+        // arithmetic, because `out.len() as u64 + size` can wrap a `u64` when
+        // `size` is near `u64::MAX`, sailing past the limit check below.
+        if size > SAVED_LOGIN_MAX_RESPONSE {
+            return Err("saved-password login: response exceeded the size limit".to_string());
+        }
+        if (out.len() as u64).saturating_add(size) > SAVED_LOGIN_MAX_RESPONSE {
             return Err("saved-password login: response exceeded the size limit".to_string());
         }
 
         let size = size as usize;
-        if pos + size > body.len() {
+        if size > body.len() - pos {
             return Err("saved-password login: truncated chunk body".to_string());
         }
         out.extend_from_slice(&body[pos..pos + size]);
@@ -1108,6 +1114,15 @@ mod tests {
         // Body bytes are not actually supplied — the size check must fire
         // before any attempt to read them.
         let err = decode_chunked(raw.as_bytes()).expect_err("oversized chunk must error");
+        assert!(err.contains("size limit"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_huge_chunk_size_without_overflowing() {
+        // A hostile size line near u64::MAX must not panic the arithmetic
+        // that checks it against the response cap.
+        let raw = "1\r\na\r\nffffffffffffffff\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("huge chunk size must error");
         assert!(err.contains("size limit"), "{err}");
     }
 
