@@ -83,8 +83,16 @@ node --test ../scripts/check-tauri-versions.test.mjs
 node ../scripts/check-tauri-versions.mjs
 npm test
 npm run typecheck
+npm run typecheck:build   # tsconfig.build.json — the shipped app graph
+npm run typecheck:e2e     # tsconfig.e2e.json — tests/e2e, EXCLUDED from the main tsconfig
 npm run lint
 ```
+
+**`npm run typecheck` does not cover `tests/e2e/`.** The main tsconfig excludes
+it from the app graph, so a Playwright spec can fail `Client Static Checks`
+while the local typecheck is clean — CI runs `tsc -p tsconfig.e2e.json` as its
+own step. A branch adding or editing an e2e spec has not been checked until
+`typecheck:e2e` has run.
 
 The Tauri check reads resolved npm/Cargo lockfile versions without installing
 or building. Paired core/API and official plugin packages must have matching

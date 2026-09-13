@@ -156,6 +156,31 @@ test.describe("Saved-password login", () => {
       .toEqual([]);
   });
 
+  test("declining does not delete a different account's credential", async ({ page }) => {
+    // The credential store is keyed by host alone, so an unconditional delete
+    // would let one account's decision destroy another account's saved
+    // credential on the same server. The stored credential here belongs to
+    // "saveduser"; the person logging in is someone else.
+    await mockWithSavedPassword(page, {
+      status: 200,
+      body: { token: MOCK_TOKEN, requires_2fa: false },
+    });
+    await page.goto("/");
+    await selectSavedServer(page);
+
+    const password = page.locator("#password");
+    await password.click();
+    await password.press("a");
+    await password.fill("typed-password-123");
+    await page.locator("#username").fill("someone-else");
+    await page.locator("#remember-password").uncheck();
+    await page.locator(".btn-primary[type='submit']").click();
+
+    // Give the decline path time to run before asserting it did nothing.
+    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
+    expect(await page.evaluate(() => window.__mockDeletedCredentials ?? [])).toEqual([]);
+  });
+
   test("declining to be remembered deletes the stored credential", async ({ page }) => {
     // OCV-022: the opt-out is an instruction, not just an absence of one.
     await mockWithSavedPassword(page, {

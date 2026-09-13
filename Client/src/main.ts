@@ -412,7 +412,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // prefills it; the token is worthless here because auto-connect forces
     // remember on.
     if (!rememberPassword && rememberIsUserChoice) {
-      void deleteCredential(host);
+      void (async () => {
+        // Withdraw only THIS account's credential. The store is keyed by host
+        // alone, so an unconditional delete would let one account's decision
+        // not to be remembered destroy a different account's saved
+        // credential on the same server.
+        const stored = await loadCredential(host);
+        if (stored && stored.username === username) {
+          await deleteCredential(host);
+        }
+      })();
     }
     if (rememberPassword) {
       saveCredential(host, username, token, password)

@@ -563,6 +563,37 @@ async fn post_login(
     parse_http_response(&raw)
 }
 
+/// Whether a response header block declares chunked transfer framing.
+///
+/// Unfolds obs-fold continuation lines - a header value continued on a
+/// following line beginning with a space or tab - before scanning. Without
+/// that, a folded `Transfer-Encoding` splits into a line whose value is empty
+/// and a line carrying no colon at all, and slips past a per-line scan.
+/// obs-fold is deprecated by RFC 9112 and nothing in this path emits it, so
+/// this is belt-and-braces against a misbehaving intermediary - but a framing
+/// check that is trivially bypassable is not a check.
+fn header_says_chunked(head: &str) -> bool {
+    let mut unfolded = String::with_capacity(head.len());
+    for line in head.lines().skip(1) {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Continuation of the previous header's value.
+            unfolded.push(' ');
+            unfolded.push_str(line.trim());
+        } else {
+            unfolded.push('\n');
+            unfolded.push_str(line);
+        }
+    }
+
+    unfolded
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("transfer-encoding")
+                && value.to_ascii_lowercase().contains("chunked")
+        })
+}
+
 /// Split a raw HTTP/1.1 response into its status code and body.
 ///
 /// Pure, so the framing is testable without a socket.
@@ -588,15 +619,7 @@ fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
     // `Connection: close` and HTTP/1.1 forbids chunked alongside it in
     // practice here, so this is a guard against a misbehaving intermediary
     // rather than an expected path — fail loudly instead of relaying garbage.
-    if head
-        .lines()
-        .skip(1)
-        .filter_map(|line| line.split_once(':'))
-        .any(|(name, value)| {
-            name.trim().eq_ignore_ascii_case("transfer-encoding")
-                && value.to_ascii_lowercase().contains("chunked")
-        })
-    {
+    if header_says_chunked(head) {
         return Err("saved-password login: chunked response framing is not supported".to_string());
     }
 
@@ -923,6 +946,46 @@ mod tests {
         assert!(err.contains("chunked"), "{err}");
     }
 
+    #[test]
+    fn parse_http_response_rejects_chunked_hidden_by_an_obs_fold() {
+        // A folded value splits into a line with an empty value and a line
+        // carrying no colon at all, which a per-line scan drops. A framing
+        // check that is trivially bypassable is not a check.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding:", " chunked"],
+            "body",
+        );
+        let err = parse_http_response(&raw).expect_err("folded chunked must still be rejected");
+        assert!(err.contains("chunked"), "{err}");
+    }
+
+    #[test]
+    fn parse_http_response_rejects_chunked_among_other_codings() {
+        for value in [
+            "Transfer-Encoding: identity, chunked",
+            "Transfer-Encoding: CHUNKED",
+            "Transfer-Encoding:   chunked  ",
+        ] {
+            let raw = http_response("HTTP/1.1 200 OK", &[value], "body");
+            assert!(
+                parse_http_response(&raw).is_err(),
+                "should have rejected: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_http_response_does_not_mistake_a_body_for_a_header() {
+        // The scan must run on the header block only.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Content-Type: application/json"],
+            r#"{"note":"Transfer-Encoding: chunked"}"#,
+        );
+        let res = parse_http_response(&raw).expect("a body naming the header is not framing");
+        assert_eq!(res.status, 200);
+    }
     #[test]
     fn parse_http_response_ignores_a_non_chunked_transfer_encoding() {
         let raw = http_response(

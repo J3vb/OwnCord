@@ -810,7 +810,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
       usernameInput.value = username;
-      if (hasSavedPassword) {
+      // The placeholder only ever belongs to LOGGING IN to an existing
+      // account. Registration reads the password field as typed text, so a
+      // placeholder there would be submitted as the new account's password —
+      // a fixed, publicly known constant.
+      //
+      // The mode is checked HERE, not only when the user switches modes,
+      // because this runs from an async credential load: it can resolve after
+      // a switch to Register, or fire while Register is already showing
+      // (clicking a server row does not force the form back to login). Both
+      // orderings re-arm the placeholder if this is guarded anywhere else.
+      if (hasSavedPassword && formMode === "login") {
         // Show the box as filled — the user ticked "Remember password" and
         // expects exactly that — without the plaintext ever being here.
         usingSavedPassword = true;

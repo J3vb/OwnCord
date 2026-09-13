@@ -253,6 +253,73 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("never arms the placeholder when a server is picked while registering", async () => {
+    // The ordering the toggle-time clear does NOT cover: the form is already
+    // in Register mode when the credential load lands. Clicking a server row
+    // does not force the form back to login, so setCredentials must refuse to
+    // arm the placeholder itself.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    // Switch to Register FIRST, then pick the saved server.
+    (container.querySelector(".form-switch a") as HTMLElement).click();
+    (container.querySelector(".server-item") as HTMLElement).click();
+
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+
+    (container.querySelector("#invite") as HTMLInputElement).value = "invite-code";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("never arms the placeholder when the load resolves after switching to register", async () => {
+    // The race the toggle-time clear also misses: the credential load is
+    // in flight when the user switches, and re-arms the placeholder when it
+    // lands. Resolve it manually so the ordering is deterministic.
+    let resolveCredential: (v: unknown) => void = () => {};
+    mockLoadCredential.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCredential = resolve;
+        }),
+    );
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    // Click the server (load starts), switch to Register, THEN let it land.
+    (container.querySelector(".server-item") as HTMLElement).click();
+    (container.querySelector(".form-switch a") as HTMLElement).click();
+    resolveCredential({ username: "saveduser", token: "tok", hasPassword: true });
+
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+
+    page.destroy?.();
+  });
+
   it("does not report a saved password as form text", async () => {
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
