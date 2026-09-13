@@ -1,18 +1,30 @@
 use serde::Serialize;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::AppHandle;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::time::timeout;
 
 use crate::secret_store::{self, Backend};
 
 /// Data returned from `load_credential`.
+///
+/// The plaintext password is deliberately NOT part of the IPC payload. It stays
+/// inside this process and is used only by `login_with_saved_password`; the
+/// frontend learns that one exists through `has_password` and prefills a
+/// placeholder. See `docs/security.md` and `docs/architecture/client.md`, both
+/// of which state that plaintext passwords never cross IPC back to JS.
 #[derive(Serialize, Clone)]
 pub struct CredentialData {
     pub username: String,
     pub token: String,
-    // Password is stored in the credential blob for re-authentication and is
-    // serialized back to the frontend over IPC so the login form can prefill
-    // it when the user ticked "Remember password".
+    #[serde(skip)]
     pub password: Option<String>,
+    /// Whether a password is stored for this host. Always mirrors
+    /// `password.is_some()` — set by `parse_credential_blob`, the only
+    /// constructor outside tests.
+    pub has_password: bool,
 }
 
 impl std::fmt::Debug for CredentialData {
@@ -21,6 +33,7 @@ impl std::fmt::Debug for CredentialData {
             .field("username", &self.username)
             .field("token", &"[REDACTED]")
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("has_password", &self.has_password)
             .finish()
     }
 }
@@ -96,6 +109,24 @@ fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
+/// Decide what password a re-written credential blob should carry.
+///
+/// Three states, because "no password supplied" and "erase the password" are
+/// different intents. Conflating them was a live defect: because an omitted
+/// password wiped the stored one, the frontend had to round-trip the plaintext
+/// back through IPC on every re-save — which is the only reason it was ever
+/// returned to JavaScript at all.
+fn resolve_password(supplied: Option<&str>, clear: bool, existing: Option<&str>) -> Option<String> {
+    match (supplied, clear) {
+        // An explicit new password wins, even over a clear request.
+        (Some(pw), _) => Some(pw.to_string()),
+        // Explicitly erase.
+        (None, true) => None,
+        // Default: carry forward whatever is already stored.
+        (None, false) => existing.map(|pw| pw.to_string()),
+    }
+}
+
 /// Save a credential (username + token + optional password) to the system
 /// credential store.
 ///
@@ -114,21 +145,36 @@ pub fn save_credential(
     username: String,
     token: String,
     password: Option<String>,
+    clear_password: Option<bool>,
 ) -> Result<(), String> {
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         require_non_empty(&token, "token")?;
         require_non_empty(&username, "username")?;
 
+        let account = login_account(&host);
         let mut payload = serde_json::json!({
             "username": username,
             "token": token,
         });
-        if let Some(ref pw) = password {
-            payload["password"] = serde_json::Value::String(pw.clone());
+
+        // Reading the existing blob is only needed for the preserve case, but
+        // it is cheap and keeps `resolve_password` pure and testable.
+        let existing = secret_store::get(&app, &account)
+            .ok()
+            .flatten()
+            .and_then(|blob| parse_credential_blob(&blob).ok())
+            .and_then(|cred| cred.password);
+
+        if let Some(pw) = resolve_password(
+            password.as_deref(),
+            clear_password.unwrap_or(false),
+            existing.as_deref(),
+        ) {
+            payload["password"] = serde_json::Value::String(pw);
         }
 
-        secret_store::set(&app, &login_account(&host), &payload.to_string())
+        secret_store::set(&app, &account, &payload.to_string())
             .map_err(|e| format!("save_credential failed: {e}"))?;
         Ok(())
     })
@@ -178,6 +224,7 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
     Ok(CredentialData {
         username,
         token,
+        has_password: password.is_some(),
         password,
     })
 }
@@ -386,6 +433,131 @@ pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Saved-password login
+// ---------------------------------------------------------------------------
+//
+// The plaintext password never crosses the IPC boundary. When the user ticked
+// "Remember password", the login form shows a placeholder and calls
+// `login_with_saved_password` instead of sending a password of its own; the
+// password is read from the credential store and used here, inside this
+// process.
+//
+// The request goes to the loopback `http_proxy` tunnel this process already
+// owns, exactly like a webview `fetch`: the proxy terminates TLS, pins the
+// certificate (TOFU) and rewrites the `Host` header, so nothing about
+// certificate handling is duplicated or bypassed here.
+//
+// The plaintext does live briefly in this process's memory, in the request
+// buffer, and is not zeroized (no `zeroize` dependency). That is strictly
+// better than the arrangement it replaces, where the same plaintext sat in
+// the JS heap for the lifetime of the connect page.
+
+/// How long the whole saved-password login may take before it is abandoned.
+const SAVED_LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Raw relay of the server's `/auth/login` response.
+///
+/// Rust deliberately does not interpret the body. Login answers a union — a
+/// token, or a `partial_token` plus `requires_2fa` — on top of every error
+/// shape, and re-encoding that contract in a second language is precisely how
+/// two implementations drift apart. The frontend parses this with exactly the
+/// same code that handles its own `api.login` response.
+#[derive(Serialize, Clone, Debug)]
+pub struct SavedLoginResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+/// Log in to `host` as `username` using the password saved in the credential
+/// store, returning the server's raw response.
+///
+/// Errors when no credential, or no saved password, exists for the host.
+#[tauri::command(async)]
+pub async fn login_with_saved_password(
+    app: AppHandle,
+    state: tauri::State<'_, crate::http_proxy::HttpProxyState>,
+    host: String,
+    username: String,
+) -> Result<SavedLoginResponse, String> {
+    require_non_empty(&host, "host")?;
+    require_non_empty(&username, "username")?;
+
+    let account = login_account(&host);
+    let stored = with_credential_lock(|| {
+        secret_store::get(&app, &account)
+            .map_err(|e| format!("login_with_saved_password failed: {e}"))
+    })?;
+    let password = stored
+        .ok_or_else(|| "no stored credential for this host".to_string())
+        .and_then(|blob| parse_credential_blob(&blob))?
+        .password
+        .ok_or_else(|| "no saved password for this host".to_string())?;
+
+    let port = crate::http_proxy::start_http_proxy(app.clone(), state, host).await?;
+
+    timeout(SAVED_LOGIN_TIMEOUT, post_login(port, &username, &password))
+        .await
+        .map_err(|_| "saved-password login timed out".to_string())?
+}
+
+/// POST the login body to the loopback proxy and return the raw response.
+async fn post_login(
+    port: u16,
+    username: &str,
+    password: &str,
+) -> Result<SavedLoginResponse, String> {
+    let body = serde_json::json!({ "username": username, "password": password }).to_string();
+    // `Host` is rewritten to the real remote by the proxy, and `Connection:
+    // close` is forced there too — it is sent explicitly so the read below can
+    // simply run to EOF instead of framing a keep-alive response.
+    let request = format!(
+        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|e| format!("saved-password login: connect failed: {e}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| format!("saved-password login: write failed: {e}"))?;
+
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .await
+        .map_err(|e| format!("saved-password login: read failed: {e}"))?;
+
+    parse_http_response(&raw)
+}
+
+/// Split a raw HTTP/1.1 response into its status code and body.
+///
+/// Pure, so the framing is testable without a socket.
+fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
+    let text = String::from_utf8_lossy(raw);
+    let (head, body) = text
+        .split_once("\r\n\r\n")
+        .ok_or("saved-password login: malformed response (no header terminator)")?;
+    let status_line = head
+        .lines()
+        .next()
+        .ok_or("saved-password login: malformed response (no status line)")?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or("saved-password login: malformed response (no status code)")?;
+
+    Ok(SavedLoginResponse {
+        status,
+        body: body.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +678,7 @@ mod tests {
             username: "alice".into(),
             token: "secret-token".into(),
             password: Some("hunter2".into()),
+            has_password: true,
         };
         let debug = format!("{data:?}");
         assert!(debug.contains("alice"));
@@ -514,16 +687,147 @@ mod tests {
         assert!(debug.contains("[REDACTED]"));
     }
 
+    /// The IPC payload must never carry the plaintext password. This is the
+    /// test-locked half of the claim made in `docs/security.md` and
+    /// `docs/architecture/client.md`; the `#[serde(skip)]` on the field is the
+    /// other half. Replaces an earlier test that asserted the opposite.
     #[test]
-    fn credential_data_serializes_password_for_prefill() {
+    fn credential_data_never_serializes_the_password() {
         let data = CredentialData {
             username: "alice".into(),
             token: "tok".into(),
-            password: Some("pw".into()),
+            password: Some("hunter2".into()),
+            has_password: true,
         };
         let json = serde_json::to_string(&data).unwrap();
-        assert!(json.contains("password"));
-        assert!(json.contains("pw"));
+        assert!(
+            !json.contains("hunter2"),
+            "plaintext password crossed IPC: {json}"
+        );
+        assert!(
+            !json.contains("\"password\""),
+            "password key present: {json}"
+        );
+        // The frontend still learns that one exists, so it can prefill a
+        // placeholder and offer the saved-password login path.
+        assert!(json.contains("\"has_password\":true"), "{json}");
+    }
+
+    #[test]
+    fn credential_data_reports_absent_password() {
+        let data = CredentialData {
+            username: "alice".into(),
+            token: "tok".into(),
+            password: None,
+            has_password: false,
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(json.contains("\"has_password\":false"), "{json}");
+    }
+
+    #[test]
+    fn parse_credential_blob_sets_has_password_from_the_blob() {
+        let with_pw =
+            parse_credential_blob(r#"{"username":"a","token":"t","password":"p"}"#).unwrap();
+        assert!(with_pw.has_password);
+        assert_eq!(with_pw.password.as_deref(), Some("p"));
+
+        let without = parse_credential_blob(r#"{"username":"a","token":"t"}"#).unwrap();
+        assert!(!without.has_password);
+        assert!(without.password.is_none());
+    }
+
+    // `save_credential` used to conflate "no password supplied" with "erase
+    // the stored password", which is the only reason the frontend ever had to
+    // round-trip the plaintext back through IPC. These pin the replacement.
+
+    #[test]
+    fn resolve_password_preserves_the_stored_one_by_default() {
+        assert_eq!(
+            resolve_password(None, false, Some("stored")).as_deref(),
+            Some("stored")
+        );
+        assert_eq!(resolve_password(None, false, None), None);
+    }
+
+    #[test]
+    fn resolve_password_erases_only_when_asked() {
+        assert_eq!(resolve_password(None, true, Some("stored")), None);
+    }
+
+    #[test]
+    fn resolve_password_lets_a_supplied_password_win() {
+        assert_eq!(
+            resolve_password(Some("new"), false, Some("stored")).as_deref(),
+            Some("new")
+        );
+        // A supplied password beats a clear request rather than silently
+        // discarding what the caller just asked to store.
+        assert_eq!(
+            resolve_password(Some("new"), true, Some("stored")).as_deref(),
+            Some("new")
+        );
+    }
+
+    /// Builds a raw HTTP/1.1 response from parts, so the framing tests do not
+    /// bury CRLFs inside string literals.
+    fn http_response(status_line: &str, headers: &[&str], body: &str) -> Vec<u8> {
+        let mut out = String::from(status_line);
+        out.push_str("\r\n");
+        for h in headers {
+            out.push_str(h);
+            out.push_str("\r\n");
+        }
+        out.push_str("\r\n");
+        out.push_str(body);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn parse_http_response_splits_status_and_body() {
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Content-Type: application/json"],
+            r#"{"token":"t"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 200);
+        assert_eq!(res.body, r#"{"token":"t"}"#);
+    }
+
+    #[test]
+    fn parse_http_response_relays_a_2fa_challenge_verbatim() {
+        // Rust must not interpret the union: a 2FA challenge is just a body.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &[],
+            r#"{"requires_2fa":true,"partial_token":"pt"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 200);
+        assert!(res.body.contains("requires_2fa"));
+        assert!(res.body.contains("partial_token"));
+    }
+
+    #[test]
+    fn parse_http_response_relays_an_error_status() {
+        let raw = http_response(
+            "HTTP/1.1 401 Unauthorized",
+            &[],
+            r#"{"error":"INVALID_CREDENTIALS"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 401);
+        assert!(res.body.contains("INVALID_CREDENTIALS"));
+    }
+
+    #[test]
+    fn parse_http_response_rejects_malformed_input() {
+        // No header terminator at all.
+        assert!(parse_http_response(b"not http at all").is_err());
+        // Terminator present, but the status line carries no code.
+        let raw = http_response("HTTP/1.1", &[], "body");
+        assert!(parse_http_response(&raw).is_err());
     }
 
     /// B4-3 follow-up: all 7 commands moved to `#[tauri::command(async)]`,

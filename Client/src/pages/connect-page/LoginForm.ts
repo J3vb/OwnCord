@@ -27,6 +27,10 @@ const MIN_PASSWORD_LENGTH = 8;
 export interface LoginFormOptions {
   readonly signal: AbortSignal;
   readonly onLogin: (host: string, username: string, password: string) => Promise<void>;
+  /** Log in with the password held in the OS credential store. Used when
+   *  the password box shows the saved-password placeholder, so the
+   *  plaintext never has to exist in JavaScript. */
+  readonly onLoginWithSavedPassword: (host: string, username: string) => Promise<void>;
   readonly onRegister: (
     host: string,
     username: string,
@@ -60,8 +64,12 @@ export interface LoginFormApi {
   getPassword(): string;
   /** Set the host input value (called when ServerPanel clicks a server). */
   setHost(host: string): void;
-  /** Set credentials (called for auto-fill from profile or credential store). */
-  setCredentials(username: string, password?: string): void;
+  /** Set credentials (called for auto-fill from profile or credential store).
+   *  `hasSavedPassword` fills the password box with a placeholder rather than
+   *  a real password — the plaintext stays in the Rust backend. */
+  setCredentials(username: string, hasSavedPassword?: boolean): void;
+  /** Whether the password box currently holds the saved-password placeholder. */
+  isUsingSavedPassword(): boolean;
   /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
   applyInviteLink(code: string, host?: string): void;
   /** Get host input value (for guard checks). */
@@ -76,7 +84,28 @@ export interface LoginFormApi {
 // ---------------------------------------------------------------------------
 
 export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
-  const { signal, onLogin, onRegister, onTotpSubmit, onSettingsOpen, onAutoLoginCancel } = opts;
+  const {
+    signal,
+    onLogin,
+    onLoginWithSavedPassword,
+    onRegister,
+    onTotpSubmit,
+    onSettingsOpen,
+    onAutoLoginCancel,
+  } = opts;
+
+  // The password box shows this when a saved password exists. It is never sent
+  // anywhere: submission branches on `usingSavedPassword`, never on the field's
+  // text, so this string can never be mistaken for a real password.
+  const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+  let usingSavedPassword = false;
+
+  /** Drop the placeholder the moment the user edits the field. */
+  function clearSavedPasswordPlaceholder(): void {
+    if (!usingSavedPassword) return;
+    usingSavedPassword = false;
+    passwordInput.value = "";
+  }
 
   // --- internal state ---
   let formState: FormState = "idle";
@@ -242,6 +271,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "Auto connect",
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
+
+    // Any edit replaces the saved-password placeholder outright, so the field
+    // never mixes placeholder text with typed characters. Enter is excluded:
+    // submitting straight from the placeholder is the whole point of it.
+    passwordInput.addEventListener(
+      "keydown",
+      (e) => {
+        if (["Tab", "Shift", "Control", "Alt", "Meta", "Enter", "Escape"].includes(e.key)) return;
+        clearSavedPasswordPlaceholder();
+      },
+      { signal },
+    );
+    passwordInput.addEventListener("paste", clearSavedPasswordPlaceholder, { signal });
 
     autoConnectCheckbox.addEventListener(
       "change",
@@ -586,11 +628,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (!username) {
       return "Username is required.";
     }
-    if (!password) {
-      return "Password is required.";
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    // A saved password is already known-good; it is never re-validated here
+    // because its plaintext is not available to this process.
+    if (!usingSavedPassword) {
+      if (!password) {
+        return "Password is required.";
+      }
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+      }
     }
     if (formMode === "register") {
       const inviteCode = inviteInput.value.trim();
@@ -622,7 +668,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     try {
       if (formMode === "login") {
-        await onLogin(host, username, password);
+        if (usingSavedPassword) {
+          await onLoginWithSavedPassword(host, username);
+        } else {
+          await onLogin(host, username, password);
+        }
       } else {
         const inviteCode = inviteInput.value.trim();
         await onRegister(host, username, password, inviteCode);
@@ -740,6 +790,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     getPassword(): string {
+      // Never hand back the placeholder. Callers use this to decide what to
+      // persist, and "" means "nothing new to save" — save_credential then
+      // preserves the password already in the credential store.
+      if (usingSavedPassword) return "";
       return passwordInput?.value ?? "";
     },
 
@@ -747,12 +801,21 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       hostInput.value = host;
     },
 
-    setCredentials(username: string, password?: string): void {
+    setCredentials(username: string, hasSavedPassword?: boolean): void {
       usernameInput.value = username;
-      if (password) {
-        passwordInput.value = password;
+      if (hasSavedPassword) {
+        // Show the box as filled — the user ticked "Remember password" and
+        // expects exactly that — without the plaintext ever being here.
+        usingSavedPassword = true;
+        passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
         rememberPasswordCheckbox.checked = true;
+      } else {
+        clearSavedPasswordPlaceholder();
       }
+    },
+
+    isUsingSavedPassword(): boolean {
+      return usingSavedPassword;
     },
 
     /**

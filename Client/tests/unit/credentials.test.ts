@@ -61,6 +61,7 @@ describe("saveCredential", () => {
       username: "alice",
       token: "tok",
       password: null,
+      clearPassword: false,
     });
   });
 
@@ -72,6 +73,7 @@ describe("saveCredential", () => {
       username: "alice",
       token: "tok",
       password: "s3cret",
+      clearPassword: false,
     });
   });
 
@@ -83,6 +85,20 @@ describe("saveCredential", () => {
     const args = invoke.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(args.password).toBeNull();
     expect("password" in args).toBe(true);
+  });
+
+  it("only asks to clear the stored password when told to", async () => {
+    // A null password means "leave the stored one alone"; erasing it is a
+    // separate, explicit intent. Conflating the two used to force the
+    // plaintext back through IPC on every re-save.
+    await saveCredential("h.example", "alice", "tok");
+    const preserved = invoke.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(preserved?.clearPassword).toBe(false);
+
+    invoke.mockClear();
+    await saveCredential("h.example", "alice", "tok", undefined, true);
+    const cleared = invoke.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(cleared?.clearPassword).toBe(true);
   });
 
   it("returns false when the command rejects", async () => {
@@ -116,7 +132,7 @@ describe("createUserUpdateCredentialSaver", () => {
   });
 
   it("does not save when the session declined to remember the password (BUG-135)", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", false, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", false);
 
     listener({ user_id: 1, username: "alice2" });
     await flushMicrotasks();
@@ -124,8 +140,8 @@ describe("createUserUpdateCredentialSaver", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("saves the refreshed username with the session's password when opted in", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+  it("saves the refreshed username without resending the password when opted in", async () => {
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 1, username: "alice2" });
 
@@ -133,17 +149,20 @@ describe("createUserUpdateCredentialSaver", () => {
     // before calling invoke — wait for it rather than guessing a microtask
     // count.
     await vi.waitFor(() => {
+      // No plaintext password: the Rust side preserves the stored one when
+      // none is supplied, so it never has to cross IPC to survive a re-save.
       expect(invoke).toHaveBeenCalledWith("save_credential", {
         host: "h.example",
         username: "alice2",
         token: "sess-token",
-        password: "s3cret",
+        password: null,
+        clearPassword: false,
       });
     });
   });
 
   it("ignores a user_update for someone else", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 999, username: "bob" });
     await flushMicrotasks();
@@ -153,7 +172,7 @@ describe("createUserUpdateCredentialSaver", () => {
 
   it("is a no-op when there is no current session token", () => {
     authStore.setState((prev) => ({ ...prev, token: null }));
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 1, username: "alice2" });
 
@@ -170,18 +189,35 @@ describe("loadCredential", () => {
     await expect(loadCredential("h.example")).resolves.toEqual({
       username: "alice",
       token: "tok",
+      hasPassword: false,
     });
     expect(invoke).toHaveBeenCalledWith("load_credential", { host: "h.example" });
   });
 
-  it("returns the stored password so the login form can prefill it", async () => {
-    invoke.mockResolvedValue({ username: "alice", token: "tok", password: "pass123" });
+  it("reports that a password exists without ever exposing it", async () => {
+    // The Rust side marks the field #[serde(skip)], so a plaintext password
+    // cannot reach here at all. Even if one somehow did, it must not survive
+    // reconstruction into the JS heap.
+    invoke.mockResolvedValue({ username: "alice", token: "tok", has_password: true });
 
-    await expect(loadCredential("h.example")).resolves.toEqual({
+    const got = await loadCredential("h.example");
+
+    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: true });
+    expect(got).not.toHaveProperty("password");
+  });
+
+  it("does not carry a password through even if the backend sends one", async () => {
+    invoke.mockResolvedValue({
       username: "alice",
       token: "tok",
+      has_password: true,
       password: "pass123",
     });
+
+    const got = await loadCredential("h.example");
+
+    expect(got).not.toHaveProperty("password");
+    expect(JSON.stringify(got)).not.toContain("pass123");
   });
 
   it("drops any extra fields the backend returns", async () => {
@@ -193,7 +229,7 @@ describe("loadCredential", () => {
 
     // toEqual ignores the explicit `password: undefined`, so this still pins
     // the exact shape and catches any unknown field, not just `bogus`.
-    expect(got).toEqual({ username: "alice", token: "tok" });
+    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: false });
     expect(got).not.toHaveProperty("bogus");
   });
 

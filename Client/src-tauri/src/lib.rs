@@ -117,6 +117,7 @@ pub fn run() {
             ws_proxy::accept_cert_fingerprint,
             credentials::save_credential,
             credentials::load_credential,
+            credentials::login_with_saved_password,
             credentials::delete_credential,
             credentials::save_identity_key,
             credentials::load_identity_key,

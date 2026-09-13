@@ -50,7 +50,7 @@ export interface ServerPanelOptions {
   /** Called immediately when the user clicks a server profile. */
   readonly onServerClick: (host: string, username?: string, autoConnect?: boolean) => void;
   /** Called after async credential lookup succeeds (may set password). */
-  readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
+  readonly onCredentialLoaded: (host: string, username: string, hasPassword?: boolean) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
   readonly onDeleteProfile?: (profileId: string) => void;
   /** Called when the user toggles auto-login on a server profile. */
@@ -229,7 +229,7 @@ export function createServerPanel(
           void (async () => {
             const cred = await loadCredential(requestedHost);
             if (cred) {
-              onCredentialLoaded(requestedHost, cred.username, cred.password);
+              onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
             }
           })();
         },

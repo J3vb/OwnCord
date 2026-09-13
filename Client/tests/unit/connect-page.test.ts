@@ -32,6 +32,7 @@ vi.mock("../../src/stores/ui.store", async () => {
 function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
   return {
     onLogin: vi.fn().mockResolvedValue(undefined),
+    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
     onRegister: vi.fn().mockResolvedValue(undefined),
     onTotpSubmit: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -133,6 +134,102 @@ describe("ConnectPage", () => {
       expect(errorBanner!.classList.contains("visible")).toBe(true);
       expect(errorBanner!.textContent).toContain("at least 8 characters");
     });
+
+    page.destroy?.();
+  });
+
+  // ── Saved-password login (OCV-001) ───────────────────────────────────────
+  //
+  // The plaintext password no longer crosses IPC, so a remembered password is
+  // shown as a placeholder and submitted through the Rust backend instead.
+  // Submission branches on internal state, never on the field's text, so the
+  // placeholder can never be sent as a literal password.
+
+  it("submits a remembered password through the backend, not as form text", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
+    });
+    expect(onLogin).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("falls back to a normal login once the user edits the remembered password", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // A keystroke drops the placeholder outright — the field must never mix
+    // placeholder text with typed characters.
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(passwordInput.value).toBe("");
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    passwordInput.value = "typed-password";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "typed-password");
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("does not report a saved password as form text", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // "" means "nothing new to save", which makes save_credential preserve
+    // the stored password instead of clearing it.
+    expect(page.getPassword()).toBe("");
 
     page.destroy?.();
   });
@@ -272,7 +369,7 @@ describe("ConnectPage", () => {
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
       token: "tok",
-      password: "savedpass",
+      hasPassword: true,
     });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
@@ -288,9 +385,12 @@ describe("ConnectPage", () => {
       expect(usernameInput.value).toBe("saveduser");
     });
 
-    // The stored password prefills the field so the user isn't retyping it.
+    // The field reads as filled so the "Remember password" tick keeps its
+    // promise, but it holds a placeholder — the plaintext never leaves Rust.
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("savedpass");
+    expect(passwordInput.value).not.toBe("");
+    expect(passwordInput.value).not.toBe("savedpass");
+    expect(page.isUsingSavedPassword()).toBe(true);
 
     page.destroy?.();
   });
@@ -975,7 +1075,7 @@ describe("ConnectPage", () => {
   // --- Credential loaded guard (host mismatch) ---
 
   it("does not apply credentials when host has changed before onCredentialLoaded", async () => {
-    mockLoadCredential.mockResolvedValue({ username: "loaded", token: "tok", password: "pass" });
+    mockLoadCredential.mockResolvedValue({ username: "loaded", token: "tok", hasPassword: true });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
@@ -1031,8 +1131,8 @@ describe("ConnectPage", () => {
 
   // --- setCredentials with password sets remember checkbox ---
 
-  it("setCredentials with password checks the remember password checkbox", async () => {
-    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", password: "pass123" });
+  it("a saved password checks the remember-password box and fills a placeholder", async () => {
+    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", hasPassword: true });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
@@ -1044,7 +1144,8 @@ describe("ConnectPage", () => {
     });
 
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("pass123");
+    expect(passwordInput.value).not.toBe("");
+    expect(passwordInput.value).not.toBe("pass123");
 
     page.destroy?.();
   });

@@ -28,11 +28,14 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
+import type { AuthResponse } from "@lib/types";
 import {
   saveCredential,
   loadCredential,
   deleteCredential,
   createUserUpdateCredentialSaver,
+  loginWithSavedPassword,
+  type SavedLoginResponse,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { initDeepLinks } from "@lib/deep-link";
@@ -59,6 +62,31 @@ const log = createLogger("main");
 // lazily so it stays out of the startup path. When a voice session exists the
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
+/**
+ * Turn the Rust backend's relayed /auth/login response into the same
+ * `AuthResponse` the normal `api.login` path produces.
+ *
+ * Rust returns status + raw body without interpreting either, so every branch
+ * (2FA challenge, token, error) is decided here by the one copy of the login
+ * contract.
+ */
+function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(relayed.body) as unknown;
+  } catch {
+    parsed = null;
+  }
+  if (relayed.status < 200 || relayed.status >= 300) {
+    const message =
+      parsed !== null && typeof parsed === "object" && "message" in parsed
+        ? String((parsed as Record<string, unknown>).message)
+        : `Login failed (${relayed.status})`;
+    throw new Error(message);
+  }
+  return (parsed ?? {}) as AuthResponse;
+}
+
 function voiceSessionLeave(sendWsLeave: boolean): void {
   void import("@lib/livekitSession")
     .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
@@ -408,11 +436,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     }
 
     // Update saved credentials when the current user changes their username.
-    // Guarded by the same remember-password opt-out as the initial save
-    // above (BUG-135), and passes the session's password through so a later
-    // save doesn't wipe out the one saved at login for an opted-in user.
+    // Guarded by the same remember-password opt-out as the initial save above
+    // (BUG-135). No password is passed: save_credential preserves the stored
+    // one when none is supplied, which is why the plaintext no longer has to
+    // make a round trip through JavaScript.
     sessionUnsubs.push(
-      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword, password)),
+      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword)),
     );
 
     const unsubState = ws.onStateChange((wsState) => {
@@ -571,6 +600,35 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             wirePostAuth(host, result.token, username, savedPassword, remember);
           }
         },
+        async onLoginWithSavedPassword(host, username) {
+          api.endSession();
+          api.setConfig({ host });
+          const attempt = api.getSession();
+          const relayed = await loginWithSavedPassword(host, username);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          if (!relayed) {
+            throw new Error("Saved password unavailable — please type it again.");
+          }
+          // From here the flow is identical to onLogin: the 2FA union and the
+          // token are read off the same AuthResponse shape, so the saved-password
+          // path cannot drift from the typed-password path.
+          const result = parseRelayedLogin(relayed);
+          if (result.requires_2fa) {
+            pendingTotpHost = host;
+            pendingTotpPartialToken = result.partial_token ?? "";
+            pendingTotpUsername = username;
+            connectPage.showTotp();
+            return;
+          }
+          if (result.token) {
+            const remember = connectPage.getRememberPassword();
+            ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
+            // No password passed: it never left the credential store, and
+            // save_credential preserves it.
+            wirePostAuth(host, result.token, username, undefined, remember);
+          }
+        },
         async onRegister(host, username, password, inviteCode) {
           api.endSession();
           api.setConfig({ host });
@@ -612,7 +670,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             // every retry hit the guard above and silently do nothing.
             pendingTotpPartialToken = "";
             const remember = connectPage.getRememberPassword();
-            const savedPassword = remember ? connectPage.getPassword() : undefined;
+            // "" when the saved-password placeholder was used — save_credential
+            // then keeps the stored password rather than clearing it.
+            const savedPassword = remember ? connectPage.getPassword() || undefined : undefined;
             ensureProfileExists(
               pendingTotpHost,
               pendingTotpUsername,
@@ -800,16 +860,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
             if (autoLoginCancelled) return;
 
-            // Use stored token directly for reconnection. Preserve the
-            // profile's existing rememberPassword rather than forcing it to
-            // false (autoConnect profiles always have it true — see
-            // setAutoLogin), and skip wirePostAuth's credential re-save: the
-            // password is never returned over IPC here, so saving with
-            // rememberPassword defaulted to true would call saveCredential
-            // with password undefined, which rewrites the whole stored
-            // blob and silently destroys any password the user opted to
-            // remember (save_credential only carries the password key
-            // `if let Some(...)`, so a None wipes it — see credentials.rs).
+            // Use stored token directly for reconnection, preserving the
+            // profile's existing rememberPassword (autoConnect profiles always
+            // have it true — see setAutoLogin).
+            //
+            // The credential re-save no longer has to be suppressed here.
+            // save_credential used to treat an absent password as "erase it",
+            // so re-saving without one destroyed the password the user opted
+            // to remember; it now preserves the stored password unless asked
+            // to clear it, so this path can refresh the token normally.
             api.setConfig({ host: autoProfile.host });
             ensureProfileExists(
               autoProfile.host,
@@ -817,7 +876,13 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
               autoProfile.rememberPassword,
               autoProfile.autoConnect,
             );
-            wirePostAuth(autoProfile.host, cred.token, cred.username, undefined, false);
+            wirePostAuth(
+              autoProfile.host,
+              cred.token,
+              cred.username,
+              undefined,
+              autoProfile.rememberPassword,
+            );
             return;
           }
         } catch (err) {

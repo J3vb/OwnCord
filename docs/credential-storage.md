@@ -17,6 +17,32 @@ user ID partition the queue. Different accounts or server ports do not share
 drafts. Its save, load and delete commands use the same credential-store mutex,
 write verification and encrypted fallback as the other secrets.
 
+## The password never crosses IPC
+
+The login credential blob carries a password only when the user ticked
+"Remember password". That plaintext stays inside the Rust backend:
+
+- `CredentialData.password` is `#[serde(skip)]`, so `load_credential` cannot
+  return it to JavaScript. The frontend receives `has_password` instead and
+  fills the password box with a placeholder, which is what the checkbox
+  promises the user.
+- Submitting that placeholder calls `login_with_saved_password`, which reads
+  the password from the credential store and performs the login itself, over
+  the same loopback `http_proxy` tunnel (and therefore the same TOFU
+  certificate pin) a webview request would use. It returns the server's raw
+  status and body without interpreting either, so the 2FA challenge and every
+  error shape are handled by the one existing copy of the login contract on
+  the frontend.
+- The login form branches on internal state, never on the text in the field,
+  so the placeholder can never be submitted as a literal password. Any
+  keystroke or paste clears it outright rather than mixing it with typed
+  characters.
+- `save_credential` distinguishes "no password supplied" from "erase the
+  password": it preserves whatever is stored unless `clear_password` is set.
+  Without that distinction every re-save had to carry the plaintext back
+  through IPC just to avoid wiping it — which is why it used to be returned
+  at all.
+
 ## Pending message recovery
 
 Durable recovery applies to **native desktop text-only sends** when the server

@@ -11,7 +11,15 @@ const log = createLogger("credentials");
 export interface SavedCredential {
   readonly username: string;
   readonly token: string;
-  readonly password?: string;
+  /** Whether a password is saved for this host. The plaintext itself never
+   *  crosses IPC — `loginWithSavedPassword` uses it inside the Rust backend. */
+  readonly hasPassword: boolean;
+}
+
+/** Raw relay of the server's /auth/login response from the Rust backend. */
+export interface SavedLoginResponse {
+  readonly status: number;
+  readonly body: string;
 }
 
 /** Dynamically import Tauri invoke to avoid errors in test/browser. */
@@ -35,6 +43,7 @@ export async function saveCredential(
   username: string,
   token: string,
   password?: string,
+  clearPassword = false,
 ): Promise<boolean> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -42,7 +51,16 @@ export async function saveCredential(
     return false;
   }
   try {
-    await invoke("save_credential", { host, username, token, password: password ?? null });
+    // Omitting `password` PRESERVES whatever is stored; only `clearPassword`
+    // erases it. Before that distinction existed, every re-save had to carry
+    // the plaintext back through IPC just to avoid wiping it.
+    await invoke("save_credential", {
+      host,
+      username,
+      token,
+      password: password ?? null,
+      clearPassword,
+    });
     return true;
   } catch (err) {
     log.error("Failed to save credential", { host, error: String(err) });
@@ -55,15 +73,16 @@ export async function saveCredential(
  * credential when the local user's own profile changes (a username edit, or
  * the identity-key PATCH) — mirroring the initial saveCredential call's
  * remember-password opt-out (BUG-135) so a later profile edit can't silently
- * persist a bearer token the user declined to store. Passes the session's
- * password through on every call: save_credential replaces the whole stored
- * blob, so omitting it (defaulting to null) would wipe out the password
- * saved at login for a user who DID opt in.
+ * persist a bearer token the user declined to store.
+ *
+ * It takes no password: `save_credential` preserves the stored one when none
+ * is supplied. This used to carry the session's plaintext password purely so
+ * that omitting it would not wipe the saved one — the reason the password was
+ * returned over IPC at all.
  */
 export function createUserUpdateCredentialSaver(
   host: string,
   rememberPassword: boolean,
-  password: string | undefined,
 ): (payload: { readonly user_id: number; readonly username: string }) => void {
   return (payload) => {
     if (!rememberPassword) return;
@@ -71,8 +90,41 @@ export function createUserUpdateCredentialSaver(
     if (payload.user_id !== currentUserId) return;
     const currentToken = authStore.getState().token;
     if (!currentToken) return;
-    void saveCredential(host, payload.username, currentToken, password);
+    void saveCredential(host, payload.username, currentToken);
   };
+}
+
+/**
+ * Log in to `host` using the password saved in the OS credential store.
+ *
+ * The plaintext never reaches JavaScript: the Rust backend reads it, performs
+ * the login through the same pinned loopback proxy a normal `fetch` would use,
+ * and returns the server's raw status and body. Parse the body exactly as an
+ * `api.login` response — the 2FA union and every error shape are relayed
+ * untouched, so there is no second copy of the login contract.
+ *
+ * Returns null when Tauri is unavailable or no password is saved.
+ */
+export async function loginWithSavedPassword(
+  host: string,
+  username: string,
+): Promise<SavedLoginResponse | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  try {
+    const result = await invoke("login_with_saved_password", { host, username });
+    if (result && typeof result === "object") {
+      const res = result as Record<string, unknown>;
+      if (typeof res.status === "number" && typeof res.body === "string") {
+        return { status: res.status, body: res.body };
+      }
+    }
+    log.error("login_with_saved_password returned an unexpected shape", { host });
+    return null;
+  } catch (err) {
+    log.error("Saved-password login failed", { host, error: String(err) });
+    return null;
+  }
 }
 
 /**
@@ -92,7 +144,7 @@ export async function loadCredential(host: string): Promise<SavedCredential | nu
         return {
           username: cred.username,
           token: cred.token,
-          password: typeof cred.password === "string" ? cred.password : undefined,
+          hasPassword: cred.has_password === true,
         };
       }
     }
