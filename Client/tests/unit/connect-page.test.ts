@@ -94,6 +94,28 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("does not throw an unhandled rejection when loadCredential rejects on a server click", async () => {
+    // ServerPanel's click handler fires an unawaited loadCredential() to
+    // auto-fill the password box; a rejection there must be caught, not left
+    // to become an unhandled rejection.
+    mockLoadCredential.mockRejectedValue(new Error("keychain locked"));
+
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    serverItem.click();
+
+    await vi.waitFor(() => {
+      expect(mockLoadCredential).toHaveBeenCalledWith("localhost:8443");
+    });
+    // Give the rejected promise's catch handler a turn to run before the
+    // test ends, or an unhandled-rejection would surface after this test.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    page.destroy?.();
+  });
+
   it("shows error when submitting empty form", async () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
@@ -194,10 +216,10 @@ describe("ConnectPage", () => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
-    // A keystroke drops the placeholder outright — the field must never mix
+    // An edit drops the placeholder outright — the field must never mix
     // placeholder text with typed characters.
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
     expect(passwordInput.value).toBe("");
     expect(page.isUsingSavedPassword()).toBe(false);
 
@@ -207,6 +229,69 @@ describe("ConnectPage", () => {
 
     await vi.waitFor(() => {
       expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "typed-password");
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("does not drop the placeholder on caret movement alone", async () => {
+    // ArrowLeft moves the caret without editing the field, so the placeholder
+    // must survive it — unlike an actual edit.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const value = passwordInput.value;
+    passwordInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+
+    expect(passwordInput.value).toBe(value);
+    expect(page.isUsingSavedPassword()).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("falls back to a normal login once a beforeinput edit clears the placeholder", async () => {
+    // Covers edits that never fire keydown/paste — drag-and-drop and
+    // autofill both mutate the value via beforeinput.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    passwordInput.value = "dropped-in-password";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "dropped-in-password");
     });
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 

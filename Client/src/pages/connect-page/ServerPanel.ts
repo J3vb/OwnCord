@@ -6,6 +6,9 @@ import { createIcon } from "@lib/icons";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("server-panel");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -237,9 +240,16 @@ export function createServerPanel(
           credentialLoadSeq += 1;
           const seq = credentialLoadSeq;
           void (async () => {
-            const cred = await loadCredential(requestedHost);
-            if (cred && seq === credentialLoadSeq) {
-              onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
+            try {
+              const cred = await loadCredential(requestedHost);
+              if (cred && seq === credentialLoadSeq) {
+                onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
+              }
+            } catch (err) {
+              log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+                host: requestedHost,
+                err,
+              });
             }
           })();
         },

@@ -142,7 +142,10 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
  * `api.login` response — the 2FA union and every error shape are relayed
  * untouched, so there is no second copy of the login contract.
  *
- * Returns null when Tauri is unavailable or no password is saved.
+ * Returns null when Tauri is unavailable or the command resolves with an
+ * unexpected shape. Any other failure — no password saved, a connect
+ * failure, a timeout, a malformed response, etc. — rejects with an `Error`
+ * carrying the backend's reason, so the caller can show it.
  */
 export async function loginWithSavedPassword(
   host: string,
@@ -162,13 +165,20 @@ export async function loginWithSavedPassword(
     return null;
   } catch (err) {
     log.error("Saved-password login failed", { host, error: String(err) });
-    return null;
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
 /**
  * Load a credential from Windows Credential Manager.
- * Returns null if not found or Tauri unavailable.
+ *
+ * Returns null when nothing is stored for `host` or Tauri is unavailable.
+ * Any other failure — the store can't be read, the OS keychain is locked,
+ * etc. — rejects with an `Error` carrying the backend's reason instead of
+ * being swallowed into `null`: the Rust side distinguishes "no credential"
+ * from "couldn't read the credential store", and collapsing that here would
+ * let callers (e.g. the remember-password opt-out) silently treat a read
+ * failure as "nothing to delete".
  */
 export async function loadCredential(host: string): Promise<SavedCredential | null> {
   const invoke = await getInvoke();
@@ -190,7 +200,7 @@ export async function loadCredential(host: string): Promise<SavedCredential | nu
     return null;
   } catch (err) {
     log.error("Failed to load credential", { host, error: String(err) });
-    return null;
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 

@@ -272,18 +272,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
 
-    // Any edit replaces the saved-password placeholder outright, so the field
-    // never mixes placeholder text with typed characters. Enter is excluded:
-    // submitting straight from the placeholder is the whole point of it.
-    passwordInput.addEventListener(
-      "keydown",
-      (e) => {
-        if (["Tab", "Shift", "Control", "Alt", "Meta", "Enter", "Escape"].includes(e.key)) return;
-        clearSavedPasswordPlaceholder();
-      },
-      { signal },
-    );
-    passwordInput.addEventListener("paste", clearSavedPasswordPlaceholder, { signal });
+    // `beforeinput` fires for every actual edit — typing, paste, drag-drop and
+    // autofill — and only for edits, so caret movement leaves the placeholder
+    // alone. It runs before the value changes, so clearing here means the edit
+    // lands in an empty field instead of mixing with the placeholder.
+    passwordInput.addEventListener("beforeinput", clearSavedPasswordPlaceholder, { signal });
 
     autoConnectCheckbox.addEventListener(
       "change",

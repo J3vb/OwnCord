@@ -605,11 +605,31 @@ fn header_says_chunked(head: &str) -> bool {
 /// Split a raw HTTP/1.1 response into its status code and body.
 ///
 /// Pure, so the framing is testable without a socket.
+///
+/// The header/body split runs on raw bytes, not a lossy UTF-8 decode of the
+/// whole response: `String::from_utf8_lossy` replaces each invalid byte with
+/// a 3-byte U+FFFD, which would corrupt chunk-size arithmetic on a chunked
+/// body. Headers are ASCII, so only the head half is lossily decoded, to read
+/// the status line and scan for `Transfer-Encoding`.
+///
+/// The server is Go's `net/http`. Its `chunkWriter` buffers only the first
+/// `bufferBeforeChunkingSize` (2048) bytes a handler writes; past that, with
+/// no explicit `Content-Length`, it sets `Transfer-Encoding: chunked` on an
+/// HTTP/1.1 response regardless of the client having sent `Connection:
+/// close` — `closeAfterReply` does not suppress chunking. `/auth/login`'s
+/// response embeds the full user profile (about text, avatar URL, display
+/// name, custom status) plus the session token, which a normal account can
+/// push past that threshold. So this is a real, reachable path, not a
+/// misbehaving-intermediary edge case, and the body is decoded here rather
+/// than relayed with its framing intact.
 fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
-    let text = String::from_utf8_lossy(raw);
-    let (head, body) = text
-        .split_once("\r\n\r\n")
+    let split_at = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
         .ok_or("saved-password login: malformed response (no header terminator)")?;
+    let head = String::from_utf8_lossy(&raw[..split_at]);
+    let body = &raw[split_at + 4..];
+
     let status_line = head
         .lines()
         .next()
@@ -620,21 +640,64 @@ fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or("saved-password login: malformed response (no status code)")?;
 
-    // This splits headers from the remaining wire bytes; it does not decode
-    // transfer framing. A chunked body would therefore be relayed with its
-    // chunk sizes and trailers still embedded, and the frontend would fail to
-    // parse it as JSON and stall with no usable error. The request forces
-    // `Connection: close` and HTTP/1.1 forbids chunked alongside it in
-    // practice here, so this is a guard against a misbehaving intermediary
-    // rather than an expected path — fail loudly instead of relaying garbage.
-    if header_says_chunked(head) {
-        return Err("saved-password login: chunked response framing is not supported".to_string());
-    }
+    let body = if header_says_chunked(&head) {
+        decode_chunked(body)?
+    } else {
+        body.to_vec()
+    };
 
     Ok(SavedLoginResponse {
         status,
-        body: body.to_string(),
+        body: String::from_utf8_lossy(&body).to_string(),
     })
+}
+
+/// Decode HTTP/1.1 chunked transfer framing into the body bytes.
+///
+/// Never returns a partial body: any malformed input is an `Err`, because a
+/// half-decoded JSON body on an auth path is worse than a clear error.
+fn decode_chunked(body: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+
+    loop {
+        // Find the CRLF ending this chunk's size line.
+        let line_end = body[pos..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or("saved-password login: truncated chunk size line")?;
+        let size_line = &body[pos..pos + line_end];
+        pos += line_end + 2;
+
+        // Ignore a `;`-separated chunk extension.
+        let size_field = size_line.split(|&b| b == b';').next().unwrap_or(size_line);
+        let size_str = std::str::from_utf8(size_field)
+            .map_err(|_| "saved-password login: chunk size is not valid UTF-8".to_string())?
+            .trim();
+        let size = u64::from_str_radix(size_str, 16)
+            .map_err(|_| format!("saved-password login: invalid chunk size: {size_str:?}"))?;
+
+        if size == 0 {
+            // Trailers (if any) follow before the final CRLF; discard them.
+            return Ok(out);
+        }
+
+        if out.len() as u64 + size > SAVED_LOGIN_MAX_RESPONSE {
+            return Err("saved-password login: response exceeded the size limit".to_string());
+        }
+
+        let size = size as usize;
+        if pos + size > body.len() {
+            return Err("saved-password login: truncated chunk body".to_string());
+        }
+        out.extend_from_slice(&body[pos..pos + size]);
+        pos += size;
+
+        if body.get(pos..pos + 2) != Some(b"\r\n") {
+            return Err("saved-password login: missing chunk terminator".to_string());
+        }
+        pos += 2;
+    }
 }
 
 #[cfg(test)]
@@ -948,51 +1011,104 @@ mod tests {
         assert!(res.body.contains("INVALID_CREDENTIALS"));
     }
 
-    #[test]
-    fn parse_http_response_rejects_chunked_framing() {
-        // Splitting headers from the rest does not decode transfer framing, so
-        // a chunked body would reach the frontend with its chunk sizes still
-        // embedded and stall the form on an unparseable response. Fail loudly.
-        let raw = http_response(
-            "HTTP/1.1 200 OK",
-            &["Transfer-Encoding: chunked"],
-            "1a
-{\"token\":\"t\"}
-0
-
-",
-        );
-        let err = parse_http_response(&raw).expect_err("chunked framing must be rejected");
-        assert!(err.contains("chunked"), "{err}");
+    /// Builds a chunked-encoded body from a list of chunk payloads, each
+    /// framed as `<hex-size>\r\n<data>\r\n`, terminated by `0\r\n\r\n`.
+    fn chunk_encode(chunks: &[&str]) -> String {
+        let mut out = String::new();
+        for c in chunks {
+            out.push_str(&format!("{:x}\r\n{c}\r\n", c.len()));
+        }
+        out.push_str("0\r\n\r\n");
+        out
     }
 
     #[test]
-    fn parse_http_response_rejects_chunked_hidden_by_an_obs_fold() {
+    fn parse_http_response_decodes_chunked_framing_to_the_same_body_as_identity() {
+        // Go chunks any response over its 2048-byte buffer regardless of
+        // `Connection: close`, so this is the expected shape for a login
+        // response with a long `about`/display-name/token payload, not a
+        // misbehaving-intermediary edge case.
+        let json = r#"{"token":"a-long-session-token","about":"hello world"}"#;
+        let (first, second) = json.split_at(20);
+        let chunked_body = chunk_encode(&[first, second]);
+        let chunked_raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding: chunked"],
+            &chunked_body,
+        );
+        let identity_raw = http_response("HTTP/1.1 200 OK", &[], json);
+
+        let chunked = parse_http_response(&chunked_raw).expect("chunked body must decode");
+        let identity = parse_http_response(&identity_raw).unwrap();
+        assert_eq!(chunked.status, 200);
+        assert_eq!(chunked.body, identity.body);
+        assert_eq!(chunked.body, json);
+    }
+
+    #[test]
+    fn parse_http_response_decodes_chunked_hidden_by_an_obs_fold() {
         // A folded value splits into a line with an empty value and a line
         // carrying no colon at all, which a per-line scan drops. A framing
         // check that is trivially bypassable is not a check.
+        let body = chunk_encode(&["body"]);
         let raw = http_response(
             "HTTP/1.1 200 OK",
             &["Transfer-Encoding:", " chunked"],
-            "body",
+            &body,
         );
-        let err = parse_http_response(&raw).expect_err("folded chunked must still be rejected");
-        assert!(err.contains("chunked"), "{err}");
+        let res = parse_http_response(&raw).expect("folded chunked must still be decoded");
+        assert_eq!(res.body, "body");
     }
 
     #[test]
-    fn parse_http_response_rejects_chunked_among_other_codings() {
-        for value in [
-            "Transfer-Encoding: identity, chunked",
-            "Transfer-Encoding: CHUNKED",
-            "Transfer-Encoding:   chunked  ",
-        ] {
-            let raw = http_response("HTTP/1.1 200 OK", &[value], "body");
-            assert!(
-                parse_http_response(&raw).is_err(),
-                "should have rejected: {value}"
-            );
-        }
+    fn decode_chunked_accepts_a_chunk_extension() {
+        // `1a;foo=bar\r\n<26 bytes>\r\n0\r\n\r\n` — the extension after `;` must
+        // be ignored, not treated as part of the hex size.
+        let payload = "abcdefghijklmnopqrstuvwxyz"; // 26 bytes = 0x1a
+        let raw = format!("1a;foo=bar\r\n{payload}\r\n0\r\n\r\n");
+        let decoded = decode_chunked(raw.as_bytes()).unwrap();
+        assert_eq!(decoded, payload.as_bytes());
+    }
+
+    #[test]
+    fn decode_chunked_discards_trailers_after_the_terminating_chunk() {
+        let raw = "4\r\nabcd\r\n0\r\nX-Trailer: value\r\n\r\n";
+        let decoded = decode_chunked(raw.as_bytes()).unwrap();
+        assert_eq!(decoded, b"abcd");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_truncated_final_chunk() {
+        // The declared size is longer than the bytes actually present; a
+        // half-decoded JSON body is worse than a clear error.
+        let raw = "a\r\nabc\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("truncated chunk must error");
+        assert!(err.contains("truncated"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_non_hex_size_line() {
+        let raw = "not-hex\r\nabcd\r\n0\r\n\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("non-hex size must error");
+        assert!(err.contains("invalid chunk size"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_body_with_no_terminating_chunk() {
+        let raw = "4\r\nabcd\r\n";
+        let err = decode_chunked(raw.as_bytes())
+            .expect_err("a body with no 0-size chunk must error, not return a partial body");
+        assert!(err.contains("chunk size line"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_decoded_size_over_the_response_limit() {
+        let oversized = SAVED_LOGIN_MAX_RESPONSE + 1;
+        let raw = format!("{oversized:x}\r\n");
+        // Body bytes are not actually supplied — the size check must fire
+        // before any attempt to read them.
+        let err = decode_chunked(raw.as_bytes()).expect_err("oversized chunk must error");
+        assert!(err.contains("size limit"), "{err}");
     }
 
     #[test]

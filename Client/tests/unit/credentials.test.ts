@@ -36,6 +36,7 @@ const {
   deleteCredential,
   createUserUpdateCredentialSaver,
   parseRelayedLogin,
+  loginWithSavedPassword,
 } = await import("@lib/credentials");
 const { ApiClientError } = await import("@lib/api");
 
@@ -263,14 +264,24 @@ describe("loadCredential", () => {
     await expect(loadCredential("h.example")).resolves.toBeNull();
   });
 
-  it("returns null when the command rejects", async () => {
+  it("propagates a command rejection instead of swallowing it to null", async () => {
+    // The Rust side distinguishes "nothing stored" from "couldn't read the
+    // store" (a locked keychain, an unparseable blob, ...); collapsing the
+    // latter into null here would let a caller like the remember-password
+    // opt-out silently skip a delete it should have surfaced as a failure.
     invoke.mockRejectedValue(new Error("keychain locked"));
 
-    await expect(loadCredential("h.example")).resolves.toBeNull();
+    await expect(loadCredential("h.example")).rejects.toThrow("keychain locked");
     expect(logMock.error).toHaveBeenCalledWith("Failed to load credential", {
       host: "h.example",
       error: "Error: keychain locked",
     });
+  });
+
+  it("wraps a non-Error rejection in an Error carrying the original reason", async () => {
+    invoke.mockRejectedValue("plain string reason");
+
+    await expect(loadCredential("h.example")).rejects.toThrow("plain string reason");
   });
 });
 
@@ -291,6 +302,47 @@ describe("deleteCredential", () => {
       host: "h.example",
       error: "Error: no such entry",
     });
+  });
+});
+
+// ── loginWithSavedPassword ─────────────────────────────────────────────────
+
+describe("loginWithSavedPassword", () => {
+  it("returns the relayed status and body as-is", async () => {
+    invoke.mockResolvedValue({ status: 200, body: '{"token":"tok"}' });
+
+    await expect(loginWithSavedPassword("h.example", "alice")).resolves.toEqual({
+      status: 200,
+      body: '{"token":"tok"}',
+    });
+    expect(invoke).toHaveBeenCalledWith("login_with_saved_password", {
+      host: "h.example",
+      username: "alice",
+    });
+  });
+
+  it("propagates a rejection as an Error carrying the original reason", async () => {
+    // Tauri commands reject with a plain string, not an Error — the caller's
+    // catch block reads err.message, so the string has to survive as one.
+    invoke.mockRejectedValue("saved-password login timed out");
+
+    await expect(loginWithSavedPassword("h.example", "alice")).rejects.toThrow(
+      "saved-password login timed out",
+    );
+    expect(logMock.error).toHaveBeenCalledWith("Saved-password login failed", {
+      host: "h.example",
+      error: "saved-password login timed out",
+    });
+  });
+
+  it("returns null for a resolved value of the wrong shape", async () => {
+    invoke.mockResolvedValue({ status: "200", body: "{}" });
+
+    await expect(loginWithSavedPassword("h.example", "alice")).resolves.toBeNull();
+    expect(logMock.error).toHaveBeenCalledWith(
+      "login_with_saved_password returned an unexpected shape",
+      { host: "h.example" },
+    );
   });
 });
 
@@ -340,6 +392,13 @@ describe("outside Tauri", () => {
     const { deleteCredential: del } = await importWithoutInvoke();
 
     await expect(del("h.example")).resolves.toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("loginWithSavedPassword returns null instead of throwing", async () => {
+    const { loginWithSavedPassword: login } = await importWithoutInvoke();
+
+    await expect(login("h.example", "alice")).resolves.toBeNull();
     expect(invoke).not.toHaveBeenCalled();
   });
 });

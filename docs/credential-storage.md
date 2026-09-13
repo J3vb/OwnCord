@@ -34,9 +34,10 @@ The login credential blob carries a password only when the user ticked
   error shape are handled by the one existing copy of the login contract on
   the frontend.
 - The login form branches on internal state, never on the text in the field,
-  so the placeholder can never be submitted as a literal password. Any
-  keystroke or paste clears it outright rather than mixing it with typed
-  characters.
+  so the placeholder can never be submitted as a literal password. Any edit —
+  typing, paste, drag-and-drop or autofill — clears it outright rather than
+  mixing it with typed characters; caret movement alone does not, and no edit
+  can be silently ignored.
 - `save_credential` distinguishes "no password supplied" from "erase the
   password": it preserves whatever is stored unless `clear_password` is set.
   Without that distinction every re-save had to carry the plaintext back

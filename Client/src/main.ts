@@ -354,6 +354,16 @@ function runHealthChecks(
 // a stale mount is discarded when a newer navigation supersedes it.
 const navGuard = createNavigationGuard();
 
+/** Fold a username the way SQLite's NOCASE collation does — ASCII A-Z only.
+ *  `users.username` is `UNIQUE COLLATE NOCASE`, so the server treats `Alice`
+ *  and `alice` as one account; a case-sensitive compare here would skip the
+ *  opt-out delete and leave the declined password stored. Deliberately NOT
+ *  `toLowerCase()`, which also folds non-ASCII pairs SQLite keeps distinct
+ *  and would delete a different account's credential. */
+function foldUsername(u: string): string {
+  return u.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
   const isCurrentNavigation = navGuard.begin();
@@ -413,19 +423,39 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // remember on.
     if (!rememberPassword && rememberIsUserChoice) {
       void (async () => {
-        // Withdraw only THIS account's credential. The store is keyed by host
-        // alone, so an unconditional delete would let one account's decision
-        // not to be remembered destroy a different account's saved
-        // credential on the same server.
-        const stored = await loadCredential(host);
-        if (stored && stored.username === username) {
-          // A failed delete leaves the password the user just declined sitting
-          // on disk. Silence there would tell them the opt-out took effect
-          // when it did not, so it is surfaced the same way a failed save is.
-          const removed = await deleteCredential(host);
-          if (!removed && owner.isCurrent()) {
-            log.warn("Credential delete failed — the saved password is still stored", { host });
-            setTransientError("Could not remove the saved password — it is still stored");
+        try {
+          // Withdraw only THIS account's credential. The store is keyed by host
+          // alone, so an unconditional delete would let one account's decision
+          // not to be remembered destroy a different account's saved
+          // credential on the same server.
+          const stored = await loadCredential(host);
+          if (stored && foldUsername(stored.username) === foldUsername(username)) {
+            // A failed delete leaves the password the user just declined sitting
+            // on disk. Silence there would tell them the opt-out took effect
+            // when it did not, so it is surfaced the same way a failed save is.
+            const removed = await deleteCredential(host);
+            if (!removed && owner.isCurrent()) {
+              log.warn("Credential delete failed — the saved password is still stored", {
+                host,
+              });
+              setTransientError("Could not remove the saved password — it is still stored");
+            }
+          }
+        } catch (err) {
+          // loadCredential rejects (rather than returning null) when the
+          // credential store itself couldn't be read — a locked keychain, an
+          // unparseable blob, etc. That's not "nothing stored"; treat it the
+          // same as a failed delete so the user isn't told nothing while the
+          // declined password is still sitting on disk.
+          log.warn(
+            "Could not check the saved credential — the saved password may still be stored",
+            {
+              host,
+              error: String(err),
+            },
+          );
+          if (owner.isCurrent()) {
+            setTransientError("Could not remove the saved password — it could not be checked");
           }
         }
       })();
@@ -616,7 +646,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           attempt.assertCurrent();
           pageOwner.assertCurrent();
           if (!relayed) {
-            throw new Error("Saved password unavailable — please type it again.");
+            throw new Error(
+              "Saved-password login is unavailable here — please type your password.",
+            );
           }
           // From here the flow is identical to onLogin: the 2FA union and the
           // token are read off the same AuthResponse shape, so the saved-password
