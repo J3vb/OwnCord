@@ -419,7 +419,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // credential on the same server.
         const stored = await loadCredential(host);
         if (stored && stored.username === username) {
-          await deleteCredential(host);
+          // A failed delete leaves the password the user just declined sitting
+          // on disk. Silence there would tell them the opt-out took effect
+          // when it did not, so it is surfaced the same way a failed save is.
+          const removed = await deleteCredential(host);
+          if (!removed && owner.isCurrent()) {
+            log.warn("Credential delete failed — the saved password is still stored", { host });
+            setTransientError("Could not remove the saved password — it is still stored");
+          }
         }
       })();
     }

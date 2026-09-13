@@ -169,16 +169,24 @@ pub fn save_credential(
             "token": token,
         });
 
-        // The existing blob is read only on the preserve path, and a read
-        // failure there aborts the save rather than silently dropping the
-        // stored password.
+        // The existing blob is read only on the preserve path, and neither a
+        // read failure nor a parse failure may be treated as "no password
+        // stored": both mean the password cannot be preserved, and answering
+        // `None` would rewrite the blob without it. A malformed blob can still
+        // carry a readable password (`parse_credential_blob` also rejects a
+        // missing username or token), so discarding it is a real loss, not
+        // just a theoretical one.
         let read_existing = || {
-            let blob = secret_store::get(&app, &account).map_err(|e| {
+            let Some(blob) = secret_store::get(&app, &account).map_err(|e| {
                 format!("save_credential refused to overwrite an unreadable credential: {e}")
+            })?
+            else {
+                return Ok(None);
+            };
+            let cred = parse_credential_blob(&blob).map_err(|e| {
+                format!("save_credential refused to overwrite an unparseable credential: {e}")
             })?;
-            Ok(blob
-                .and_then(|blob| parse_credential_blob(&blob).ok())
-                .and_then(|cred| cred.password))
+            Ok(cred.password)
         };
 
         if let Some(pw) = resolve_password(
@@ -834,6 +842,18 @@ mod tests {
         assert!(err.contains("keychain locked"), "{err}");
     }
 
+    /// A blob that reads fine but does not parse is still a case where the
+    /// password cannot be preserved. It can even carry a readable password —
+    /// `parse_credential_blob` also rejects a missing username or token — so
+    /// answering "no password" would discard a recoverable one.
+    #[test]
+    fn resolve_password_refuses_to_preserve_from_an_unparseable_blob() {
+        let err = resolve_password(None, false, || {
+            Err("credential blob is not valid JSON".to_string())
+        })
+        .expect_err("a parse failure must abort the save, not erase the password");
+        assert!(err.contains("not valid JSON"), "{err}");
+    }
     #[test]
     fn resolve_password_erases_only_when_asked() {
         assert_eq!(
