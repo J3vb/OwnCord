@@ -33,13 +33,17 @@ The login credential blob carries a password only when the user ticked
   status and body without interpreting either, so the 2FA challenge and every
   error shape are handled by the one existing copy of the login contract on
   the frontend.
-- The login form branches on internal state, never on the text in the field,
-  so the placeholder can never be submitted as a literal password. Any edit —
-  typing, paste, drag-and-drop — clears it outright via `beforeinput`, before
-  the edit lands, so it can never mix with typed characters; a password
-  manager that replaces the value without firing `beforeinput` is still
-  caught by a backstop `input` listener. Caret movement alone does not clear
-  it, and no edit can be silently ignored.
+- The login form branches on internal state, not the text in the field, to
+  decide whether to submit the saved password. Any edit — typing, paste,
+  drag-and-drop — clears that internal flag outright via `beforeinput`,
+  before the edit lands, so it can never mix with typed characters; a
+  password manager that replaces the value without firing `beforeinput` is
+  still caught by a backstop `input` listener. Caret movement alone does not
+  clear it, and no edit can be silently ignored. The placeholder text itself
+  can still re-enter the field as literal characters — reveal the field,
+  copy the bullets, paste them back — so `validateForm()` separately rejects
+  the placeholder string outright whenever the internal flag is not set,
+  in both login and register mode.
 - `save_credential` distinguishes "no password supplied" from "erase the
   password": it preserves whatever is stored unless `clear_password` is set.
   Without that distinction every re-save had to carry the plaintext back

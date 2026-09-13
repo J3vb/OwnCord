@@ -340,6 +340,125 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("rejects the placeholder pasted back in as literal text (login)", async () => {
+    // Reveal the field, copy the bullets, paste them back: `beforeinput`
+    // clears `usingSavedPassword` and blanks the field before the paste
+    // lands, so the `input` listener sees the flag already false and does
+    // nothing further — the field ends up holding the placeholder string as
+    // literal text with `usingSavedPassword === false`. validateForm() must
+    // still reject it.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onLogin).not.toHaveBeenCalled();
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("rejects the placeholder pasted back in as literal text (register)", async () => {
+    // Same round trip, but in Register mode there is no placeholder-clearing
+    // toggle to fall back on — this is the path that would otherwise create
+    // an account whose password is a fixed, publicly known constant.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    usernameInput.value = "newuser";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("still submits a normal saved-password login (guards the placeholder check)", async () => {
+    // The new placeholder check must not fire on the ordinary saved-password
+    // path, where the field legitimately holds the placeholder text while
+    // `usingSavedPassword` is true.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
+    });
+    expect(onLogin).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   it("never carries a remembered password into registration", async () => {
     // Regression: the placeholder is a fixed, publicly known constant. If it
     // survived a switch to Register it would be submitted as the NEW account's

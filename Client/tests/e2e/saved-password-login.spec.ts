@@ -156,11 +156,16 @@ test.describe("Saved-password login", () => {
       .toEqual([]);
   });
 
-  test("declining does not delete a different account's credential", async ({ page }) => {
-    // The credential store is keyed by host alone, so an unconditional delete
-    // would let one account's decision destroy another account's saved
-    // credential on the same server. The stored credential here belongs to
-    // "saveduser"; the person logging in is someone else.
+  test("declining as a different username still deletes the host's credential", async ({
+    page,
+  }) => {
+    // The credential store holds one credential per host, not per account, and
+    // `save_credential` already overwrites that one credential without a
+    // username check. The stored username is a stale copy, not an account
+    // identity — it cannot tell "someone-else" apart from "saveduser" on the
+    // same host — so guarding the delete on it would only risk leaving a
+    // declined password sitting on disk (e.g. after an account rename). The
+    // delete is unconditional for the host; it stays that way here too.
     await mockWithSavedPassword(page, {
       status: 200,
       body: { token: MOCK_TOKEN, requires_2fa: false },
@@ -176,9 +181,12 @@ test.describe("Saved-password login", () => {
     await page.locator("#remember-password").uncheck();
     await page.locator(".btn-primary[type='submit']").click();
 
-    // Give the decline path time to run before asserting it did nothing.
     await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
-    expect(await page.evaluate(() => window.__mockDeletedCredentials ?? [])).toEqual([]);
+    await expect
+      .poll(async () => page.evaluate(() => window.__mockDeletedCredentials ?? []), {
+        timeout: 10000,
+      })
+      .toContain("localhost:8443");
   });
 
   test("declining to be remembered deletes the stored credential", async ({ page }) => {

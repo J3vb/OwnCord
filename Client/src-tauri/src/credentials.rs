@@ -531,21 +531,45 @@ pub async fn login_with_saved_password(
         .map_err(|_| "saved-password login timed out".to_string())?
 }
 
+/// Identifies this client to the server, distinct from the webview's own
+/// `fetch` User-Agent.
+const CLIENT_USER_AGENT: &str = concat!("OwnCord-Client/", env!("CARGO_PKG_VERSION"));
+
+/// Build the raw HTTP/1.1 request for the saved-password login.
+///
+/// Pure, so the framing is testable without a socket.
+///
+/// `Host` is rewritten to the real remote by the proxy, and `Connection:
+/// close` is forced there too — it is sent explicitly so the read below can
+/// simply run to EOF instead of framing a keep-alive response.
+///
+/// `User-Agent` is not decoration: an optional Coraza WAF (OWASP CRS) scores a
+/// missing `User-Agent` and, for a server reached by IP address, a numeric
+/// `Host` — at paranoia level 2 in blocking mode those two together are
+/// enough to refuse the request before authentication is even attempted. The
+/// typed-password login goes through the webview's own `fetch`, which always
+/// sends one, so without this header a saved-password login could fail on a
+/// server configuration where typing the same password works. The server
+/// also records this header as the session's device name
+/// (`Server/api/auth_handler.go`), so an absent header leaves that field
+/// empty for this login path only.
+fn build_login_request(username: &str, password: &str) -> String {
+    let body = serde_json::json!({ "username": username, "password": password }).to_string();
+    format!(
+        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        CLIENT_USER_AGENT,
+        body.len(),
+        body
+    )
+}
+
 /// POST the login body to the loopback proxy and return the raw response.
 async fn post_login(
     port: u16,
     username: &str,
     password: &str,
 ) -> Result<SavedLoginResponse, String> {
-    let body = serde_json::json!({ "username": username, "password": password }).to_string();
-    // `Host` is rewritten to the real remote by the proxy, and `Connection:
-    // close` is forced there too — it is sent explicitly so the read below can
-    // simply run to EOF instead of framing a keep-alive response.
-    let request = format!(
-        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
+    let request = build_login_request(username, password);
 
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .await
@@ -963,6 +987,31 @@ mod tests {
                 .as_deref(),
             Some("new")
         );
+    }
+
+    /// Would break if the User-Agent header were dropped again (the original
+    /// defect, which let a WAF's missing-User-Agent + numeric-Host score
+    /// block a saved-password login that an equivalent webview `fetch` would
+    /// pass) or if the header block/framing regressed.
+    #[test]
+    fn build_login_request_carries_the_user_agent_and_correct_framing() {
+        let request = build_login_request("alice", "hunter2");
+        let expected_ua = format!("User-Agent: {CLIENT_USER_AGENT}\r\n");
+        assert!(request.contains(&expected_ua), "{request}");
+
+        let (head, body) = request
+            .split_once("\r\n\r\n")
+            .expect("exactly one header/body separator");
+        assert!(
+            !body.contains("\r\n\r\n"),
+            "more than one header/body separator: {request}"
+        );
+
+        assert!(head.contains("Content-Type: application/json\r\n"));
+        assert!(head.ends_with("Connection: close"));
+
+        let expected_len = format!("Content-Length: {}\r\n", body.len());
+        assert!(head.contains(&expected_len), "{head}");
     }
 
     /// Builds a raw HTTP/1.1 response from parts, so the framing tests do not

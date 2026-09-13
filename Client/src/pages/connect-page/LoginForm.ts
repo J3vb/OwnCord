@@ -653,6 +653,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       if (password.length < MIN_PASSWORD_LENGTH) {
         return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
       }
+      // The placeholder is not a password. It can re-enter the field as literal
+      // text (reveal the field, copy the bullets, paste them back — `beforeinput`
+      // clears the flag before the paste lands), and in register mode that would
+      // become an account password anyone can guess.
+      if (password === SAVED_PASSWORD_PLACEHOLDER) {
+        return "Please type your password.";
+      }
     }
     if (formMode === "register") {
       const inviteCode = inviteInput.value.trim();
