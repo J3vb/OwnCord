@@ -99,6 +99,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // text, so this string can never be mistaken for a real password.
   const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
   let usingSavedPassword = false;
+  // Latch, not a mirror of `usingSavedPassword`: once the placeholder has
+  // been in the field, its text can be copied back in at any later point,
+  // including after a switch to Register, even though `usingSavedPassword`
+  // itself gets cleared long before that. Never reset — the whole point is
+  // that this outlives the flag it sits next to.
+  let savedPasswordWasShown = false;
 
   /** Drop the placeholder the moment the user edits the field. */
   function clearSavedPasswordPlaceholder(): void {
@@ -656,9 +662,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // The placeholder is not a password. It can re-enter the field as literal
       // text (reveal the field, copy the bullets, paste them back — `beforeinput`
       // clears the flag before the paste lands), and in register mode that would
-      // become an account password anyone can guess.
-      if (password === SAVED_PASSWORD_PLACEHOLDER) {
-        return "Please type your password.";
+      // become an account password anyone can guess. Gated on the latch, not on
+      // `usingSavedPassword` (already cleared by then): only reject this exact
+      // string on a form that actually showed it, so an account whose real
+      // password happens to be those bullets can still sign in or register.
+      if (savedPasswordWasShown && password === SAVED_PASSWORD_PLACEHOLDER) {
+        return "That field holds the saved-password placeholder, not a password. Clear it and type your real password.";
       }
     }
     if (formMode === "register") {
@@ -840,6 +849,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         // Show the box as filled — the user ticked "Remember password" and
         // expects exactly that — without the plaintext ever being here.
         usingSavedPassword = true;
+        savedPasswordWasShown = true;
         passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
         rememberPasswordCheckbox.checked = true;
       } else {

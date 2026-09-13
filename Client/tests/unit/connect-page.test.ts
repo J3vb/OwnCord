@@ -459,6 +459,72 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("submits the bullet string as a real password when no placeholder was ever shown", async () => {
+    // The rejection is gated on a latch armed only by actually displaying the
+    // placeholder. A fresh form (no saved credential) never arms it, so a user
+    // whose real password happens to be exactly those twelve bullets can still
+    // log in — and register — with it.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "testuser";
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "testuser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("registers with the bullet string as a real password when no placeholder was ever shown", async () => {
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    inviteInput.value = "invite-code";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        SAVED_PASSWORD_PLACEHOLDER,
+        "invite-code",
+      );
+    });
+
+    page.destroy?.();
+  });
+
   it("never carries a remembered password into registration", async () => {
     // Regression: the placeholder is a fixed, publicly known constant. If it
     // survived a switch to Register it would be submitted as the NEW account's

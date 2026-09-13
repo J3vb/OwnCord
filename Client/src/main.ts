@@ -617,7 +617,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           api.endSession();
           api.setConfig({ host });
           const attempt = api.getSession();
-          const relayed = await loginWithSavedPassword(host, username);
+          // loginWithSavedPassword's own IPC await isn't cancellable, so a
+          // cancelled login would otherwise hang until the backend's own
+          // SAVED_LOGIN_TIMEOUT — route it through the scope so it rejects
+          // promptly instead.
+          const relayed = await attempt.run(loginWithSavedPassword(host, username));
           attempt.assertCurrent();
           pageOwner.assertCurrent();
           if (!relayed) {

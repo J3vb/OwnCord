@@ -553,10 +553,18 @@ const CLIENT_USER_AGENT: &str = concat!("OwnCord-Client/", env!("CARGO_PKG_VERSI
 /// also records this header as the session's device name
 /// (`Server/api/auth_handler.go`), so an absent header leaves that field
 /// empty for this login path only.
+///
+/// `Accept` is sent for the same reason: CRS rule 920300 scores a missing
+/// `Accept` too, and combined with the numeric `Host` that is enough to hit
+/// the blocking threshold on its own at paranoia level 3, even with
+/// `User-Agent` present. `Accept: application/json` matches what this
+/// endpoint actually returns. `Accept-Encoding` is deliberately not sent:
+/// the response below is read and parsed without any content decoding, so
+/// advertising a compression this code cannot decode would break parsing.
 fn build_login_request(username: &str, password: &str) -> String {
     let body = serde_json::json!({ "username": username, "password": password }).to_string();
     format!(
-        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         CLIENT_USER_AGENT,
         body.len(),
         body
@@ -989,15 +997,22 @@ mod tests {
         );
     }
 
-    /// Would break if the User-Agent header were dropped again (the original
-    /// defect, which let a WAF's missing-User-Agent + numeric-Host score
-    /// block a saved-password login that an equivalent webview `fetch` would
-    /// pass) or if the header block/framing regressed.
+    /// Would break if the User-Agent or Accept header were dropped again
+    /// (the original defect, and its follow-up, which let a WAF's
+    /// missing-header + numeric-Host score block a saved-password login that
+    /// an equivalent webview `fetch` would pass) or if the header
+    /// block/framing regressed. Also pins that no `Accept-Encoding` is sent,
+    /// since the response is read without content decoding.
     #[test]
     fn build_login_request_carries_the_user_agent_and_correct_framing() {
         let request = build_login_request("alice", "hunter2");
         let expected_ua = format!("User-Agent: {CLIENT_USER_AGENT}\r\n");
         assert!(request.contains(&expected_ua), "{request}");
+        assert!(
+            request.contains("Accept: application/json\r\n"),
+            "{request}"
+        );
+        assert!(!request.contains("Accept-Encoding"), "{request}");
 
         let (head, body) = request
             .split_once("\r\n\r\n")

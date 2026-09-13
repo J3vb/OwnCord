@@ -17,7 +17,7 @@ user ID partition the queue. Different accounts or server ports do not share
 drafts. Its save, load and delete commands use the same credential-store mutex,
 write verification and encrypted fallback as the other secrets.
 
-## The password never crosses IPC
+## The stored password never crosses IPC back to JavaScript
 
 The login credential blob carries a password only when the user ticked
 "Remember password". That plaintext stays inside the Rust backend:
