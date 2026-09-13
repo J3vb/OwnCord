@@ -4,6 +4,8 @@
  */
 
 import { createLogger } from "./logger";
+import { ApiClientError } from "./api";
+import type { AuthResponse } from "./types";
 import { authStore } from "@stores/auth.store";
 
 const log = createLogger("credentials");
@@ -92,6 +94,43 @@ export function createUserUpdateCredentialSaver(
     if (!currentToken) return;
     void saveCredential(host, payload.username, currentToken);
   };
+}
+
+/**
+ * Turn the backend's relayed `/auth/login` response into the same
+ * `AuthResponse` an ordinary `api.login` call produces.
+ *
+ * Rust returns status and raw body without interpreting either, so this is the
+ * single place the login contract is read for the saved-password path — it
+ * mirrors `api.ts`'s `parseError` + `ApiClientError` so a caller can narrow on
+ * `.status` / `.code` exactly as it can for a typed password.
+ *
+ * Throws `ApiClientError` for a non-2xx response. Throws a plain `Error` for a
+ * 2xx whose body does not parse: returning an empty object there would leave
+ * both the token and the 2FA branch unentered and strand the caller with no
+ * result and no error.
+ */
+export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(relayed.body) as unknown;
+  } catch {
+    parsed = null;
+  }
+  const body =
+    parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+
+  if (relayed.status < 200 || relayed.status >= 300) {
+    const code = typeof body?.error === "string" ? body.error : "UNKNOWN";
+    const message =
+      typeof body?.message === "string" ? body.message : `Login failed (${relayed.status})`;
+    throw new ApiClientError(relayed.status, code, message);
+  }
+
+  if (body === null) {
+    throw new Error("Login failed: the server returned an unreadable response.");
+  }
+  return body as unknown as AuthResponse;
 }
 
 /**

@@ -8,7 +8,7 @@ import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
-import { createApiClient } from "@lib/api";
+import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
@@ -28,14 +28,13 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import type { AuthResponse } from "@lib/types";
 import {
   saveCredential,
   loadCredential,
   deleteCredential,
   createUserUpdateCredentialSaver,
   loginWithSavedPassword,
-  type SavedLoginResponse,
+  parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { initDeepLinks } from "@lib/deep-link";
@@ -62,30 +61,6 @@ const log = createLogger("main");
 // lazily so it stays out of the startup path. When a voice session exists the
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
-/**
- * Turn the Rust backend's relayed /auth/login response into the same
- * `AuthResponse` the normal `api.login` path produces.
- *
- * Rust returns status + raw body without interpreting either, so every branch
- * (2FA challenge, token, error) is decided here by the one copy of the login
- * contract.
- */
-function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(relayed.body) as unknown;
-  } catch {
-    parsed = null;
-  }
-  if (relayed.status < 200 || relayed.status >= 300) {
-    const message =
-      parsed !== null && typeof parsed === "object" && "message" in parsed
-        ? String((parsed as Record<string, unknown>).message)
-        : `Login failed (${relayed.status})`;
-    throw new Error(message);
-  }
-  return (parsed ?? {}) as AuthResponse;
-}
 
 function voiceSessionLeave(sendWsLeave: boolean): void {
   void import("@lib/livekitSession")
@@ -151,7 +126,9 @@ const router = createRouter("connect");
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
 // accepted; the bearer token never rides an unpinned TLS connection.
-const api = createApiClient({ host: "" }, () => {
+/** Shared 401 handling, named so the saved-password relay path can run the
+ *  same side effect `api.ts` runs for an ordinary request. */
+function handleUnauthorized(): void {
   log.warn("Session expired (401), clearing auth");
   // A 401 on a request made before any session existed (e.g. a failed login
   // attempt) is not a session "expiring" — the login form's own catch block
@@ -160,7 +137,8 @@ const api = createApiClient({ host: "" }, () => {
     setTransientError("Your session expired — sign in again.");
   }
   clearAuth();
-});
+}
+const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 configureConnectionDiagnostics(api, ws);
 onAuthCleared((reason) => {
@@ -613,7 +591,17 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           // From here the flow is identical to onLogin: the 2FA union and the
           // token are read off the same AuthResponse shape, so the saved-password
           // path cannot drift from the typed-password path.
-          const result = parseRelayedLogin(relayed);
+          let result;
+          try {
+            result = parseRelayedLogin(relayed);
+          } catch (err) {
+            // Run the same side effect `api.ts` runs for a 401 on any other
+            // request, so the two login paths cannot diverge on session state.
+            if (err instanceof ApiClientError && err.status === 401) {
+              handleUnauthorized();
+            }
+            throw err;
+          }
           if (result.requires_2fa) {
             pendingTotpHost = host;
             pendingTotpPartialToken = result.partial_token ?? "";

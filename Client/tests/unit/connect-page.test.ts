@@ -213,6 +213,46 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("never carries a remembered password into registration", async () => {
+    // Regression: the placeholder is a fixed, publicly known constant. If it
+    // survived a switch to Register it would be submitted as the NEW account's
+    // password, because only the login branch consults `usingSavedPassword`.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // Switch to Register without touching the password field.
+    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    expect(passwordInput.value).toBe("");
+
+    // Submitting now must be rejected for a missing password, not sent.
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   it("does not report a saved password as form text", async () => {
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
@@ -1146,6 +1186,9 @@ describe("ConnectPage", () => {
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
     expect(passwordInput.value).not.toBe("");
     expect(passwordInput.value).not.toBe("pass123");
+    // The property that actually matters: the box is on the saved-password
+    // path, not merely filled with something non-empty.
+    expect(page.isUsingSavedPassword()).toBe(true);
 
     page.destroy?.();
   });

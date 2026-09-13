@@ -30,8 +30,14 @@ const { logMock, createLoggerMock } = vi.hoisted(() => {
 
 vi.mock("@lib/logger", () => ({ createLogger: createLoggerMock }));
 
-const { saveCredential, loadCredential, deleteCredential, createUserUpdateCredentialSaver } =
-  await import("@lib/credentials");
+const {
+  saveCredential,
+  loadCredential,
+  deleteCredential,
+  createUserUpdateCredentialSaver,
+  parseRelayedLogin,
+} = await import("@lib/credentials");
+const { ApiClientError } = await import("@lib/api");
 
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
 // fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
@@ -335,5 +341,65 @@ describe("outside Tauri", () => {
 
     await expect(del("h.example")).resolves.toBe(false);
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+// ── parseRelayedLogin ──────────────────────────────────────────────────────
+//
+// The saved-password login gets the server's raw status and body from Rust, so
+// this is the single place that path reads the login contract. It has to behave
+// like api.ts's own error handling or the two login paths silently diverge.
+
+describe("parseRelayedLogin", () => {
+  it("returns the token from a successful login", () => {
+    const res = parseRelayedLogin({ status: 200, body: '{"token":"t","requires_2fa":false}' });
+    expect(res.token).toBe("t");
+    expect(res.requires_2fa).toBe(false);
+  });
+
+  it("relays a 2FA challenge instead of treating it as a failure", () => {
+    const res = parseRelayedLogin({
+      status: 200,
+      body: '{"requires_2fa":true,"partial_token":"pt"}',
+    });
+    expect(res.requires_2fa).toBe(true);
+    expect(res.partial_token).toBe("pt");
+  });
+
+  it("throws ApiClientError carrying the server's status and code", () => {
+    // A plain Error would drop .status/.code, so a caller could not narrow a
+    // saved-password failure the way it can a typed-password one.
+    try {
+      parseRelayedLogin({
+        status: 401,
+        body: '{"error":"INVALID_CREDENTIALS","message":"Wrong password"}',
+      });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect((err as InstanceType<typeof ApiClientError>).status).toBe(401);
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("INVALID_CREDENTIALS");
+      expect((err as Error).message).toBe("Wrong password");
+    }
+  });
+
+  it("falls back to a usable message when the error body is not JSON", () => {
+    try {
+      parseRelayedLogin({ status: 502, body: "<html>gateway</html>" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect((err as InstanceType<typeof ApiClientError>).status).toBe(502);
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("UNKNOWN");
+      expect((err as Error).message).toContain("502");
+    }
+  });
+
+  it("throws rather than silently succeeding on an unreadable 2xx body", () => {
+    // Returning {} would enter neither the token nor the 2FA branch, stranding
+    // the login form in its loading state with nothing shown to the user.
+    expect(() => parseRelayedLogin({ status: 200, body: "not json" })).toThrow();
+    expect(() => parseRelayedLogin({ status: 200, body: "" })).toThrow();
+    expect(() => parseRelayedLogin({ status: 204, body: "" })).toThrow();
   });
 });

@@ -116,14 +116,25 @@ fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
 /// password wiped the stored one, the frontend had to round-trip the plaintext
 /// back through IPC on every re-save — which is the only reason it was ever
 /// returned to JavaScript at all.
-fn resolve_password(supplied: Option<&str>, clear: bool, existing: Option<&str>) -> Option<String> {
+fn resolve_password(
+    supplied: Option<&str>,
+    clear: bool,
+    read_existing: impl FnOnce() -> Result<Option<String>, String>,
+) -> Result<Option<String>, String> {
     match (supplied, clear) {
         // An explicit new password wins, even over a clear request.
-        (Some(pw), _) => Some(pw.to_string()),
+        (Some(pw), _) => Ok(Some(pw.to_string())),
         // Explicitly erase.
-        (None, true) => None,
+        (None, true) => Ok(None),
         // Default: carry forward whatever is already stored.
-        (None, false) => existing.map(|pw| pw.to_string()),
+        //
+        // The read is lazy and its failure is FATAL. `secret_store::get`
+        // deliberately separates "nothing stored" from "the store could not be
+        // read", so a caller can tell a broken keychain from a first login;
+        // treating an error as "no password" here would rewrite the blob
+        // without the password the user asked us to keep - silently destroying
+        // it, which is the same class of loss this command exists to prevent.
+        (None, false) => read_existing(),
     }
 }
 
@@ -158,19 +169,23 @@ pub fn save_credential(
             "token": token,
         });
 
-        // Reading the existing blob is only needed for the preserve case, but
-        // it is cheap and keeps `resolve_password` pure and testable.
-        let existing = secret_store::get(&app, &account)
-            .ok()
-            .flatten()
-            .and_then(|blob| parse_credential_blob(&blob).ok())
-            .and_then(|cred| cred.password);
+        // The existing blob is read only on the preserve path, and a read
+        // failure there aborts the save rather than silently dropping the
+        // stored password.
+        let read_existing = || {
+            let blob = secret_store::get(&app, &account).map_err(|e| {
+                format!("save_credential refused to overwrite an unreadable credential: {e}")
+            })?;
+            Ok(blob
+                .and_then(|blob| parse_credential_blob(&blob).ok())
+                .and_then(|cred| cred.password))
+        };
 
         if let Some(pw) = resolve_password(
             password.as_deref(),
             clear_password.unwrap_or(false),
-            existing.as_deref(),
-        ) {
+            read_existing,
+        )? {
             payload["password"] = serde_json::Value::String(pw);
         }
 
@@ -456,6 +471,13 @@ pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
 /// How long the whole saved-password login may take before it is abandoned.
 const SAVED_LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Largest `/auth/login` response this will buffer.
+///
+/// The timeout alone is not a bound: a server that streams steadily can push
+/// an unbounded amount of memory into the read buffer inside 20 seconds.
+/// `http_proxy.rs` caps its own header read for the same reason.
+const SAVED_LOGIN_MAX_RESPONSE: u64 = 64 * 1024;
+
 /// Raw relay of the server's `/auth/login` response.
 ///
 /// Rust deliberately does not interpret the body. Login answers a union — a
@@ -494,7 +516,7 @@ pub async fn login_with_saved_password(
         .password
         .ok_or_else(|| "no saved password for this host".to_string())?;
 
-    let port = crate::http_proxy::start_http_proxy(app.clone(), state, host).await?;
+    let port = crate::http_proxy::start_http_proxy(app, state, host).await?;
 
     timeout(SAVED_LOGIN_TIMEOUT, post_login(port, &username, &password))
         .await
@@ -525,11 +547,18 @@ async fn post_login(
         .await
         .map_err(|e| format!("saved-password login: write failed: {e}"))?;
 
+    // Bounded read: one byte over the cap is treated as a failure rather than
+    // silently truncated, so a partial body can never be parsed as a complete
+    // response.
     let mut raw = Vec::new();
-    stream
+    let mut bounded = stream.take(SAVED_LOGIN_MAX_RESPONSE + 1);
+    bounded
         .read_to_end(&mut raw)
         .await
         .map_err(|e| format!("saved-password login: read failed: {e}"))?;
+    if raw.len() as u64 > SAVED_LOGIN_MAX_RESPONSE {
+        return Err("saved-password login: response exceeded the size limit".to_string());
+    }
 
     parse_http_response(&raw)
 }
@@ -551,6 +580,25 @@ fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
         .nth(1)
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or("saved-password login: malformed response (no status code)")?;
+
+    // This splits headers from the remaining wire bytes; it does not decode
+    // transfer framing. A chunked body would therefore be relayed with its
+    // chunk sizes and trailers still embedded, and the frontend would fail to
+    // parse it as JSON and stall with no usable error. The request forces
+    // `Connection: close` and HTTP/1.1 forbids chunked alongside it in
+    // practice here, so this is a guard against a misbehaving intermediary
+    // rather than an expected path — fail loudly instead of relaying garbage.
+    if head
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("transfer-encoding")
+                && value.to_ascii_lowercase().contains("chunked")
+        })
+    {
+        return Err("saved-password login: chunked response framing is not supported".to_string());
+    }
 
     Ok(SavedLoginResponse {
         status,
@@ -744,27 +792,63 @@ mod tests {
     #[test]
     fn resolve_password_preserves_the_stored_one_by_default() {
         assert_eq!(
-            resolve_password(None, false, Some("stored")).as_deref(),
+            resolve_password(None, false, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
             Some("stored")
         );
-        assert_eq!(resolve_password(None, false, None), None);
+        assert_eq!(resolve_password(None, false, || Ok(None)).unwrap(), None);
+    }
+
+    /// The bug this guards: an unreadable credential store must NOT look like
+    /// "no password stored". If it did, an ordinary re-save (a token refresh,
+    /// say) would rewrite the blob without the password the user asked to
+    /// keep, destroying it with no error anywhere.
+    #[test]
+    fn resolve_password_refuses_to_preserve_from_an_unreadable_store() {
+        let err = resolve_password(None, false, || Err("keychain locked".to_string()))
+            .expect_err("a read failure must abort the save, not erase the password");
+        assert!(err.contains("keychain locked"), "{err}");
     }
 
     #[test]
     fn resolve_password_erases_only_when_asked() {
-        assert_eq!(resolve_password(None, true, Some("stored")), None);
+        assert_eq!(
+            resolve_password(None, true, || Ok(Some("stored".into()))).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_password_does_not_read_when_it_does_not_need_to() {
+        // The read is the only fallible part, so the paths that cannot need it
+        // must not be able to fail because of it.
+        let exploding = || -> Result<Option<String>, String> {
+            panic!("the existing credential must not be read on this path")
+        };
+        assert_eq!(
+            resolve_password(Some("new"), false, exploding)
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
+        assert_eq!(resolve_password(None, true, exploding).unwrap(), None);
     }
 
     #[test]
     fn resolve_password_lets_a_supplied_password_win() {
         assert_eq!(
-            resolve_password(Some("new"), false, Some("stored")).as_deref(),
+            resolve_password(Some("new"), false, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
             Some("new")
         );
         // A supplied password beats a clear request rather than silently
         // discarding what the caller just asked to store.
         assert_eq!(
-            resolve_password(Some("new"), true, Some("stored")).as_deref(),
+            resolve_password(Some("new"), true, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
             Some("new")
         );
     }
@@ -819,6 +903,34 @@ mod tests {
         let res = parse_http_response(&raw).unwrap();
         assert_eq!(res.status, 401);
         assert!(res.body.contains("INVALID_CREDENTIALS"));
+    }
+
+    #[test]
+    fn parse_http_response_rejects_chunked_framing() {
+        // Splitting headers from the rest does not decode transfer framing, so
+        // a chunked body would reach the frontend with its chunk sizes still
+        // embedded and stall the form on an unparseable response. Fail loudly.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding: chunked"],
+            "1a
+{\"token\":\"t\"}
+0
+
+",
+        );
+        let err = parse_http_response(&raw).expect_err("chunked framing must be rejected");
+        assert!(err.contains("chunked"), "{err}");
+    }
+
+    #[test]
+    fn parse_http_response_ignores_a_non_chunked_transfer_encoding() {
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding: identity"],
+            r#"{"token":"t"}"#,
+        );
+        assert_eq!(parse_http_response(&raw).unwrap().status, 200);
     }
 
     #[test]

@@ -72,6 +72,8 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
+  // Monotonic token: only the newest credential load may apply.
+  let credentialLoadSeq = 0;
   const {
     signal,
     onServerClick,
@@ -226,9 +228,17 @@ export function createServerPanel(
           onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
           // Auto-fill credentials from credential store (async)
           const requestedHost = profile.host;
+          // Two profiles can share a host (same server, different accounts),
+          // and `loadCredential` is keyed by host alone, so a slower earlier
+          // click could resolve last and overwrite the selection the user
+          // actually made. Only the newest click may apply its result. The
+          // host check downstream is not enough on its own, and a mismatch is
+          // no longer visible now that the password box shows identical dots.
+          credentialLoadSeq += 1;
+          const seq = credentialLoadSeq;
           void (async () => {
             const cred = await loadCredential(requestedHost);
-            if (cred) {
+            if (cred && seq === credentialLoadSeq) {
               onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
             }
           })();

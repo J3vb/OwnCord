@@ -602,6 +602,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function handleToggleMode(): void {
     formMode = formMode === "login" ? "register" : "login";
 
+    // A remembered password belongs to an EXISTING account. Carrying the
+    // placeholder into Register would submit a fixed, publicly known constant
+    // as the new account's password, because only the login branch consults
+    // `usingSavedPassword`.
+    clearSavedPasswordPlaceholder();
+
     setText(formTitle, formMode === "login" ? "Login" : "Register");
     setText(submitBtnText, formMode === "login" ? "Login" : "Register");
     setText(
@@ -629,8 +635,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       return "Username is required.";
     }
     // A saved password is already known-good; it is never re-validated here
-    // because its plaintext is not available to this process.
-    if (!usingSavedPassword) {
+    // because its plaintext is not available to this process. The bypass is
+    // login-only: registration always needs a real, freshly typed password.
+    if (!usingSavedPassword || formMode !== "login") {
       if (!password) {
         return "Password is required.";
       }
