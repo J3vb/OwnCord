@@ -282,7 +282,9 @@ The Tauri desktop client implements the following security measures:
 
 - Self-signed certificates are supported via Trust-On-First-Use (TOFU) pinning
 - The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
+- The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
+- All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
 - Certificate mismatch triggers a modal requiring user acknowledgment
 - Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
 

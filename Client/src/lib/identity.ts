@@ -4,7 +4,7 @@
  * no-ops in non-Tauri environments (tests, browser).
  *
  * Two backing stores:
- *   - OS keyring  (save/load/delete_identity_key, account `identity:{host}:{uid}`):
+ *   - OS keyring  (save/load/delete_identity_key, account `identity:{userId}@{host}`):
  *     the client's own long-term identity PRIVATE key (base64 JWK blob),
  *     scoped by host AND user id (see `identityKeyPairCache` below — two
  *     accounts must never share one identity keypair).

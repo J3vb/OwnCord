@@ -8,7 +8,7 @@ below when a write fails or cannot be verified:
 | Secret                          | Account name                      | Contents                                             |
 | ------------------------------- | --------------------------------- | ---------------------------------------------------- |
 | Login credential                | `{host}`                          | JSON `{"username","token","password"}`               |
-| Voice-E2EE identity private key | `identity:{host}`                 | base64 JWK (P-256 private key)                       |
+| Voice-E2EE identity private key | `identity:{userId}@{host}`        | base64 JWK (P-256 private key)                       |
 | Pending message text            | `pending-messages:{owner_digest}` | JSON array of text drafts and stable send identities |
 
 For pending messages, `owner_digest` is the lowercase hexadecimal SHA-256 digest
