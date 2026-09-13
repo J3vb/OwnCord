@@ -14,6 +14,18 @@ import { expect } from "@playwright/test";
 // Mock data — basic
 // ---------------------------------------------------------------------------
 
+declare global {
+  interface Window {
+    /** Every `login_with_saved_password` the client issued, in order. Lets a
+     *  test assert the saved-password path ran rather than a typed-password
+     *  login, which is otherwise indistinguishable from the outside. */
+    __mockSavedPasswordLogins?: Array<{ host?: string; username?: string }>;
+    /** Hosts the client asked to delete a credential for. The delete stays a
+     *  no-op on the stored value, so this records intent, not effect. */
+    __mockDeletedCredentials?: Array<string | undefined>;
+  }
+}
+
 export const MOCK_TOKEN = "mock-session-token-abc123";
 
 export const MOCK_LOGIN_RESPONSE = {
@@ -453,7 +465,13 @@ export function buildTauriMockScript(opts: {
   /** Seeds `load_credential`. Default null = nothing stored. `delete_credential`
    *  stays a no-op, so a test can assert behaviour that must hold even when the
    *  credential is still readable. */
-  storedCredential?: { username: string; token: string } | null;
+  storedCredential?: { username: string; token: string; has_password?: boolean } | null;
+  /** Seeds `login_with_saved_password` — the relay the client uses when the
+   *  password box holds the saved-password placeholder. Rust returns the
+   *  server's raw status and body, so this mirrors that shape exactly. Every
+   *  call is recorded on `window.__mockSavedPasswordLogins` so a test can
+   *  assert the saved-password path ran instead of a typed-password login. */
+  savedPasswordLogin?: { status: number; body: unknown };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
   // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
@@ -688,8 +706,26 @@ export function buildTauriMockScript(opts: {
         if (cmd === "stop_livekit_proxy") return;
 
         // ---- Credentials ----
-        if (cmd === "save_credential" || cmd === "delete_credential") return null;
+        window.__mockDeletedCredentials ??= [];
+        // Still a no-op on the stored credential (load_credential keeps
+        // returning it) — only the call is recorded, so a test can assert the
+        // client asked for a delete without that delete winning a race.
+        if (cmd === "delete_credential") { window.__mockDeletedCredentials.push(args?.host); return null; }
+        if (cmd === "save_credential") return null;
         if (cmd === "load_credential") return ${JSON.stringify(opts.storedCredential ?? null)};
+        window.__mockSavedPasswordLogins ??= [];
+        if (cmd === "login_with_saved_password") {
+          window.__mockSavedPasswordLogins.push({ host: args?.host, username: args?.username });
+          ${
+            opts.savedPasswordLogin
+              ? `return ${JSON.stringify({
+                  status: opts.savedPasswordLogin.status,
+                  body: JSON.stringify(opts.savedPasswordLogin.body),
+                })};`
+              : `throw new Error("no saved password for this host");`
+          }
+        }
+
         window.__mockPendingMessages ??= {};
         const pendingOwner = JSON.stringify([args?.host, args?.userId]);
         if (cmd === "save_pending_messages") { window.__mockPendingMessages[pendingOwner] = args.value; return; }

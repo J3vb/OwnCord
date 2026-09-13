@@ -17,6 +17,57 @@ user ID partition the queue. Different accounts or server ports do not share
 drafts. Its save, load and delete commands use the same credential-store mutex,
 write verification and encrypted fallback as the other secrets.
 
+## The stored password never crosses IPC back to JavaScript
+
+The login credential blob carries a password only when the user ticked
+"Remember password". That plaintext stays inside the Rust backend:
+
+- `CredentialData.password` is `#[serde(skip)]`, so `load_credential` cannot
+  return it to JavaScript. The frontend receives `has_password` instead and
+  fills the password box with a placeholder, which is what the checkbox
+  promises the user.
+- Submitting that placeholder calls `login_with_saved_password`, which reads
+  the password from the credential store and performs the login itself, over
+  the same loopback `http_proxy` tunnel (and therefore the same TOFU
+  certificate pin) a webview request would use. It returns the server's raw
+  status and body without interpreting either, so the 2FA challenge and every
+  error shape are handled by the one existing copy of the login contract on
+  the frontend.
+- The login form branches on internal state, not the text in the field, to
+  decide whether to submit the saved password. Any edit — typing, paste,
+  drag-and-drop — clears that internal flag outright via `beforeinput`,
+  before the edit lands, so it can never mix with typed characters; a
+  password manager that replaces the value without firing `beforeinput` is
+  still caught by a backstop `input` listener. Caret movement alone does not
+  clear it, and no edit can be silently ignored. The placeholder text itself
+  can still re-enter the field as literal characters — reveal the field,
+  copy the bullets, paste them back — with nothing left marking it as
+  anything but ordinary text. `validateForm()` refuses that exact string
+  unconditionally, but **only in register mode**, where it would otherwise
+  become a new account's password — a fixed, publicly known constant. Login
+  mode does not check it: the check is stateless (it does not depend on
+  whether this form ever showed a saved password), and a login submission of
+  the literal placeholder is not special-cased — it simply fails
+  authentication like any other wrong password, so an account whose real
+  password happens to be those bullets is never locked out.
+- `save_credential` distinguishes "no password supplied" from "erase the
+  password": it preserves whatever is stored unless `clear_password` is set.
+  Without that distinction every re-save had to carry the plaintext back
+  through IPC just to avoid wiping it — which is why it used to be returned
+  at all. A read failure on the preserve path aborts the save rather than
+  rewriting the blob without a password it could not read.
+- Declining "Remember password" on an interactive login **deletes** the stored
+  credential rather than leaving an earlier one in place, so a password saved
+  under a previous opt-in does not outlive the opt-out. The delete is
+  unconditional for the host: the store holds one credential per host, so
+  there is nothing finer to target, and `save_credential` already overwrites
+  that one credential without a username check. If two accounts share a host,
+  opting out as one removes the credential the other saved — the same
+  credential a remembered login by either would have overwritten anyway. The
+  username survives in the server profile, so the form still prefills it. The
+  auto-login path never deletes: it is replaying a stored credential, not
+  expressing a preference.
+
 ## Pending message recovery
 
 Durable recovery applies to **native desktop text-only sends** when the server

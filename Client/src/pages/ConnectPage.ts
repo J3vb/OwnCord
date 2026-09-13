@@ -23,6 +23,8 @@ import type { SimpleProfile } from "./connect-page/ServerPanel";
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
   onLogin(host: string, username: string, password: string): Promise<void>;
+  /** Log in using the password kept in the OS credential store. */
+  onLoginWithSavedPassword(host: string, username: string): Promise<void>;
   onRegister(host: string, username: string, password: string, inviteCode: string): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
@@ -57,6 +59,8 @@ export function createConnectPage(
   /** Whether the auto-connect checkbox is ticked. */
   getAutoConnect(): boolean;
   getPassword(): string;
+  /** Whether the password box holds the saved-password placeholder. */
+  isUsingSavedPassword(): boolean;
   /** Re-render the server profile list with updated data. */
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
   /** Pre-select a server by host — fills the login form and loads saved credentials. */
@@ -76,6 +80,7 @@ export function createConnectPage(
   const loginForm = createLoginForm({
     signal,
     onLogin: callbacks.onLogin,
+    onLoginWithSavedPassword: callbacks.onLoginWithSavedPassword,
     onRegister: callbacks.onRegister,
     onTotpSubmit: callbacks.onTotpSubmit,
     onSettingsOpen: () => openSettings(),
@@ -92,10 +97,10 @@ export function createConnectPage(
         }
         loginForm.setAutoConnect(autoConnect === true);
       },
-      onCredentialLoaded(host: string, username: string, password?: string) {
+      onCredentialLoaded(host: string, username: string, hasPassword?: boolean) {
         // Guard: user may have clicked a different profile while loading
         if (loginForm.getHost() === host) {
-          loginForm.setCredentials(username, password);
+          loginForm.setCredentials(username, hasPassword);
         }
       },
       onAddProfile: callbacks.onAddProfile,
@@ -327,6 +332,7 @@ export function createConnectPage(
     getRememberPassword: () => loginForm.getRememberPassword(),
     getAutoConnect: () => loginForm.getAutoConnect(),
     getPassword: () => loginForm.getPassword(),
+    isUsingSavedPassword: () => loginForm.isUsingSavedPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       serverPanel.renderProfiles(profiles);
     },
@@ -341,8 +347,10 @@ export function createConnectPage(
         try {
           const cred = await loadCredential(host);
           if (cred && loginForm.getHost() === host) {
-            // Prefill the saved password so the user isn't retyping it.
-            loginForm.setCredentials(cred.username, cred.password);
+            // Show the password box as filled when one is saved, so the
+            // "Remember password" tick keeps its promise. The plaintext stays
+            // in the Rust backend; submitting uses onLoginWithSavedPassword.
+            loginForm.setCredentials(cred.username, cred.hasPassword);
           }
         } catch (err) {
           log.debug("Credential auto-fill failed (best-effort, user can type manually)", {

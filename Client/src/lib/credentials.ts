@@ -4,6 +4,8 @@
  */
 
 import { createLogger } from "./logger";
+import { ApiClientError } from "./api";
+import type { AuthResponse } from "./types";
 import { authStore } from "@stores/auth.store";
 
 const log = createLogger("credentials");
@@ -11,7 +13,15 @@ const log = createLogger("credentials");
 export interface SavedCredential {
   readonly username: string;
   readonly token: string;
-  readonly password?: string;
+  /** Whether a password is saved for this host. The plaintext itself never
+   *  crosses IPC — `loginWithSavedPassword` uses it inside the Rust backend. */
+  readonly hasPassword: boolean;
+}
+
+/** Raw relay of the server's /auth/login response from the Rust backend. */
+export interface SavedLoginResponse {
+  readonly status: number;
+  readonly body: string;
 }
 
 /** Dynamically import Tauri invoke to avoid errors in test/browser. */
@@ -35,6 +45,7 @@ export async function saveCredential(
   username: string,
   token: string,
   password?: string,
+  clearPassword = false,
 ): Promise<boolean> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -42,7 +53,16 @@ export async function saveCredential(
     return false;
   }
   try {
-    await invoke("save_credential", { host, username, token, password: password ?? null });
+    // Omitting `password` PRESERVES whatever is stored; only `clearPassword`
+    // erases it. Before that distinction existed, every re-save had to carry
+    // the plaintext back through IPC just to avoid wiping it.
+    await invoke("save_credential", {
+      host,
+      username,
+      token,
+      password: password ?? null,
+      clearPassword,
+    });
     return true;
   } catch (err) {
     log.error("Failed to save credential", { host, error: String(err) });
@@ -55,15 +75,16 @@ export async function saveCredential(
  * credential when the local user's own profile changes (a username edit, or
  * the identity-key PATCH) — mirroring the initial saveCredential call's
  * remember-password opt-out (BUG-135) so a later profile edit can't silently
- * persist a bearer token the user declined to store. Passes the session's
- * password through on every call: save_credential replaces the whole stored
- * blob, so omitting it (defaulting to null) would wipe out the password
- * saved at login for a user who DID opt in.
+ * persist a bearer token the user declined to store.
+ *
+ * It takes no password: `save_credential` preserves the stored one when none
+ * is supplied. This used to carry the session's plaintext password purely so
+ * that omitting it would not wipe the saved one — the reason the password was
+ * returned over IPC at all.
  */
 export function createUserUpdateCredentialSaver(
   host: string,
   rememberPassword: boolean,
-  password: string | undefined,
 ): (payload: { readonly user_id: number; readonly username: string }) => void {
   return (payload) => {
     if (!rememberPassword) return;
@@ -71,13 +92,93 @@ export function createUserUpdateCredentialSaver(
     if (payload.user_id !== currentUserId) return;
     const currentToken = authStore.getState().token;
     if (!currentToken) return;
-    void saveCredential(host, payload.username, currentToken, password);
+    void saveCredential(host, payload.username, currentToken);
   };
 }
 
 /**
+ * Turn the backend's relayed `/auth/login` response into the same
+ * `AuthResponse` an ordinary `api.login` call produces.
+ *
+ * Rust returns status and raw body without interpreting either, so this is the
+ * single place the login contract is read for the saved-password path — it
+ * mirrors `api.ts`'s `parseError` + `ApiClientError` so a caller can narrow on
+ * `.status` / `.code` exactly as it can for a typed password.
+ *
+ * Throws `ApiClientError` for a non-2xx response. Throws a plain `Error` for a
+ * 2xx whose body does not parse: returning an empty object there would leave
+ * both the token and the 2FA branch unentered and strand the caller with no
+ * result and no error.
+ */
+export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(relayed.body) as unknown;
+  } catch {
+    parsed = null;
+  }
+  const body =
+    parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+
+  if (relayed.status < 200 || relayed.status >= 300) {
+    const code = typeof body?.error === "string" ? body.error : "UNKNOWN";
+    const message =
+      typeof body?.message === "string" ? body.message : `Login failed (${relayed.status})`;
+    throw new ApiClientError(relayed.status, code, message);
+  }
+
+  if (body === null) {
+    throw new Error("Login failed: the server returned an unreadable response.");
+  }
+  return body as unknown as AuthResponse;
+}
+
+/**
+ * Log in to `host` using the password saved in the OS credential store.
+ *
+ * The plaintext never reaches JavaScript: the Rust backend reads it, performs
+ * the login through the same pinned loopback proxy a normal `fetch` would use,
+ * and returns the server's raw status and body. Parse the body exactly as an
+ * `api.login` response — the 2FA union and every error shape are relayed
+ * untouched, so there is no second copy of the login contract.
+ *
+ * Returns null when Tauri is unavailable or the command resolves with an
+ * unexpected shape. Any other failure — no password saved, a connect
+ * failure, a timeout, a malformed response, etc. — rejects with an `Error`
+ * carrying the backend's reason, so the caller can show it.
+ */
+export async function loginWithSavedPassword(
+  host: string,
+  username: string,
+): Promise<SavedLoginResponse | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  try {
+    const result = await invoke("login_with_saved_password", { host, username });
+    if (result && typeof result === "object") {
+      const res = result as Record<string, unknown>;
+      if (typeof res.status === "number" && typeof res.body === "string") {
+        return { status: res.status, body: res.body };
+      }
+    }
+    log.error("login_with_saved_password returned an unexpected shape", { host });
+    return null;
+  } catch (err) {
+    log.error("Saved-password login failed", { host, error: String(err) });
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
  * Load a credential from Windows Credential Manager.
- * Returns null if not found or Tauri unavailable.
+ *
+ * Returns null when nothing is stored for `host` or Tauri is unavailable.
+ * Any other failure — the store can't be read, the OS keychain is locked,
+ * etc. — rejects with an `Error` carrying the backend's reason instead of
+ * being swallowed into `null`: the Rust side distinguishes "no credential"
+ * from "couldn't read the credential store", and collapsing that here would
+ * let callers (e.g. the remember-password opt-out) silently treat a read
+ * failure as "nothing to delete".
  */
 export async function loadCredential(host: string): Promise<SavedCredential | null> {
   const invoke = await getInvoke();
@@ -92,14 +193,14 @@ export async function loadCredential(host: string): Promise<SavedCredential | nu
         return {
           username: cred.username,
           token: cred.token,
-          password: typeof cred.password === "string" ? cred.password : undefined,
+          hasPassword: cred.has_password === true,
         };
       }
     }
     return null;
   } catch (err) {
     log.error("Failed to load credential", { host, error: String(err) });
-    return null;
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 

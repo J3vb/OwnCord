@@ -175,7 +175,7 @@ import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { deleteCredential } from "@lib/credentials";
+import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
@@ -289,6 +289,37 @@ describe("main.ts connected overlay (OC-0063)", () => {
 
     const iconEl = overlay?.querySelector(".connected-srv-icon");
     expect(iconEl?.textContent).toBe("M"); // first letter of "My Guild", not "1" (host) or "" (blank auth)
+  });
+});
+
+describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
+  afterEach(() => {
+    vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
+  });
+
+  it("deletes the stored credential unconditionally, regardless of what the stored username was", async () => {
+    // The store is keyed by host alone (one credential per host), and
+    // save_credential already overwrites it with no username check. The
+    // stored username is a stale copy, not an account identity, so the
+    // delete must not depend on comparing it to the login username — this
+    // stubs loadCredential to return a DIFFERENT username than the one
+    // logging in, the case that used to make the delete skip.
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "Bob",
+      token: "tok",
+      hasPassword: true,
+    });
+    vi.mocked(deleteCredential).mockResolvedValue(true);
+
+    await loginAndReachAuthOk("case-fold.example:8443", "alice", {
+      user: { id: 9, username: "alice", avatar: null, role: "member" },
+      server_name: "Case Fold Co",
+      motd: "",
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(deleteCredential).toHaveBeenCalledWith("case-fold.example:8443");
   });
 });
 

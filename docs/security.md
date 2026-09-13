@@ -266,7 +266,7 @@ The Tauri desktop client implements the following security measures:
 ### Credential Storage
 
 - Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
-- Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript
+- Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript. The field is `#[serde(skip)]` on `CredentialData` and the claim is test-locked (`credential_data_never_serializes_the_password`). A remembered password is shown in the login form as a placeholder and submitted by the `login_with_saved_password` command, which reads the password in Rust and logs in through the same pinned loopback proxy a normal request uses
 - Auto-login uses stored tokens for reconnection, not passwords
 
 ### Tauri Capabilities (Least Privilege)

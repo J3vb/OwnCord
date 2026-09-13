@@ -1,18 +1,30 @@
 use serde::Serialize;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::AppHandle;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::time::timeout;
 
 use crate::secret_store::{self, Backend};
 
 /// Data returned from `load_credential`.
+///
+/// The plaintext password is deliberately NOT part of the IPC payload. It stays
+/// inside this process and is used only by `login_with_saved_password`; the
+/// frontend learns that one exists through `has_password` and prefills a
+/// placeholder. See `docs/security.md` and `docs/architecture/client.md`, both
+/// of which state that plaintext passwords never cross IPC back to JS.
 #[derive(Serialize, Clone)]
 pub struct CredentialData {
     pub username: String,
     pub token: String,
-    // Password is stored in the credential blob for re-authentication and is
-    // serialized back to the frontend over IPC so the login form can prefill
-    // it when the user ticked "Remember password".
+    #[serde(skip)]
     pub password: Option<String>,
+    /// Whether a password is stored for this host. Always mirrors
+    /// `password.is_some()` — set by `parse_credential_blob`, the only
+    /// constructor outside tests.
+    pub has_password: bool,
 }
 
 impl std::fmt::Debug for CredentialData {
@@ -21,6 +33,7 @@ impl std::fmt::Debug for CredentialData {
             .field("username", &self.username)
             .field("token", &"[REDACTED]")
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("has_password", &self.has_password)
             .finish()
     }
 }
@@ -96,6 +109,35 @@ fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
+/// Decide what password a re-written credential blob should carry.
+///
+/// Three states, because "no password supplied" and "erase the password" are
+/// different intents. Conflating them was a live defect: because an omitted
+/// password wiped the stored one, the frontend had to round-trip the plaintext
+/// back through IPC on every re-save — which is the only reason it was ever
+/// returned to JavaScript at all.
+fn resolve_password(
+    supplied: Option<&str>,
+    clear: bool,
+    read_existing: impl FnOnce() -> Result<Option<String>, String>,
+) -> Result<Option<String>, String> {
+    match (supplied, clear) {
+        // An explicit new password wins, even over a clear request.
+        (Some(pw), _) => Ok(Some(pw.to_string())),
+        // Explicitly erase.
+        (None, true) => Ok(None),
+        // Default: carry forward whatever is already stored.
+        //
+        // The read is lazy and its failure is FATAL. `secret_store::get`
+        // deliberately separates "nothing stored" from "the store could not be
+        // read", so a caller can tell a broken keychain from a first login;
+        // treating an error as "no password" here would rewrite the blob
+        // without the password the user asked us to keep - silently destroying
+        // it, which is the same class of loss this command exists to prevent.
+        (None, false) => read_existing(),
+    }
+}
+
 /// Save a credential (username + token + optional password) to the system
 /// credential store.
 ///
@@ -114,21 +156,48 @@ pub fn save_credential(
     username: String,
     token: String,
     password: Option<String>,
+    clear_password: Option<bool>,
 ) -> Result<(), String> {
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         require_non_empty(&token, "token")?;
         require_non_empty(&username, "username")?;
 
+        let account = login_account(&host);
         let mut payload = serde_json::json!({
             "username": username,
             "token": token,
         });
-        if let Some(ref pw) = password {
-            payload["password"] = serde_json::Value::String(pw.clone());
+
+        // The existing blob is read only on the preserve path, and neither a
+        // read failure nor a parse failure may be treated as "no password
+        // stored": both mean the password cannot be preserved, and answering
+        // `None` would rewrite the blob without it. A malformed blob can still
+        // carry a readable password (`parse_credential_blob` also rejects a
+        // missing username or token), so discarding it is a real loss, not
+        // just a theoretical one.
+        let read_existing = || {
+            let Some(blob) = secret_store::get(&app, &account).map_err(|e| {
+                format!("save_credential refused to overwrite an unreadable credential: {e}")
+            })?
+            else {
+                return Ok(None);
+            };
+            let cred = parse_credential_blob(&blob).map_err(|e| {
+                format!("save_credential refused to overwrite an unparseable credential: {e}")
+            })?;
+            Ok(cred.password)
+        };
+
+        if let Some(pw) = resolve_password(
+            password.as_deref(),
+            clear_password.unwrap_or(false),
+            read_existing,
+        )? {
+            payload["password"] = serde_json::Value::String(pw);
         }
 
-        secret_store::set(&app, &login_account(&host), &payload.to_string())
+        secret_store::set(&app, &account, &payload.to_string())
             .map_err(|e| format!("save_credential failed: {e}"))?;
         Ok(())
     })
@@ -178,6 +247,7 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
     Ok(CredentialData {
         username,
         token,
+        has_password: password.is_some(),
         password,
     })
 }
@@ -386,6 +456,288 @@ pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Saved-password login
+// ---------------------------------------------------------------------------
+//
+// The plaintext password never crosses the IPC boundary. When the user ticked
+// "Remember password", the login form shows a placeholder and calls
+// `login_with_saved_password` instead of sending a password of its own; the
+// password is read from the credential store and used here, inside this
+// process.
+//
+// The request goes to the loopback `http_proxy` tunnel this process already
+// owns, exactly like a webview `fetch`: the proxy terminates TLS, pins the
+// certificate (TOFU) and rewrites the `Host` header, so nothing about
+// certificate handling is duplicated or bypassed here.
+//
+// The plaintext does live briefly in this process's memory, in the request
+// buffer, and is not zeroized (no `zeroize` dependency). That is strictly
+// better than the arrangement it replaces, where the same plaintext sat in
+// the JS heap for the lifetime of the connect page.
+
+/// How long the whole saved-password login may take before it is abandoned.
+const SAVED_LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Largest `/auth/login` response this will buffer.
+///
+/// The timeout alone is not a bound: a server that streams steadily can push
+/// an unbounded amount of memory into the read buffer inside 20 seconds.
+/// `http_proxy.rs` caps its own header read for the same reason.
+const SAVED_LOGIN_MAX_RESPONSE: u64 = 64 * 1024;
+
+/// Raw relay of the server's `/auth/login` response.
+///
+/// Rust deliberately does not interpret the body. Login answers a union — a
+/// token, or a `partial_token` plus `requires_2fa` — on top of every error
+/// shape, and re-encoding that contract in a second language is precisely how
+/// two implementations drift apart. The frontend parses this with exactly the
+/// same code that handles its own `api.login` response.
+#[derive(Serialize, Clone, Debug)]
+pub struct SavedLoginResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+/// Log in to `host` as `username` using the password saved in the credential
+/// store, returning the server's raw response.
+///
+/// Errors when no credential, or no saved password, exists for the host.
+#[tauri::command(async)]
+pub async fn login_with_saved_password(
+    app: AppHandle,
+    state: tauri::State<'_, crate::http_proxy::HttpProxyState>,
+    host: String,
+    username: String,
+) -> Result<SavedLoginResponse, String> {
+    require_non_empty(&host, "host")?;
+    require_non_empty(&username, "username")?;
+
+    let account = login_account(&host);
+    let stored = with_credential_lock(|| {
+        secret_store::get(&app, &account)
+            .map_err(|e| format!("login_with_saved_password failed: {e}"))
+    })?;
+    let password = stored
+        .ok_or_else(|| "no stored credential for this host".to_string())
+        .and_then(|blob| parse_credential_blob(&blob))?
+        .password
+        .ok_or_else(|| "no saved password for this host".to_string())?;
+
+    let port = crate::http_proxy::start_http_proxy(app, state, host).await?;
+
+    timeout(SAVED_LOGIN_TIMEOUT, post_login(port, &username, &password))
+        .await
+        .map_err(|_| "saved-password login timed out".to_string())?
+}
+
+/// Identifies this client to the server, distinct from the webview's own
+/// `fetch` User-Agent.
+const CLIENT_USER_AGENT: &str = concat!("OwnCord-Client/", env!("CARGO_PKG_VERSION"));
+
+/// Build the raw HTTP/1.1 request for the saved-password login.
+///
+/// Pure, so the framing is testable without a socket.
+///
+/// `Host` is rewritten to the real remote by the proxy, and `Connection:
+/// close` is forced there too — it is sent explicitly so the read below can
+/// simply run to EOF instead of framing a keep-alive response.
+///
+/// `User-Agent` is not decoration: an optional Coraza WAF (OWASP CRS) scores a
+/// missing `User-Agent` and, for a server reached by IP address, a numeric
+/// `Host` — at paranoia level 2 in blocking mode those two together are
+/// enough to refuse the request before authentication is even attempted. The
+/// typed-password login goes through the webview's own `fetch`, which always
+/// sends one, so without this header a saved-password login could fail on a
+/// server configuration where typing the same password works. The server
+/// also records this header as the session's device name
+/// (`Server/api/auth_handler.go`), so an absent header leaves that field
+/// empty for this login path only.
+///
+/// `Accept` is sent for the same reason: CRS rule 920300 scores a missing
+/// `Accept` too, and combined with the numeric `Host` that is enough to hit
+/// the blocking threshold on its own at paranoia level 3, even with
+/// `User-Agent` present. `Accept: application/json` matches what this
+/// endpoint actually returns. `Accept-Encoding` is deliberately not sent:
+/// the response below is read and parsed without any content decoding, so
+/// advertising a compression this code cannot decode would break parsing.
+fn build_login_request(username: &str, password: &str) -> String {
+    let body = serde_json::json!({ "username": username, "password": password }).to_string();
+    format!(
+        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        CLIENT_USER_AGENT,
+        body.len(),
+        body
+    )
+}
+
+/// POST the login body to the loopback proxy and return the raw response.
+async fn post_login(
+    port: u16,
+    username: &str,
+    password: &str,
+) -> Result<SavedLoginResponse, String> {
+    let request = build_login_request(username, password);
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|e| format!("saved-password login: connect failed: {e}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| format!("saved-password login: write failed: {e}"))?;
+
+    // Bounded read: one byte over the cap is treated as a failure rather than
+    // silently truncated, so a partial body can never be parsed as a complete
+    // response.
+    let mut raw = Vec::new();
+    let mut bounded = stream.take(SAVED_LOGIN_MAX_RESPONSE + 1);
+    bounded
+        .read_to_end(&mut raw)
+        .await
+        .map_err(|e| format!("saved-password login: read failed: {e}"))?;
+    if raw.len() as u64 > SAVED_LOGIN_MAX_RESPONSE {
+        return Err("saved-password login: response exceeded the size limit".to_string());
+    }
+
+    parse_http_response(&raw)
+}
+
+/// Whether a response header block declares chunked transfer framing.
+///
+/// Unfolds obs-fold continuation lines - a header value continued on a
+/// following line beginning with a space or tab - before scanning. Without
+/// that, a folded `Transfer-Encoding` splits into a line whose value is empty
+/// and a line carrying no colon at all, and slips past a per-line scan.
+/// obs-fold is deprecated by RFC 9112 and nothing in this path emits it, so
+/// this is belt-and-braces against a misbehaving intermediary - but a framing
+/// check that is trivially bypassable is not a check.
+fn header_says_chunked(head: &str) -> bool {
+    let mut unfolded = String::with_capacity(head.len());
+    for line in head.lines().skip(1) {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Continuation of the previous header's value.
+            unfolded.push(' ');
+            unfolded.push_str(line.trim());
+        } else {
+            unfolded.push('\n');
+            unfolded.push_str(line);
+        }
+    }
+
+    unfolded
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("transfer-encoding")
+                && value.to_ascii_lowercase().contains("chunked")
+        })
+}
+
+/// Split a raw HTTP/1.1 response into its status code and body.
+///
+/// Pure, so the framing is testable without a socket.
+///
+/// The header/body split runs on raw bytes, not a lossy UTF-8 decode of the
+/// whole response: `String::from_utf8_lossy` replaces each invalid byte with
+/// a 3-byte U+FFFD, which would corrupt chunk-size arithmetic on a chunked
+/// body. Headers are ASCII, so only the head half is lossily decoded, to read
+/// the status line and scan for `Transfer-Encoding`.
+///
+/// The server is Go's `net/http`. Its `chunkWriter` buffers only the first
+/// `bufferBeforeChunkingSize` (2048) bytes a handler writes; past that, with
+/// no explicit `Content-Length`, it sets `Transfer-Encoding: chunked` on an
+/// HTTP/1.1 response regardless of the client having sent `Connection:
+/// close` — `closeAfterReply` does not suppress chunking. `/auth/login`'s
+/// response embeds the full user profile (about text, avatar URL, display
+/// name, custom status) plus the session token, which a normal account can
+/// push past that threshold. So this is a real, reachable path, not a
+/// misbehaving-intermediary edge case, and the body is decoded here rather
+/// than relayed with its framing intact.
+fn parse_http_response(raw: &[u8]) -> Result<SavedLoginResponse, String> {
+    let split_at = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("saved-password login: malformed response (no header terminator)")?;
+    let head = String::from_utf8_lossy(&raw[..split_at]);
+    let body = &raw[split_at + 4..];
+
+    let status_line = head
+        .lines()
+        .next()
+        .ok_or("saved-password login: malformed response (no status line)")?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or("saved-password login: malformed response (no status code)")?;
+
+    let body = if header_says_chunked(&head) {
+        decode_chunked(body)?
+    } else {
+        body.to_vec()
+    };
+
+    Ok(SavedLoginResponse {
+        status,
+        body: String::from_utf8_lossy(&body).to_string(),
+    })
+}
+
+/// Decode HTTP/1.1 chunked transfer framing into the body bytes.
+///
+/// Never returns a partial body: any malformed input is an `Err`, because a
+/// half-decoded JSON body on an auth path is worse than a clear error.
+fn decode_chunked(body: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+
+    loop {
+        // Find the CRLF ending this chunk's size line.
+        let line_end = body[pos..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or("saved-password login: truncated chunk size line")?;
+        let size_line = &body[pos..pos + line_end];
+        pos += line_end + 2;
+
+        // Ignore a `;`-separated chunk extension.
+        let size_field = size_line.split(|&b| b == b';').next().unwrap_or(size_line);
+        let size_str = std::str::from_utf8(size_field)
+            .map_err(|_| "saved-password login: chunk size is not valid UTF-8".to_string())?
+            .trim();
+        let size = u64::from_str_radix(size_str, 16)
+            .map_err(|_| format!("saved-password login: invalid chunk size: {size_str:?}"))?;
+
+        if size == 0 {
+            // Trailers (if any) follow before the final CRLF; discard them.
+            return Ok(out);
+        }
+
+        // The size line is attacker-controlled: bound it on its own before any
+        // arithmetic, because `out.len() as u64 + size` can wrap a `u64` when
+        // `size` is near `u64::MAX`, sailing past the limit check below.
+        if size > SAVED_LOGIN_MAX_RESPONSE {
+            return Err("saved-password login: response exceeded the size limit".to_string());
+        }
+        if (out.len() as u64).saturating_add(size) > SAVED_LOGIN_MAX_RESPONSE {
+            return Err("saved-password login: response exceeded the size limit".to_string());
+        }
+
+        let size = size as usize;
+        if size > body.len() - pos {
+            return Err("saved-password login: truncated chunk body".to_string());
+        }
+        out.extend_from_slice(&body[pos..pos + size]);
+        pos += size;
+
+        if body.get(pos..pos + 2) != Some(b"\r\n") {
+            return Err("saved-password login: missing chunk terminator".to_string());
+        }
+        pos += 2;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +858,7 @@ mod tests {
             username: "alice".into(),
             token: "secret-token".into(),
             password: Some("hunter2".into()),
+            has_password: true,
         };
         let debug = format!("{data:?}");
         assert!(debug.contains("alice"));
@@ -514,16 +867,357 @@ mod tests {
         assert!(debug.contains("[REDACTED]"));
     }
 
+    /// The IPC payload must never carry the plaintext password. This is the
+    /// test-locked half of the claim made in `docs/security.md` and
+    /// `docs/architecture/client.md`; the `#[serde(skip)]` on the field is the
+    /// other half. Replaces an earlier test that asserted the opposite.
     #[test]
-    fn credential_data_serializes_password_for_prefill() {
+    fn credential_data_never_serializes_the_password() {
         let data = CredentialData {
             username: "alice".into(),
             token: "tok".into(),
-            password: Some("pw".into()),
+            password: Some("hunter2".into()),
+            has_password: true,
         };
         let json = serde_json::to_string(&data).unwrap();
-        assert!(json.contains("password"));
-        assert!(json.contains("pw"));
+        assert!(
+            !json.contains("hunter2"),
+            "plaintext password crossed IPC: {json}"
+        );
+        assert!(
+            !json.contains("\"password\""),
+            "password key present: {json}"
+        );
+        // The frontend still learns that one exists, so it can prefill a
+        // placeholder and offer the saved-password login path.
+        assert!(json.contains("\"has_password\":true"), "{json}");
+    }
+
+    #[test]
+    fn credential_data_reports_absent_password() {
+        let data = CredentialData {
+            username: "alice".into(),
+            token: "tok".into(),
+            password: None,
+            has_password: false,
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(json.contains("\"has_password\":false"), "{json}");
+    }
+
+    #[test]
+    fn parse_credential_blob_sets_has_password_from_the_blob() {
+        let with_pw =
+            parse_credential_blob(r#"{"username":"a","token":"t","password":"p"}"#).unwrap();
+        assert!(with_pw.has_password);
+        assert_eq!(with_pw.password.as_deref(), Some("p"));
+
+        let without = parse_credential_blob(r#"{"username":"a","token":"t"}"#).unwrap();
+        assert!(!without.has_password);
+        assert!(without.password.is_none());
+    }
+
+    // `save_credential` used to conflate "no password supplied" with "erase
+    // the stored password", which is the only reason the frontend ever had to
+    // round-trip the plaintext back through IPC. These pin the replacement.
+
+    #[test]
+    fn resolve_password_preserves_the_stored_one_by_default() {
+        assert_eq!(
+            resolve_password(None, false, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
+            Some("stored")
+        );
+        assert_eq!(resolve_password(None, false, || Ok(None)).unwrap(), None);
+    }
+
+    /// The bug this guards: an unreadable credential store must NOT look like
+    /// "no password stored". If it did, an ordinary re-save (a token refresh,
+    /// say) would rewrite the blob without the password the user asked to
+    /// keep, destroying it with no error anywhere.
+    #[test]
+    fn resolve_password_refuses_to_preserve_from_an_unreadable_store() {
+        let err = resolve_password(None, false, || Err("keychain locked".to_string()))
+            .expect_err("a read failure must abort the save, not erase the password");
+        assert!(err.contains("keychain locked"), "{err}");
+    }
+
+    /// A blob that reads fine but does not parse is still a case where the
+    /// password cannot be preserved. It can even carry a readable password —
+    /// `parse_credential_blob` also rejects a missing username or token — so
+    /// answering "no password" would discard a recoverable one.
+    #[test]
+    fn resolve_password_refuses_to_preserve_from_an_unparseable_blob() {
+        let err = resolve_password(None, false, || {
+            Err("credential blob is not valid JSON".to_string())
+        })
+        .expect_err("a parse failure must abort the save, not erase the password");
+        assert!(err.contains("not valid JSON"), "{err}");
+    }
+    #[test]
+    fn resolve_password_erases_only_when_asked() {
+        assert_eq!(
+            resolve_password(None, true, || Ok(Some("stored".into()))).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_password_does_not_read_when_it_does_not_need_to() {
+        // The read is the only fallible part, so the paths that cannot need it
+        // must not be able to fail because of it.
+        let exploding = || -> Result<Option<String>, String> {
+            panic!("the existing credential must not be read on this path")
+        };
+        assert_eq!(
+            resolve_password(Some("new"), false, exploding)
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
+        assert_eq!(resolve_password(None, true, exploding).unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_password_lets_a_supplied_password_win() {
+        assert_eq!(
+            resolve_password(Some("new"), false, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
+        // A supplied password beats a clear request rather than silently
+        // discarding what the caller just asked to store.
+        assert_eq!(
+            resolve_password(Some("new"), true, || Ok(Some("stored".into())))
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
+    }
+
+    /// Would break if the User-Agent or Accept header were dropped again
+    /// (the original defect, and its follow-up, which let a WAF's
+    /// missing-header + numeric-Host score block a saved-password login that
+    /// an equivalent webview `fetch` would pass) or if the header
+    /// block/framing regressed. Also pins that no `Accept-Encoding` is sent,
+    /// since the response is read without content decoding.
+    #[test]
+    fn build_login_request_carries_the_user_agent_and_correct_framing() {
+        let request = build_login_request("alice", "hunter2");
+        let expected_ua = format!("User-Agent: {CLIENT_USER_AGENT}\r\n");
+        assert!(request.contains(&expected_ua), "{request}");
+        assert!(
+            request.contains("Accept: application/json\r\n"),
+            "{request}"
+        );
+        assert!(!request.contains("Accept-Encoding"), "{request}");
+
+        let (head, body) = request
+            .split_once("\r\n\r\n")
+            .expect("exactly one header/body separator");
+        assert!(
+            !body.contains("\r\n\r\n"),
+            "more than one header/body separator: {request}"
+        );
+
+        assert!(head.contains("Content-Type: application/json\r\n"));
+        assert!(head.ends_with("Connection: close"));
+
+        let expected_len = format!("Content-Length: {}\r\n", body.len());
+        assert!(head.contains(&expected_len), "{head}");
+    }
+
+    /// Builds a raw HTTP/1.1 response from parts, so the framing tests do not
+    /// bury CRLFs inside string literals.
+    fn http_response(status_line: &str, headers: &[&str], body: &str) -> Vec<u8> {
+        let mut out = String::from(status_line);
+        out.push_str("\r\n");
+        for h in headers {
+            out.push_str(h);
+            out.push_str("\r\n");
+        }
+        out.push_str("\r\n");
+        out.push_str(body);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn parse_http_response_splits_status_and_body() {
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Content-Type: application/json"],
+            r#"{"token":"t"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 200);
+        assert_eq!(res.body, r#"{"token":"t"}"#);
+    }
+
+    #[test]
+    fn parse_http_response_relays_a_2fa_challenge_verbatim() {
+        // Rust must not interpret the union: a 2FA challenge is just a body.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &[],
+            r#"{"requires_2fa":true,"partial_token":"pt"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 200);
+        assert!(res.body.contains("requires_2fa"));
+        assert!(res.body.contains("partial_token"));
+    }
+
+    #[test]
+    fn parse_http_response_relays_an_error_status() {
+        let raw = http_response(
+            "HTTP/1.1 401 Unauthorized",
+            &[],
+            r#"{"error":"INVALID_CREDENTIALS"}"#,
+        );
+        let res = parse_http_response(&raw).unwrap();
+        assert_eq!(res.status, 401);
+        assert!(res.body.contains("INVALID_CREDENTIALS"));
+    }
+
+    /// Builds a chunked-encoded body from a list of chunk payloads, each
+    /// framed as `<hex-size>\r\n<data>\r\n`, terminated by `0\r\n\r\n`.
+    fn chunk_encode(chunks: &[&str]) -> String {
+        let mut out = String::new();
+        for c in chunks {
+            out.push_str(&format!("{:x}\r\n{c}\r\n", c.len()));
+        }
+        out.push_str("0\r\n\r\n");
+        out
+    }
+
+    #[test]
+    fn parse_http_response_decodes_chunked_framing_to_the_same_body_as_identity() {
+        // Go chunks any response over its 2048-byte buffer regardless of
+        // `Connection: close`, so this is the expected shape for a login
+        // response with a long `about`/display-name/token payload, not a
+        // misbehaving-intermediary edge case.
+        let json = r#"{"token":"a-long-session-token","about":"hello world"}"#;
+        let (first, second) = json.split_at(20);
+        let chunked_body = chunk_encode(&[first, second]);
+        let chunked_raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding: chunked"],
+            &chunked_body,
+        );
+        let identity_raw = http_response("HTTP/1.1 200 OK", &[], json);
+
+        let chunked = parse_http_response(&chunked_raw).expect("chunked body must decode");
+        let identity = parse_http_response(&identity_raw).unwrap();
+        assert_eq!(chunked.status, 200);
+        assert_eq!(chunked.body, identity.body);
+        assert_eq!(chunked.body, json);
+    }
+
+    #[test]
+    fn parse_http_response_decodes_chunked_hidden_by_an_obs_fold() {
+        // A folded value splits into a line with an empty value and a line
+        // carrying no colon at all, which a per-line scan drops. A framing
+        // check that is trivially bypassable is not a check.
+        let body = chunk_encode(&["body"]);
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding:", " chunked"],
+            &body,
+        );
+        let res = parse_http_response(&raw).expect("folded chunked must still be decoded");
+        assert_eq!(res.body, "body");
+    }
+
+    #[test]
+    fn decode_chunked_accepts_a_chunk_extension() {
+        // `1a;foo=bar\r\n<26 bytes>\r\n0\r\n\r\n` — the extension after `;` must
+        // be ignored, not treated as part of the hex size.
+        let payload = "abcdefghijklmnopqrstuvwxyz"; // 26 bytes = 0x1a
+        let raw = format!("1a;foo=bar\r\n{payload}\r\n0\r\n\r\n");
+        let decoded = decode_chunked(raw.as_bytes()).unwrap();
+        assert_eq!(decoded, payload.as_bytes());
+    }
+
+    #[test]
+    fn decode_chunked_discards_trailers_after_the_terminating_chunk() {
+        let raw = "4\r\nabcd\r\n0\r\nX-Trailer: value\r\n\r\n";
+        let decoded = decode_chunked(raw.as_bytes()).unwrap();
+        assert_eq!(decoded, b"abcd");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_truncated_final_chunk() {
+        // The declared size is longer than the bytes actually present; a
+        // half-decoded JSON body is worse than a clear error.
+        let raw = "a\r\nabc\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("truncated chunk must error");
+        assert!(err.contains("truncated"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_non_hex_size_line() {
+        let raw = "not-hex\r\nabcd\r\n0\r\n\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("non-hex size must error");
+        assert!(err.contains("invalid chunk size"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_body_with_no_terminating_chunk() {
+        let raw = "4\r\nabcd\r\n";
+        let err = decode_chunked(raw.as_bytes())
+            .expect_err("a body with no 0-size chunk must error, not return a partial body");
+        assert!(err.contains("chunk size line"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_decoded_size_over_the_response_limit() {
+        let oversized = SAVED_LOGIN_MAX_RESPONSE + 1;
+        let raw = format!("{oversized:x}\r\n");
+        // Body bytes are not actually supplied — the size check must fire
+        // before any attempt to read them.
+        let err = decode_chunked(raw.as_bytes()).expect_err("oversized chunk must error");
+        assert!(err.contains("size limit"), "{err}");
+    }
+
+    #[test]
+    fn decode_chunked_rejects_a_huge_chunk_size_without_overflowing() {
+        // A hostile size line near u64::MAX must not panic the arithmetic
+        // that checks it against the response cap.
+        let raw = "1\r\na\r\nffffffffffffffff\r\n";
+        let err = decode_chunked(raw.as_bytes()).expect_err("huge chunk size must error");
+        assert!(err.contains("size limit"), "{err}");
+    }
+
+    #[test]
+    fn parse_http_response_does_not_mistake_a_body_for_a_header() {
+        // The scan must run on the header block only.
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Content-Type: application/json"],
+            r#"{"note":"Transfer-Encoding: chunked"}"#,
+        );
+        let res = parse_http_response(&raw).expect("a body naming the header is not framing");
+        assert_eq!(res.status, 200);
+    }
+    #[test]
+    fn parse_http_response_ignores_a_non_chunked_transfer_encoding() {
+        let raw = http_response(
+            "HTTP/1.1 200 OK",
+            &["Transfer-Encoding: identity"],
+            r#"{"token":"t"}"#,
+        );
+        assert_eq!(parse_http_response(&raw).unwrap().status, 200);
+    }
+
+    #[test]
+    fn parse_http_response_rejects_malformed_input() {
+        // No header terminator at all.
+        assert!(parse_http_response(b"not http at all").is_err());
+        // Terminator present, but the status line carries no code.
+        let raw = http_response("HTTP/1.1", &[], "body");
+        assert!(parse_http_response(&raw).is_err());
     }
 
     /// B4-3 follow-up: all 7 commands moved to `#[tauri::command(async)]`,

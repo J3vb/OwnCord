@@ -256,6 +256,7 @@ describe("ServerPanel", () => {
       vi.mocked(loadCredential).mockResolvedValueOnce({
         username: "saveduser",
         token: "tok",
+        hasPassword: false,
       });
 
       const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
@@ -266,7 +267,7 @@ describe("ServerPanel", () => {
 
       // Password is no longer returned from credential store over IPC (security hardening)
       await vi.waitFor(() => {
-        expect(onCredentialLoaded).toHaveBeenCalledWith("localhost:8443", "saveduser", undefined);
+        expect(onCredentialLoaded).toHaveBeenCalledWith("localhost:8443", "saveduser", false);
       });
     });
 

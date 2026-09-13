@@ -6,6 +6,9 @@ import { createIcon } from "@lib/icons";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("server-panel");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +53,7 @@ export interface ServerPanelOptions {
   /** Called immediately when the user clicks a server profile. */
   readonly onServerClick: (host: string, username?: string, autoConnect?: boolean) => void;
   /** Called after async credential lookup succeeds (may set password). */
-  readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
+  readonly onCredentialLoaded: (host: string, username: string, hasPassword?: boolean) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
   readonly onDeleteProfile?: (profileId: string) => void;
   /** Called when the user toggles auto-login on a server profile. */
@@ -72,6 +75,8 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
+  // Monotonic token: only the newest credential load may apply.
+  let credentialLoadSeq = 0;
   const {
     signal,
     onServerClick,
@@ -226,10 +231,25 @@ export function createServerPanel(
           onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
           // Auto-fill credentials from credential store (async)
           const requestedHost = profile.host;
+          // Two profiles can share a host (same server, different accounts),
+          // and `loadCredential` is keyed by host alone, so a slower earlier
+          // click could resolve last and overwrite the selection the user
+          // actually made. Only the newest click may apply its result. The
+          // host check downstream is not enough on its own, and a mismatch is
+          // no longer visible now that the password box shows identical dots.
+          credentialLoadSeq += 1;
+          const seq = credentialLoadSeq;
           void (async () => {
-            const cred = await loadCredential(requestedHost);
-            if (cred) {
-              onCredentialLoaded(requestedHost, cred.username, cred.password);
+            try {
+              const cred = await loadCredential(requestedHost);
+              if (cred && seq === credentialLoadSeq) {
+                onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
+              }
+            } catch (err) {
+              log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+                host: requestedHost,
+                err,
+              });
             }
           })();
         },
