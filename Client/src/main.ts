@@ -373,6 +373,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     username: string,
     password?: string,
     rememberPassword = true,
+    // Whether this login is the user's own explicit choice about being
+    // remembered. Only then may declining it delete an existing credential —
+    // the auto-login path passes false, because it is replaying a stored
+    // credential rather than expressing a preference, and deleting there would
+    // destroy the very credential it just used.
+    rememberIsUserChoice = false,
   ): void {
     log.info("Post-auth wiring", { host, username });
     // Tear down any prior session wiring so listeners and the connected
@@ -399,7 +405,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // on logout/disconnect (or the next wirePostAuth).
     const sessionUnsubs: Array<() => void> = [];
 
-    // BUG-135: Only persist credentials when the user opted in.
+    // BUG-135: Only persist credentials when the user opted in. Declining is
+    // an active instruction, not just an absence of one (OCV-022): a password
+    // stored under an earlier opt-in must not outlive the opt-out, so the whole
+    // credential goes. The username survives in the profile, so the form still
+    // prefills it; the token is worthless here because auto-connect forces
+    // remember on.
+    if (!rememberPassword && rememberIsUserChoice) {
+      void deleteCredential(host);
+    }
     if (rememberPassword) {
       saveCredential(host, username, token, password)
         .then((ok) => {
@@ -575,7 +589,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             const remember = connectPage.getRememberPassword();
             const savedPassword = remember ? password : undefined;
             ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-            wirePostAuth(host, result.token, username, savedPassword, remember);
+            wirePostAuth(host, result.token, username, savedPassword, remember, true);
           }
         },
         async onLoginWithSavedPassword(host, username) {
@@ -614,7 +628,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
             // No password passed: it never left the credential store, and
             // save_credential preserves it.
-            wirePostAuth(host, result.token, username, undefined, remember);
+            wirePostAuth(host, result.token, username, undefined, remember, true);
           }
         },
         async onRegister(host, username, password, inviteCode) {
@@ -636,7 +650,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-          wirePostAuth(host, result.token, username, savedPassword, remember);
+          wirePostAuth(host, result.token, username, savedPassword, remember, true);
         },
         async onTotpSubmit(code) {
           if (!pendingTotpPartialToken) {
@@ -673,6 +687,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
               pendingTotpUsername,
               savedPassword,
               remember,
+              true,
             );
           }
         },

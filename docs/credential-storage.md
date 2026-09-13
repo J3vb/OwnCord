@@ -41,7 +41,14 @@ The login credential blob carries a password only when the user ticked
   password": it preserves whatever is stored unless `clear_password` is set.
   Without that distinction every re-save had to carry the plaintext back
   through IPC just to avoid wiping it — which is why it used to be returned
-  at all.
+  at all. A read failure on the preserve path aborts the save rather than
+  rewriting the blob without a password it could not read.
+- Declining "Remember password" on an interactive login **deletes** the stored
+  credential rather than leaving an earlier one in place, so a password saved
+  under a previous opt-in does not outlive the opt-out. The username survives
+  in the server profile, so the form still prefills it. The auto-login path
+  never deletes: it is replaying a stored credential, not expressing a
+  preference.
 
 ## Pending message recovery
 
