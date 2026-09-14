@@ -393,7 +393,11 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay
 		// buffer as a number no client ever saw live, and since clients ack
-		// only max(seq), it could never be requested back.
+		// only max(seq), it could never be requested back. The limit is a
+		// sliding 1s window via the shared auth.RateLimiter (the deleted
+		// TopicRateLimiter was a token bucket with a full refill at each
+		// window boundary — sliding is stricter on boundary-straddling
+		// bursts, the same sustained rate).
 		if bm.recipients == nil && bm.channelID != 0 {
 			if !h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
 				slog.Warn("hub: topic rate limit exceeded, dropping message",

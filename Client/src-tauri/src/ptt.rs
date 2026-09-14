@@ -233,10 +233,7 @@ mod linux {
     /// Returns `None` for unknown codes (including the modifier VKs above,
     /// which this never reverses — see the VK_KEYCODES doc comment).
     pub fn vk_to_keycode(vk: i32) -> Option<Keycode> {
-        VK_KEYCODES
-            .iter()
-            .find(|(v, _)| *v == vk)
-            .map(|(_, k)| k.clone())
+        VK_KEYCODES.iter().find(|(v, _)| *v == vk).map(|(_, k)| *k)
     }
 }
 

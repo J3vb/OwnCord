@@ -353,7 +353,14 @@ export function createServerPanel(
     // from there too. Mounted onto the panel's closest connect-page root.
     const root = panelEl.closest(".connect-page") ?? document.body;
     const instance = createModal(
-      { content: header, ariaLabelledBy: "add-server-title", onClose: closeModal },
+      {
+        content: header,
+        ariaLabelledBy: "add-server-title",
+        onClose: closeModal,
+        // Also tears the modal down on page teardown (the chained abort of
+        // modalAc above), not just on backdrop click / Escape / Save.
+        signal: modalAc.signal,
+      },
       root,
     );
     appendChildren(instance.modal, body, footer);

@@ -76,7 +76,7 @@ vi.mock("@components/VideoGrid", () => ({
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
-import { setMessageJumpHandler } from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -310,6 +310,24 @@ describe("createChatArea", () => {
 
     expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers a global message-jump handler and unregisters it on cleanup", () => {
+    // Drop any handler an earlier test in this file left installed.
+    setMessageJumpHandler(() => {})();
+
+    const result = createChatArea(makeOptions());
+
+    // A permalink jump routes to the chat area's jumper.
+    jumpToMessage(5, 42);
+    expect(mockJumpTo).toHaveBeenCalledWith(5, 42);
+
+    for (const unsub of result.unsubscribers) unsub();
+
+    // A page that has been torn down must not keep answering permalink jumps.
+    const jumpsWithHandler = vi.mocked(mockJumpTo).mock.calls.length;
+    jumpToMessage(5, 42);
+    expect(vi.mocked(mockJumpTo).mock.calls.length).toBe(jumpsWithHandler);
   });
 
   // --- Pin button interaction ---
