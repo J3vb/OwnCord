@@ -64,6 +64,20 @@ func ExtractBearerToken(r *http.Request) (string, bool) {
 	return strings.TrimSpace(parts[1]), true
 }
 
+// parseTS parses s as either the SQLite space-separated format
+// ("2006-01-02 15:04:05") or the ISO-8601 UTC format ("2006-01-02T15:04:05Z"),
+// reporting ok=false if neither layout matches. Shared by IsEffectivelyBanned
+// and IsSessionExpired, which each have their own fail-safe verdict for an
+// unparseable timestamp.
+func parseTS(s string) (t time.Time, ok bool) {
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // IsEffectivelyBanned reports whether u is currently banned, accounting for
 // temporary ban expiry. A user is effectively banned when:
 //   - u.Banned is true, AND
@@ -81,15 +95,13 @@ func IsEffectivelyBanned(u *db.User) bool {
 		return true
 	}
 	// Temporary ban — parse the expiry and compare to now.
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		t, err := time.Parse(layout, *u.BanExpires)
-		if err == nil {
-			// Ban is still active if expiry is in the future.
-			return time.Now().UTC().Before(t.UTC())
-		}
+	t, ok := parseTS(*u.BanExpires)
+	if !ok {
+		// Unparseable expiry — fail-safe: treat as still banned.
+		return true
 	}
-	// Unparseable expiry — fail-safe: treat as still banned.
-	return true
+	// Ban is still active if expiry is in the future.
+	return time.Now().UTC().Before(t.UTC())
 }
 
 // IsSessionExpired reports whether the expiresAt timestamp string represents a
@@ -97,12 +109,10 @@ func IsEffectivelyBanned(u *db.User) bool {
 // ("2006-01-02 15:04:05") and the ISO-8601 UTC format ("2006-01-02T15:04:05Z").
 // Any string that cannot be parsed is treated as expired for safety.
 func IsSessionExpired(expiresAt string) bool {
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		t, err := time.Parse(layout, expiresAt)
-		if err == nil {
-			return time.Now().UTC().After(t.UTC())
-		}
+	t, ok := parseTS(expiresAt)
+	if !ok {
+		// Unparseable expiry — treat as expired for safety.
+		return true
 	}
-	// Unparseable expiry — treat as expired for safety.
-	return true
+	return time.Now().UTC().After(t.UTC())
 }

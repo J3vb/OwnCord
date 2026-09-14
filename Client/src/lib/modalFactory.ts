@@ -30,6 +30,8 @@ export interface ModalOptions {
   readonly overlayAttrs?: Readonly<Record<string, string>>;
   /** Accessible name for the dialog (aria-label on the .modal container). */
   readonly ariaLabel?: string;
+  /** Id of an element naming the dialog (aria-labelledby); wins over ariaLabel. */
+  readonly ariaLabelledBy?: string;
   /** AbortSignal for automatic cleanup when the parent component is destroyed. */
   readonly signal?: AbortSignal;
 }
@@ -61,6 +63,7 @@ export function createModal(
     className,
     overlayAttrs,
     ariaLabel,
+    ariaLabelledBy,
     signal,
   } = options;
 
@@ -78,7 +81,7 @@ export function createModal(
   // Build modal container
   const modalClass = className !== undefined ? `modal ${className}` : "modal";
   const modal = createElement("div", { class: modalClass });
-  applyDialogSemantics(modal, ariaLabel !== undefined ? { label: ariaLabel } : {});
+  applyDialogSemantics(modal, { label: ariaLabel, labelledBy: ariaLabelledBy });
   trapFocus(modal, ac.signal);
   modal.appendChild(content);
   overlay.appendChild(modal);

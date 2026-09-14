@@ -217,19 +217,25 @@ export class LiveKitSession {
       : null;
   }
 
-  /** Explicit publish options for the microphone track, or undefined to let
-   *  the Room's publishDefaults decide.
+  /** The channel's configured audio encoding, or undefined when no
+   *  voice_config has arrived for it yet (LiveKit's own audio default then
+   *  applies, because the caller omits audioPreset entirely).
    *
-   *  OC-0441: createRoom folds the channel's configured audio bitrate into
-   *  publishDefaults, but it runs synchronously from the voice_token handler
-   *  and the server sends voice_config only afterwards — an ordering frozen by
-   *  the epoch-1 golden transcripts, so it cannot be swapped on the wire. On a
-   *  channel's first join the Room is therefore built before any config
-   *  arrived. Every microphone publish happens later, past the LiveKit connect
-   *  round-trip, so reading voiceConfigs here picks up the bitrate the Room
-   *  missed; publishDefaults stays the fallback for every other track. */
-  private micPublishOptions(): { audioPreset: { maxBitrate: number } } | undefined {
-    const channelId = this._currentChannelId;
+   *  OC-0438: the server computes an audio bitrate from the channel's voice
+   *  quality and delivers it via voice_config (setVoiceConfig ->
+   *  voiceStore.voiceConfigs).
+   *
+   *  OC-0441: createRoom folds this into publishDefaults, but it runs
+   *  synchronously from the voice_token handler and the server sends
+   *  voice_config only afterwards — an ordering frozen by the epoch-1 golden
+   *  transcripts, so it cannot be swapped on the wire. On a channel's first
+   *  join the Room is therefore built before any config arrived. Every
+   *  microphone publish happens later, past the LiveKit connect round-trip, so
+   *  re-reading here picks up the bitrate the Room missed; publishDefaults
+   *  stays the fallback for every other track. */
+  private configuredAudioOptions(
+    channelId: number | null,
+  ): { audioPreset: { maxBitrate: number } } | undefined {
     if (channelId === null) return undefined;
     const bitrate = voiceStore.getState().voiceConfigs.get(channelId)?.bitrate;
     return bitrate === undefined ? undefined : { audioPreset: { maxBitrate: bitrate } };
@@ -420,16 +426,9 @@ export class LiveKitSession {
     this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
     const quality = getStreamQuality();
     const isSource = quality === "source";
-    // OC-0438: the server computes an audio bitrate from the channel's voice
-    // quality and delivers it via voice_config (setVoiceConfig ->
-    // voiceStore.voiceConfigs). Apply it to the published mic track here —
-    // undefined (no config has arrived yet for this channel, or no channelId
-    // was given) falls back to LiveKit's own built-in audio default by
-    // omitting audioPreset entirely below.
-    const configuredAudioBitrate =
-      channelId !== undefined
-        ? voiceStore.getState().voiceConfigs.get(channelId)?.bitrate
-        : undefined;
+    // OC-0438: publish with the channel's configured audio bitrate — spreading
+    // undefined omits audioPreset, leaving LiveKit's own default in place.
+    const audioOptions = this.configuredAudioOptions(channelId ?? null);
     const newRoom = new Room({
       // Adaptive features reduce quality based on subscriber viewport —
       // disable for "source" quality to maintain full resolution.
@@ -452,9 +451,7 @@ export class LiveKitSession {
           maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
           maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
         },
-        ...(configuredAudioBitrate !== undefined
-          ? { audioPreset: { maxBitrate: configuredAudioBitrate } }
-          : {}),
+        ...audioOptions,
       },
       // End-to-end encryption: SFrame-based E2EE using a server-distributed
       // per-channel symmetric key. The SFU only sees encrypted frames.
@@ -1351,7 +1348,9 @@ export class LiveKitSession {
    *  a channel with no voice_config keeps LiveKit's own default, so both leave
    *  the call shaped exactly as it was before. */
   private async enableMicrophone(room: Room, enabled: boolean): Promise<void> {
-    const publishOptions = enabled ? this.micPublishOptions() : undefined;
+    const publishOptions = enabled
+      ? this.configuredAudioOptions(this._currentChannelId)
+      : undefined;
     if (publishOptions === undefined) {
       await room.localParticipant.setMicrophoneEnabled(enabled);
       return;
@@ -1595,14 +1594,9 @@ export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
 
-/** True when the LiveKit session has an active room connection. */
-export function isVoiceConnected(): boolean {
-  return session.getRoom() !== null;
-}
-
 /** True while a join is in flight ("connecting"/"reconnecting") OR a room is
  *  live ("connected") — i.e. there is something for leaveVoice() to tear
- *  down. OC-0249: isVoiceConnected() alone reads false for the entire
+ *  down. OC-0249: a Room-existence check alone reads false for the entire
  *  "connecting" state (no Room object exists yet), so a caller deciding
  *  whether to abort an in-flight join must ask this instead. */
 export function isVoiceSessionActive(): boolean {

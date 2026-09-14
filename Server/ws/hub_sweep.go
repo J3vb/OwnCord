@@ -19,9 +19,6 @@ const staleClientTimeout = 90 * time.Second
 // onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {
 	h.sweepStaleClients()
-	// Per-channel token buckets are created on first broadcast; prune idle
-	// ones here or the bucket map grows for the process lifetime.
-	h.topicLimiter.Cleanup(10 * time.Minute)
 	h.refreshTelemetryGauges()
 }
 

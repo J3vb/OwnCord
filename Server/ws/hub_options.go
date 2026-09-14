@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -146,10 +145,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	reg := NewHandlerRegistry()
 
-	// Normalize once at construction, exactly like qualityBitrate's own
-	// fallback: an unset or invalid configured value degrades to "medium"
-	// rather than propagating a bad value into every voice_config this hub
-	// ever sends (OC-0439).
+	// Normalize once here rather than propagating an unset or invalid
+	// configured value into every voice_config this hub sends (OC-0439).
 	defaultVoiceQuality := "medium"
 	if validVoiceQuality(opts.VoiceQuality) {
 		defaultVoiceQuality = opts.VoiceQuality
@@ -170,7 +167,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clientEvents:        make(chan clientEvent, 64),
 		stop:                make(chan struct{}),
 		pubsub:              NewPubSub(),
-		topicLimiter:        NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 		replayBuf:           NewEventRingBuffer(ringSize),
 		registry:            reg,
 		permChecker:         permissions.NewChecker(database),

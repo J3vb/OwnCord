@@ -652,13 +652,6 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 	return s.banUser(ctx, actorID, targetID, reason, expires, nil)
 }
 
-// BanUserWithReport is BanUser with a report link (plan item 2's
-// "...WithReport variant" — BanUser's own signature is untouched, so
-// admin/api.go and every other existing caller is unaffected).
-func (s *ModerationService) BanUserWithReport(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time, reportID int64) error {
-	return s.banUser(ctx, actorID, targetID, reason, expires, &reportID)
-}
-
 func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time, reportID *int64) error {
 	ctx, span := telemetry.GlobalTracer("service/moderation").Start(ctx, "ModerationService.BanUser",
 		telemetry.Int64("actor_id", actorID),
@@ -802,12 +795,6 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 // owner.
 func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID int64) error {
 	return s.forceLogout(ctx, actorID, targetID, "", nil)
-}
-
-// ForceLogoutWithReport is ForceLogout with a report link (plan item 2's
-// "...WithReport variant"; ForceLogout's own signature is unchanged).
-func (s *ModerationService) ForceLogoutWithReport(ctx context.Context, actorID, targetID int64, reportID int64) error {
-	return s.forceLogout(ctx, actorID, targetID, "", &reportID)
 }
 
 // forceLogout's reason is the ledger row's text; empty falls back to the

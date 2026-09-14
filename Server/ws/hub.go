@@ -50,8 +50,7 @@ type Hub struct {
 	// bare test hubs; the broadcast gate fails closed then.
 	messageSvc *service.MessageService
 
-	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
-	topicLimiter *TopicRateLimiter // per-topic throughput caps
+	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
@@ -162,15 +161,11 @@ type Hub struct {
 	voice VoiceStore
 
 	// defaultVoiceQuality is the operator-configured voice.quality
-	// (HubOptions.VoiceQuality, fed from cfg.Voice.Quality), used by
-	// voiceJoinComplete as the fallback when a channel has no per-channel
-	// voice_quality override — which is every channel, since CreateChannel
-	// never writes that column (OC-0439). Set once at construction and never
-	// mutated after (voice.quality is startup-only: changing it in
-	// config.yaml requires a restart, same as the setup wizard already
-	// treats it), so no mutex guards it, like livekit/lkProcess below.
-	// Always one of voiceQualities' keys — NewHub validates and normalizes
-	// it, falling back to "medium" itself when unset or invalid.
+	// (HubOptions.VoiceQuality), used by voiceJoinComplete as the fallback
+	// when a channel has no per-channel voice_quality override (OC-0439).
+	// Always one of voiceQualities' keys — NewHub normalizes it. Set once at
+	// construction and never mutated (voice.quality is startup-only), so no
+	// mutex guards it, like livekit/lkProcess below.
 	defaultVoiceQuality string
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation

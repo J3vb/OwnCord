@@ -42,11 +42,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import { renderMentionSegment } from "../../src/components/message-list/content-parser";
-import {
-  jumpToMessage,
-  setMessageJumpHandler,
-  hasMessageJumpHandler,
-} from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
 import { messagesStore, setAroundMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
@@ -362,7 +358,6 @@ describe("createMessageJumper", () => {
 
 describe("message-navigation registry", () => {
   it("is a no-op before a page registers a handler", () => {
-    expect(hasMessageJumpHandler()).toBe(false);
     expect(() => jumpToMessage(1, 2)).not.toThrow();
   });
 
@@ -374,7 +369,9 @@ describe("message-navigation registry", () => {
     expect(handler).toHaveBeenCalledWith(5, 42);
 
     unregister();
-    expect(hasMessageJumpHandler()).toBe(false);
+    // After unregistering, the handler must stop receiving jumps.
+    jumpToMessage(5, 43);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it("a stale unregister does not clear a newer handler", () => {
@@ -388,7 +385,6 @@ describe("message-navigation registry", () => {
     jumpToMessage(1, 1);
     expect(second).toHaveBeenCalled();
     expect(first).not.toHaveBeenCalled();
-    expect(hasMessageJumpHandler()).toBe(true);
   });
 
   afterEach(() => {

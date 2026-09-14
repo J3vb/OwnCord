@@ -11,9 +11,9 @@
  * under every category — the server agrees (it validates the type alone).
  */
 
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
 import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
@@ -44,19 +44,9 @@ export function defaultTypeForCategory(category: string): ChannelType {
 export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
   const ac = new AbortController();
-  let overlay: HTMLDivElement | null = null;
-  let restoreFocus: (() => void) | null = null;
+  let instance: ModalInstance | null = null;
 
   function mount(container: Element): void {
-    overlay = createElement("div", {
-      class: "modal-overlay visible",
-      "data-testid": "create-channel-modal",
-    });
-
-    const modal = createElement("div", { class: "modal" });
-    applyDialogSemantics(modal, { labelledBy: "create-channel-title" });
-    trapFocus(modal, ac.signal);
-
     // Header
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", { id: "create-channel-title" }, "Create Channel");
@@ -180,14 +170,28 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     );
 
     appendChildren(footer, cancelBtn, createBtn);
-    appendChildren(modal, header, body, footer);
-    overlay.appendChild(modal);
+
+    // Overlay/modal shell, dialog semantics, focus trap and focus
+    // save/restore all come from the shared factory; only the backdrop and
+    // Escape wiring stay here, since this component's onClose is decoupled
+    // from destroy() (see the caller's onClose, which calls destroy()).
+    instance = createModal(
+      {
+        content: header,
+        closeOnBackdrop: false,
+        closeOnEscape: false,
+        overlayAttrs: { "data-testid": "create-channel-modal" },
+        ariaLabelledBy: "create-channel-title",
+      },
+      container,
+    );
+    appendChildren(instance.modal, body, footer);
 
     // Close on backdrop click
-    overlay.addEventListener(
+    instance.overlay.addEventListener(
       "click",
       (e) => {
-        if (e.target === overlay) {
+        if (e.target === instance?.overlay) {
           onClose();
         }
       },
@@ -200,18 +204,12 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) {
+        if (e.key === "Escape" && instance?.overlay.isConnected === true) {
           onClose();
         }
       },
       { signal: ac.signal },
     );
-
-    container.appendChild(overlay);
-
-    // Capture where focus came from before anything inside the dialog takes
-    // it, so destroy() can hand it back to the opener.
-    restoreFocus = focusDialog(modal);
 
     // Focus the name input
     nameInput.focus();
@@ -219,15 +217,8 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
 
   function destroy(): void {
     ac.abort();
-    if (overlay !== null) {
-      overlay.remove();
-      overlay = null;
-    }
-    // Every close path (X, Cancel, backdrop, Escape) funnels through the
-    // caller's onClose, which calls destroy() — the single place focus
-    // returns to the opener.
-    restoreFocus?.();
-    restoreFocus = null;
+    instance?.destroy();
+    instance = null;
   }
 
   return { mount, destroy };

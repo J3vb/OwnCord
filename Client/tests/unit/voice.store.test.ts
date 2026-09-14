@@ -14,7 +14,6 @@ import {
   setLocalCamera,
   setLocalScreenshare,
   setListenOnly,
-  setLocalSpeaking,
   setSpeakers,
   setVoiceConfig,
   getChannelVoiceUsers,
@@ -536,80 +535,6 @@ describe("voice store", () => {
       setLocalScreenshare(true);
       setLocalScreenshare(false);
       expect(voiceStore.getState().localScreenshare).toBe(false);
-    });
-  });
-
-  describe("setLocalSpeaking", () => {
-    it("updates speaking state for current user in active channel", () => {
-      // Set up: current user (id=1) in channel 10
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
-      setVoiceStates([VOICE_STATE_1]);
-      joinVoiceChannel(10);
-
-      setLocalSpeaking(true);
-      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
-      expect(user?.speaking).toBe(true);
-
-      setLocalSpeaking(false);
-      const userAfter = voiceStore.getState().voiceUsers.get(10)?.get(1);
-      expect(userAfter?.speaking).toBe(false);
-
-      // Cleanup
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
-    });
-
-    it("is a no-op when not in a voice channel", () => {
-      const before = voiceStore.getState();
-      setLocalSpeaking(true);
-      expect(voiceStore.getState()).toBe(before);
-    });
-
-    it("is a no-op with no signed-in user, even if a row's user_id is 0", () => {
-      // authStore has no user, so currentUserId defaults to 0. Without the
-      // `currentUserId === 0` early return, the function would happily
-      // treat a "user_id: 0" roster row as "us" and flip its speaking flag.
-      setVoiceStates([{ ...VOICE_STATE_1, user_id: 0 }]);
-      joinVoiceChannel(10);
-      setLocalSpeaking(true);
-      expect(voiceStore.getState().voiceUsers.get(10)?.get(0)?.speaking).toBe(false);
-    });
-
-    it("is a no-op (same state reference) when speaking already matches the requested value", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
-      setVoiceStates([VOICE_STATE_1]);
-      joinVoiceChannel(10);
-      setLocalSpeaking(true);
-      const before = voiceStore.getState();
-
-      setLocalSpeaking(true); // already true — must not allocate a new state
-
-      expect(voiceStore.getState()).toBe(before);
-
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
     });
   });
 

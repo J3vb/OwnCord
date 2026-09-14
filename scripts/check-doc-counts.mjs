@@ -3,7 +3,7 @@
 // (the automated half of G-04).
 //
 //   node scripts/check-doc-counts.mjs
-//   node scripts/check-doc-counts.mjs --selftest
+//   node --test scripts/check-doc-counts.test.mjs
 //
 // Scope, deliberately small: this counts ledger statuses and compares them to
 // the numbers active documents assert. It is not a document-status framework,
@@ -188,67 +188,7 @@ function main() {
   );
 }
 
-function selftest() {
-  let failed = 0;
-  const assert = (cond, msg) => {
-    console.log(`${cond ? "PASS" : "FAIL"} ${msg}`);
-    if (!cond) failed++;
-  };
-  const t = tally({ findings: [{ status: "open" }, { status: "open" }, { status: "fixed" }] });
-  assert(t.open === 2 && t.fixed === 1 && t.total === 3, "tally counts by status and total");
-  assert(t.refuted === 0, "a declared-but-unused status counts 0, not undefined");
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-  const c = claimsIn;
-  const has = (s, kind, value) => c(s).some((x) => x.kind === kind && x.value === value);
-
-  assert(
-    has("Ledger: **306 fixed / 38 open / 3 declined / 1 duplicate = 348**.", "open", 38),
-    "enumeration: reads each pair",
-  );
-  assert(
-    has("Ledger: **306 fixed / 38 open / 3 declined / 1 duplicate = 348**.", "total", 348),
-    "enumeration: reads the = total",
-  );
-  assert(
-    has("**38 open** · 0 blocked · 306 fixed · 3 declined", "fixed", 306),
-    "enumeration: FINDINGS.md header shape",
-  );
-  assert(
-    has("| open | **38** |\n| **Total** | **348** |", "open", 38),
-    "status table with a Total row",
-  );
-  assert(has("the ledger holds\n348 records", "total", 348), '"N records" near a ledger mention');
-
-  // The false positives that made a looser version unusable.
-  assert(
-    c("The 45 open P1 rows are tracked in the register.").length === 0,
-    'a lone "45 open" is not a ledger claim',
-  );
-  assert(
-    c("| All 8 findings F1-F8 closed |").length === 0,
-    "a different register is not a ledger claim",
-  );
-  assert(
-    c("| `golangci-lint` | claimed broken (G-05) | G-05 **refuted** |").length === 0,
-    '"G-05 refuted" is an id, not a count',
-  );
-  assert(c('`tools/mcp-introspect/package.json` (`">=20"`)').length === 0, '">=20" is not a count');
-  assert(
-    c('go build -ldflags "-X main.version=1.2.0-alpha.3"').length === 0,
-    "a version string is not a count",
-  );
-  assert(c("11 medium, 27 low").length === 0, "severities are not statuses");
-  assert(c("22 sit under Client/").length === 0, "a bare number is not a claim");
-  assert(
-    c("348 records in some unrelated table").length === 0,
-    '"N records" without ledger context is ignored',
-  );
-
-  console.log(
-    failed ? `\nselftest: ${failed} assertion(s) failed` : "\nselftest: all assertions pass",
-  );
-  process.exit(failed ? 1 : 0);
-}
-
-if (process.argv.includes("--selftest")) selftest();
-else main();
+if (invokedDirectly) main();

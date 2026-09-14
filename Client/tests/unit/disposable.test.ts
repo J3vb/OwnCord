@@ -101,35 +101,6 @@ describe("Disposable", () => {
     });
   });
 
-  // ── onInterval ─────────────────────────────────────────
-
-  describe("onInterval", () => {
-    it("registers an interval that fires on schedule", () => {
-      const d = new Disposable();
-      const fn = vi.fn();
-      d.onInterval(fn, 1000);
-
-      vi.advanceTimersByTime(3000);
-      expect(fn).toHaveBeenCalledTimes(3);
-
-      d.destroy();
-    });
-
-    it("clears interval on destroy", () => {
-      const d = new Disposable();
-      const fn = vi.fn();
-      d.onInterval(fn, 1000);
-
-      vi.advanceTimersByTime(2000);
-      expect(fn).toHaveBeenCalledTimes(2);
-
-      d.destroy();
-
-      vi.advanceTimersByTime(5000);
-      expect(fn).toHaveBeenCalledTimes(2); // no further calls
-    });
-  });
-
   // ── destroy ────────────────────────────────────────────
 
   describe("destroy", () => {

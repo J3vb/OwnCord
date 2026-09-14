@@ -45,19 +45,16 @@ export function attachDiagnosticListeners(room: Room): void {
  * connection on first read when none exists yet, a side effect a passive
  * diagnostic must never trigger.
  */
-function getIceTransports(room: Room): Array<{
-  label: "subscriber" | "publisher";
-  transport: NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
-}> {
+type IceTransport = NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
+
+function getIceTransports(
+  room: Room,
+): Array<{ label: "subscriber" | "publisher"; transport: IceTransport }> {
   const pcManager = room.engine?.pcManager;
-  const transports: Array<{
-    label: "subscriber" | "publisher";
-    transport: NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
-  }> = [];
-  if (!pcManager) return transports;
-  if (pcManager.subscriber)
+  const transports: Array<{ label: "subscriber" | "publisher"; transport: IceTransport }> = [];
+  if (pcManager?.subscriber)
     transports.push({ label: "subscriber", transport: pcManager.subscriber });
-  if (pcManager.publisher) transports.push({ label: "publisher", transport: pcManager.publisher });
+  if (pcManager?.publisher) transports.push({ label: "publisher", transport: pcManager.publisher });
   return transports;
 }
 

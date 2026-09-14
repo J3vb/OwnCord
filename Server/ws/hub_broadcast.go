@@ -260,14 +260,9 @@ func (h *Hub) DisconnectUser(userID int64) {
 // 401 that tells it to sign in again. No-op if the user is not connected.
 //
 // This inspects h.clients at one instant, so a revocation landing while a
-// connection's handshake is still in flight (registered nowhere yet — a
-// handshake can spend real DB time in computeAllowedChannels,
-// computeReadableChannels, cold-tier replay queries, or buildReady's own
-// queries before registerNow runs) finds nothing to kick here. That window
-// is closed on the other side instead: postRegisterSessionRecheck
-// (hub_registry.go) re-validates the session immediately after registerNow,
-// from both production callers (handleFreshConnect, reconnectRegister), so
-// either this call or that recheck catches any given revocation (OC-0423).
+// connection's handshake is still in flight finds nothing to kick here. That
+// window is closed on the other side instead, by postRegisterSessionRecheck
+// (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
@@ -340,9 +335,9 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 
 // SendToUserLow sends a low-priority message to a specific user. Unlike
 // SendToUserHigh, an overflow is silently dropped rather than disconnecting
-// the client — the targeted-delivery sibling of BroadcastToAllLow /
-// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
-// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+// the client — the targeted-delivery sibling of broadcastExcludeLow, for
+// events (e.g. DM typing indicators) that need direct-to-user routing but
+// are ephemeral and safely droppable (OC-0260).
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
@@ -352,14 +347,6 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	}
 	c.sendLowMsg(msg)
 	return true
-}
-
-// BroadcastToAllLow enqueues a low-priority global broadcast.
-// Low-priority messages are silently dropped if a client's buffer is full.
-func (h *Hub) BroadcastToAllLow(msg []byte) {
-	// Low-priority global broadcasts bypass the sequenced broadcast channel
-	// and go directly through pub/sub — they don't need replay or seq numbering.
-	h.pubsub.PublishGlobalLow(msg)
 }
 
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
@@ -406,9 +393,13 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay
 		// buffer as a number no client ever saw live, and since clients ack
-		// only max(seq), it could never be requested back.
+		// only max(seq), it could never be requested back. The limit is a
+		// sliding 1s window via the shared auth.RateLimiter (the deleted
+		// TopicRateLimiter was a token bucket with a full refill at each
+		// window boundary — sliding is stricter on boundary-straddling
+		// bursts, the same sustained rate).
 		if bm.recipients == nil && bm.channelID != 0 {
-			if !h.topicLimiter.Allow(ChannelTopic(bm.channelID)) {
+			if !h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
 				slog.Warn("hub: topic rate limit exceeded, dropping message",
 					"channel_id", bm.channelID)
 				return 0, 0, false

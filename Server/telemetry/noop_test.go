@@ -25,7 +25,6 @@ func TestNoopProvider_TracerAndSpanAreInert(t *testing.T) {
 	ctx, span := tracer.Start(context.Background(), "op",
 		telemetry.String("s", "v"),
 		telemetry.Int64("i", 7),
-		telemetry.Float64("f", 1.5),
 	)
 	if ctx == nil {
 		t.Fatal("Start returned a nil context")
@@ -76,7 +75,6 @@ func TestAttrConstructors(t *testing.T) {
 	}{
 		{"String", telemetry.String("s", "v"), "s", "v"},
 		{"Int64", telemetry.Int64("i", 7), "i", int64(7)},
-		{"Float64", telemetry.Float64("f", 1.5), "f", 1.5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

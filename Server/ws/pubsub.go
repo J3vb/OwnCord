@@ -163,9 +163,10 @@ func (ps *PubSub) UnsubscribeAll(client *Client) {
 	}
 }
 
-// Priority levels for pub/sub delivery.
+// Priority levels for pub/sub delivery. DMs and direct mentions go through
+// Hub.SendToUserHigh -> Client.sendHighMsg directly, not through PubSub, so
+// there is no PriorityHigh here.
 const (
-	PriorityHigh   = 0 // DMs, direct mentions — drained first by writePump
 	PriorityNormal = 1 // chat messages, reactions, channel events
 	PriorityLow    = 2 // typing indicators, presence updates — dropped on overflow
 )
@@ -182,12 +183,6 @@ func (ps *PubSub) Publish(topic Topic, msg []byte, excludeUserID int64) int {
 // in, which is exactly what would go stale across a concurrent reconnect.
 func (ps *PubSub) PublishFiltered(topic Topic, msg []byte, allow func(userID int64) bool) int {
 	return ps.publishWithPriority(topic, msg, 0, PriorityNormal, allow)
-}
-
-// PublishHigh sends msg at high priority (DMs, mentions).
-// High-priority messages are drained before normal/low by writePump.
-func (ps *PubSub) PublishHigh(topic Topic, msg []byte, excludeUserID int64) int {
-	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityHigh, nil)
 }
 
 // PublishLow sends msg at low priority (typing, presence).
@@ -230,9 +225,6 @@ func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int
 	delivered := 0
 	for _, c := range clients {
 		switch priority {
-		case PriorityHigh:
-			c.sendHighMsg(msg)
-			delivered++
 		case PriorityLow:
 			c.sendLowMsg(msg)
 			delivered++ // count attempt, even if dropped

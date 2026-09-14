@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -36,16 +35,7 @@ func getPermChannel(channels *service.ChannelService, w http.ResponseWriter, r *
 // Unlike writeChannelErr it passes the service's NotFound text through —
 // the override paths distinguish "role not found" from "user not found".
 func writeOverrideErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel permission action failed")
-	}
+	writeSvcErr(w, err, "", "", "channel permission action failed")
 }
 
 // applyOverrideResult runs the post-mutation fan-out: cached-permission

@@ -11,7 +11,6 @@ import {
   updateReaction,
   addOptimisticReaction,
   rollbackReaction,
-  addPendingSend,
   confirmSend,
   addOptimisticMessage,
   markSendFailed,
@@ -20,7 +19,6 @@ import {
   isChannelLoaded,
   hasMoreMessages,
   isWindowDetached,
-  clearChannelMessages,
   setChannelLoading,
   setChannelLoadError,
   getHistoryLoadState,
@@ -37,6 +35,39 @@ import type {
   MessageUser,
   Attachment,
 } from "../../src/lib/types";
+
+// addPendingSend and clearChannelMessages were removed from the store (dead
+// exports, zero src callers); tests keep using the identical observable-state
+// writes via setState.
+function addPendingSend(correlationId: string, channelId: number): void {
+  messagesStore.setState((prev) => ({
+    ...prev,
+    pendingSends: new Map(prev.pendingSends).set(correlationId, channelId),
+  }));
+}
+
+function clearChannelMessages(channelId: number): void {
+  messagesStore.setState((prev) => {
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.delete(channelId);
+    const updatedLoaded = new Set(prev.loadedChannels);
+    updatedLoaded.delete(channelId);
+    const updatedHasMore = new Map(prev.hasMore);
+    updatedHasMore.delete(channelId);
+    const updatedLoadState = new Map(prev.historyLoadState);
+    updatedLoadState.delete(channelId);
+    const updatedDetached = new Set(prev.detachedChannels);
+    updatedDetached.delete(channelId);
+    return {
+      ...prev,
+      messagesByChannel: updatedMessages,
+      loadedChannels: updatedLoaded,
+      hasMore: updatedHasMore,
+      historyLoadState: updatedLoadState,
+      detachedChannels: updatedDetached,
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -727,7 +758,6 @@ describe("messages store", () => {
     });
 
     it("confirmSend is a no-op for unknown correlationId", () => {
-      const before = messagesStore.getState();
       confirmSend("unknown", 100, "2026-03-15T10:00:00Z");
       const after = messagesStore.getState();
       // State still changes (new Map created), but pending size is 0

@@ -742,33 +742,3 @@ func TestRegistry_InstallFromZip_InvalidArchive(t *testing.T) {
 		t.Error("InstallFromZip accepted a non-zip payload")
 	}
 }
-
-// ─── bytesReaderAt ──────────────────────────────────────────────────────────
-
-func TestBytesReaderAt(t *testing.T) {
-	data := bytesReaderAt("hello world")
-
-	buf := make([]byte, 5)
-	n, err := data.ReadAt(buf, 0)
-	if err != nil || n != 5 || string(buf) != "hello" {
-		t.Errorf("ReadAt(0) = (%d, %v, %q), want (5, nil, \"hello\")", n, err, buf)
-	}
-
-	// A short read at the tail reports io.EOF alongside the bytes it managed
-	// to copy, which is what archive/zip expects.
-	tail := make([]byte, 10)
-	n, err = data.ReadAt(tail, 6)
-	if n != 5 || err == nil {
-		t.Errorf("ReadAt(6) = (%d, %v), want (5, io.EOF)", n, err)
-	}
-	if string(tail[:n]) != "world" {
-		t.Errorf("tail = %q, want %q", tail[:n], "world")
-	}
-
-	if _, err := data.ReadAt(buf, -1); err == nil {
-		t.Error("ReadAt with a negative offset succeeded; want io.EOF")
-	}
-	if _, err := data.ReadAt(buf, 999); err == nil {
-		t.Error("ReadAt past the end succeeded; want io.EOF")
-	}
-}

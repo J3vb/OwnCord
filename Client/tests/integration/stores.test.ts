@@ -12,7 +12,16 @@ import { wireDispatcher } from "@lib/dispatcher";
 // ── Stores ──────────────────────────────────────────────────────────
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
-import { messagesStore, addPendingSend, addMessage } from "@stores/messages.store";
+import { messagesStore, addMessage } from "@stores/messages.store";
+
+// addPendingSend was removed from the store (dead export, zero src callers);
+// tests keep using the identical observable-state write via setState.
+function addPendingSend(correlationId: string, channelId: number): void {
+  messagesStore.setState((prev) => ({
+    ...prev,
+    pendingSends: new Map(prev.pendingSends).set(correlationId, channelId),
+  }));
+}
 import { voiceStore } from "@stores/voice.store";
 import { authStore, setAuth } from "@stores/auth.store";
 import { dmStore } from "@stores/dm.store";

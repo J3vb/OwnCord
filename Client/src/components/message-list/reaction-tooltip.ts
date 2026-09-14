@@ -25,6 +25,9 @@ export const REACTION_TOOLTIP_DEBOUNCE_MS = 300;
 /** How many names are spelled out before collapsing into "and N others". */
 const MAX_NAMES = 3;
 
+/** "A, B and C" — no Oxford comma, matching the existing phrasing. */
+const listFormatter = new Intl.ListFormat("en-GB", { type: "conjunction" });
+
 // ---------------------------------------------------------------------------
 // Fetcher injection
 // ---------------------------------------------------------------------------
@@ -168,8 +171,7 @@ export function formatReactorNames(
   if (others > 0) {
     return `${shown.join(", ")} and ${others} ${others === 1 ? "other" : "others"}`;
   }
-  if (shown.length === 1) return shown[0]!;
-  return `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]!}`;
+  return listFormatter.format(shown);
 }
 
 // ---------------------------------------------------------------------------

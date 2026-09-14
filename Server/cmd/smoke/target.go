@@ -117,7 +117,7 @@ func newStandaloneTarget(oldBin, newBin string) (*standaloneTarget, error) {
 }
 
 func (t *standaloneTarget) start(version string) error {
-	bin, err := t.binary(version)
+	bin, err := pickVersion(version, t.oldBin, t.newBin)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func (t *standaloneTarget) archive(dir string) error {
 	if err := tightenModes(filepath.Join(dir, "data")); err != nil {
 		return fmt.Errorf("archiving the data directory: %w", err)
 	}
-	if err := copyFile(filepath.Join(t.dir, "config.yaml"), filepath.Join(dir, "config.yaml")); err != nil {
+	if err := copyFile(filepath.Join(t.dir, "config.yaml"), filepath.Join(dir, "config.yaml"), 0o600); err != nil {
 		return fmt.Errorf("archiving config.yaml: %w", err)
 	}
 	return nil
@@ -206,7 +206,7 @@ func (t *standaloneTarget) restore(dir string) error {
 	if err := tightenModes(live); err != nil {
 		return fmt.Errorf("restoring the data directory: %w", err)
 	}
-	if err := copyFile(filepath.Join(dir, "config.yaml"), filepath.Join(t.dir, "config.yaml")); err != nil {
+	if err := copyFile(filepath.Join(dir, "config.yaml"), filepath.Join(t.dir, "config.yaml"), 0o600); err != nil {
 		return fmt.Errorf("restoring config.yaml: %w", err)
 	}
 	return nil
@@ -250,21 +250,27 @@ func (t *standaloneTarget) cleanup() {
 	}
 }
 
-func (t *standaloneTarget) binary(version string) (string, error) {
+// pickVersion resolves the "old"/"new" label the phases speak to the artefact
+// that label names on this leg — a binary for the standalone target, an image
+// for the container one.
+func pickVersion(version, old, next string) (string, error) {
 	switch version {
 	case "old":
-		return t.oldBin, nil
+		return old, nil
 	case "new":
-		return t.newBin, nil
+		return next, nil
 	}
 	return "", fmt.Errorf("unknown version %q, want \"old\" or \"new\"", version)
 }
 
-// copyFile is 0o600 because config.yaml holds the server's secrets.
-func copyFile(src, dst string) error {
+// copyFile copies src to dst at mode. 0o600 for the standalone leg, whose
+// config.yaml holds the server's secrets; 0o644 for the container leg's
+// bind-mounted one, which has to stay readable by uid 65532.
+func copyFile(src, dst string, mode os.FileMode) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0o600)
+	//nolint:gosec // G306: the caller picks the mode; see the doc comment
+	return os.WriteFile(dst, data, mode)
 }

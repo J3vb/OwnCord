@@ -1,37 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  escapeHtml,
-  createElement,
-  setText,
-  appendChildren,
-  clearChildren,
-  qs,
-  qsa,
-} from "../../src/lib/dom";
-
-describe("escapeHtml", () => {
-  it("escapes all HTML special characters", () => {
-    expect(escapeHtml('<script>alert("xss")</script>')).toBe(
-      "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;",
-    );
-  });
-
-  it("escapes ampersands", () => {
-    expect(escapeHtml("foo & bar")).toBe("foo &amp; bar");
-  });
-
-  it("escapes single quotes", () => {
-    expect(escapeHtml("it's")).toBe("it&#039;s");
-  });
-
-  it("returns empty string unchanged", () => {
-    expect(escapeHtml("")).toBe("");
-  });
-
-  it("leaves safe text unchanged", () => {
-    expect(escapeHtml("Hello world 123")).toBe("Hello world 123");
-  });
-});
+import { createElement, setText, appendChildren, clearChildren, qs } from "../../src/lib/dom";
 
 describe("createElement", () => {
   it("creates an element with the given tag", () => {
@@ -119,7 +87,7 @@ describe("clearChildren", () => {
   });
 });
 
-describe("qs and qsa", () => {
+describe("qs", () => {
   it("qs finds element by selector", () => {
     const container = document.createElement("div");
     const child = document.createElement("span");
@@ -145,23 +113,5 @@ describe("qs and qsa", () => {
     const other = document.createElement("div");
     expect(qs(".scoped", other)).toBeNull();
     expect(qs(".scoped", parent)).toBe(child);
-  });
-
-  it("qsa returns array of matches", () => {
-    const container = document.createElement("div");
-    container.innerHTML = ""; // intentionally empty
-    const a = document.createElement("span");
-    a.className = "item";
-    const b = document.createElement("span");
-    b.className = "item";
-    container.appendChild(a);
-    container.appendChild(b);
-    document.body.appendChild(container);
-
-    const results = qsa(".item", container);
-    expect(results).toHaveLength(2);
-    expect(Array.isArray(results)).toBe(true);
-
-    document.body.removeChild(container);
   });
 });

@@ -863,44 +863,6 @@ func TestGetCachedSettings_CacheMiss_DoubleCheck(t *testing.T) {
 	}
 }
 
-// ─── parseChannelID error paths ───────────────────────────────────────────────
-
-func TestParseChannelID_ValidPayload(t *testing.T) {
-	raw := json.RawMessage(`{"channel_id": 42}`)
-	id, err := ws.ParseChannelIDForTest(raw)
-	if err != nil {
-		t.Fatalf("ParseChannelIDForTest: %v", err)
-	}
-	if id != 42 {
-		t.Errorf("channel_id = %d, want 42", id)
-	}
-}
-
-func TestParseChannelID_InvalidJSON(t *testing.T) {
-	raw := json.RawMessage(`NOT JSON`)
-	_, err := ws.ParseChannelIDForTest(raw)
-	if err == nil {
-		t.Error("expected error for invalid JSON, got nil")
-	}
-}
-
-func TestParseChannelID_NonIntegerChannelID(t *testing.T) {
-	raw := json.RawMessage(`{"channel_id": "not-a-number"}`)
-	_, err := ws.ParseChannelIDForTest(raw)
-	if err == nil {
-		t.Error("expected error for non-integer channel_id, got nil")
-	}
-}
-
-func TestParseChannelID_MissingField(t *testing.T) {
-	// Missing channel_id field — json.Number.Int64 on zero value returns 0, no error.
-	raw := json.RawMessage(`{}`)
-	id, err := ws.ParseChannelIDForTest(raw)
-	if err == nil && id != 0 {
-		t.Errorf("expected id=0 for missing channel_id, got %d", id)
-	}
-}
-
 // ─── buildJSON error fallback path ────────────────────────────────────────────
 
 func TestBuildJSON_ValidValue_ReturnsJSON(t *testing.T) {

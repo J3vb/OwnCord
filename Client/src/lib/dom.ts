@@ -3,19 +3,6 @@
 // All user content must go through these helpers.
 
 /**
- * Escape HTML special characters to prevent XSS.
- * Use this when building HTML strings that include user data.
- */
-export function escapeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-/**
  * Create an element with optional attributes and text content.
  * Text is set via textContent (safe from XSS).
  */
@@ -81,11 +68,4 @@ export function qs<K extends keyof HTMLElementTagNameMap>(
 export function qs(selector: string, parent?: Element): Element | null;
 export function qs(selector: string, parent?: Element): Element | null {
   return (parent ?? document).querySelector(selector);
-}
-
-/**
- * Query all matching elements as an array.
- */
-export function qsa(selector: string, parent?: Element): Element[] {
-  return Array.from((parent ?? document).querySelectorAll(selector));
 }

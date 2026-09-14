@@ -51,16 +51,9 @@ func (h *Hub) handleReconnect(
 	// also gates the ChannelTopic subscription in registerNow and would leak
 	// the channel's chat to a user who cannot read it.
 	//
-	// old is nil on almost every ORDINARY reconnect, not just a rare race:
-	// readPump's own disconnect-teardown defer (unregisterNow, then
-	// handleVoiceLeave) has already deleted h.clients[userID] and broadcast
-	// the room's own voice_leave by the time the server observes the new
-	// socket and gets here. liveVoiceChID would then stay 0 and this whole
-	// supplement would be skipped — exactly when the resuming client most
-	// needs that voice_leave, since it is the only frame that runs the
-	// client's VOICE_LEAVE dispatch and tears down its local voice UI
-	// (OC-0428). See liveVoiceEventsSinceForUser below for the fallback used
-	// when old is nil.
+	// old is nil on almost every ORDINARY reconnect, not just a rare race, so
+	// it is hoisted here for the liveVoiceChID == 0 fallback further down:
+	// liveVoiceEventsSinceForUser (OC-0428), whose doc explains why.
 	var liveVoiceChID int64
 	old := h.GetClient(c.userID)
 	if old != nil {
@@ -126,15 +119,11 @@ func (h *Hub) handleReconnect(
 	}
 
 	// OC-0423: reconnectRegister just made c reachable via h.clients, so this
-	// is the earliest point a sign-out-everywhere / account-recovery
-	// revocation racing reconnectPrecheck's DB work could have found this
-	// socket — DisconnectRevokedUser inspects h.clients at one instant, and
-	// a revocation landing before registerNow ran kicked nothing. Re-read
-	// the session now (see postRegisterSessionRecheck's doc for why this
-	// ordering closes the race). Deliberately outside reconnectRegister's
-	// h.seqMu section: it only needs to run after that section's
-	// registerNow, and a DB round trip has no business extending the
-	// critical section that serializes every broadcast.
+	// is the earliest point a revocation racing reconnectPrecheck's DB work
+	// could have found this socket — see postRegisterSessionRecheck's doc.
+	// Deliberately outside reconnectRegister's h.seqMu section: it only needs
+	// to run after that section's registerNow, and a DB round trip has no
+	// business extending the critical section that serializes every broadcast.
 	if h.postRegisterSessionRecheck(ctx, c) {
 		// Mirrors reconnectWriteReplay's own handshake-failure path below:
 		// the teardown already ran (inside postRegisterSessionRecheck), so
@@ -170,15 +159,11 @@ func (h *Hub) handleReconnect(
 	case liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID]:
 		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
 	case old == nil:
-		// OC-0428: no still-registered old *Client to source the room from —
-		// the ordinary case, since readPump's own disconnect-teardown defer
-		// has almost always already run by the time we get here. That
-		// teardown's own voice_leave already has a seq and sits in the ring
-		// buffer/cold tier tagged with the room's channel ID, which this
-		// branch does not know in advance, so it scans by the resuming
-		// user's OWN id instead of by channel. A frame whose channel IS in
-		// allowedChannelIDs is skipped here — the main replay above already
-		// carries it, and re-adding it would duplicate the frame on the wire.
+		// OC-0428: no still-registered old *Client to source the room from,
+		// so scan by the resuming user's OWN id instead of by channel. A
+		// frame whose channel IS in allowedChannelIDs is skipped — the main
+		// replay above already carries it, and re-adding it would duplicate
+		// the frame on the wire.
 		for _, evt := range h.liveVoiceEventsSinceForUser(ctx, lastSeq, c.userID) {
 			if !allowedChannelIDs[payloadChannelID(evt)] {
 				events = append(events, evt)
@@ -668,9 +653,6 @@ func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, 
 				filtered = append(filtered, evt)
 			}
 		}
-	}
-	if len(filtered) == 0 {
-		return nil
 	}
 	return filtered
 }

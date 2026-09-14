@@ -16,9 +16,9 @@
  * shown as its own option rather than being silently rounded to a neighbour.
  */
 
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { getKnownCategories } from "@stores/channels.store";
 
@@ -159,19 +159,9 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
   } = options;
   const isVoice = channelType === "voice";
   const ac = new AbortController();
-  let overlay: HTMLDivElement | null = null;
-  let restoreFocus: (() => void) | null = null;
+  let instance: ModalInstance | null = null;
 
   function mount(container: Element): void {
-    overlay = createElement("div", {
-      class: "modal-overlay visible",
-      "data-testid": "edit-channel-modal",
-    });
-
-    const modal = createElement("div", { class: "modal" });
-    applyDialogSemantics(modal, { labelledBy: "edit-channel-title" });
-    trapFocus(modal, ac.signal);
-
     // Header
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", { id: "edit-channel-title" }, "Edit Channel");
@@ -387,14 +377,28 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
 
     appendChildren(footer, cancelBtn, saveBtn);
-    appendChildren(modal, header, body, footer);
-    overlay.appendChild(modal);
+
+    // Overlay/modal shell, dialog semantics, focus trap and focus
+    // save/restore all come from the shared factory; only the backdrop and
+    // Escape wiring stay here, since this component's onClose is decoupled
+    // from destroy() (see the caller's onClose, which calls destroy()).
+    instance = createModal(
+      {
+        content: header,
+        closeOnBackdrop: false,
+        closeOnEscape: false,
+        overlayAttrs: { "data-testid": "edit-channel-modal" },
+        ariaLabelledBy: "edit-channel-title",
+      },
+      container,
+    );
+    appendChildren(instance.modal, body, footer);
 
     // Close on backdrop click
-    overlay.addEventListener(
+    instance.overlay.addEventListener(
       "click",
       (e) => {
-        if (e.target === overlay) {
+        if (e.target === instance?.overlay) {
           onClose();
         }
       },
@@ -407,18 +411,12 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) {
+        if (e.key === "Escape" && instance?.overlay.isConnected === true) {
           onClose();
         }
       },
       { signal: ac.signal },
     );
-
-    container.appendChild(overlay);
-
-    // Capture where focus came from before anything inside the dialog takes
-    // it, so destroy() can hand it back to the opener.
-    restoreFocus = focusDialog(modal);
 
     nameInput.focus();
     nameInput.select();
@@ -426,15 +424,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
 
   function destroy(): void {
     ac.abort();
-    if (overlay !== null) {
-      overlay.remove();
-      overlay = null;
-    }
-    // Every close path (X, Cancel, backdrop, Escape) funnels through the
-    // caller's onClose, which calls destroy() — the single place focus
-    // returns to the opener.
-    restoreFocus?.();
-    restoreFocus = null;
+    instance?.destroy();
+    instance = null;
   }
 
   return { mount, destroy };

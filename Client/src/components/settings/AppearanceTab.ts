@@ -6,7 +6,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
 import { setTheme } from "@stores/ui.store";
-import { getActiveThemeName, loadCustomTheme, restoreTheme } from "@lib/themes";
+import { getActiveThemeName, restoreTheme } from "@lib/themes";
 import {
   applyFontSize,
   effectiveFontSize,
@@ -17,12 +17,7 @@ import {
 const FALLBACK_ACCENT = "#5865f2";
 
 function getDefaultAccent(themeName: string): string {
-  if (themeName === "neon-glow") return "#00c8ff";
-  if (themeName in THEMES) return FALLBACK_ACCENT;
-
-  const customTheme = loadCustomTheme(themeName);
-  const accent = customTheme?.colors["--accent"];
-  return typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent) ? accent : FALLBACK_ACCENT;
+  return themeName === "neon-glow" ? "#00c8ff" : FALLBACK_ACCENT;
 }
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {

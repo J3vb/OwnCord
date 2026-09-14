@@ -14,6 +14,7 @@ package plugin
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -249,7 +250,7 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 	if int64(len(zipBytes)) > maxZipBytes {
 		return "", fmt.Errorf("plugin zip exceeds %d bytes", maxZipBytes)
 	}
-	zr, err := zip.NewReader(bytesReaderAt(zipBytes), int64(len(zipBytes)))
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	if err != nil {
 		return "", fmt.Errorf("invalid zip: %w", err)
 	}
@@ -549,22 +550,6 @@ func (r *Registry) installZipReactivate(ctx context.Context, name string) {
 	r.mu.Unlock()
 	slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
 		"name", name)
-}
-
-// bytesReaderAt is a tiny wrapper that satisfies io.ReaderAt for a byte
-// slice. archive/zip needs ReaderAt; bytes.Reader provides it but importing
-// "bytes" alongside the existing "io" surface keeps the import block tight.
-type bytesReaderAt []byte
-
-func (b bytesReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	if off < 0 || off >= int64(len(b)) {
-		return 0, io.EOF
-	}
-	n := copy(p, b[off:])
-	if n < len(p) {
-		return n, io.EOF
-	}
-	return n, nil
 }
 
 // activateAll attempts to compile + register host-API hooks for every plugin

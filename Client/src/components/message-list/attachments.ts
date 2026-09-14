@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
+import { formatByteSize } from "@lib/connectionStats";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
@@ -74,9 +75,7 @@ export function resolveServerUrl(url: string): string {
 // -- Helpers ------------------------------------------------------------------
 
 export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return formatByteSize(bytes, 1024, "KB", 1);
 }
 
 /** Strip any `; codecs=…` parameters and normalise case before matching. */

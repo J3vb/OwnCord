@@ -6,14 +6,10 @@
 import { createStore } from "@lib/store";
 
 export interface UiState {
-  readonly sidebarCollapsed: boolean;
-  readonly memberListVisible: boolean;
   readonly settingsOpen: boolean;
-  readonly activeModal: string | null;
   readonly theme: "dark" | "neon-glow" | "midnight" | "light";
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
-  readonly persistentError: string | null;
   /**
    * Host of a server that refused this client's protocol epoch as too old.
    * main.ts consumes it when the connect page mounts, to offer the update
@@ -26,14 +22,10 @@ export interface UiState {
 }
 
 const INITIAL_STATE: UiState = {
-  sidebarCollapsed: false,
-  memberListVisible: true,
   settingsOpen: false,
-  activeModal: null,
   theme: "neon-glow",
   connectionStatus: "disconnected",
   transientError: null,
-  persistentError: null,
   updateRequiredHost: null,
   collapsedCategories: new Set(),
   sidebarMode: "channels",
@@ -41,22 +33,6 @@ const INITIAL_STATE: UiState = {
 };
 
 export const uiStore = createStore<UiState>(INITIAL_STATE);
-
-/** Toggle sidebar collapsed state. */
-export function toggleSidebar(): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    sidebarCollapsed: !prev.sidebarCollapsed,
-  }));
-}
-
-/** Toggle member list visibility. */
-export function toggleMemberList(): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    memberListVisible: !prev.memberListVisible,
-  }));
-}
 
 /** Open the settings panel. */
 export function openSettings(): void {
@@ -71,22 +47,6 @@ export function closeSettings(): void {
   uiStore.setState((prev) => ({
     ...prev,
     settingsOpen: false,
-  }));
-}
-
-/** Open a named modal. */
-export function openModal(name: string): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    activeModal: name,
-  }));
-}
-
-/** Close the active modal. */
-export function closeModal(): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    activeModal: null,
   }));
 }
 
@@ -117,13 +77,6 @@ export function setTransientError(msg: string | null): void {
 /** Set a persistent error message that requires user action. */
 export function setUpdateRequiredHost(host: string | null): void {
   uiStore.setState((prev) => ({ ...prev, updateRequiredHost: host }));
-}
-
-export function setPersistentError(msg: string | null): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    persistentError: msg,
-  }));
 }
 
 // ---------------------------------------------------------------------------

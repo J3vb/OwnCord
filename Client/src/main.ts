@@ -21,7 +21,6 @@ import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
 import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
-import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { MountableComponent } from "@lib/safe-render";
@@ -43,6 +42,7 @@ import { createCertMismatchModal, createCertFirstUseModal } from "@components/Ce
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
+import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 
@@ -61,7 +61,6 @@ const log = createLogger("main");
 // lazily so it stays out of the startup path. When a voice session exists the
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
-
 function voiceSessionLeave(sendWsLeave: boolean): void {
   void import("@lib/livekitSession")
     .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
@@ -352,11 +351,12 @@ function runHealthChecks(
 
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
-const navGuard = createNavigationGuard();
+let navGeneration = 0;
 
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
-  const isCurrentNavigation = navGuard.begin();
+  const thisNavigation = ++navGeneration;
+  const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
   log.info("Navigating to page", { pageId });
   // Destroy previous page
   currentPage?.destroy?.();
@@ -590,6 +590,30 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       persistProfiles();
     }
 
+    // Shared tail of both login paths: branch to the 2FA challenge, or wire the
+    // session. Structural rather than duplicated, so the saved-password path
+    // cannot drift from the typed-password one. `password` is undefined on the
+    // saved-password path — the plaintext never leaves the credential store,
+    // and save_credential preserves it when none is supplied.
+    function completeLogin(
+      host: string,
+      username: string,
+      result: AuthResponse,
+      password?: string,
+    ): void {
+      if (result.requires_2fa) {
+        pendingTotpHost = host;
+        pendingTotpPartialToken = result.partial_token ?? "";
+        pendingTotpUsername = username;
+        connectPage.showTotp();
+        return;
+      }
+      if (!result.token) return;
+      const remember = connectPage.getRememberPassword();
+      ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
+      wirePostAuth(host, result.token, username, remember ? password : undefined, remember, true);
+    }
+
     const connectPage = createConnectPage(
       {
         async onLogin(host, username, password) {
@@ -599,19 +623,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           const result = await api.login(username, password);
           attempt.assertCurrent();
           pageOwner.assertCurrent();
-          if (result.requires_2fa) {
-            pendingTotpHost = host;
-            pendingTotpPartialToken = result.partial_token ?? "";
-            pendingTotpUsername = username;
-            connectPage.showTotp();
-            return;
-          }
-          if (result.token) {
-            const remember = connectPage.getRememberPassword();
-            const savedPassword = remember ? password : undefined;
-            ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-            wirePostAuth(host, result.token, username, savedPassword, remember, true);
-          }
+          completeLogin(host, username, result, password);
         },
         async onLoginWithSavedPassword(host, username) {
           api.endSession();
@@ -629,9 +641,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
               "Saved-password login is unavailable here — please type your password.",
             );
           }
-          // From here the flow is identical to onLogin: the 2FA union and the
-          // token are read off the same AuthResponse shape, so the saved-password
-          // path cannot drift from the typed-password path.
+          // The relayed body is the same AuthResponse shape api.login returns,
+          // so from here the flow is literally the typed-password one.
           let result;
           try {
             result = parseRelayedLogin(relayed);
@@ -643,20 +654,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             }
             throw err;
           }
-          if (result.requires_2fa) {
-            pendingTotpHost = host;
-            pendingTotpPartialToken = result.partial_token ?? "";
-            pendingTotpUsername = username;
-            connectPage.showTotp();
-            return;
-          }
-          if (result.token) {
-            const remember = connectPage.getRememberPassword();
-            ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-            // No password passed: it never left the credential store, and
-            // save_credential preserves it.
-            wirePostAuth(host, result.token, username, undefined, remember, true);
-          }
+          completeLogin(host, username, result);
         },
         async onRegister(host, username, password, inviteCode) {
           api.endSession();

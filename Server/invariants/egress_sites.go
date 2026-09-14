@@ -51,7 +51,7 @@ var EgressAllow = map[string]EgressEntry{
 		"downloads the pinned, checksum-verified livekit-server binary once",
 		[]string{"fetchLimited", "downloadTo"}},
 	"ws/livekit.go": {"config", "voice.livekit_url (ws://localhost:7880 by default; a remote LiveKit when the operator points it there)", "voice.livekit_url",
-		"the room-service client behind RemoveParticipant, GetParticipant, MutePublishedTrack, ListParticipants and ListRooms; the SDK builds its own *http.Client, so only its construction is syntactically visible here",
+		"the room-service client behind UpdateParticipant, RemoveParticipant and ListRooms; the SDK builds its own *http.Client, so only its construction is syntactically visible here",
 		[]string{"NewLiveKitClient"}},
 	"ws/livekit_process.go": {"config", "voice.livekit_url (ws://localhost:7880 by default; a remote LiveKit when the operator points it there)", "voice.livekit_url",
 		"health probes of the LiveKit process; loopback under the default, the operator's LiveKit host otherwise",

@@ -78,16 +78,7 @@ type memberUnbanBroadcaster interface {
 
 // writeModerationErr maps ModerationService errors onto admin API responses.
 func writeModerationErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation action failed")
-	}
+	writeSvcErr(w, err, "user not found", "", "moderation action failed")
 }
 
 // patchUserPrecheck resolves and validates the target of a

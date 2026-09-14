@@ -64,14 +64,10 @@ const VOICE_INITIAL: VoiceState = {
 };
 
 const UI_INITIAL: UiState = {
-  sidebarCollapsed: false,
-  memberListVisible: true,
   settingsOpen: false,
-  activeModal: null,
   theme: "dark",
   connectionStatus: "disconnected",
   transientError: null,
-  persistentError: null,
   updateRequiredHost: null,
   collapsedCategories: new Set(),
   sidebarMode: "channels",

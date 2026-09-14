@@ -55,16 +55,11 @@ func handleIssueRecoveryCredential(authSvc *service.AuthService) http.HandlerFun
 }
 
 func writeRecoveryErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	case errors.Is(err, service.ErrRateLimited):
+	// ErrRateLimited has no equivalent in writeSvcErr's four cases, so it is
+	// checked first and everything else falls through to the shared mapper.
+	if errors.Is(err, service.ErrRateLimited) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to issue the recovery credential")
+		return
 	}
+	writeSvcErr(w, err, "", "", "failed to issue the recovery credential")
 }

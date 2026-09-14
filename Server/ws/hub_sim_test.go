@@ -57,12 +57,17 @@ package ws_test
 // steps. A failure prints the seed, the step, a ready-to-paste replay line
 // and the last steps.
 //
-// Determinism: the step sequence, every seq allocation (the topic limiter is
-// frozen to a per-channel count, FreezeTopicLimiterForTest), every wire fault
-// and every figure on the stats line are a pure function of the seed — three
-// runs of one seed print byte-identical stats — so a failure in any of them
-// replays exactly from the printed line. What still varies between runs is
-// the scheduler's interleaving inside a racing reconnect step: which of the
+// Determinism: the step sequence, every wire fault and every figure on the
+// stats line are a pure function of the seed. The one exception is the topic
+// limiter's shed count: it now rides the shared auth.RateLimiter (item 1,
+// 2026-09-14 simplification) and its real 1s window, like every other rate
+// limit in ws, rather than a per-hub instance frozen to a fixed count — so a
+// run slow enough to cross a window boundary differently can shed at a
+// different step than a prior run of the same seed. checkCounts' I4 check
+// does not depend on that: it detects a shed dynamically (seq unchanged
+// across the call), so the oracle holds regardless of exactly when a shed
+// lands. What varies between runs, seed aside, is the scheduler's
+// interleaving inside a racing reconnect step: which of the
 // racing seqs land in the replay burst and which arrive live. The oracle
 // holds for every interleaving, and the burst is shaped so the client reads
 // the same frames either way (see broadcast), but a defect that depends on
@@ -251,7 +256,6 @@ func simDMChannel(i, j int) int64 {
 func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, raced int) {
 	database := openTestDB(t)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, ReplayRingSize: simRing})
-	hub.FreezeTopicLimiterForTest()
 	s := &sim{
 		t: t, hub: hub, seed: seed, steps: steps,
 		rng:    rand.New(rand.NewPCG(seed, seed^0xD1B54A32D192ED03)),

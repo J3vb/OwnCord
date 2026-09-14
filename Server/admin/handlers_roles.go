@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -35,16 +34,7 @@ func roleServiceUnavailable(w http.ResponseWriter) {
 // writeRoleErr maps RoleService errors onto admin API responses. Separate from
 // writeModerationErr only because NOT_FOUND means "role", not "user".
 func writeRoleErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "role not found")
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "role action failed")
-	}
+	writeSvcErr(w, err, "role not found", "", "role action failed")
 }
 
 // roleRequest is the JSON body for POST /roles and PATCH /roles/{id}. Every

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -53,14 +52,7 @@ type putChannelRetentionRequest struct {
 }
 
 func writeRetentionErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention change failed")
-	}
+	writeSvcErr(w, err, "", "", "retention change failed")
 }
 
 // handlePutChannelRetention sets a channel's override.

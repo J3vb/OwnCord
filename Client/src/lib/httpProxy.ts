@@ -48,13 +48,3 @@ export async function ensureHttpProxy(host: string): Promise<string> {
     pending.delete(host);
   }
 }
-
-/** Stop the tunnel for `host` (best-effort). */
-export async function stopHttpProxy(host: string): Promise<void> {
-  pending.delete(host);
-  try {
-    await invoke("stop_http_proxy", { remoteHost: host });
-  } catch (err) {
-    log.debug("stop_http_proxy failed (ignored)", { host, error: String(err) });
-  }
-}

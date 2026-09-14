@@ -154,12 +154,7 @@ func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, p
 	// run() has actually exited, so this is exact, not a best guess.
 	select {
 	case <-p.done:
-		p.dropped.Add(1)
-		slog.Error("event dropped: persister stopped",
-			"seq", seq,
-			"event_type", eventType,
-			"channel_id", channelID,
-		)
+		p.dropStopped(seq, eventType, channelID)
 		return
 	default:
 	}
@@ -212,16 +207,22 @@ func (p *EventPersister) Stop(ctx context.Context) {
 	for {
 		select {
 		case evt := <-p.queue:
-			p.dropped.Add(1)
-			slog.Error("event dropped: persister stopped",
-				"seq", evt.seq,
-				"event_type", evt.eventType,
-				"channel_id", evt.channelID,
-			)
+			p.dropStopped(evt.seq, evt.eventType, evt.channelID)
 		default:
 			return
 		}
 	}
+}
+
+// dropStopped counts and loudly logs an event that reached the queue after
+// run() had already exited, so it is never lost silently.
+func (p *EventPersister) dropStopped(seq int64, eventType string, channelID int64) {
+	p.dropped.Add(1)
+	slog.Error("event dropped: persister stopped",
+		"seq", seq,
+		"event_type", eventType,
+		"channel_id", channelID,
+	)
 }
 
 // drainQueued appends every event already sitting in the queue to batch

@@ -362,20 +362,6 @@ func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicI
 	return nil
 }
 
-// ResolveAppealID translates a public id — the only identifier a route
-// parameter ever carries — to the internal id used for broadcasting a
-// queue change after a write (mirrors ReportService.ResolveReportID). 404s
-// on an unknown public id. Not permission-gated: like PublicIDFor,
-// resolving an id the caller's own write just touched discloses nothing
-// new.
-func (s *AppealService) ResolveAppealID(ctx context.Context, publicID string) (int64, error) {
-	a, err := s.st.GetAppealByPublicID(ctx, publicID)
-	if err != nil {
-		return 0, fmt.Errorf("%w: appeal not found", ErrNotFound)
-	}
-	return a.ID, nil
-}
-
 // RequireModerate is requireModerate exported for a handler that must
 // authorize BEFORE resolving anything else about the request (mirrors
 // ReportService.RequireModerate) — running the id resolution first turns

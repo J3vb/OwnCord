@@ -17,7 +17,6 @@ import {
   prependMessages,
   setAroundMessages,
   reattachToPresent,
-  clearChannelMessages,
   getChannelMessages,
   isChannelLoaded,
   hasMoreMessages,
@@ -27,6 +26,31 @@ import {
   markSendFailed,
 } from "../../src/stores/messages.store";
 import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
+
+// clearChannelMessages was removed from the store (dead export, zero src
+// callers); tests keep using the identical observable-state write via setState.
+function clearChannelMessages(channelId: number): void {
+  messagesStore.setState((prev) => {
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.delete(channelId);
+    const updatedLoaded = new Set(prev.loadedChannels);
+    updatedLoaded.delete(channelId);
+    const updatedHasMore = new Map(prev.hasMore);
+    updatedHasMore.delete(channelId);
+    const updatedLoadState = new Map(prev.historyLoadState);
+    updatedLoadState.delete(channelId);
+    const updatedDetached = new Set(prev.detachedChannels);
+    updatedDetached.delete(channelId);
+    return {
+      ...prev,
+      messagesByChannel: updatedMessages,
+      loadedChannels: updatedLoaded,
+      hasMore: updatedHasMore,
+      historyLoadState: updatedLoadState,
+      detachedChannels: updatedDetached,
+    };
+  });
+}
 
 const USER: MessageUser = { id: 1, username: "alice", avatar: null };
 

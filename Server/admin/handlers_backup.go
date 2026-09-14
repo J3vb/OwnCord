@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -8,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -146,9 +147,7 @@ func handleListBackups() http.HandlerFunc {
 		}
 
 		// Sort newest first.
-		sort.Slice(backups, func(i, j int) bool {
-			return backups[i].Date > backups[j].Date
-		})
+		slices.SortFunc(backups, func(a, b backupEntry) int { return cmp.Compare(b.Date, a.Date) })
 
 		writeJSON(w, http.StatusOK, backups)
 	}

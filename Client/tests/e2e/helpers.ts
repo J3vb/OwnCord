@@ -737,7 +737,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "save_settings") return;
 
         // ---- Certs ----
-        if (cmd === "store_cert_fingerprint" || cmd === "get_cert_fingerprint") return null;
+        if (cmd === "get_cert_fingerprint") return null;
         if (cmd === "accept_cert_fingerprint") return null;
 
         // ---- E2EE identity (keyring blob + TOFU pins) ----

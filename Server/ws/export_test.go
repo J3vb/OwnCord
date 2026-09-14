@@ -4,13 +4,13 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"sync/atomic"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/livekit/protocol/livekit"
 )
@@ -244,13 +244,15 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 	p.stopped = true
 }
 
-// NewHubForTest creates a minimal Hub with no DB or limiter for webhook testing.
+// NewHubForTest creates a minimal Hub with no DB for webhook testing. limiter
+// is real (not nil): deliverBroadcast's channel-scoped path consults it for
+// the topic rate limit unconditionally.
 func NewHubForTest() *Hub {
 	return &Hub{
-		clients:      make(map[int64]*Client),
-		pubsub:       NewPubSub(),
-		topicLimiter: NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
-		voiceMod:     newVoiceModLocks(),
+		clients:  make(map[int64]*Client),
+		pubsub:   NewPubSub(),
+		limiter:  auth.NewRateLimiter(),
+		voiceMod: newVoiceModLocks(),
 	}
 }
 
@@ -330,11 +332,6 @@ func (h *Hub) ExpireSettingsCacheForTest() {
 	h.settingsMu.Lock()
 	defer h.settingsMu.Unlock()
 	h.settingsLastUpdate = time.Time{} // zero time — always older than any TTL
-}
-
-// ParseChannelIDForTest exposes parseChannelID for external tests.
-func ParseChannelIDForTest(payload json.RawMessage) (int64, error) {
-	return parseChannelID(payload)
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
@@ -566,15 +563,6 @@ func CloseSendForTest(c *Client) {
 // and stream are the PCG's two words.
 func NewFaultConnForTest(seed, stream uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
 	return newFaultConn(seed, stream, sched, preface, in)
-}
-
-// FreezeTopicLimiterForTest swaps the hub's per-topic limiter for one whose
-// window never rolls over inside a test run, so a shed is a deterministic
-// count — the first topicRateLimitPerSecond frames per channel pass, the rest
-// shed — instead of one that depends on where time.Now() falls. Call before
-// the first broadcast; the simulation needs it so a seed replays exactly.
-func (h *Hub) FreezeTopicLimiterForTest() {
-	h.topicLimiter = NewTopicRateLimiter(topicRateLimitPerSecond, time.Hour)
 }
 
 // EventNamesUserForTest exposes eventNamesUser to the external test package.

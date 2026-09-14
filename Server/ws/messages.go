@@ -939,18 +939,3 @@ func buildServerRestartMsg(reason string, delaySeconds int) []byte {
 		},
 	})
 }
-
-// parseChannelID safely extracts channel_id from a raw payload map.
-func parseChannelID(payload json.RawMessage) (int64, error) {
-	var p struct {
-		ChannelID json.Number `json:"channel_id"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return 0, err
-	}
-	id, err := p.ChannelID.Int64()
-	if err != nil {
-		return 0, fmt.Errorf("channel_id must be integer: %w", err)
-	}
-	return id, nil
-}

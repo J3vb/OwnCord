@@ -117,8 +117,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
-	channelID, err := parseChannelID(payload)
-	if err != nil || channelID <= 0 {
+	channelID, err := parseCallChannelID(MsgTypeVoiceJoin, payload)
+	if err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be a positive integer"))
 		return 0, nil, false
 	}
@@ -336,12 +336,12 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, c *Client, ch *db.Channel, c
 //
 // The writes and the re-read are the service's (VoiceService.RestoreModFlags);
 // what stays here is the broadcast decision, plus the reason no SFU mute
-// accompanies them: MuteParticipantAudio resolves the participant in the
-// destination room first, and this join has not minted its token yet, so the
-// call could only fail — after a LiveKit round trip on the read pump. As
-// everywhere else in the voice moderation path the persisted server_muted is
-// the authority: it blocks the target's own unmute and is re-applied at the
-// SFU whenever the moderator next acts.
+// accompanies them: MuteParticipant's updateVoiceParticipantPermissions
+// resolves the participant in the destination room first, and this join has
+// not minted its token yet, so the call could only fail — after a LiveKit
+// round trip on the read pump. As everywhere else in the voice moderation
+// path the persisted server_muted is the authority: it blocks the target's
+// own unmute and is re-applied at the SFU whenever the moderator next acts.
 func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64) *db.VoiceState {
 	if refreshed := h.voice.RestoreModFlags(ctx, c.userID, channelID, wasServerMuted, wasServerDeafened, wasServerMutedBy); refreshed != nil {
 		return refreshed
@@ -543,9 +543,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
 
-	// Send voice_config to the joiner. h.defaultVoiceQuality (set at
-	// construction from the operator's voice.quality config, HubOptions.
-	// VoiceQuality) is the fallback for a channel with no per-channel
+	// Send voice_config to the joiner. h.defaultVoiceQuality (the operator's
+	// voice.quality config) is the fallback for a channel with no per-channel
 	// override — which is every channel today, since CreateChannel never
 	// writes voice_quality and the column has no DEFAULT (OC-0439).
 	quality := h.defaultVoiceQuality

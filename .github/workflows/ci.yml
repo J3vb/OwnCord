@@ -335,7 +335,7 @@ jobs:
           node-version: 24
 
       - name: Self-test the count matcher
-        run: node scripts/check-doc-counts.mjs --selftest
+        run: node --test scripts/check-doc-counts.test.mjs
 
       - name: Documents must agree with the findings ledger
         run: node scripts/check-doc-counts.mjs
@@ -345,7 +345,7 @@ jobs:
       # installations that applied it and no error is ever raised. Self-tested
       # first, for the same reason the count matcher is.
       - name: Self-test the migration-immutability matcher
-        run: node scripts/check-migrations.mjs --selftest
+        run: node --test scripts/check-migrations.test.mjs
 
       - name: Shipped migrations must not be edited
         run: node scripts/check-migrations.mjs
@@ -368,7 +368,7 @@ jobs:
       # b0-dev-branch-protection.sh, so a change to that list's shape fails here
       # rather than silently weakening the gate.
       - name: Self-test the release gate
-        run: node scripts/verify-gate-evidence.mjs --selftest
+        run: node --test scripts/verify-gate-evidence.test.mjs
 
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation

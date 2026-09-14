@@ -298,6 +298,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         (supportsMessageDeduplication(owner)
           ? newClientMessageId(pendingMessageRetryFloor(owner))
           : undefined);
+      // Set only for a send with a recoverable logical identity: plain text
+      // with a client_message_id, no reply and no attachments.
+      const persistId = replyTo === null && attachments.length === 0 ? clientMessageId : undefined;
+      /** Persist before handing text to the socket, so a process crash after
+       *  commit but before ACK can recover the same logical identity. */
+      function persistPendingText(id: string): Promise<void> {
+        return savePendingText(owner, {
+          clientMessageId: id,
+          channelId,
+          content,
+          createdAt: Number(id.split(":", 1)[0]),
+        }).catch(() => {
+          if (ownsSession())
+            showToast("Could not save this pending message for recovery after restart", "error");
+        });
+      }
       if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a
         // failed row with retry rather than silently dropping the message.
@@ -313,17 +329,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         });
         draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
         markSendFailed(cid, "OFFLINE");
-        if (clientMessageId && replyTo === null && attachments.length === 0) {
-          void savePendingText(owner, {
-            clientMessageId,
-            channelId,
-            content,
-            createdAt: Number(clientMessageId.split(":", 1)[0]),
-          }).catch(() => {
-            if (ownsSession())
-              showToast("Could not save this pending message for recovery after restart", "error");
-          });
-        }
+        if (persistId !== undefined) void persistPendingText(persistId);
         return;
       }
       const sendNow = (): void => {
@@ -361,43 +367,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }, 20_000);
         sendTimers.set(cid, { timer, release: session?.addCleanup(() => clearSendTimer(cid)) });
       };
-      const needsPersist =
-        clientMessageId !== undefined && replyTo === null && attachments.length === 0;
       // OC-0433: both branches go through the single controller-scoped
       // sendChain so a synchronous reply/attachment send can never jump a
-      // plain-text send whose persist IPC (below) is still in flight — and
+      // plain-text send whose persistPendingText IPC is still in flight — and
       // vice versa. Without this, only guarding the branch a given finding
       // named would still leave the two branches racing each other. When
       // nothing is already in flight and this send needs no persistence,
       // dispatch stays fully synchronous — unchanged from before, and relied
       // on by every caller (e.g. a same-tick read of ws.send's return value).
-      if (!needsPersist && !sendChainBusy) {
+      if (persistId === undefined && !sendChainBusy) {
         sendNow();
         return;
       }
       sendChainBusy = true;
       const myGen = ++sendChainGen;
       sendChain = sendChain
-        .then(() => {
-          if (clientMessageId && replyTo === null && attachments.length === 0) {
-            // Persist before handing text to the socket, so a process crash
-            // after commit but before ACK can recover the same logical
-            // identity.
-            return savePendingText(owner, {
-              clientMessageId,
-              channelId,
-              content,
-              createdAt: Number(clientMessageId.split(":", 1)[0]),
-            }).catch(() => {
-              if (ownsSession())
-                showToast(
-                  "Could not save this pending message for recovery after restart",
-                  "error",
-                );
-            });
-          }
-          return undefined;
-        })
+        .then(() => (persistId === undefined ? undefined : persistPendingText(persistId)))
         .then(() => {
           sendNow();
           // Only the still-last-queued entry may clear the flag — a newer

@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  observeMedia,
-  unobserveMedia,
-  pauseAllMedia,
-  resumeVisibleMedia,
-  destroyObserver,
-} from "../../src/lib/media-visibility";
+import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/media-visibility";
 
 // Mock IntersectionObserver
 let observerCallback: IntersectionObserverCallback;
@@ -76,7 +70,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  destroyObserver();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -199,24 +192,6 @@ describe("media-visibility", () => {
     cleanup();
   });
 
-  it("resumeVisibleMedia only unfreezes intersecting GIFs", () => {
-    const img1 = createFakeImg("https://example.com/a.gif");
-    const img2 = createFakeImg("https://example.com/b.gif");
-    const wrap1 = createWrapper();
-    const wrap2 = createWrapper();
-    observeMedia(img1, "https://example.com/a.gif", wrap1);
-    observeMedia(img2, "https://example.com/b.gif", wrap2);
-    fireIntersection([
-      { target: img1, isIntersecting: true },
-      { target: img2, isIntersecting: false },
-    ]);
-    img1.src = "data:image/png;base64,frozen";
-    img2.src = "data:image/png;base64,frozen";
-    resumeVisibleMedia();
-    expect(img1.src).toBe("https://example.com/a.gif");
-    expect(img2.src).toBe("data:image/png;base64,frozen");
-  });
-
   it("wrapper gets gif-paused class when frozen", () => {
     const cleanup = setupCanvasMocks();
     const img = createFakeImg("https://example.com/cat.gif");
@@ -226,14 +201,6 @@ describe("media-visibility", () => {
     vi.advanceTimersByTime(10_000);
     expect(wrap.classList.contains("gif-paused")).toBe(true);
     cleanup();
-  });
-
-  it("destroyObserver cleans up", () => {
-    const img = createFakeImg("https://example.com/cat.gif");
-    const wrap = createWrapper();
-    observeMedia(img, "https://example.com/cat.gif", wrap);
-    destroyObserver();
-    expect(disconnectMock).toHaveBeenCalled();
   });
 
   it("unobserveMedia does not start a dangling auto-timer", () => {
@@ -298,16 +265,5 @@ describe("media-visibility", () => {
     // Should not throw
     expect(img.src).toBe("data:image/png;base64,frozen");
     cleanup();
-  });
-
-  it("resumeVisibleMedia cleans up stale WeakRefs without throwing", () => {
-    // Register and immediately unobserve so the entry is gone from tracked
-    const img = createFakeImg("https://example.com/gone.gif");
-    const wrap = createWrapper();
-    observeMedia(img, "https://example.com/gone.gif", wrap);
-    unobserveMedia(img);
-    // Now resumeVisibleMedia should not crash
-    resumeVisibleMedia();
-    // No assertion needed — just verifying no throw
   });
 });

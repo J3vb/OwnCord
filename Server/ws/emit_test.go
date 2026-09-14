@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // drainChan reads all pending messages from a buffered chan []byte within a
@@ -23,7 +25,8 @@ func drainChan(ch chan []byte, timeout time.Duration) [][]byte {
 }
 
 // newEmitTestHub creates a minimal Hub suitable for EmitEvents tests.
-// No DB, no limiter, no registry — just the client map, broadcast channel,
+// No DB, no registry — just the client map, broadcast channel, the topic
+// rate limiter (deliverBroadcast's channel-scoped path runs through it),
 // and the locks needed for delivery.
 func newEmitTestHub() *Hub {
 	return &Hub{
@@ -34,7 +37,7 @@ func newEmitTestHub() *Hub {
 		pubsub:          NewPubSub(),
 		replayBuf:       NewEventRingBuffer(100),
 		voiceKeyHolders: make(map[int64]int64),
-		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
+		limiter:         auth.NewRateLimiter(),
 	}
 }
 
