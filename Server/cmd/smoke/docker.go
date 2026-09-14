@@ -164,18 +164,15 @@ func (t *dockerTarget) baseURL() string { return defaultBaseURL }
 // (docs/deployment.md:160), and the in-place self-update endpoint answers 503
 // CONTAINER_DEPLOYMENT in a container.
 func (t *dockerTarget) start(version string) error {
-	image, err := t.imageFor(version)
+	image, err := pickVersion(version, t.oldImage, t.newImage)
 	if err != nil {
 		return err
 	}
 	if t.running {
 		return fmt.Errorf("start %s: the %s container has not been drained", version, t.version)
 	}
-	if t.name != "" {
-		if _, err := docker("rm", "-f", t.name); err != nil {
-			return err
-		}
-		t.name = ""
+	if err := t.removeContainer(); err != nil {
+		return err
 	}
 	t.runs++
 	// Recorded BEFORE the run, not after it: `docker run -d` creates the
@@ -345,7 +342,7 @@ func (t *dockerTarget) archive(dir string) error {
 	// compose file replaces that with an operator-owned host file. A copy of
 	// the volume therefore does not contain it, and an owner's backup that
 	// forgot it would restore a server with somebody else's configuration.
-	if err := copyFile(t.configPath(), filepath.Join(dir, "config.yaml")); err != nil {
+	if err := copyFile(t.configPath(), filepath.Join(dir, "config.yaml"), 0o600); err != nil {
 		return fmt.Errorf("archiving config.yaml: %w", err)
 	}
 	return nil
@@ -365,11 +362,8 @@ func (t *dockerTarget) restore(dir string) error {
 	if t.running {
 		return errors.New("restore: the container is still running")
 	}
-	if t.name != "" {
-		if _, err := docker("rm", "-f", t.name); err != nil {
-			return err
-		}
-		t.name = ""
+	if err := t.removeContainer(); err != nil {
+		return err
 	}
 	if _, err := docker("volume", "rm", "-f", t.vol); err != nil {
 		return err
@@ -396,19 +390,25 @@ func (t *dockerTarget) restore(dir string) error {
 	// The host side of the mount, restored as a plain file for the same
 	// reason archive() copied it that way — the next container bind-mounts
 	// this path, so writing it here is what puts it back.
-	return copyRestoredConfig(filepath.Join(dir, "config.yaml"), t.configPath())
+	// 0o644, not the 0o600 the standalone leg uses: the next container
+	// bind-mounts this path and reads it as uid 65532.
+	if err := copyFile(filepath.Join(dir, "config.yaml"), t.configPath(), 0o644); err != nil {
+		return fmt.Errorf("restoring config.yaml: %w", err)
+	}
+	return nil
 }
 
-// copyRestoredConfig is copyFile at 0644 rather than 0600: this file is
-// bind-mounted into the next container and has to stay readable by uid 65532.
-func copyRestoredConfig(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("restoring config.yaml: %w", err)
+// removeContainer drops the container this target currently owns, if any, and
+// forgets its name. Both start() (replacing the version) and restore()
+// (detaching from the volume so it can be recreated) begin with it.
+func (t *dockerTarget) removeContainer() error {
+	if t.name == "" {
+		return nil
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // G306: bind-mounted into the container and read by uid 65532
-		return fmt.Errorf("restoring config.yaml: %w", err)
+	if _, err := docker("rm", "-f", t.name); err != nil {
+		return err
 	}
+	t.name = ""
 	return nil
 }
 
@@ -443,16 +443,6 @@ func (t *dockerTarget) cleanup() {
 	if t.dir != "" {
 		_ = os.RemoveAll(t.dir)
 	}
-}
-
-func (t *dockerTarget) imageFor(version string) (string, error) {
-	switch version {
-	case "old":
-		return t.oldImage, nil
-	case "new":
-		return t.newImage, nil
-	}
-	return "", fmt.Errorf("unknown version %q, want \"old\" or \"new\"", version)
 }
 
 // --- docker cp, without ever handing docker a host path ----------------------

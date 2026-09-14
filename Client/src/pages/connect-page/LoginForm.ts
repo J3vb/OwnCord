@@ -20,6 +20,11 @@ export type FormMode = "login" | "register";
 
 const MIN_PASSWORD_LENGTH = 8;
 
+// The password box shows this when a saved password exists. It is never sent
+// anywhere: submission branches on `usingSavedPassword`, never on the field's
+// text, so this string can never be mistaken for a real password.
+const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+
 // ---------------------------------------------------------------------------
 // Options & Return type
 // ---------------------------------------------------------------------------
@@ -94,10 +99,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onAutoLoginCancel,
   } = opts;
 
-  // The password box shows this when a saved password exists. It is never sent
-  // anywhere: submission branches on `usingSavedPassword`, never on the field's
-  // text, so this string can never be mistaken for a real password.
-  const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
   let usingSavedPassword = false;
 
   /** Drop the placeholder the moment the user edits the field. */

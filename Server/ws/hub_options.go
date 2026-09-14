@@ -146,10 +146,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	reg := NewHandlerRegistry()
 
-	// Normalize once at construction, exactly like qualityBitrate's own
-	// fallback: an unset or invalid configured value degrades to "medium"
-	// rather than propagating a bad value into every voice_config this hub
-	// ever sends (OC-0439).
+	// Normalize once here rather than propagating an unset or invalid
+	// configured value into every voice_config this hub sends (OC-0439).
 	defaultVoiceQuality := "medium"
 	if validVoiceQuality(opts.VoiceQuality) {
 		defaultVoiceQuality = opts.VoiceQuality

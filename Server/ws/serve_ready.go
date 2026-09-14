@@ -140,11 +140,9 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 // path enforces, so the affordance cannot drift from the rule (S-12).
 //
 // timedOut is the caller's live HasActiveTimeout verdict (via subjectFor),
-// not recomputed here: threading it through as a plain bool, rather than
-// looking it up per channel, keeps this the same one-lookup-per-ready-payload
-// shape as the rest of buildReady while still matching
-// refreshChannelVisibilityCanSend's per-channel verdict on a live socket
-// (OC-0434) — a timed-out user must not see can_send: true anywhere.
+// threaded through as a plain bool so the lookup happens once per ready
+// payload instead of once per channel — a timed-out user must not see
+// can_send: true anywhere (OC-0434).
 func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
 	if role == nil {
 		return false
@@ -205,10 +203,8 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // carries the caller's own acknowledgement per NSFW-labelled channel id
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict
-// (OC-0434) — threaded into every channel's can_send the same way it feeds
-// refreshChannelVisibilityCanSend's live-refresh sibling, so a timed-out
-// user's connect-time payload cannot claim can_send: true anywhere.
+// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict,
+// fed into every channel's can_send — see channelCanSend (OC-0434).
 func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
@@ -549,15 +545,11 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	}
 	h.registerNow(c, allowedChannelIDs)
 
-	// OC-0423: a sign-out-everywhere / account-recovery revocation racing the
-	// DB work above (computeAllowedChannels, the role lookup, etc.) finds
-	// h.clients empty for this user and kicks nothing — registerNow just
-	// above is the earliest point a live revocation could have found this
-	// socket. Re-read the session right here, now that c is reachable: see
-	// postRegisterSessionRecheck's doc for why this ordering closes the race
-	// rather than merely narrowing it. When it reports true it has already
-	// run the full failed-handshake teardown (unregisterFailedHandshake);
-	// only closing conn is left to do here.
+	// OC-0423: registerNow just above is the earliest point a revocation
+	// racing this handshake's DB work could have found this socket, so
+	// re-read the session now that c is reachable — see
+	// postRegisterSessionRecheck's doc. When it reports true it has already
+	// run the full failed-handshake teardown; only closing conn is left.
 	if h.postRegisterSessionRecheck(ctx, c) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
 		return fmt.Errorf("handleFreshConnect: session revoked for user %d during handshake", c.userID)

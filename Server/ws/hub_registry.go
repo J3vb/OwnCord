@@ -225,24 +225,19 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 // after registerNow makes c reachable via h.clients, closing OC-0423: a
 // session revoked (sign-out-everywhere, POST /users/me/sessions/revoke-all;
 // or account recovery, RedeemRecoveryKit) while this handshake's earlier DB
-// work — computeAllowedChannels, computeReadableChannels, cold-tier replay
-// queries, buildReady's own queries — was still in flight is invisible to
-// DisconnectRevokedUser: that call inspects h.clients at one instant, and a
-// connection is not in h.clients until registerNow runs. Without this
-// re-check the handshake sails through to a live, fully authorized socket on
-// a session row that no longer exists, until sweepRevokedSessions' next tick
-// (up to 60s) or the client's 10th inbound frame (handleMessageSessionRecheck,
-// SessionCheckInterval).
+// work was still in flight is invisible to DisconnectRevokedUser: that call
+// inspects h.clients at one instant, and a connection is not in h.clients
+// until registerNow runs. Without this re-check the handshake sails through
+// to a live, fully authorized socket on a session row that no longer exists,
+// until sweepRevokedSessions' next tick (up to 60s) or the client's 10th
+// inbound frame (handleMessageSessionRecheck, SessionCheckInterval).
 //
-// Calling this AFTER registerNow, rather than narrowing the window by
-// calling it earlier (e.g. from refreshUserSnapshot, which both handshake
-// paths already call pre-register for the equivalent ban check, OC-0272),
-// is what closes the race rather than merely shrinking it: a revocation
-// whose DELETE is visible to the read below is acted on right here, and one
-// whose DELETE commits later necessarily does so after registerNow already
-// ran, so that revocation's own DisconnectRevokedUser call finds c in
-// h.clients and kicks it normally. There is no ordering left in which
-// neither catches it.
+// Calling this AFTER registerNow is what closes the race rather than merely
+// shrinking it: a revocation whose DELETE is visible to the read below is
+// acted on right here, and one whose DELETE commits later necessarily does so
+// after registerNow already ran, so that revocation's own
+// DisconnectRevokedUser call finds c in h.clients and kicks it normally.
+// There is no ordering left in which neither catches it.
 //
 // It returns true when the caller must abort the handshake instead of
 // continuing to send auth_ok/ready: c has already been torn back out of the

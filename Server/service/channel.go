@@ -265,8 +265,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	// every refocus at up to 10/s/user, and even a no-op write occupies the
 	// single writer connection and opens a transaction. The extra read runs on
 	// the reader pool, which doesn't serialize. Same problem-shape as the
-	// session-touch throttle (api/middleware.go). A read failure falls through
-	// to the write — the write is the load-bearing half.
+	// session-touch throttle (api/middleware.go).
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err == nil {
 		lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)

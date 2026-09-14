@@ -543,9 +543,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
 
-	// Send voice_config to the joiner. h.defaultVoiceQuality (set at
-	// construction from the operator's voice.quality config, HubOptions.
-	// VoiceQuality) is the fallback for a channel with no per-channel
+	// Send voice_config to the joiner. h.defaultVoiceQuality (the operator's
+	// voice.quality config) is the fallback for a channel with no per-channel
 	// override — which is every channel today, since CreateChannel never
 	// writes voice_quality and the column has no DEFAULT (OC-0439).
 	quality := h.defaultVoiceQuality

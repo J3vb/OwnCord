@@ -135,12 +135,11 @@ function uuid(): string {
  *  a port, truncating it to "fd00:" and missing the cert_store_key it's
  *  compared against (OC-0215/OC-0417). */
 export function normalizeHostForCertCompare(host: string): string {
-  const stripped = host.endsWith(":443")
-    ? (() => {
-        const rest = host.slice(0, -":443".length);
-        return !rest.includes(":") || rest.endsWith("]") ? rest : host;
-      })()
-    : host;
+  let stripped = host;
+  if (host.endsWith(":443")) {
+    const rest = host.slice(0, -":443".length);
+    if (!rest.includes(":") || rest.endsWith("]")) stripped = rest;
+  }
   return stripped.replace(/^\[(.*)\]$/, "$1").toLowerCase();
 }
 

@@ -714,12 +714,10 @@ fn decode_chunked(body: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(out);
         }
 
-        // The size line is attacker-controlled: bound it on its own before any
-        // arithmetic, because `out.len() as u64 + size` can wrap a `u64` when
-        // `size` is near `u64::MAX`, sailing past the limit check below.
-        if size > SAVED_LOGIN_MAX_RESPONSE {
-            return Err("saved-password login: response exceeded the size limit".to_string());
-        }
+        // The size line is attacker-controlled and can be near `u64::MAX`, so
+        // this must saturate: a plain `+` would wrap and sail past the limit.
+        // Saturating also covers an oversized single chunk, since the sum is
+        // never less than `size` itself.
         if (out.len() as u64).saturating_add(size) > SAVED_LOGIN_MAX_RESPONSE {
             return Err("saved-password login: response exceeded the size limit".to_string());
         }

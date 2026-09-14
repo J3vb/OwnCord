@@ -27,11 +27,6 @@ import (
 //   - CanPublishSources restricts track types per permission (BUG-128)
 const tokenTTL = 5 * time.Minute
 
-// canSubscribeAlways backs the CanSubscribe grant, which every OwnCord voice
-// token carries. It was a parameter threaded through three layers and set to
-// true at both call sites; a constant states the rule where the grant is built.
-var canSubscribeAlways = true
-
 // LiveKitClient provides token generation and room management via
 // the LiveKit server SDK.
 type LiveKitClient struct {
@@ -104,13 +99,15 @@ func (c *LiveKitClient) GenerateToken(
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
+	// Every OwnCord voice token grants CanSubscribe: a server-deafened or
+	// non-speaking participant must still receive other people's audio and
+	// streams, so subscription is never derived from the publish permissions.
+	canSubscribeAlways := true
+
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
 	grant := &auth.VideoGrant{
-		RoomJoin: true,
-		Room:     roomName,
-		// Always granted: a server-deafened or non-speaking participant must
-		// still receive other people's audio and streams, so subscription is
-		// never derived from the publish permissions above.
+		RoomJoin:     true,
+		Room:         roomName,
 		CanSubscribe: &canSubscribeAlways,
 	}
 
