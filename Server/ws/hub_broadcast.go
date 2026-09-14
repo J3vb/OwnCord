@@ -335,9 +335,9 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 
 // SendToUserLow sends a low-priority message to a specific user. Unlike
 // SendToUserHigh, an overflow is silently dropped rather than disconnecting
-// the client — the targeted-delivery sibling of BroadcastToAllLow /
-// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
-// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+// the client — the targeted-delivery sibling of broadcastExcludeLow, for
+// events (e.g. DM typing indicators) that need direct-to-user routing but
+// are ephemeral and safely droppable (OC-0260).
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
@@ -347,14 +347,6 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	}
 	c.sendLowMsg(msg)
 	return true
-}
-
-// BroadcastToAllLow enqueues a low-priority global broadcast.
-// Low-priority messages are silently dropped if a client's buffer is full.
-func (h *Hub) BroadcastToAllLow(msg []byte) {
-	// Low-priority global broadcasts bypass the sequenced broadcast channel
-	// and go directly through pub/sub — they don't need replay or seq numbering.
-	h.pubsub.PublishGlobalLow(msg)
 }
 
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
@@ -403,7 +395,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// buffer as a number no client ever saw live, and since clients ack
 		// only max(seq), it could never be requested back.
 		if bm.recipients == nil && bm.channelID != 0 {
-			if !h.topicLimiter.Allow(ChannelTopic(bm.channelID)) {
+			if !h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
 				slog.Warn("hub: topic rate limit exceeded, dropping message",
 					"channel_id", bm.channelID)
 				return 0, 0, false

@@ -87,9 +87,6 @@ keyring = { version = "3", default-features = false, features = [
     "sync-secret-service",
     "crypto-rust",
 ] }
-# Scrubs the plaintext secret copies that the DPAPI fallback has to materialize
-# as `Vec<u8>` for the Win32 call.
-zeroize = "1"
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
@@ -121,6 +118,9 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
 ] }
+# Scrubs the plaintext secret copies that the DPAPI fallback (dpapi.rs, itself
+# `#[cfg(windows)]`) has to materialize as `Vec<u8>` for the Win32 call.
+zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"

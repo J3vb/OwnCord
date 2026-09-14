@@ -236,7 +236,6 @@ import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import type { ReadyMember } from "../../src/lib/types";
 import {
-  isVoiceConnected,
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
@@ -639,7 +638,6 @@ describe("LiveKitSession", () => {
       // Overwriting with a new host should succeed
       session.setServerHost("another:8080");
       // Verify the session is still in a valid disconnected state after setting host
-      expect(isVoiceConnected()).toBe(false);
       // leaveVoice should still work (no room to disconnect from)
       session.leaveVoice(false);
       expect(setLocalCamera).toHaveBeenCalledWith(false);
@@ -654,8 +652,6 @@ describe("LiveKitSession", () => {
       // After clear, leaveVoice (which touches error paths) should not invoke cb
       session.leaveVoice(false);
       expect(cb).not.toHaveBeenCalled();
-      // Verify the session is still usable after clearing error callback
-      expect(isVoiceConnected()).toBe(false);
     });
 
     it("setOnRemoteVideo stores callbacks and clearOnRemoteVideo removes them", () => {
@@ -668,8 +664,6 @@ describe("LiveKitSession", () => {
       session.leaveVoice(false);
       expect(videoCb).not.toHaveBeenCalled();
       expect(removedCb).not.toHaveBeenCalled();
-      // Verify the session state is consistent after clearing callbacks
-      expect(isVoiceConnected()).toBe(false);
     });
   });
 
@@ -710,8 +704,6 @@ describe("LiveKitSession", () => {
 
       session.cleanupAll();
 
-      // After cleanup, voice should be disconnected
-      expect(isVoiceConnected()).toBe(false);
       // Camera and screenshare state should be reset
       expect(setLocalCamera).toHaveBeenCalledWith(false);
       expect(setLocalScreenshare).toHaveBeenCalledWith(false);
@@ -2560,10 +2552,6 @@ describe("LiveKitSession", () => {
   // -----------------------------------------------------------------------
 
   describe("singleton exports", () => {
-    it("isVoiceConnected returns false when no session is active", () => {
-      expect(isVoiceConnected()).toBe(false);
-    });
-
     it("bound leaveVoice is callable without throwing", () => {
       expect(() => boundLeaveVoice(false)).not.toThrow();
     });

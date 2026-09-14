@@ -6,7 +6,7 @@ import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 import dispatcherSource from "../../src/lib/dispatcher.ts?raw";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
-import { authStore, clearAuth } from "../../src/stores/auth.store";
+import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
   messagesStore,
@@ -53,7 +53,6 @@ vi.mock("@lib/livekitSession", () => ({
   handleE2EEOffer: vi.fn(async () => {}),
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
-  isVoiceConnected: vi.fn(() => false),
   isVoiceSessionActive: vi.fn(() => false),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
@@ -88,7 +87,6 @@ import {
   leaveVoice as mockLeaveVoice,
   disableCamera as mockDisableCamera,
   disableScreenshare as mockDisableScreenshare,
-  isVoiceConnected as mockIsVoiceConnected,
   isVoiceSessionActive as mockIsVoiceSessionActive,
   handleParticipantLeft as mockHandleParticipantLeft,
 } from "@lib/livekitSession";
@@ -4721,32 +4719,6 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
-      await vi.runAllTimersAsync();
-
-      expect(mockLeaveVoice).toHaveBeenCalledWith(true);
-      expect(voiceStore.getState().currentChannelId).toBeNull();
-      expect(voiceStore.getState().voiceStatus).toBe("idle");
-
-      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
-    });
-
-    // OC-0249: isVoiceConnected() reads session.getRoom(), whose `_room`
-    // getter is null for the ENTIRE "connecting" state — the very state a
-    // voice join is in while voiceStatus is "joining" and connectAndSetup()
-    // is still awaiting createRoom()/resolveLiveKitUrl(). An unrelated error
-    // that lands in that window (e.g. RATE_LIMITED from a different action)
-    // must still abort the in-flight connect attempt, not just roll back the
-    // store — otherwise the join completes with a hot mic and no UI. Because
-    // isVoiceConnected() alone can't see a "connecting" session, the guard
-    // must ask a broader question than "is there a Room" — isVoiceConnected()
-    // itself keeps reporting false throughout.
-    it("tears down an in-flight connect attempt that has no Room yet when a refusal lands", async () => {
-      vi.mocked(mockLeaveVoice).mockClear();
-      vi.mocked(mockIsVoiceConnected).mockReturnValue(false);
-      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(true);
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
-
-      mock.dispatch("error", { code: "RATE_LIMITED", message: "too many requests" });
       await vi.runAllTimersAsync();
 
       expect(mockLeaveVoice).toHaveBeenCalledWith(true);

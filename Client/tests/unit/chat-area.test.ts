@@ -76,7 +76,7 @@ vi.mock("@components/VideoGrid", () => ({
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
-import { hasMessageJumpHandler, setMessageJumpHandler } from "@lib/message-navigation";
+import { setMessageJumpHandler } from "@lib/message-navigation";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -310,16 +310,6 @@ describe("createChatArea", () => {
 
     expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
-  });
-
-  it("registers a global message-jump handler and unregisters it on cleanup", () => {
-    const result = createChatArea(makeOptions());
-    expect(hasMessageJumpHandler()).toBe(true);
-
-    for (const unsub of result.unsubscribers) unsub();
-
-    // A page that has been torn down must not keep answering permalink jumps.
-    expect(hasMessageJumpHandler()).toBe(false);
   });
 
   // --- Pin button interaction ---

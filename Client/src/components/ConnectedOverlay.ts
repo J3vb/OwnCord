@@ -61,19 +61,9 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   });
   setText(srvIcon, serverName.charAt(0).toUpperCase());
 
-  // SVG checkmark badge (matches mockup)
+  // Checkmark badge (matches mockup)
   const checkBadge = createElement("div", { class: "connected-check-badge" });
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "3");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-  polyline.setAttribute("points", "20 6 9 17 4 12");
-  svg.appendChild(polyline);
-  checkBadge.appendChild(svg);
+  checkBadge.appendChild(createIcon("check"));
   appendChildren(iconWrap, srvIcon, checkBadge);
 
   // Text elements

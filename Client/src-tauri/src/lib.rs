@@ -12,6 +12,7 @@ mod http_proxy;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+mod proxy_common;
 mod ptt;
 mod secret_store;
 mod tofu;
@@ -107,7 +108,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
-            commands::store_cert_fingerprint,
             commands::get_cert_fingerprint,
             commands::store_identity_pin,
             commands::get_identity_pin,
@@ -131,7 +131,6 @@ pub fn run() {
             ptt::ptt_start,
             ptt::ptt_stop,
             ptt::ptt_set_key,
-            ptt::ptt_get_key,
             ptt::ptt_polling_supported,
             ptt::ptt_listen_for_key,
             livekit_proxy::start_livekit_proxy,

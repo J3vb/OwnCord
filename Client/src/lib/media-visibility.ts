@@ -288,35 +288,3 @@ export function pauseAllMedia(): void {
     }
   }
 }
-
-/** Unfreeze only GIFs that are currently in the viewport. */
-export function resumeVisibleMedia(): void {
-  for (const ref of allTracked) {
-    const img = ref.deref();
-    if (img === undefined) {
-      allTracked.delete(ref);
-      continue;
-    }
-    const entry = tracked.get(img);
-    if (entry !== undefined && entry.isIntersecting) {
-      unfreezeImage(img, entry);
-    }
-  }
-}
-
-/** Clean up observer (for testing or app teardown). */
-export function destroyObserver(): void {
-  // Clear all auto-pause timers
-  for (const ref of allTracked) {
-    const img = ref.deref();
-    if (img !== undefined) {
-      const entry = tracked.get(img);
-      if (entry?.autoTimer !== null && entry?.autoTimer !== undefined) {
-        clearTimeout(entry.autoTimer);
-      }
-    }
-  }
-  observer?.disconnect();
-  observer = null;
-  allTracked.clear();
-}

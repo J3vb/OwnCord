@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 
 	"github.com/J3vb/OwnCord/Server/config"
 )

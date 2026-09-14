@@ -3,9 +3,9 @@
  * Create, copy, and revoke invite codes.
  */
 
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 
 // ---------------------------------------------------------------------------
@@ -54,10 +54,9 @@ function formatInviteInfo(invite: InviteItem): string {
 
 export function createInviteManager(options: InviteManagerOptions): MountableComponent {
   const ac = new AbortController();
-  let root: HTMLDivElement | null = null;
+  let instance: ModalInstance | null = null;
   let listEl: HTMLDivElement | null = null;
   let emptyEl: HTMLDivElement | null = null;
-  let restoreFocus: (() => void) | null = null;
   let invites: readonly InviteItem[] = options.invites;
 
   function renderList(): void {
@@ -156,16 +155,6 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
   }
 
   function mount(container: Element): void {
-    root = createElement("div", {
-      class: "modal-overlay visible",
-    });
-
-    const modal = createElement("div", {
-      class: "modal",
-    });
-    applyDialogSemantics(modal, { labelledBy: "invite-manager-title" });
-    trapFocus(modal, ac.signal);
-
     // Header
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", { id: "invite-manager-title" }, "Server Invites");
@@ -214,6 +203,22 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     );
     footer.appendChild(createBtn);
 
+    // Overlay/modal shell, dialog semantics, focus trap and focus
+    // save/restore all come from the shared factory; only the backdrop and
+    // Escape wiring stay here, since this component's onClose is decoupled
+    // from destroy() (see the caller's onClose, which calls destroy()).
+    instance = createModal(
+      {
+        content: header,
+        closeOnBackdrop: false,
+        closeOnEscape: false,
+        ariaLabelledBy: "invite-manager-title",
+      },
+      container,
+    );
+    appendChildren(instance.modal, body, footer);
+    renderList();
+
     // Escape key
     document.addEventListener(
       "keydown",
@@ -226,39 +231,23 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     );
 
     // Click overlay to close
-    root.addEventListener(
+    instance.overlay.addEventListener(
       "click",
       (e) => {
-        if (e.target === root) {
+        if (e.target === instance?.overlay) {
           options.onClose();
         }
       },
       { signal: ac.signal },
     );
-
-    appendChildren(modal, header, body, footer);
-    root.appendChild(modal);
-    renderList();
-
-    container.appendChild(root);
-
-    // Capture where focus came from before anything inside the dialog takes
-    // it, so destroy() can hand it back to the opener.
-    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
     ac.abort();
-    if (root !== null) {
-      root.remove();
-      root = null;
-    }
+    instance?.destroy();
+    instance = null;
     listEl = null;
     emptyEl = null;
-    // Every close path (X, backdrop, Escape) funnels through the caller's
-    // onClose, which calls destroy() — the single place focus returns.
-    restoreFocus?.();
-    restoreFocus = null;
   }
 
   return { mount, destroy };

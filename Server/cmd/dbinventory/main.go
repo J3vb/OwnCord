@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -374,11 +375,7 @@ func joined(m map[string]int) string {
 	if len(m) == 0 {
 		return "—"
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if m[k] > 1 {
@@ -451,11 +448,7 @@ func printTable(w io.Writer, rows []fileUse) int {
 
 // countList renders a count map as "a 1, b 2", keys sorted.
 func countList(m map[string]int) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))

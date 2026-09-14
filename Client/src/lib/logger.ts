@@ -67,22 +67,9 @@ function emit(entry: LogEntry): void {
     logBuffer.shift();
   }
 
-  // Console output
+  // Console output. Every LogLevel is a real console method name.
   const prefix = `[${entry.timestamp}] [${entry.level.toUpperCase()}] [${entry.component}]`;
-  switch (entry.level) {
-    case "debug":
-      console.debug(prefix, entry.message, entry.data ?? "");
-      break;
-    case "info":
-      console.info(prefix, entry.message, entry.data ?? "");
-      break;
-    case "warn":
-      console.warn(prefix, entry.message, entry.data ?? "");
-      break;
-    case "error":
-      console.error(prefix, entry.message, entry.data ?? "");
-      break;
-  }
+  console[entry.level](prefix, entry.message, entry.data ?? "");
 
   // Notify listeners
   for (const listener of listeners) {

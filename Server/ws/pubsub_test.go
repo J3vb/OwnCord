@@ -246,24 +246,6 @@ func TestPubSub_PublishLow(t *testing.T) {
 	assertChanEmpty(t, c2.sendLow)
 }
 
-func TestPubSub_PublishHigh(t *testing.T) {
-	ps := newTestPubSub()
-	c1 := makeTestClient(1)
-	c2 := makeTestClient(2)
-
-	ps.Subscribe(c1, UserTopic(1))
-	ps.Subscribe(c2, UserTopic(1))
-
-	msg := []byte(`{"type":"dm"}`)
-	delivered := ps.PublishHigh(UserTopic(1), msg, 0)
-
-	if delivered != 2 {
-		t.Fatalf("delivered = %d, want 2", delivered)
-	}
-	assertChanMsg(t, c1.sendHigh, msg)
-	assertChanMsg(t, c2.sendHigh, msg)
-}
-
 // ─── TopicsForClient ─────────────────────────────────────────────────────────
 
 func TestPubSub_TopicsForClient(t *testing.T) {

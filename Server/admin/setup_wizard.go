@@ -3,7 +3,7 @@ package admin
 import (
 	"fmt"
 	"net"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -251,7 +251,7 @@ func wizardSettingKeys(wr *setupWizardRequest) []string {
 	for k := range updates {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 

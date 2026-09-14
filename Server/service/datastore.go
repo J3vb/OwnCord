@@ -31,7 +31,6 @@ type Store interface {
 
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
-	CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*db.Message, error)
 	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error)
 	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
@@ -42,14 +41,12 @@ type Store interface {
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error)
 	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
 	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
-	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
 	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
 	// MarkChannelReadAtLatest is the mark-read that computes its own
@@ -61,7 +58,6 @@ type Store interface {
 
 	// ── Mentions ──
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
-	GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error)
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
 	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
@@ -78,10 +74,6 @@ type Store interface {
 	ListChannels(ctx context.Context) ([]db.Channel, error)
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
-	UpdateChannel(ctx context.Context, id int64, name, topic string, slowMode int) error
-	DeleteChannel(ctx context.Context, id int64) error
-	SetChannelSlowMode(ctx context.Context, id int64, slowMode int) error
-	SetChannelVoiceMaxUsers(ctx context.Context, id int64, maxUsers int) error
 	// GetChannelPermissions / GetUserChannelPermissions are the two single-row
 	// override lookups permissions.DB requires (Store is passed straight to
 	// permissions.NewChecker).
@@ -96,13 +88,11 @@ type Store interface {
 	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
 	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
 	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
-	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
 	// GetChannelOverridesFor merges the role and per-user override layers for
 	// one member in two batch queries — the single fetch behind every
 	// "what can this member do here" site, and the reason no site pays an N+1
 	// for the second layer.
 	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
-	GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// ── Users ──
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
@@ -168,7 +158,6 @@ type Store interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
-	SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error)
 	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
 	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
@@ -193,13 +182,10 @@ type Store interface {
 	TouchSession(ctx context.Context, tokenHash string) error
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
-	ForceLogoutUser(ctx context.Context, userID int64) error
-	GetUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 
 	// ── Roles ──
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
-	GetUserWithRole(ctx context.Context, userID int64) (*db.User, *db.Role, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
 	GetDefaultRole(ctx context.Context) (*db.Role, error)
@@ -221,22 +207,18 @@ type Store interface {
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
 	ListInvites(ctx context.Context) ([]*db.Invite, error)
-	UseInviteAtomic(ctx context.Context, code string) error
 	RevokeInvite(ctx context.Context, code string) error
 
 	// ── Voice ──
 	JoinVoiceChannel(ctx context.Context, userID, channelID int64) error
 	JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error
-	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
 	GetVoiceState(ctx context.Context, userID int64) (*db.VoiceState, error)
 	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]db.VoiceState, error)
 	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
 	UpdateVoiceMute(ctx context.Context, userID int64, muted bool) error
 	UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool) error
-	ClearVoiceState(ctx context.Context, userID int64) error
 	ClearAllVoiceStates(ctx context.Context) error
-	CountActiveCameras(ctx context.Context, channelID int64) (int, error)
 	UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) error
 	EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
 	UpdateVoiceScreenshare(ctx context.Context, userID int64, screenshare bool) error
@@ -273,14 +255,12 @@ type Store interface {
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
 	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
-	CountDMParticipants(ctx context.Context, channelID int64) (int, error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
 	// ── Message requests (migration 046, B5-6) ──
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
-	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
 	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error)
 	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
 	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
@@ -291,7 +271,6 @@ type Store interface {
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
 	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
-	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
@@ -300,12 +279,10 @@ type Store interface {
 	RevokeNSFW(ctx context.Context, userID, channelID int64) error
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
-	DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error
 	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
 	// ── Attachments ──
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
-	GetAttachmentByID(ctx context.Context, id string) (*db.Attachment, error)
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
 	// IsMessageDeleted backs the tombstone half of attachment access; the
@@ -320,7 +297,6 @@ type Store interface {
 	UserStorageUsed(ctx context.Context, userID int64) (int64, error)
 	ListUserStorageIDs(ctx context.Context) ([]int64, error)
 	RecountUserStorage(ctx context.Context, userID int64) error
-	TotalAttachmentBytes(ctx context.Context) (int64, error)
 
 	// ── Reports (migration 048, B5-8) ──
 	// FileReport inserts the report row and its evidence snapshot in one
@@ -343,7 +319,6 @@ type Store interface {
 	// not outrank the current assignee.
 	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
 	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
-	InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
 	// InsertReportNote is guarded on EXISTS(users) and the report's state
 	// (Codex review widened); false means the caller answers 409 — either
@@ -412,7 +387,6 @@ type Store interface {
 	GetAppealByPublicID(ctx context.Context, publicID string) (*db.Appeal, error)
 	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
 	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
-	AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
 	// AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
 	// transaction with a fresh authority re-check (P2) and, when
 	// checkSelfReview is true, decision 8's deciding-moderator eligibility
@@ -432,10 +406,6 @@ type Store interface {
 	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (result db.AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error)
 	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
-	// CountEligibleModerators is decision 8's self-review escape: the count
-	// of OTHER users (excluding excludeActorID, excludeAppellantID, id 0,
-	// and anyone effectively banned) whose role holds permBit or adminBit.
-	CountEligibleModerators(ctx context.Context, excludeActorID, excludeAppellantID, permBit, adminBit int64) (int64, error)
 
 	// ── Push (migration 045, B5-4) ──
 	// UpsertPushSubscription's keep is the per-user device cap; the upsert,
@@ -444,7 +414,6 @@ type Store interface {
 	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
 	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
 	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
-	CountPushSubscriptions(ctx context.Context) (int64, error)
 	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
 	// dispatch-only (B5-11): the former returns the push credential for a
 	// caller-narrowed audience, the latter prunes by id alone on a push
@@ -463,7 +432,6 @@ type Store interface {
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
 	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminDeleteChannel(ctx context.Context, id int64) error
-	BackupTo(ctx context.Context, path string) error
 	BackupToSafe(ctx context.Context, path, safeRoot string) error
 	CountUsersWithoutTOTP(ctx context.Context) (int, error)
 

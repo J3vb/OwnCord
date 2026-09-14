@@ -164,7 +164,7 @@ const CHECK_DOCS = [
   // installation that already applied it. Nothing else can see that — a fresh
   // database applies the new text and every test passes. `step`, not
   // `optional`: it is Node, and this file is Node.
-  step("node", ["scripts/check-migrations.mjs", "--selftest"], "."),
+  step("node", ["--test", "scripts/check-migrations.test.mjs"], "."),
   step("node", ["scripts/check-migrations.mjs"], "."),
   ...LEDGER_VERIFY,
 ];
@@ -196,15 +196,26 @@ const CHECK_HYGIENE = [
   // the guards on workflows that spend. `step`, not `optional`: it is Node, and
   // this file is Node. It lives in check:hygiene so it runs inside the pinned
   // Repository Hygiene job rather than needing a new required check.
-  step("node", ["scripts/check-workflow-guards.mjs", "--selftest"], "."),
+  step("node", ["--test", "scripts/check-workflow-guards.test.mjs"], "."),
   step("node", ["scripts/check-workflow-guards.mjs"], "."),
   // OC-0397 / R-09. A job in release.yml that pushes an image or cuts a
   // GitHub Release must carry `environment: release`, or it publishes with
   // no required-reviewer approval. Same rationale as the guard check above:
   // Node checking Node, run here so it rides the pinned Repository Hygiene
   // job instead of a new required check.
-  step("node", ["scripts/check-release-environment.mjs", "--selftest"], "."),
+  step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
   step("node", ["scripts/check-release-environment.mjs"], "."),
+];
+
+// Every check, in the order `check` has always run them. release:preflight
+// reuses this instead of respelling the same five spreads, so the two lists
+// cannot silently drift apart.
+const CHECK_ALL = [
+  ...CHECK_DOCS,
+  ...CHECK_HYGIENE,
+  ...CHECK_SERVER,
+  ...CHECK_CLIENT,
+  ...CHECK_RUST,
 ];
 
 const TASKS = {
@@ -218,7 +229,7 @@ const TASKS = {
   "check:rust": CHECK_RUST,
   "check:docs": CHECK_DOCS,
   "check:hygiene": CHECK_HYGIENE,
-  check: [...CHECK_DOCS, ...CHECK_HYGIENE, ...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
+  check: CHECK_ALL,
   generate: [
     step("go", ["run", "./cmd/genprotocol"], "Server"),
     optional(
@@ -236,14 +247,7 @@ const TASKS = {
     optional("gofmt", "gofmt", ["-w", "."], "Server", "gofmt not on PATH"),
     step("cargo", ["fmt", "--all"], "Client/src-tauri"),
   ],
-  "release:preflight": [
-    ...CHECK_DOCS,
-    ...CHECK_HYGIENE,
-    ...CHECK_SERVER,
-    ...CHECK_CLIENT,
-    ...CHECK_RUST,
-    step("npm", ["run", "build"], "Client"),
-  ],
+  "release:preflight": [...CHECK_ALL, step("npm", ["run", "build"], "Client")],
 };
 
 // Resolve against PATH directly instead of shelling out to `where`/`command`.

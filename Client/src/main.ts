@@ -21,7 +21,6 @@ import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
 import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
-import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { MountableComponent } from "@lib/safe-render";
@@ -352,11 +351,12 @@ function runHealthChecks(
 
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
-const navGuard = createNavigationGuard();
+let navGeneration = 0;
 
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
-  const isCurrentNavigation = navGuard.begin();
+  const thisNavigation = ++navGeneration;
+  const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
   log.info("Navigating to page", { pageId });
   // Destroy previous page
   currentPage?.destroy?.();

@@ -120,184 +120,123 @@ fn is_key_down(_vk: i32) -> bool {
 mod linux {
     use device_query::Keycode;
 
+    /// Non-modifier VK <-> Keycode pairs. Every entry here round-trips:
+    /// `vk_to_keycode(vk) == Some(key)` and `keycode_to_vk(&key) == vk`.
+    /// Modifier keys are NOT in this table — several Keycodes collapse to one
+    /// VK (LShift/RShift both -> 0x10), which a single (vk, Keycode) pair
+    /// cannot represent, and the reverse direction was never defined for them
+    /// (`vk_to_keycode` returned `None` for 0x10/0x11/0x12/0x5B before this
+    /// table existed). They are handled as a small match prefix in
+    /// `keycode_to_vk` instead.
+    const VK_KEYCODES: &[(i32, Keycode)] = &[
+        // Digits
+        (0x30, Keycode::Key0),
+        (0x31, Keycode::Key1),
+        (0x32, Keycode::Key2),
+        (0x33, Keycode::Key3),
+        (0x34, Keycode::Key4),
+        (0x35, Keycode::Key5),
+        (0x36, Keycode::Key6),
+        (0x37, Keycode::Key7),
+        (0x38, Keycode::Key8),
+        (0x39, Keycode::Key9),
+        // Letters
+        (0x41, Keycode::A),
+        (0x42, Keycode::B),
+        (0x43, Keycode::C),
+        (0x44, Keycode::D),
+        (0x45, Keycode::E),
+        (0x46, Keycode::F),
+        (0x47, Keycode::G),
+        (0x48, Keycode::H),
+        (0x49, Keycode::I),
+        (0x4A, Keycode::J),
+        (0x4B, Keycode::K),
+        (0x4C, Keycode::L),
+        (0x4D, Keycode::M),
+        (0x4E, Keycode::N),
+        (0x4F, Keycode::O),
+        (0x50, Keycode::P),
+        (0x51, Keycode::Q),
+        (0x52, Keycode::R),
+        (0x53, Keycode::S),
+        (0x54, Keycode::T),
+        (0x55, Keycode::U),
+        (0x56, Keycode::V),
+        (0x57, Keycode::W),
+        (0x58, Keycode::X),
+        (0x59, Keycode::Y),
+        (0x5A, Keycode::Z),
+        // Control keys
+        (0x08, Keycode::Backspace),
+        (0x09, Keycode::Tab),
+        (0x0D, Keycode::Enter),
+        (0x1B, Keycode::Escape),
+        (0x20, Keycode::Space),
+        (0x21, Keycode::PageUp),
+        (0x22, Keycode::PageDown),
+        (0x23, Keycode::End),
+        (0x24, Keycode::Home),
+        (0x25, Keycode::Left),
+        (0x26, Keycode::Up),
+        (0x27, Keycode::Right),
+        (0x28, Keycode::Down),
+        (0x2D, Keycode::Insert),
+        (0x2E, Keycode::Delete),
+        // Numpad
+        (0x60, Keycode::Numpad0),
+        (0x61, Keycode::Numpad1),
+        (0x62, Keycode::Numpad2),
+        (0x63, Keycode::Numpad3),
+        (0x64, Keycode::Numpad4),
+        (0x65, Keycode::Numpad5),
+        (0x66, Keycode::Numpad6),
+        (0x67, Keycode::Numpad7),
+        (0x68, Keycode::Numpad8),
+        (0x69, Keycode::Numpad9),
+        // Function keys
+        (0x70, Keycode::F1),
+        (0x71, Keycode::F2),
+        (0x72, Keycode::F3),
+        (0x73, Keycode::F4),
+        (0x74, Keycode::F5),
+        (0x75, Keycode::F6),
+        (0x76, Keycode::F7),
+        (0x77, Keycode::F8),
+        (0x78, Keycode::F9),
+        (0x79, Keycode::F10),
+        (0x7A, Keycode::F11),
+        (0x7B, Keycode::F12),
+        // Lock keys
+        (0x14, Keycode::CapsLock),
+    ];
+
     /// Convert a device_query Keycode to its Windows-VK-equivalent integer.
     /// Returns 0 for keys that have no mapping (treated as "unknown").
     pub fn keycode_to_vk(key: &Keycode) -> i32 {
         match key {
-            // Digits
-            Keycode::Key0 => 0x30,
-            Keycode::Key1 => 0x31,
-            Keycode::Key2 => 0x32,
-            Keycode::Key3 => 0x33,
-            Keycode::Key4 => 0x34,
-            Keycode::Key5 => 0x35,
-            Keycode::Key6 => 0x36,
-            Keycode::Key7 => 0x37,
-            Keycode::Key8 => 0x38,
-            Keycode::Key9 => 0x39,
-            // Letters
-            Keycode::A => 0x41,
-            Keycode::B => 0x42,
-            Keycode::C => 0x43,
-            Keycode::D => 0x44,
-            Keycode::E => 0x45,
-            Keycode::F => 0x46,
-            Keycode::G => 0x47,
-            Keycode::H => 0x48,
-            Keycode::I => 0x49,
-            Keycode::J => 0x4A,
-            Keycode::K => 0x4B,
-            Keycode::L => 0x4C,
-            Keycode::M => 0x4D,
-            Keycode::N => 0x4E,
-            Keycode::O => 0x4F,
-            Keycode::P => 0x50,
-            Keycode::Q => 0x51,
-            Keycode::R => 0x52,
-            Keycode::S => 0x53,
-            Keycode::T => 0x54,
-            Keycode::U => 0x55,
-            Keycode::V => 0x56,
-            Keycode::W => 0x57,
-            Keycode::X => 0x58,
-            Keycode::Y => 0x59,
-            Keycode::Z => 0x5A,
-            // Control keys
-            Keycode::Backspace => 0x08,
-            Keycode::Tab => 0x09,
-            Keycode::Enter => 0x0D,
-            Keycode::Escape => 0x1B,
-            Keycode::Space => 0x20,
-            Keycode::PageUp => 0x21,
-            Keycode::PageDown => 0x22,
-            Keycode::End => 0x23,
-            Keycode::Home => 0x24,
-            Keycode::Left => 0x25,
-            Keycode::Up => 0x26,
-            Keycode::Right => 0x27,
-            Keycode::Down => 0x28,
-            Keycode::Insert => 0x2D,
-            Keycode::Delete => 0x2E,
-            // Numpad
-            Keycode::Numpad0 => 0x60,
-            Keycode::Numpad1 => 0x61,
-            Keycode::Numpad2 => 0x62,
-            Keycode::Numpad3 => 0x63,
-            Keycode::Numpad4 => 0x64,
-            Keycode::Numpad5 => 0x65,
-            Keycode::Numpad6 => 0x66,
-            Keycode::Numpad7 => 0x67,
-            Keycode::Numpad8 => 0x68,
-            Keycode::Numpad9 => 0x69,
-            // Function keys
-            Keycode::F1 => 0x70,
-            Keycode::F2 => 0x71,
-            Keycode::F3 => 0x72,
-            Keycode::F4 => 0x73,
-            Keycode::F5 => 0x74,
-            Keycode::F6 => 0x75,
-            Keycode::F7 => 0x76,
-            Keycode::F8 => 0x77,
-            Keycode::F9 => 0x78,
-            Keycode::F10 => 0x79,
-            Keycode::F11 => 0x7A,
-            Keycode::F12 => 0x7B,
-            // Lock keys
-            Keycode::CapsLock => 0x14,
-            // Modifier keys (included so ptt_listen_for_key can skip them)
+            // Modifier keys (included so ptt_listen_for_key can skip them).
+            // See the VK_KEYCODES doc comment for why these live here instead.
             Keycode::LShift | Keycode::RShift => 0x10,
             Keycode::LControl | Keycode::RControl => 0x11,
             Keycode::LAlt | Keycode::RAlt => 0x12,
             Keycode::LMeta | Keycode::RMeta => 0x5B,
-            _ => 0,
+            _ => VK_KEYCODES
+                .iter()
+                .find(|(_, k)| k == key)
+                .map(|(vk, _)| *vk)
+                .unwrap_or(0),
         }
     }
 
     /// Convert a VK-equivalent integer back to a device_query Keycode.
-    /// Returns `None` for unknown codes.
+    /// Returns `None` for unknown codes (including the modifier VKs above,
+    /// which this never reverses — see the VK_KEYCODES doc comment).
     pub fn vk_to_keycode(vk: i32) -> Option<Keycode> {
-        match vk {
-            0x30 => Some(Keycode::Key0),
-            0x31 => Some(Keycode::Key1),
-            0x32 => Some(Keycode::Key2),
-            0x33 => Some(Keycode::Key3),
-            0x34 => Some(Keycode::Key4),
-            0x35 => Some(Keycode::Key5),
-            0x36 => Some(Keycode::Key6),
-            0x37 => Some(Keycode::Key7),
-            0x38 => Some(Keycode::Key8),
-            0x39 => Some(Keycode::Key9),
-            0x41 => Some(Keycode::A),
-            0x42 => Some(Keycode::B),
-            0x43 => Some(Keycode::C),
-            0x44 => Some(Keycode::D),
-            0x45 => Some(Keycode::E),
-            0x46 => Some(Keycode::F),
-            0x47 => Some(Keycode::G),
-            0x48 => Some(Keycode::H),
-            0x49 => Some(Keycode::I),
-            0x4A => Some(Keycode::J),
-            0x4B => Some(Keycode::K),
-            0x4C => Some(Keycode::L),
-            0x4D => Some(Keycode::M),
-            0x4E => Some(Keycode::N),
-            0x4F => Some(Keycode::O),
-            0x50 => Some(Keycode::P),
-            0x51 => Some(Keycode::Q),
-            0x52 => Some(Keycode::R),
-            0x53 => Some(Keycode::S),
-            0x54 => Some(Keycode::T),
-            0x55 => Some(Keycode::U),
-            0x56 => Some(Keycode::V),
-            0x57 => Some(Keycode::W),
-            0x58 => Some(Keycode::X),
-            0x59 => Some(Keycode::Y),
-            0x5A => Some(Keycode::Z),
-            0x08 => Some(Keycode::Backspace),
-            0x09 => Some(Keycode::Tab),
-            0x0D => Some(Keycode::Enter),
-            0x1B => Some(Keycode::Escape),
-            0x20 => Some(Keycode::Space),
-            0x21 => Some(Keycode::PageUp),
-            0x22 => Some(Keycode::PageDown),
-            0x23 => Some(Keycode::End),
-            0x24 => Some(Keycode::Home),
-            0x25 => Some(Keycode::Left),
-            0x26 => Some(Keycode::Up),
-            0x27 => Some(Keycode::Right),
-            0x28 => Some(Keycode::Down),
-            0x2D => Some(Keycode::Insert),
-            0x2E => Some(Keycode::Delete),
-            0x60 => Some(Keycode::Numpad0),
-            0x61 => Some(Keycode::Numpad1),
-            0x62 => Some(Keycode::Numpad2),
-            0x63 => Some(Keycode::Numpad3),
-            0x64 => Some(Keycode::Numpad4),
-            0x65 => Some(Keycode::Numpad5),
-            0x66 => Some(Keycode::Numpad6),
-            0x67 => Some(Keycode::Numpad7),
-            0x68 => Some(Keycode::Numpad8),
-            0x69 => Some(Keycode::Numpad9),
-            0x70 => Some(Keycode::F1),
-            0x71 => Some(Keycode::F2),
-            0x72 => Some(Keycode::F3),
-            0x73 => Some(Keycode::F4),
-            0x74 => Some(Keycode::F5),
-            0x75 => Some(Keycode::F6),
-            0x76 => Some(Keycode::F7),
-            0x77 => Some(Keycode::F8),
-            0x78 => Some(Keycode::F9),
-            0x79 => Some(Keycode::F10),
-            0x7A => Some(Keycode::F11),
-            0x7B => Some(Keycode::F12),
-            0x14 => Some(Keycode::CapsLock),
-            _ => None,
-        }
-    }
-
-    /// Modifier VK codes to skip in ptt_listen_for_key.
-    pub fn is_modifier_vk(vk: i32) -> bool {
-        matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C)
+        VK_KEYCODES
+            .iter()
+            .find(|(v, _)| *v == vk)
+            .map(|(_, k)| k.clone())
     }
 }
 
@@ -455,12 +394,6 @@ pub fn ptt_set_key(vk_code: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the current PTT virtual key code.
-#[tauri::command]
-pub fn ptt_get_key() -> i32 {
-    PTT_VKEY.load(Ordering::SeqCst)
-}
-
 /// Wait for the user to press any non-modifier key and return its VK-equivalent code.
 /// Used by the keybind capture UI. Times out after 10 seconds and returns 0.
 /// Runs on a dedicated thread to avoid blocking the Tauri async thread pool.
@@ -479,7 +412,7 @@ pub async fn ptt_listen_for_key() -> i32 {
             while std::time::Instant::now() < deadline {
                 for key in device_state.get_keys() {
                     let vk = linux::keycode_to_vk(&key);
-                    if vk == 0 || linux::is_modifier_vk(vk) || !is_allowed_ptt_capture_vk(vk) {
+                    if !is_allowed_ptt_capture_vk(vk) {
                         continue;
                     }
                     // Wait for key release (with its own timeout)
@@ -547,9 +480,9 @@ mod tests {
         assert!(ptt_set_key(254).is_ok());
 
         ptt_set_key(0x41).unwrap(); // A
-        assert_eq!(ptt_get_key(), 0x41);
+        assert_eq!(PTT_VKEY.load(Ordering::SeqCst), 0x41);
         ptt_set_key(0).unwrap();
-        assert_eq!(ptt_get_key(), 0);
+        assert_eq!(PTT_VKEY.load(Ordering::SeqCst), 0);
     }
 
     #[test]

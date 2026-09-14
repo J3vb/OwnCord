@@ -871,15 +871,6 @@ export function setMessagePinned(channelId: number, messageId: number, pinned: b
   });
 }
 
-/** Track a pending outbound message send. */
-export function addPendingSend(correlationId: string, channelId: number): void {
-  messagesStore.setState((prev) => {
-    const updated = new Map(prev.pendingSends);
-    updated.set(correlationId, channelId);
-    return { ...prev, pendingSends: updated };
-  });
-}
-
 /**
  * Confirm a pending send from a chat_send_ok ack: stamp the optimistic row with
  * its real server id + timestamp and mark it "sent". The subsequent
@@ -939,39 +930,6 @@ export function confirmSend(
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, updatedList);
     return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
-  });
-}
-
-/** Clear all messages for a channel. */
-export function clearChannelMessages(channelId: number): void {
-  messagesStore.setState((prev) => {
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.delete(channelId);
-
-    const updatedLoaded = new Set(prev.loadedChannels);
-    updatedLoaded.delete(channelId);
-
-    const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.delete(channelId);
-
-    const updatedLoadState = new Map(prev.historyLoadState);
-    updatedLoadState.delete(channelId);
-
-    const updatedDetached = new Set(prev.detachedChannels);
-    updatedDetached.delete(channelId);
-
-    const updatedWatermark = new Map(prev.loadWatermark ?? []);
-    updatedWatermark.delete(channelId);
-
-    return {
-      ...prev,
-      messagesByChannel: updatedMessages,
-      loadedChannels: updatedLoaded,
-      hasMore: updatedHasMore,
-      historyLoadState: updatedLoadState,
-      detachedChannels: updatedDetached,
-      loadWatermark: updatedWatermark,
-    };
   });
 }
 

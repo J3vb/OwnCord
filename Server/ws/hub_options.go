@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -168,7 +167,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clientEvents:        make(chan clientEvent, 64),
 		stop:                make(chan struct{}),
 		pubsub:              NewPubSub(),
-		topicLimiter:        NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 		replayBuf:           NewEventRingBuffer(ringSize),
 		registry:            reg,
 		permChecker:         permissions.NewChecker(database),

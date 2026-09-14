@@ -41,8 +41,3 @@ export function jumpToMessage(channelId: number, messageId: number): void {
   }
   handler(channelId, messageId);
 }
-
-/** Whether a jump would currently reach a handler. Used by tests and guards. */
-export function hasMessageJumpHandler(): boolean {
-  return handler !== null;
-}

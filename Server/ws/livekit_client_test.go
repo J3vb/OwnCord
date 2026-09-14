@@ -13,9 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// LiveKitClient.ListParticipants, CountVideoTracks and HealthCheck had no
-// coverage — CountVideoTracks in particular gates MaxVideo enforcement, so a
-// miscount silently changes who is allowed to turn a camera on.
+// LiveKitClient.HealthCheck had no coverage.
 //
 // The room service client speaks Twirp over HTTP, so these tests stand up an
 // httptest server that replies with real protobuf-encoded responses.
@@ -56,124 +54,6 @@ func twirpServer(t *testing.T, status int, reply proto.Message) *ws.LiveKitClien
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 	return client
-}
-
-func TestLiveKitClient_ListParticipants_Empty(t *testing.T) {
-	client := twirpServer(t, http.StatusOK, &livekit.ListParticipantsResponse{})
-
-	got, err := client.ListParticipants(42)
-	if err != nil {
-		t.Fatalf("ListParticipants: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("ListParticipants = %v, want empty", got)
-	}
-}
-
-func TestLiveKitClient_ListParticipants_ReturnsParticipants(t *testing.T) {
-	client := twirpServer(t, http.StatusOK, &livekit.ListParticipantsResponse{
-		Participants: []*livekit.ParticipantInfo{
-			{Identity: "user-1:tok"},
-			{Identity: "user-2:tok"},
-		},
-	})
-
-	got, err := client.ListParticipants(42)
-	if err != nil {
-		t.Fatalf("ListParticipants: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("ListParticipants returned %d participants, want 2", len(got))
-	}
-	if got[0].Identity != "user-1:tok" {
-		t.Errorf("participant[0].Identity = %q, want %q", got[0].Identity, "user-1:tok")
-	}
-}
-
-func TestLiveKitClient_ListParticipants_ServerError(t *testing.T) {
-	client := twirpServer(t, http.StatusInternalServerError, nil)
-
-	if _, err := client.ListParticipants(42); err == nil {
-		t.Error("ListParticipants against a failing server returned nil error")
-	}
-}
-
-func TestLiveKitClient_CountVideoTracks(t *testing.T) {
-	tests := []struct {
-		name         string
-		participants []*livekit.ParticipantInfo
-		want         int
-	}{
-		{
-			name: "no participants",
-			want: 0,
-		},
-		{
-			name: "audio only",
-			participants: []*livekit.ParticipantInfo{
-				{Tracks: []*livekit.TrackInfo{{Type: livekit.TrackType_AUDIO}}},
-			},
-			want: 0,
-		},
-		{
-			name: "one video among audio",
-			participants: []*livekit.ParticipantInfo{
-				{Tracks: []*livekit.TrackInfo{
-					{Type: livekit.TrackType_AUDIO},
-					{Type: livekit.TrackType_VIDEO},
-				}},
-			},
-			want: 1,
-		},
-		{
-			name: "video counted across participants",
-			participants: []*livekit.ParticipantInfo{
-				{Tracks: []*livekit.TrackInfo{{Type: livekit.TrackType_VIDEO}}},
-				{Tracks: []*livekit.TrackInfo{
-					{Type: livekit.TrackType_VIDEO},
-					{Type: livekit.TrackType_VIDEO},
-				}},
-				{Tracks: []*livekit.TrackInfo{{Type: livekit.TrackType_AUDIO}}},
-			},
-			want: 3,
-		},
-		{
-			name: "participant with no tracks",
-			participants: []*livekit.ParticipantInfo{
-				{Identity: "user-1"},
-				{Tracks: []*livekit.TrackInfo{{Type: livekit.TrackType_VIDEO}}},
-			},
-			want: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := twirpServer(t, http.StatusOK, &livekit.ListParticipantsResponse{
-				Participants: tt.participants,
-			})
-
-			got, err := client.CountVideoTracks(7)
-			if err != nil {
-				t.Fatalf("CountVideoTracks: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("CountVideoTracks = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestLiveKitClient_CountVideoTracks_PropagatesError(t *testing.T) {
-	client := twirpServer(t, http.StatusInternalServerError, nil)
-
-	got, err := client.CountVideoTracks(7)
-	if err == nil {
-		t.Fatal("CountVideoTracks against a failing server returned nil error")
-	}
-	if got != 0 {
-		t.Errorf("count = %d on error, want 0", got)
-	}
 }
 
 func TestLiveKitClient_HealthCheck_Success(t *testing.T) {

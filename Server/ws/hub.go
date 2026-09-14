@@ -50,8 +50,7 @@ type Hub struct {
 	// bare test hubs; the broadcast gate fails closed then.
 	messageSvc *service.MessageService
 
-	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
-	topicLimiter *TopicRateLimiter // per-topic throughput caps
+	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order

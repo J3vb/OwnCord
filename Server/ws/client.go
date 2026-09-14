@@ -118,12 +118,6 @@ func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq u
 	}
 }
 
-// GetTokenHash returns the session token hash stored on this client.
-// Exported for tests.
-func (c *Client) GetTokenHash() string {
-	return c.tokenHash
-}
-
 // touch updates the last activity timestamp and increments the received counter.
 func (c *Client) touch() {
 	c.mu.Lock()

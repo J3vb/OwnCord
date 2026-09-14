@@ -172,21 +172,6 @@ func receiveErrorCode(ch <-chan []byte, deadline time.Duration) string {
 
 // ─── 2.2: Session expiry check in readPump ────────────────────────────────────
 
-// TestSessionExpiry_TokenHashStoredOnClient verifies that a Client created via
-// NewTestClientWithTokenHash carries the tokenHash field for periodic revalidation.
-func TestSessionExpiry_TokenHashStoredOnClient(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	user := seedOwnerUser(t, database, "expiry-user1")
-	send := make(chan []byte, 16)
-
-	hash := "deadbeefdeadbeef"
-	c := ws.NewTestClientWithTokenHash(hub, user, hash, 0, send)
-
-	if got := c.GetTokenHash(); got != hash {
-		t.Errorf("GetTokenHash() = %q, want %q", got, hash)
-	}
-}
-
 // TestSessionExpiry_ValidSessionAllowsMessages verifies that when a client has a
 // valid (non-expired) session stored in the DB, the periodic expiry check does
 // NOT close the connection.

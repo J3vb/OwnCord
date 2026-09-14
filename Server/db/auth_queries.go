@@ -64,12 +64,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	// The durable gate (migration 043): setup_completed is set by the first
 	// owner's creation below and never cleared by the server, so an emptied
@@ -126,7 +121,6 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty commit: %w", err)
 	}
-	committed = true
 	return uid, nil
 }
 
@@ -141,12 +135,7 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	result, err := tx.Exec(
 		`UPDATE invites SET use_count = use_count + 1
@@ -183,7 +172,6 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite commit: %w", err)
 	}
-	committed = true
 	return uid, nil
 }
 
@@ -196,12 +184,7 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithSession begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	result, err := tx.Exec(
 		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
@@ -220,7 +203,6 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateUserWithSession commit: %w", err)
 	}
-	committed = true
 	return uid, nil
 }
 

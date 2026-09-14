@@ -47,12 +47,7 @@ func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labe
 	if err != nil {
 		return false, fmt.Errorf("AcknowledgeNSFW begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	var nsfw int64
 	switch scanErr := tx.QueryRowContext(ctx, `SELECT nsfw FROM channels WHERE id = ?`, channelID).Scan(&nsfw); {
@@ -76,7 +71,6 @@ func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labe
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("AcknowledgeNSFW commit: %w", err)
 	}
-	committed = true
 	return true, nil
 }
 
@@ -140,12 +134,7 @@ func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u Cha
 	if err != nil {
 		return fmt.Errorf("AdminUpdateChannelClearingNSFW begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 	if err := q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
 		Name:          u.Name,
@@ -167,6 +156,5 @@ func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u Cha
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("AdminUpdateChannelClearingNSFW commit: %w", err)
 	}
-	committed = true
 	return nil
 }

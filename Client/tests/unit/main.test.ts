@@ -6,7 +6,7 @@
  * every direct dependency of main.ts that is not needed to observe the two
  * behaviors below is stubbed out (mirroring the pattern main-page.test.ts
  * uses for MainPage.ts), while ws.ts, authStore, router.ts, safe-render.ts,
- * navigation-guard.ts and ConnectedOverlay.ts run for real — so the actual
+ * and ConnectedOverlay.ts run for real — so the actual
  * event-ordering bug (OC-0063) is exercised, not simulated, and the tray
  * listener (OC-0037) is driven through the same Tauri event mock ws.ts's own
  * tests use.

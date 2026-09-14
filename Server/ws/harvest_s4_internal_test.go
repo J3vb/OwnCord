@@ -99,27 +99,6 @@ readLoop:
 	}
 }
 
-// The per-channel token buckets are created on first broadcast and were never
-// pruned in production — Cleanup existed but had no caller. The stale-client
-// tick is the natural place.
-func TestStaleTick_PrunesIdleTopicLimiterBuckets(t *testing.T) {
-	h := newEmitTestHub()
-	h.topicLimiter.Allow(ChannelTopic(9))
-
-	h.topicLimiter.mu.Lock()
-	h.topicLimiter.buckets[ChannelTopic(9)].lastReset = time.Now().Add(-time.Hour)
-	h.topicLimiter.mu.Unlock()
-
-	h.onStaleTick()
-
-	h.topicLimiter.mu.Lock()
-	_, exists := h.topicLimiter.buckets[ChannelTopic(9)]
-	h.topicLimiter.mu.Unlock()
-	if exists {
-		t.Error("idle topic bucket survived the stale tick — the bucket map grows for the process lifetime")
-	}
-}
-
 // dm_channel_open is unsequenced and targeted: an addressee mid-reconnect
 // never receives it, while the DM's sequenced chat_message replays fine —
 // leaving an unreachable channel until the next full ready. Emitting one must

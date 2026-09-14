@@ -483,18 +483,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypeTypingStart: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ChannelID json.Number `json:"channel_id"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid typing_start payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
+		chID, err := parseCallChannelID(MsgTypeTypingStart, raw)
 		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if chID <= 0 {
-			return nil, fmt.Errorf("channel_id must be positive")
+			return nil, err
 		}
 		return TypingStartCmd{userID: userID, channelID: chID}, nil
 	},
@@ -511,35 +502,17 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ChannelID json.Number `json:"channel_id"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid channel_focus payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
+		chID, err := parseCallChannelID(MsgTypeChannelFocus, raw)
 		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if chID <= 0 {
-			return nil, fmt.Errorf("channel_id must be positive")
+			return nil, err
 		}
 		return ChannelFocusCmd{userID: userID, channelID: chID}, nil
 	},
 
 	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ChannelID json.Number `json:"channel_id"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid mark_read payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
+		chID, err := parseCallChannelID(MsgTypeMarkRead, raw)
 		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if chID <= 0 {
-			return nil, fmt.Errorf("channel_id must be positive")
+			return nil, err
 		}
 		return MarkReadCmd{userID: userID, channelID: chID}, nil
 	},
@@ -591,18 +564,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypeVoiceJoin: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ChannelID json.Number `json:"channel_id"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid voice_join payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
+		chID, err := parseCallChannelID(MsgTypeVoiceJoin, raw)
 		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if chID <= 0 {
-			return nil, fmt.Errorf("channel_id must be positive")
+			return nil, err
 		}
 		return VoiceJoinCmd{userID: userID, channelID: chID}, nil
 	},

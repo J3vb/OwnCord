@@ -108,12 +108,7 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	if err != nil {
 		return false, fmt.Errorf("CreateMessageRequest begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
 	n, err := q.InsertMessageRequest(ctx, dbgen.InsertMessageRequestParams{
@@ -129,7 +124,6 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("CreateMessageRequest commit: %w", err)
 	}
-	committed = true
 	return n > 0, nil
 }
 
@@ -218,12 +212,7 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 	if err != nil {
 		return nil, fmt.Errorf("AcceptMessageRequest begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
 	row, err := q.GetMessageRequestForRecipient(ctx, dbgen.GetMessageRequestForRecipientParams{ID: id, RecipientID: recipientID})
@@ -265,6 +254,5 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("AcceptMessageRequest commit: %w", err)
 	}
-	committed = true
 	return fromDBGenMessageRequest(updated), nil
 }

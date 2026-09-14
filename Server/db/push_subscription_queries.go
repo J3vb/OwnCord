@@ -39,12 +39,7 @@ func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint,
 	if err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
 	id, err := q.UpsertPushSubscription(ctx, dbgen.UpsertPushSubscriptionParams{
@@ -75,7 +70,6 @@ func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint,
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription commit: %w", err)
 	}
-	committed = true
 	return id, nil
 }
 

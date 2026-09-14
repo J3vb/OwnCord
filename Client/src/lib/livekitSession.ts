@@ -1594,14 +1594,9 @@ export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
 
-/** True when the LiveKit session has an active room connection. */
-export function isVoiceConnected(): boolean {
-  return session.getRoom() !== null;
-}
-
 /** True while a join is in flight ("connecting"/"reconnecting") OR a room is
  *  live ("connected") — i.e. there is something for leaveVoice() to tear
- *  down. OC-0249: isVoiceConnected() alone reads false for the entire
+ *  down. OC-0249: a Room-existence check alone reads false for the entire
  *  "connecting" state (no Room object exists yet), so a caller deciding
  *  whether to abort an in-flight join must ask this instead. */
 export function isVoiceSessionActive(): boolean {

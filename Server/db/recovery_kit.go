@@ -67,12 +67,7 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
 	now := time.Now().UTC().Format(sessionTimeLayout)
@@ -107,6 +102,5 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit commit: %w", err)
 	}
-	committed = true
 	return sessionsRevoked, nil
 }

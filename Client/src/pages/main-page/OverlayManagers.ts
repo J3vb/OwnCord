@@ -152,24 +152,30 @@ export function createQuickSwitcherManager(
 }
 
 // ---------------------------------------------------------------------------
-// Invite Manager Controller
+// Generic async overlay controller
 // ---------------------------------------------------------------------------
 
-export interface InviteManagerController {
-  open(): Promise<void>;
-  cleanup(): void;
-}
-
-export function createInviteManagerController(opts: {
-  readonly api: ApiClient;
+/**
+ * Shared shape behind an overlay that opens by awaiting a fetch: an
+ * instance/opening guard against a double-click during the round trip,
+ * post-await `getRoot()` re-derivation (a page teardown during the fetch
+ * nulls the root MainPage handed out, but the pre-await root still points at
+ * the now-detached node — mounting on it would create an instance whose
+ * document-level listeners nothing ever tears down), catch -> log -> toast,
+ * and `finally opening = false`.
+ */
+function createAsyncOverlayController<T>(opts: {
   readonly getRoot: () => HTMLDivElement | null;
-}): InviteManagerController {
+  /** Extra precondition (besides instance/root/opening) checked before the
+   *  fetch starts; open() bails silently (no log, no toast) if it returns
+   *  false. Runs before `opening` is set. */
+  readonly canOpen?: () => boolean;
+  readonly load: () => Promise<T>;
+  readonly build: (data: T, root: HTMLDivElement, close: () => void) => MountableComponent;
+  readonly errorLog: string;
+  readonly errorToast: string;
+}): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
-  // Set for the duration of the getInvites() round trip. `instance` is only
-  // assigned after the await, so the synchronous `instance !== null` guard
-  // alone lets a double-click during the fetch mount two overlays — the
-  // second assignment orphans the first, which is then unreachable by its own
-  // close affordances. This flag closes that window.
   let opening = false;
 
   function close(): void {
@@ -182,17 +188,44 @@ export function createInviteManagerController(opts: {
   async function open(): Promise<void> {
     const root = opts.getRoot();
     if (instance !== null || root === null || opening) return;
+    if (opts.canOpen?.() === false) return;
     opening = true;
     try {
-      const raw = await opts.api.getInvites();
-      // Re-derive liveness: a page teardown during the fetch nulls the root
-      // MainPage handed out, but the pre-await `root` const above still
-      // points at the now-detached node. Mounting on it anyway would create
-      // an instance whose document-level listeners nothing ever tears down.
+      const data = await opts.load();
       const liveRoot = opts.getRoot();
       if (liveRoot === null) return;
+      instance = opts.build(data, liveRoot, close);
+      instance.mount(liveRoot);
+    } catch (err) {
+      log.error(opts.errorLog, { error: String(err) });
+      showToast(opts.errorToast, "error");
+    } finally {
+      opening = false;
+    }
+  }
+
+  return { open, close, isOpen: () => instance !== null };
+}
+
+// ---------------------------------------------------------------------------
+// Invite Manager Controller
+// ---------------------------------------------------------------------------
+
+export interface InviteManagerController {
+  open(): Promise<void>;
+  cleanup(): void;
+}
+
+export function createInviteManagerController(opts: {
+  readonly api: ApiClient;
+  readonly getRoot: () => HTMLDivElement | null;
+}): InviteManagerController {
+  const controller = createAsyncOverlayController<InviteResponse[]>({
+    getRoot: opts.getRoot,
+    load: () => opts.api.getInvites(),
+    build: (raw, _root, close) => {
       const invites = raw.filter((r) => !isInviteRevoked(r)).map(mapInviteResponse);
-      instance = createInviteManager({
+      return createInviteManager({
         invites,
         onCreateInvite: async () => {
           const created = await opts.api.createInvite({});
@@ -220,16 +253,12 @@ export function createInviteManagerController(opts: {
           showToast(message, "error");
         },
       });
-      instance.mount(liveRoot);
-    } catch (err) {
-      log.error("Failed to open invite manager", { error: String(err) });
-      showToast("Failed to load invites", "error");
-    } finally {
-      opening = false;
-    }
-  }
+    },
+    errorLog: "Failed to open invite manager",
+    errorToast: "Failed to load invites",
+  });
 
-  return { open, cleanup: close };
+  return { open: controller.open, cleanup: controller.close };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,52 +285,37 @@ export function createPinnedPanelController(opts: {
    */
   readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): PinnedPanelController {
-  let instance: MountableComponent | null = null;
-  // Same guard as InviteManagerController.open: `instance` is only assigned
-  // after the getPins() await, so a double-click during the fetch would
-  // otherwise mount two panels and orphan the first one permanently.
-  let opening = false;
+  // Set by canOpen() and read by load()/build() for the same open() attempt —
+  // safe because canOpen, load and build all run for one open() call before
+  // the next can start (the `opening` guard), same as the original toggle()
+  // capturing channelId once at the top and reusing it throughout.
+  let channelId: number | null = null;
 
-  function close(): void {
-    if (instance !== null) {
-      instance.destroy?.();
-      instance = null;
-    }
-  }
-
-  async function toggle(): Promise<void> {
-    if (instance !== null) {
-      close();
-      return;
-    }
-    if (opening) return;
-    const root = opts.getRoot();
-    const channelId = opts.getCurrentChannelId();
-    if (root === null || channelId === null) return;
-    opening = true;
-    try {
-      const resp = await opts.api.getPins(channelId);
-      // Re-derive liveness: a page teardown during the fetch nulls the root
-      // MainPage handed out, but the pre-await `root` const above still
-      // points at the now-detached node — see InviteManagerController.open.
-      const liveRoot = opts.getRoot();
-      if (liveRoot === null) return;
+  const controller = createAsyncOverlayController<Awaited<ReturnType<ApiClient["getPins"]>>>({
+    getRoot: opts.getRoot,
+    canOpen: () => {
+      channelId = opts.getCurrentChannelId();
+      return channelId !== null;
+    },
+    load: () => opts.api.getPins(channelId as number),
+    build: (resp, _liveRoot, close) => {
+      const id = channelId as number;
       const pins = resp.messages.map(mapToPinnedMessage);
-      instance = createPinnedMessages({
-        channelId,
+      return createPinnedMessages({
+        channelId: id,
         pinnedMessages: pins,
         onJumpToMessage: (msgId: number) => {
-          opts.onJumpToMessage?.(channelId, msgId);
+          opts.onJumpToMessage?.(id, msgId);
           close();
         },
         onUnpin: (msgId: number) => {
           void opts.api
-            .unpinMessage(channelId, msgId)
+            .unpinMessage(id, msgId)
             .then(() => {
               // The server has no pin/unpin broadcast — this store write is
               // the row's only local authority for `pinned`. Without it the
               // row still says "Unpin" after this panel closes.
-              setMessagePinned(channelId, msgId, false);
+              setMessagePinned(id, msgId, false);
               close();
             })
             .catch((err: unknown) => {
@@ -311,16 +325,20 @@ export function createPinnedPanelController(opts: {
         },
         onClose: close,
       });
-      instance.mount(liveRoot);
-    } catch (err) {
-      log.error("Failed to load pinned messages", { error: String(err) });
-      showToast("Failed to load pinned messages", "error");
-    } finally {
-      opening = false;
+    },
+    errorLog: "Failed to load pinned messages",
+    errorToast: "Failed to load pinned messages",
+  });
+
+  async function toggle(): Promise<void> {
+    if (controller.isOpen()) {
+      controller.close();
+      return;
     }
+    await controller.open();
   }
 
-  return { toggle, cleanup: close };
+  return { toggle, cleanup: controller.close };
 }
 
 // ---------------------------------------------------------------------------

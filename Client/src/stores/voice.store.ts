@@ -442,25 +442,6 @@ export function setListenOnly(listenOnly: boolean): void {
   }));
 }
 
-/** Update the current user's speaking state for local VAD feedback. */
-export function setLocalSpeaking(speaking: boolean): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  if (currentUserId === 0) return;
-  voiceStore.setState((prev) => {
-    const channelId = prev.currentChannelId;
-    if (channelId === null) return prev;
-    const channelUsers = prev.voiceUsers.get(channelId);
-    if (!channelUsers) return prev;
-    const user = channelUsers.get(currentUserId);
-    if (!user || user.speaking === speaking) return prev;
-    const nextUsers = new Map(channelUsers);
-    nextUsers.set(currentUserId, { ...user, speaking });
-    const nextChannels = new Map(prev.voiceUsers);
-    nextChannels.set(channelId, nextUsers);
-    return { ...prev, voiceUsers: nextChannels };
-  });
-}
-
 /** Store voice config for a channel from a voice_config event. */
 export function setVoiceConfig(payload: VoiceConfigPayload): void {
   voiceStore.setState((prev) => {

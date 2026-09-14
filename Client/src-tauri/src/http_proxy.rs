@@ -29,15 +29,13 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, error, info, warn};
-use rustls::pki_types::ServerName;
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 
 use crate::tofu::{self, TofuOutcome};
 
@@ -74,23 +72,10 @@ impl HttpProxyState {
     }
 }
 
-/// Validate a remote host string before it is used in header rewriting and
-/// dialing. Mirrors start_livekit_proxy's checks.
-fn validate_remote_host(remote_host: &str) -> Result<(), String> {
-    if remote_host.is_empty() || remote_host.len() > 260 {
-        return Err("remote_host is empty or too long".into());
-    }
-    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
-        return Err("remote_host contains invalid characters".into());
-    }
-    if !remote_host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("remote_host contains unexpected characters".into());
-    }
-    Ok(())
-}
+use crate::proxy_common::{
+    connect_tls, copy_with_deadline, read_request_headers, resolve_remote_target,
+    validate_remote_host,
+};
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
 /// loopback port. The webview should send its REST traffic to
@@ -285,41 +270,6 @@ fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
 /// literal contains more than one colon, and RFC 3986 gives it no way to
 /// carry a port without brackets, so that case is returned whole with the
 /// default port instead of being mis-split on its last colon.
-fn split_host_port(remote_host: &str) -> Result<(&str, &str), String> {
-    if let Some(rest) = remote_host.strip_prefix('[') {
-        let (host, tail) = rest
-            .split_once(']')
-            .ok_or_else(|| format!("unterminated '[' in remote_host '{remote_host}'"))?;
-        let port = tail.strip_prefix(':').unwrap_or("443");
-        Ok((host, port))
-    } else {
-        match remote_host.rsplit_once(':') {
-            Some((host, port)) if !host.contains(':') => Ok((host, port)),
-            _ => Ok((remote_host, "443")),
-        }
-    }
-}
-
-/// Derive the TLS `ServerName` (SNI) and the TCP dial target from a
-/// `remote_host` string. Mirrors `livekit_proxy::parse_server_name`'s
-/// bracket handling.
-fn resolve_remote_target(remote_host: &str) -> Result<(ServerName<'static>, String), String> {
-    let (hostname, port) = split_host_port(remote_host)?;
-    let server_name = if let Ok(ip) = hostname.parse::<IpAddr>() {
-        ServerName::IpAddress(ip.into())
-    } else {
-        ServerName::try_from(hostname.to_string())
-            .map_err(|e| format!("invalid server name '{hostname}': {e}"))?
-    };
-
-    let dial_target = if hostname.contains(':') {
-        format!("[{hostname}]:{port}")
-    } else {
-        format!("{hostname}:{port}")
-    };
-    Ok((server_name, dial_target))
-}
-
 /// Handle one proxied connection:
 /// 1. Read the request headers from the loopback side
 /// 2. TLS-connect to the remote and run the TOFU check (store/emit/reject)
@@ -330,32 +280,7 @@ async fn handle_connection<R: Runtime>(
     remote_host: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n), 10s guard ─────────
-    let mut buf = Vec::with_capacity(4096);
-    timeout(Duration::from_secs(10), async {
-        let mut trailer = [0u8; 4];
-        loop {
-            let mut byte = [0u8; 1];
-            local.read_exact(&mut byte).await?;
-            buf.push(byte[0]);
-            trailer[0] = trailer[1];
-            trailer[1] = trailer[2];
-            trailer[2] = trailer[3];
-            trailer[3] = byte[0];
-            if trailer == *b"\r\n\r\n" {
-                break;
-            }
-            if buf.len() > 16_384 {
-                return Err(Box::<dyn std::error::Error + Send + Sync>::from(
-                    "HTTP request headers too large",
-                ));
-            }
-        }
-        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    })
-    .await
-    .map_err(|_| {
-        Box::<dyn std::error::Error + Send + Sync>::from("request header read timed out")
-    })??;
+    let buf = read_request_headers(&mut local).await?;
 
     // Defense-in-depth (primary validation is in start_http_proxy).
     validate_remote_host(remote_host)?;
@@ -370,14 +295,13 @@ async fn handle_connection<R: Runtime>(
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
     let (server_name, dial_target) = resolve_remote_target(remote_host)?;
-    let tcp = timeout(Duration::from_secs(10), TcpStream::connect(&dial_target))
-        .await
-        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
-    let mut tls = timeout(Duration::from_secs(10), connector.connect(server_name, tcp))
-        .await
-        .map_err(|_| {
-            Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out")
-        })??;
+    let mut tls = connect_tls(
+        &connector,
+        server_name,
+        &dial_target,
+        Duration::from_secs(10),
+    )
+    .await?;
 
     let fingerprint = captured_fp
         .lock()
@@ -478,31 +402,6 @@ async fn handle_connection<R: Runtime>(
 /// one that is merely slow.
 const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Run `io::copy_bidirectional` under a deadline. Without this, a remote
-/// that completes the TLS handshake and then stalls forever (neither
-/// responding nor closing) parks the spawned connection task — and both the
-/// loopback socket and the remote TLS session — indefinitely; closing the
-/// local side alone does not free it, since `copy_bidirectional` only
-/// resolves once BOTH directions finish. Generic over the stream types so it
-/// can be unit-tested without a live TLS connection.
-async fn copy_with_deadline<A, B>(
-    local: &mut A,
-    remote: &mut B,
-    dur: Duration,
-) -> io::Result<(u64, u64)>
-where
-    A: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
-    B: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
-{
-    match timeout(dur, io::copy_bidirectional(local, remote)).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "data phase timed out",
-        )),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -552,61 +451,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_crlf_and_null() {
-        assert!(validate_remote_host("evil\r\nhost").is_err());
-        assert!(validate_remote_host("evil\0host").is_err());
-    }
-
-    #[test]
-    fn validate_rejects_empty_and_odd_chars() {
-        assert!(validate_remote_host("").is_err());
-        assert!(validate_remote_host("host name").is_err());
-        assert!(validate_remote_host("host/path").is_err());
-    }
-
-    #[test]
-    fn validate_accepts_typical_hosts() {
-        assert!(validate_remote_host("example.com:8443").is_ok());
-        assert!(validate_remote_host("192.168.1.10:8443").is_ok());
-        assert!(validate_remote_host("[::1]:8443").is_ok());
-    }
-
-    // OC-0021: IPv6 hosts that are not in the exact `[addr]:port` shape must
-    // still resolve to a valid ServerName and a dialable host:port target.
-
-    #[test]
-    fn resolve_remote_target_handles_bracketed_ipv6_without_port() {
-        let (server_name, dial_target) = resolve_remote_target("[2001:db8::1]")
-            .expect("bracketed IPv6 without a port must parse");
-        assert!(matches!(server_name, ServerName::IpAddress(_)));
-        assert_eq!(dial_target, "[2001:db8::1]:443");
-    }
-
-    #[test]
-    fn resolve_remote_target_handles_bare_ipv6_without_port() {
-        let (server_name, dial_target) =
-            resolve_remote_target("2001:db8::1").expect("bare IPv6 without a port must parse");
-        assert!(matches!(server_name, ServerName::IpAddress(_)));
-        assert_eq!(dial_target, "[2001:db8::1]:443");
-    }
-
-    #[test]
-    fn resolve_remote_target_still_handles_bracketed_ipv6_with_port() {
-        let (server_name, dial_target) = resolve_remote_target("[2001:db8::1]:8443")
-            .expect("bracketed IPv6 with a port must parse");
-        assert!(matches!(server_name, ServerName::IpAddress(_)));
-        assert_eq!(dial_target, "[2001:db8::1]:8443");
-    }
-
-    #[test]
-    fn resolve_remote_target_still_handles_plain_hostname_and_port() {
-        let (server_name, dial_target) =
-            resolve_remote_target("example.com:8443").expect("hostname:port must parse");
-        assert!(matches!(server_name, ServerName::DnsName(_)));
-        assert_eq!(dial_target, "example.com:8443");
-    }
-
-    #[test]
     fn rewrite_replaces_host_and_forces_close() {
         let raw = b"GET /api/v1/health HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nAccept: */*\r\n\r\n";
         let out = rewrite_request_headers(raw, "example.com:8443");
@@ -638,34 +482,6 @@ mod tests {
         assert!(out.ends_with("\r\n\r\n"));
     }
 
-    // OC-0218: the data phase of a tunneled request (step 3 in
-    // `handle_connection`) must not be able to hang forever. A remote that
-    // completes the TLS handshake and then neither responds nor closes must
-    // eventually be reclaimed, the same way the header-read/connect/handshake
-    // phases already are (10s guards above). Simulate that stall with two
-    // in-memory duplex pairs where neither peer ever writes or disconnects,
-    // so raw `io::copy_bidirectional` would block forever.
-    #[tokio::test]
-    async fn copy_with_deadline_reclaims_a_stalled_connection() {
-        // Keep both "far" ends alive (bound, not `_`) so neither duplex half
-        // observes EOF — this is what makes the connection "stalled" rather
-        // than "closed".
-        let (mut local_near, _local_far) = tokio::io::duplex(64);
-        let (mut remote_near, _remote_far) = tokio::io::duplex(64);
-
-        // An outer safety bound: if `copy_with_deadline` does not honor its
-        // own deadline, fail fast instead of hanging the test suite forever.
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(5),
-            copy_with_deadline(&mut local_near, &mut remote_near, Duration::from_millis(50)),
-        )
-        .await
-        .expect(
-            "copy_with_deadline must resolve on its own deadline; the data phase must not hang \
-             indefinitely on a stalled remote (OC-0218)",
-        );
-
-        let err = outcome.expect_err("a stalled remote must surface as a timeout error, not Ok");
-        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-    }
+    // OC-0218 note: the copy_with_deadline stall test lives in
+    // proxy_common.rs now, next to the shared helper.
 }

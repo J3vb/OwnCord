@@ -231,10 +231,27 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
 
 // --- Formatting helpers ---
 
+/**
+ * Format a byte count as `B` / `<kiloUnit>` / `MB`, switching units at
+ * `base` and `base * base`. Shared by `formatBytes` here (base-1000, "kB")
+ * and `formatFileSize` in components/message-list/attachments.ts
+ * (base-1024, "KB") — those two disagreed on both the base and the unit
+ * case before this was unified, so keep each call site's own `base`/
+ * `kiloUnit`/`decimals` rather than picking one for both.
+ */
+export function formatByteSize(
+  bytes: number,
+  base: number,
+  kiloUnit: string,
+  decimals: number,
+): string {
+  if (bytes < base) return `${Math.round(bytes)} B`;
+  if (bytes < base * base) return `${(bytes / base).toFixed(decimals)} ${kiloUnit}`;
+  return `${(bytes / (base * base)).toFixed(decimals)} MB`;
+}
+
 export function formatBytes(bytes: number): string {
-  if (bytes < 1000) return `${Math.round(bytes)} B`;
-  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(2)} kB`;
-  return `${(bytes / 1_000_000).toFixed(2)} MB`;
+  return formatByteSize(bytes, 1000, "kB", 2);
 }
 
 export function formatRate(bytesPerSec: number): string {

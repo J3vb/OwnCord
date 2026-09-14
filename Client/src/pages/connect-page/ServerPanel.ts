@@ -3,6 +3,7 @@
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createModal } from "@lib/modalFactory";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
@@ -294,11 +295,8 @@ export function createServerPanel(
   function handleAddServer(): void {
     if (!onAddProfile) return;
 
-    const overlay = createElement("div", { class: "modal-overlay visible" });
-    const modal = createElement("div", { class: "modal" });
-
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Add Server");
+    const title = createElement("h3", { id: "add-server-title" }, "Add Server");
     const closeBtn = createElement("button", { class: "modal-close", type: "button" });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -332,14 +330,12 @@ export function createServerPanel(
     setText(saveBtn, "Add Server");
     appendChildren(footer, cancelBtn, saveBtn);
 
-    appendChildren(modal, header, body, footer);
-    overlay.appendChild(modal);
-
     // Each open modal gets its own AbortController so closeModal() can
-    // release its listeners; registering them on the page-lifetime `signal`
-    // instead (which only aborts once, at page teardown) would keep every
-    // discarded modal subtree reachable until then (OC-0335). Chained to the
-    // page signal so an open modal is also torn down on page teardown.
+    // release its own button listeners; registering them on the
+    // page-lifetime `signal` instead (which only aborts once, at page
+    // teardown) would keep every discarded modal subtree reachable until
+    // then (OC-0335). Chained to the page signal so an open modal is also
+    // torn down on page teardown.
     const modalAc = new AbortController();
     signal.addEventListener("abort", () => modalAc.abort(), {
       once: true,
@@ -348,8 +344,19 @@ export function createServerPanel(
 
     function closeModal(): void {
       modalAc.abort();
-      overlay.remove();
+      instance.destroy();
     }
+
+    // A self-contained local modal with no caller-owned destroy() to
+    // decouple from, so backdrop click and Escape close it directly through
+    // the factory; dialog semantics, focus trap and focus save/restore come
+    // from there too. Mounted onto the panel's closest connect-page root.
+    const root = panelEl.closest(".connect-page") ?? document.body;
+    const instance = createModal(
+      { content: header, ariaLabelledBy: "add-server-title", onClose: closeModal },
+      root,
+    );
+    appendChildren(instance.modal, body, footer);
 
     function handleSave(): void {
       const name = nameInput.value.trim();
@@ -373,16 +380,6 @@ export function createServerPanel(
     closeBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
     cancelBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
     saveBtn.addEventListener("click", handleSave, { signal: modalAc.signal });
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) closeModal();
-      },
-      { signal: modalAc.signal },
-    );
-
-    // Allow backdrop stop propagation on modal body
-    modal.addEventListener("click", (e) => e.stopPropagation(), { signal: modalAc.signal });
 
     // Enter key submits
     hostAddrInput.addEventListener(
@@ -393,9 +390,6 @@ export function createServerPanel(
       { signal: modalAc.signal },
     );
 
-    // Mount onto the panel's closest connect-page root
-    const root = panelEl.closest(".connect-page") ?? document.body;
-    root.appendChild(overlay);
     nameInput.focus();
   }
 

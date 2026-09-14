@@ -48,12 +48,6 @@ export class Disposable {
     });
   }
 
-  /** Set an interval, auto-tracked for cleanup. */
-  onInterval(fn: () => void, ms: number): void {
-    const id = setInterval(fn, ms);
-    this.addCleanup(() => clearInterval(id));
-  }
-
   /** Flush all cleanups: abort listeners, run cleanup fns. */
   destroy(): void {
     if (this.destroyed) return;

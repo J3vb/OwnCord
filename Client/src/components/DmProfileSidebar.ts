@@ -70,7 +70,6 @@ export type DmProfileSidebarComponent = MountableComponent & {
 // ---------------------------------------------------------------------------
 
 const SIDEBAR_WIDTH = 340;
-const ANIMATION_DURATION_MS = 170;
 const NOTE_STORAGE_PREFIX = "owncord:dm-note:";
 
 const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
@@ -166,24 +165,10 @@ export function createDmProfileSidebar(
       class: "dps-avatar",
       "data-testid": "dps-avatar",
     });
-    wrapper.style.width = "80px";
-    wrapper.style.height = "80px";
-    wrapper.style.borderRadius = "50%";
-    wrapper.style.display = "flex";
-    wrapper.style.alignItems = "center";
-    wrapper.style.justifyContent = "center";
-    wrapper.style.fontSize = "32px";
-    wrapper.style.fontWeight = "700";
-    wrapper.style.color = "#fff";
-    wrapper.style.margin = "24px auto 12px";
-    wrapper.style.position = "relative";
-    wrapper.style.flexShrink = "0";
-
     // The letter draws immediately; the picture (if any) is fetched through
     // the same cert-pinned, bearer-token path attachments use and swapped in
     // once the bytes arrive. `<img src>` cannot carry the auth header an
     // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
-    wrapper.style.background = "var(--accent, #5865f2)";
     const initial = avatarInitial(user);
     const letter = createElement("span", {}, initial);
     avatarLetterNode = letter;
@@ -198,9 +183,6 @@ export function createDmProfileSidebar(
           alt: resolveDisplayName(user),
           class: "dps-avatar-img",
         });
-        img.style.width = "80px";
-        img.style.height = "80px";
-        img.style.borderRadius = "50%";
         letter.remove();
         wrapper.style.background = "transparent";
         wrapper.insertBefore(img, wrapper.firstChild);
@@ -209,13 +191,6 @@ export function createDmProfileSidebar(
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
-    statusDot.style.position = "absolute";
-    statusDot.style.bottom = "2px";
-    statusDot.style.right = "2px";
-    statusDot.style.width = "16px";
-    statusDot.style.height = "16px";
-    statusDot.style.borderRadius = "50%";
-    statusDot.style.border = "3px solid var(--bg-secondary, #111214)";
     statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     statusDot.title = STATUS_LABELS[user.status] ?? "Offline";
     statusDotNode = statusDot;
@@ -235,19 +210,11 @@ export function createDmProfileSidebar(
       "data-testid": "dm-profile-sidebar",
     });
 
-    // Base styles
-    panel.style.width = `${SIDEBAR_WIDTH}px`;
-    panel.style.background = "var(--bg-secondary, #111214)";
-    panel.style.borderLeft = "1px solid var(--border-glow, rgba(0,200,255,0.08))";
-    panel.style.display = "flex";
-    panel.style.flexDirection = "column";
-    panel.style.flexShrink = "0";
-    panel.style.overflow = "hidden";
-    panel.style.position = "relative";
-
-    // Slide-in animation: start offscreen then animate
+    // Slide-in animation: start offscreen then animate. Width and the
+    // transition duration are static (see .dm-profile-sidebar in app.css);
+    // the margin itself is the one genuinely animated value, kept in sync
+    // with the CSS width via the same SIDEBAR_WIDTH constant.
     panel.style.marginRight = `-${SIDEBAR_WIDTH}px`;
-    panel.style.transition = `margin-right ${ANIMATION_DURATION_MS}ms ease`;
 
     // --- Close button ---
     const closeBtn = createElement("button", {
@@ -255,17 +222,6 @@ export function createDmProfileSidebar(
       "aria-label": "Close profile sidebar",
       "data-testid": "dps-close",
     });
-    closeBtn.style.position = "absolute";
-    closeBtn.style.top = "8px";
-    closeBtn.style.right = "8px";
-    closeBtn.style.background = "none";
-    closeBtn.style.border = "none";
-    closeBtn.style.color = "var(--text-muted, #949ba4)";
-    closeBtn.style.cursor = "pointer";
-    closeBtn.style.fontSize = "18px";
-    closeBtn.style.lineHeight = "1";
-    closeBtn.style.padding = "4px";
-    closeBtn.style.zIndex = "1";
     closeBtn.textContent = "\u2715";
     closeBtn.addEventListener(
       "click",
@@ -278,9 +234,6 @@ export function createDmProfileSidebar(
 
     // --- Scrollable content ---
     const content = createElement("div", { class: "dps-content" });
-    content.style.overflowY = "auto";
-    content.style.flex = "1";
-    content.style.padding = "0 16px 16px";
 
     // Avatar
     content.appendChild(buildAvatar());
@@ -290,11 +243,6 @@ export function createDmProfileSidebar(
       class: "dps-username",
       "data-testid": "dps-username",
     });
-    nameEl.style.textAlign = "center";
-    nameEl.style.fontSize = "20px";
-    nameEl.style.fontWeight = "600";
-    nameEl.style.color = "var(--text-primary, #f2f3f5)";
-    nameEl.style.marginBottom = "4px";
     setText(nameEl, resolveDisplayName(user));
     nameNode = nameEl;
 
@@ -303,19 +251,8 @@ export function createDmProfileSidebar(
       class: "dps-status",
       "data-testid": "dps-status",
     });
-    statusLine.style.display = "flex";
-    statusLine.style.alignItems = "center";
-    statusLine.style.justifyContent = "center";
-    statusLine.style.gap = "6px";
-    statusLine.style.marginBottom = "16px";
-    statusLine.style.fontSize = "13px";
-    statusLine.style.color = "var(--text-muted, #949ba4)";
 
     const statusDotInline = createElement("span", { class: "dps-status-dot-inline" });
-    statusDotInline.style.width = "8px";
-    statusDotInline.style.height = "8px";
-    statusDotInline.style.borderRadius = "50%";
-    statusDotInline.style.display = "inline-block";
     statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     statusDotInlineNode = statusDotInline;
 
@@ -326,32 +263,17 @@ export function createDmProfileSidebar(
     appendChildren(content, nameEl, statusLine);
 
     // Divider helper
-    const makeDivider = (): HTMLDivElement => {
-      const d = createElement("div", { class: "dps-divider" });
-      d.style.height = "1px";
-      d.style.background = "var(--border-glow, rgba(0,200,255,0.08))";
-      d.style.margin = "12px 0";
-      return d;
-    };
+    const makeDivider = (): HTMLDivElement => createElement("div", { class: "dps-divider" });
 
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
       content.appendChild(makeDivider());
       const aboutTitle = createElement("div", { class: "dps-section-title" }, "ABOUT ME");
-      aboutTitle.style.fontSize = "12px";
-      aboutTitle.style.fontWeight = "700";
-      aboutTitle.style.color = "var(--text-muted, #949ba4)";
-      aboutTitle.style.textTransform = "uppercase";
-      aboutTitle.style.marginBottom = "8px";
 
       const aboutText = createElement("div", {
         class: "dps-about-text",
         "data-testid": "dps-about",
       });
-      aboutText.style.fontSize = "14px";
-      aboutText.style.color = "var(--text-secondary, #dbdee1)";
-      aboutText.style.lineHeight = "1.4";
-      aboutText.style.wordBreak = "break-word";
       setText(aboutText, user.about);
 
       appendChildren(content, aboutTitle, aboutText);
@@ -361,18 +283,11 @@ export function createDmProfileSidebar(
     if (user.joinDate !== undefined && user.joinDate !== null) {
       content.appendChild(makeDivider());
       const joinTitle = createElement("div", { class: "dps-section-title" }, "MEMBER SINCE");
-      joinTitle.style.fontSize = "12px";
-      joinTitle.style.fontWeight = "700";
-      joinTitle.style.color = "var(--text-muted, #949ba4)";
-      joinTitle.style.textTransform = "uppercase";
-      joinTitle.style.marginBottom = "8px";
 
       const joinText = createElement("div", {
         class: "dps-join-text",
         "data-testid": "dps-join-date",
       });
-      joinText.style.fontSize = "14px";
-      joinText.style.color = "var(--text-secondary, #dbdee1)";
       setText(joinText, user.joinDate);
 
       appendChildren(content, joinTitle, joinText);
@@ -381,11 +296,6 @@ export function createDmProfileSidebar(
     // Note section (local-only, persisted to localStorage)
     content.appendChild(makeDivider());
     const noteTitle = createElement("div", { class: "dps-section-title" }, "NOTE");
-    noteTitle.style.fontSize = "12px";
-    noteTitle.style.fontWeight = "700";
-    noteTitle.style.color = "var(--text-muted, #949ba4)";
-    noteTitle.style.textTransform = "uppercase";
-    noteTitle.style.marginBottom = "8px";
 
     const noteInput = createElement("textarea", {
       class: "dps-note",
@@ -393,15 +303,6 @@ export function createDmProfileSidebar(
       "data-testid": "dps-note",
       rows: "3",
     });
-    noteInput.style.width = "100%";
-    noteInput.style.resize = "vertical";
-    noteInput.style.background = "var(--bg-primary, #1e1f22)";
-    noteInput.style.border = "none";
-    noteInput.style.borderRadius = "4px";
-    noteInput.style.color = "var(--text-primary, #f2f3f5)";
-    noteInput.style.fontSize = "13px";
-    noteInput.style.padding = "8px";
-    noteInput.style.fontFamily = "inherit";
     noteInput.value = loadNote(user.id, host);
 
     noteInput.addEventListener(
