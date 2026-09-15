@@ -36,9 +36,11 @@
 //     K6_VOICE_CHURN_MS boundaries), and the upload-admission scenario. No
 //     voice-load.sh SFU cohort — the churn exercises the control plane, not
 //     the media path.
-//   restart — 100 connections at the capacity rate; the workflow stops the
-//     server 30 s into the sustain (60 s ramp + 30 s = 90 s from run start)
-//     and boots it again on the same data dir. (Arrives with Task 3.)
+//   restart — 100 connections at the capacity rate; the workflow (or the
+//     operator) stops the server 30 s into the sustain (60 s ramp + 30 s =
+//     90 s from run start) and boots it again on the same data dir. k6 keeps
+//     sending through the frame's delay_seconds drain window, then reconnects
+//     with last_seq + active_channel_id and measures the resume.
 //   ceiling-search — one ramping-vus scenario stepping connections by
 //     K6_CEILING_STEP from 100 to K6_CEILING_MAX, holding each step 60 s,
 //     sending at the capacity rate, with the observer VU recording the
@@ -55,8 +57,8 @@
 // K6_UPLOAD_BYTES and user_quota_mb=1).
 //
 // Environment variables:
-//   K6_PROFILE          - capacity (default) | operational | ceiling-search
-//                         (restart arrives with Task 3)
+//   K6_PROFILE          - capacity (default) | operational | restart |
+//                         ceiling-search
 //   K6_WS_URL           - WebSocket URL (default: wss://localhost:8443/api/v1/ws)
 //   K6_HTTP_URL         - HTTP base URL (default: https://localhost:8443)
 //   K6_USERNAME         - Test user prefix (default: loadtest)
@@ -88,17 +90,20 @@ import { Counter, Gauge, Rate, Trend } from "k6/metrics";
 
 // Configuration
 const PROFILE = __ENV.K6_PROFILE || "capacity";
-if (!["capacity", "operational", "ceiling-search"].includes(PROFILE)) {
-  // restart arrives with Task 3.
+if (!["capacity", "operational", "restart", "ceiling-search"].includes(PROFILE)) {
   throw new Error(
-    `K6_PROFILE must be "capacity", "operational" or "ceiling-search" (got: ${PROFILE})`,
+    `K6_PROFILE must be "capacity", "operational", "restart" or "ceiling-search" (got: ${PROFILE})`,
   );
 }
 const IS_OPERATIONAL = PROFILE === "operational";
+const IS_RESTART = PROFILE === "restart";
 const IS_CEILING = PROFILE === "ceiling-search";
 // The observer scenario and its metrics run under operational and
 // ceiling-search — one measures per phase, the other per step.
 const OBS_ON = IS_OPERATIONAL || IS_CEILING;
+// The resume path (last_seq + active_channel_id) runs under operational and
+// restart: the storm closes and reopens sockets, the drill loses the process.
+const RESUMES_ON = IS_OPERATIONAL || IS_RESTART;
 
 // Custom metrics
 const wsConnections = new Counter("ws_connections");
@@ -135,9 +140,9 @@ const voiceTokens = new Counter("voice_tokens");
 // run's summary metric key set stays byte-identical to the B6-9 script's.
 // Measurement only — no new latency budgets; the only thresholds these get
 // are count>0 / max==0 / count==0 sanity gates, profile-gated below.
-const wsResumeTime = IS_OPERATIONAL ? new Trend("ws_resume_time", true) : null;
-const wsReplaySource = IS_OPERATIONAL ? new Counter("ws_replay_source") : null;
-const wsReplayGap = IS_OPERATIONAL ? new Trend("ws_replay_gap", true) : null;
+const wsResumeTime = RESUMES_ON ? new Trend("ws_resume_time", true) : null;
+const wsReplaySource = RESUMES_ON ? new Counter("ws_replay_source") : null;
+const wsReplayGap = RESUMES_ON ? new Trend("ws_replay_gap", true) : null;
 const voiceStateDelivery = IS_OPERATIONAL ? new Trend("voice_state_delivery_ms", true) : null;
 const uploadAdmitTime = IS_OPERATIONAL ? new Trend("upload_admit_time", true) : null;
 const uploadRefuseTime = IS_OPERATIONAL ? new Trend("upload_refuse_time", true) : null;
@@ -150,11 +155,25 @@ const downloadTime = IS_OPERATIONAL ? new Trend("download_time", true) : null;
 // count>0 sanity gates every new phase was to get live on paired counters,
 // not on the trends themselves — a threshold on a trend can only say
 // something about the values, never that the sample was non-empty.
-const wsResumes = IS_OPERATIONAL ? new Counter("ws_resumes") : null;
+const wsResumes = RESUMES_ON ? new Counter("ws_resumes") : null;
 const voiceStates = IS_OPERATIONAL ? new Counter("voice_states") : null;
 const uploadAdmits = IS_OPERATIONAL ? new Counter("upload_admits") : null;
 const uploadRefuses = IS_OPERATIONAL ? new Counter("upload_refuses") : null;
 const downloads = IS_OPERATIONAL ? new Counter("downloads") : null;
+
+// Restart-drill metrics (K6_PROFILE=restart). The frame is the sequenced
+// server_restart broadcast (protocol.md:1815-1826, reason + delay_seconds);
+// the 30 s drain budget it promises is what the workflow asserts from the
+// outside (drain_ms, rc).
+const serverRestartReceived = IS_RESTART ? new Counter("server_restart_received") : null;
+const serverRestartLead = IS_RESTART ? new Trend("server_restart_lead_ms", true) : null;
+const restartResumeTime = IS_RESTART ? new Trend("restart_resume_time", true) : null;
+// Sends attempted after the server_restart frame and before the socket
+// closes, classified acked / errored / unanswered; anything unanswered AND
+// absent from every post-restart replay is a lost message (a ledger finding,
+// never a doc number).
+const drainSends = IS_RESTART ? new Counter("sends_during_drain") : null;
+const sendsLost = IS_RESTART ? new Counter("sends_lost") : null;
 
 // The observer's window onto the server, one poll every 5 s (operational
 // only; the VU polls /api/v1/metrics — IP-restricted, and the load generator
@@ -307,7 +326,10 @@ export const options = {
       : {
           ws_connect_time: ["p(95)<2000"], // 95% connect under 2s
           ws_message_success: ["rate>0.95"], // 95% of sends acked
-          ws_errors: ["count<50"], // fewer than 50 errors
+          // The drill's outage window produces failed connect attempts and
+          // error frames that are the drill working, not a defect, so
+          // ws_errors does not gate a restart run.
+          ...(IS_RESTART ? {} : { ws_errors: ["count<50"] }),
           // docs/capacity.md, "REST login". Tightened from the first
           // qualifying run (measured p95 307 / p99 344 on the constrained
           // leg); bcrypt cost 12 is the floor here, so the headroom left is
@@ -369,6 +391,24 @@ export const options = {
           upload_low_disk: ["count==0"],
           upload_oversize: ["count==0"],
           downloads: ["count>0"],
+        }
+      : {}),
+    // B6-10 restart drill. The drill's own gates: the frame reached every
+    // connection, the drain sent something (a 30 s drain always does), and
+    // no drain send was lost. Every post-restart resume is served tier none
+    // — the per-boot seq floor (OC-0210) renumbers the space and the boot
+    // marks visibility changed, so buffer/db replay after a restart is
+    // fail-closed unreachable — which is why the gate is tier:none, not
+    // tier:db. ws_replay_gap measures contiguity AFTER the post-resume
+    // rebase; server_restart_lead_ms and restart_resume_time are
+    // measurement-only — the PRD excludes new latency budgets.
+    ...(IS_RESTART
+      ? {
+          server_restart_received: ["count>0"],
+          ws_replay_gap: ["max==0"],
+          "ws_replay_source{tier:none}": ["count>0"],
+          sends_during_drain: ["count>0"],
+          sends_lost: ["count==0"],
         }
       : {}),
     // B6-10 ceiling-search. The steps are informational — no threshold gates
@@ -479,7 +519,7 @@ export default function () {
 
   // A resume is any connection opened after this VU has seen a seq — i.e.
   // every storm reconnect. Capacity never resumes: vuLastSeq stays 0.
-  const resumed = IS_OPERATIONAL && vuLastSeq > 0;
+  const resumed = RESUMES_ON && vuLastSeq > 0;
 
   // Resume iterations reuse the stored token (no re-login on resume).
   let token = vuToken;
@@ -503,10 +543,20 @@ export default function () {
     let msgCount = 0;
     let voiceJoinSent = 0;
     let pendingSends = {}; // send-id -> Date.now() at send
+    // Restart-drill per-connection state.
+    let restartReceivedAt = 0; // Date.now() when server_restart arrived
+    let drainPending = {}; // send-id -> content, sent after the frame
+    let drainUnanswered = []; // contents with no ack and no replay sighting
     // Per-connection resume bookkeeping.
     const resumedConn = resumed;
     let resumeStartedAt = 0;
     let resumeGap = 0;
+    // Post-restart the server's per-boot seq floor (OC-0210) renumbers the
+    // sequence space and the boot marks visibility changed, so every
+    // post-restart resume is served tier none (full re-sync). The client
+    // rebases: the first sequenced frame after such a resume anchors
+    // contiguity, and the gap metric only counts skips from there on.
+    let rebasing = false;
 
     let closeIn;
     if (resumedConn) {
@@ -547,8 +597,13 @@ export default function () {
         // checks contiguity against its stored last_seq: every skipped seq
         // is a lost frame — a defect, not a latency number. A seq at or
         // below vuLastSeq is replay overlap — already accounted, ignored.
-        if (IS_OPERATIONAL && typeof data.seq === "number" && data.seq > 0) {
-          if (data.seq > vuLastSeq) {
+        if (RESUMES_ON && typeof data.seq === "number" && data.seq > 0) {
+          if (rebasing) {
+            // New numbering: anchor on the first sequenced frame after the
+            // full re-sync; the renumbering itself is not a lost frame.
+            vuLastSeq = data.seq;
+            rebasing = false;
+          } else if (data.seq > vuLastSeq) {
             if (resumedConn) resumeGap += data.seq - vuLastSeq - 1;
             vuLastSeq = data.seq;
           }
@@ -562,11 +617,26 @@ export default function () {
               wsResumes.add(1);
               wsResumeTime.add(Date.now() - resumeStartedAt);
               // Which tier served the resume (protocol.md:192).
-              wsReplaySource.add(1, {
-                tier: (data.payload && data.payload.replay_source) || "none",
-              });
+              const tier = (data.payload && data.payload.replay_source) || "none";
+              wsReplaySource.add(1, { tier: tier });
+              // Post-restart, the per-boot seq floor renumbered the space and
+              // the boot marks visibility changed, so tier none is the
+              // designed post-restart resume (full re-sync); the client
+              // rebases its seq anchor (internal/app/persistence.go:105,
+              // OC-0210).
+              if (IS_RESTART && tier === "none") {
+                rebasing = true;
+              }
               // channel_focus after auth_ok is idempotent (protocol.md:160).
               socket.send(envelope("channel_focus", { channel_id: CHANNEL_ID }));
+              if (IS_RESTART) {
+                // The full re-sync re-delivers state in the ready payload;
+                // anything still unanswered and unseen here is absent from
+                // every replay — a lost message.
+                restartResumeTime.add(Date.now() - resumeStartedAt);
+                sendsLost.add(drainUnanswered.length);
+                drainUnanswered = [];
+              }
             } else {
               wsAuthOkTime.add(Date.now() - authSentAt, stepTags());
             }
@@ -597,6 +667,10 @@ export default function () {
               broadcastLatency.add(Date.now() - pendingSends[data.id], stepTags());
               delete pendingSends[data.id];
             }
+            if (IS_RESTART && data.id && drainPending[data.id]) {
+              drainSends.add(1, { outcome: "acked" });
+              delete drainPending[data.id];
+            }
             break;
           case "chat_message": {
             // Recipient delivery. A sender also receives its own broadcast,
@@ -612,6 +686,16 @@ export default function () {
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
               deliveryLatency.add(Date.now() - at, stepTags());
               deliveries.add(1);
+            }
+            // Restart drill: a replay sighting of a drain send removes it
+            // from the unanswered set. Replay precedes auth_ok
+            // (protocol.md:305-315), so everything arriving before auth_ok
+            // is replay by construction.
+            if (IS_RESTART && !authed && drainUnanswered.length) {
+              const at2 = drainUnanswered.indexOf(content);
+              if (at2 !== -1) {
+                drainUnanswered.splice(at2, 1);
+              }
             }
             break;
           }
@@ -649,9 +733,25 @@ export default function () {
             }
             voiceTokens.add(1);
             break;
+          case "server_restart":
+            // Sequenced broadcast, protocol.md:1815-1826 (reason +
+            // delay_seconds). The socket's close comes from the server's own
+            // drain, not from us; lead_ms measures frame arrival to actual
+            // close and should be >= delay_seconds.
+            if (IS_RESTART && !restartReceivedAt) {
+              restartReceivedAt = Date.now();
+              serverRestartReceived.add(1);
+            }
+            break;
           case "error":
             wsErrors.add(1);
             wsMessageRate.add(false);
+            // A drain send the server refused classifies as errored: error
+            // envelopes echo the request id (protocol.md:1837).
+            if (IS_RESTART && data.id && drainPending[data.id]) {
+              drainSends.add(1, { outcome: "errored" });
+              delete drainPending[data.id];
+            }
             break;
           default:
             // Broadcast traffic (presence, typing, seq'd frames) — receiving
@@ -669,9 +769,19 @@ export default function () {
 
     // ws_replay_gap is asserted once per resumed connection, at its close:
     // the number of seq values the replay skipped, 0 when contiguity held.
+    // The drill's drain sends classify at close: acked/errored removed
+    // earlier; the rest are unanswered, their contents kept for the next
+    // connection's replay watcher.
     socket.on("close", function () {
-      if (IS_OPERATIONAL && resumedConn) {
+      if (RESUMES_ON && resumedConn) {
         wsReplayGap.add(resumeGap);
+      }
+      if (IS_RESTART && restartReceivedAt) {
+        serverRestartLead.add(Date.now() - restartReceivedAt);
+        for (const id of Object.keys(drainPending)) {
+          drainSends.add(1, { outcome: "unanswered" });
+          drainUnanswered.push(drainPending[id]);
+        }
       }
     });
 
@@ -727,6 +837,9 @@ export default function () {
       }
       const id = `${vuId}-${msgCount}-${Date.now()}`;
       pendingSends[id] = Date.now();
+      if (IS_RESTART && restartReceivedAt) {
+        drainPending[id] = `Load test message ${vuId}-${msgCount} t=${Date.now()} v=${vuId}`;
+      }
       socket.send(
         JSON.stringify({
           type: "chat_send",
