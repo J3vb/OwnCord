@@ -39,7 +39,11 @@
 //   restart — 100 connections at the capacity rate; the workflow stops the
 //     server 30 s into the sustain (60 s ramp + 30 s = 90 s from run start)
 //     and boots it again on the same data dir. (Arrives with Task 3.)
-//   ceiling-search — (Arrives with Task 2.)
+//   ceiling-search — one ramping-vus scenario stepping connections by
+//     K6_CEILING_STEP from 100 to K6_CEILING_MAX, holding each step 60 s,
+//     sending at the capacity rate, with the observer VU recording the
+//     writer-wait delta per step. Every trend is tagged step=<n>; the steps
+//     are informational and no threshold gates any of them.
 //
 // Prerequisites: the target server must already have the loadtest users
 // (K6_USERNAME<vu-number>, all sharing K6_PASSWORD) registered, and the
@@ -51,8 +55,8 @@
 // K6_UPLOAD_BYTES and user_quota_mb=1).
 //
 // Environment variables:
-//   K6_PROFILE          - capacity (default) | operational (restart and
-//                         ceiling-search arrive with their tasks)
+//   K6_PROFILE          - capacity (default) | operational | ceiling-search
+//                         (restart arrives with Task 3)
 //   K6_WS_URL           - WebSocket URL (default: wss://localhost:8443/api/v1/ws)
 //   K6_HTTP_URL         - HTTP base URL (default: https://localhost:8443)
 //   K6_USERNAME         - Test user prefix (default: loadtest)
@@ -72,6 +76,8 @@
 //                         VUs' reconnects into shared waves (default: 120)
 //   K6_VOICE_CHURN_MS   - operational: voice leave+rejoin period (default: 10000)
 //   K6_UPLOAD_BYTES     - operational: per-upload payload size (default: 262144)
+//   K6_CEILING_MAX      - ceiling-search: highest connection count probed (default: 500)
+//   K6_CEILING_STEP     - ceiling-search: connection increment per step (default: 100)
 //
 // Self-signed TLS (the default server cert): run k6 with --insecure-skip-tls-verify.
 
@@ -82,11 +88,17 @@ import { Counter, Gauge, Rate, Trend } from "k6/metrics";
 
 // Configuration
 const PROFILE = __ENV.K6_PROFILE || "capacity";
-if (PROFILE !== "capacity" && PROFILE !== "operational") {
-  // restart and ceiling-search arrive with their tasks.
-  throw new Error(`K6_PROFILE must be "capacity" or "operational" (got: ${PROFILE})`);
+if (!["capacity", "operational", "ceiling-search"].includes(PROFILE)) {
+  // restart arrives with Task 3.
+  throw new Error(
+    `K6_PROFILE must be "capacity", "operational" or "ceiling-search" (got: ${PROFILE})`,
+  );
 }
 const IS_OPERATIONAL = PROFILE === "operational";
+const IS_CEILING = PROFILE === "ceiling-search";
+// The observer scenario and its metrics run under operational and
+// ceiling-search — one measures per phase, the other per step.
+const OBS_ON = IS_OPERATIONAL || IS_CEILING;
 
 // Custom metrics
 const wsConnections = new Counter("ws_connections");
@@ -150,14 +162,14 @@ const downloads = IS_OPERATIONAL ? new Counter("downloads") : null;
 // since the previous poll, tagged phase=<ramp|sustain|storm|upload>: a
 // phase's count is its total delta over that window, which is what the
 // document publishes, not the end-of-run cumulative B6-9 recorded.
-const obsPollTime = IS_OPERATIONAL ? new Trend("obs_poll_time", true) : null;
-const obsDbWriterWaitCount = IS_OPERATIONAL ? new Counter("obs_db_writer_wait_count") : null;
-const obsDbWriterWaitSeconds = IS_OPERATIONAL ? new Counter("obs_db_writer_wait_seconds") : null;
-const obsDbReaderWaitCount = IS_OPERATIONAL ? new Counter("obs_db_reader_wait_count") : null;
-const obsDbReaderWaitSeconds = IS_OPERATIONAL ? new Counter("obs_db_reader_wait_seconds") : null;
+const obsPollTime = OBS_ON ? new Trend("obs_poll_time", true) : null;
+const obsDbWriterWaitCount = OBS_ON ? new Counter("obs_db_writer_wait_count") : null;
+const obsDbWriterWaitSeconds = OBS_ON ? new Counter("obs_db_writer_wait_seconds") : null;
+const obsDbReaderWaitCount = OBS_ON ? new Counter("obs_db_reader_wait_count") : null;
+const obsDbReaderWaitSeconds = OBS_ON ? new Counter("obs_db_reader_wait_seconds") : null;
 const obsReconnectTier = IS_OPERATIONAL ? new Counter("obs_reconnect_tier") : null;
 const obsBackpressure = IS_OPERATIONAL ? new Counter("obs_backpressure") : null;
-const obsConnRejects = IS_OPERATIONAL ? new Counter("obs_ws_conn_rejects") : null;
+const obsConnRejects = OBS_ON ? new Counter("obs_ws_conn_rejects") : null;
 const obsUploadStorage = IS_OPERATIONAL ? new Gauge("obs_upload_storage_used_mb") : null;
 
 // --- configuration ---------------------------------------------------------
@@ -179,6 +191,14 @@ const VOICE_VUS = VOICE_CHANNEL_ID ? parseInt(__ENV.K6_VOICE_VUS || "25") : 0;
 const STORM_AT = parseInt(__ENV.K6_STORM_AT || "120"); // seconds
 const CHURN_MS = parseInt(__ENV.K6_VOICE_CHURN_MS || "10000");
 const UPLOAD_BYTES = parseInt(__ENV.K6_UPLOAD_BYTES || "262144");
+// Ceiling-search knobs. The search probes CEILING_START connections, then
+// steps by K6_CEILING_STEP holding each step CEILING_HOLD_S, up to
+// K6_CEILING_MAX; the caller must have registered at least K6_CEILING_MAX
+// loadtest users for the top step to fully connect.
+const CEILING_START = 100;
+const CEILING_HOLD_S = 60;
+const CEILING_MAX = parseInt(__ENV.K6_CEILING_MAX || "500");
+const CEILING_STEP = parseInt(__ENV.K6_CEILING_STEP || "100");
 // 1 upload / 10 s = 6/min per user, inside the 10/min limit (docs/api.md:1965).
 const UPLOAD_INTERVAL_S = 10;
 // Uploads begin this many seconds into the sustain, so the observer has a
@@ -194,7 +214,6 @@ function seconds(d) {
 
 const RAMP_S = seconds(RAMP);
 const SUSTAIN_S = seconds(SUSTAIN);
-const TOTAL_S = RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN);
 const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
 // The storm's nominal wall-clock moment: RAMP + STORM_AT. Per-VU timers
 // quantize to whole minutes (below), so the wave lands on the first minute
@@ -202,12 +221,29 @@ const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
 // hold the quantized wave(s).
 const STORM_NOMINAL_S = RAMP_S + STORM_AT;
 
+// The ceiling-search schedule. Each step is a 0 s stage (ramping-vus jumps to
+// the target immediately, so the step's connection count is held the whole
+// CEILING_HOLD_S window) followed by the hold stage itself; a trailing
+// ramp-down drains the sockets the same way capacity drains. HOLD_MS below
+// covers the whole search, so every VU holds one connection from its first
+// step to the ramp-down and the executor's targets ARE the connection counts.
+const CEILING_STEPS = [];
+for (let v = CEILING_START; v <= CEILING_MAX; v += CEILING_STEP) {
+  CEILING_STEPS.push(v);
+}
+const CEILING_TOTAL_S = CEILING_STEPS.length * CEILING_HOLD_S + seconds(RAMP_DOWN);
+const CEILING_STAGES = CEILING_STEPS.flatMap((v) => [
+  { duration: "0s", target: v },
+  { duration: `${CEILING_HOLD_S}s`, target: v },
+]).concat([{ duration: RAMP_DOWN, target: 0 }]);
+const TOTAL_S = IS_CEILING ? CEILING_TOTAL_S : RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN);
+
 // A connection is held for the WHOLE run, not for a fixed 25 seconds.
 // "100 simultaneous connections" is the claim under test: if each VU closed
 // its socket mid-run and re-iterated, the peak would only hold in the gaps
 // between iterations, and the number published would be a ceiling nobody
 // sustained. k6 closes whatever is still open during ramp-down.
-const HOLD_MS = (RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN)) * 1000;
+const HOLD_MS = TOTAL_S * 1000;
 
 export const options = {
   // k6's default trend stats requested for docs/capacity.md's p99 columns:
@@ -222,16 +258,21 @@ export const options = {
       // default would cut the ramp-down short at this hold length.
       gracefulRampDown: "30s",
       gracefulStop: "30s",
-      stages: [
-        { duration: RAMP, target: PEAK_VUS },
-        { duration: SUSTAIN, target: PEAK_VUS },
-        { duration: RAMP_DOWN, target: 0 },
-      ],
+      // Capacity: ramp to the peak, hold, drain. Ceiling-search: jump to each
+      // step (0 s stages — ramping-vus reaches the target before the hold
+      // begins) and hold it CEILING_HOLD_S, then the same drain.
+      stages: IS_CEILING
+        ? CEILING_STAGES
+        : [
+            { duration: RAMP, target: PEAK_VUS },
+            { duration: SUSTAIN, target: PEAK_VUS },
+            { duration: RAMP_DOWN, target: 0 },
+          ],
     },
-    // The observer and the uploads scenario exist only under operational.
-    // The observer starts at t=0 so its elapsed clock aligns with the run's
-    // phase windows; the uploads start 60 s into the sustain.
-    ...(IS_OPERATIONAL
+    // The observer runs under operational and ceiling-search, from t=0 so its
+    // clock aligns with the run's phases and steps; the uploads scenario only
+    // under operational, starting 60 s into the sustain.
+    ...(OBS_ON
       ? {
           observer: {
             executor: "constant-vus",
@@ -239,6 +280,10 @@ export const options = {
             duration: `${TOTAL_S}s`,
             exec: "observerScenario",
           },
+        }
+      : {}),
+    ...(IS_OPERATIONAL
+      ? {
           uploads: {
             executor: "constant-vus",
             vus: PEAK_VUS,
@@ -251,23 +296,34 @@ export const options = {
       : {}),
   },
   thresholds: {
-    ws_connect_time: ["p(95)<2000"], // 95% connect under 2s
-    ws_message_success: ["rate>0.95"], // 95% of sends acked
-    ws_errors: ["count<50"], // fewer than 50 errors
-    // docs/capacity.md, "REST login". Tightened from the first qualifying run
-    // (measured p95 307 / p99 344 on the constrained leg); bcrypt cost 12 is
-    // the floor here, so the headroom left is deliberate and not generous.
-    auth_time: ["p(95)<600", "p(99)<1000"],
-    // docs/capacity.md, "WebSocket open -> auth_ok received". Tightened from
-    // measured p95 13 / p99 29 — the initial budget was 70x the real figure.
-    ws_auth_ok_time: ["p(95)<200", "p(99)<500"],
-    // docs/capacity.md, "message send -> sender acknowledgement". The metric
-    // existed with no threshold at all, so it could not fail. Tightened from
-    // measured p95 57 / p99 83.
-    ws_broadcast_latency_ms: ["p(95)<150", "p(99)<300"],
-    // docs/capacity.md, "message send -> recipient delivery". Tightened from
-    // measured p95 60 / p99 85 over 1.14 million deliveries.
-    ws_delivery_latency_ms: ["p(95)<200", "p(99)<400"],
+    // The B6-9 capacity budgets. Under ceiling-search they do not gate the
+    // run: the search is EXPECTED to find the step where a budget first
+    // breaks, so gating the whole run on them would make every search red
+    // the moment it works. The document, not the threshold engine, reads the
+    // per-step percentiles; the ceiling run still asserts the run was sane
+    // (authed/ready/deliveries below).
+    ...(IS_CEILING
+      ? {}
+      : {
+          ws_connect_time: ["p(95)<2000"], // 95% connect under 2s
+          ws_message_success: ["rate>0.95"], // 95% of sends acked
+          ws_errors: ["count<50"], // fewer than 50 errors
+          // docs/capacity.md, "REST login". Tightened from the first
+          // qualifying run (measured p95 307 / p99 344 on the constrained
+          // leg); bcrypt cost 12 is the floor here, so the headroom left is
+          // deliberate and not generous.
+          auth_time: ["p(95)<600", "p(99)<1000"],
+          // docs/capacity.md, "WebSocket open -> auth_ok received". Tightened
+          // from measured p95 13 / p99 29 — the initial budget was 70x the
+          // real figure.
+          ws_auth_ok_time: ["p(95)<200", "p(99)<500"],
+          // docs/capacity.md, "message send -> sender acknowledgement".
+          // Tightened from measured p95 57 / p99 83.
+          ws_broadcast_latency_ms: ["p(95)<150", "p(99)<300"],
+          // docs/capacity.md, "message send -> recipient delivery". Tightened
+          // from measured p95 60 / p99 85 over 1.14 million deliveries.
+          ws_delivery_latency_ms: ["p(95)<200", "p(99)<400"],
+        }),
     // A run where nobody authenticated, went ready, or received anyone
     // else's message is a broken run, no matter how green everything else
     // looks — this is the assertion that was missing when the script drifted
@@ -315,8 +371,54 @@ export const options = {
           downloads: ["count>0"],
         }
       : {}),
+    // B6-10 ceiling-search. The steps are informational — no threshold gates
+    // any of them, and the capacity budgets (above) are not re-gated here: the
+    // document, not the threshold engine, reads the per-step percentiles. The
+    // base sanity gates already assert the run was sane; what ceiling adds are
+    // pass-through thresholds (p(95)>=0 / count>=0 always hold, and an empty
+    // series passes) whose only job is to materialize each step as a
+    // first-class series in the summary — k6 collapses tagged samples into the
+    // aggregate in handleSummary unless a threshold names the sub-metric.
+    ...(IS_CEILING ? ceilingStepThresholds() : {}),
   },
 }; // envelope wraps a client->server frame in the protocol's outer shape.
+
+// --- ceiling-search step clock ----------------------------------------------
+
+// One run anchor, set by the first execution of any scenario. Its sub-second
+// jitter against the executor's own t=0 is far inside one 60 s step.
+let runStart = 0;
+function runStep() {
+  if (!runStart) runStart = Date.now();
+  const i = Math.floor((Date.now() - runStart) / (CEILING_HOLD_S * 1000));
+  return CEILING_STEPS[Math.min(Math.max(i, 0), CEILING_STEPS.length - 1)];
+}
+// Sample tags for the current step, or undefined outside ceiling-search:
+// passing undefined tags to add() leaves the sample untagged, which is what
+// the capacity profile wants.
+function stepTags() {
+  return IS_CEILING ? { step: String(runStep()) } : undefined;
+}
+
+// The pass-through thresholds, one per (metric, step) pair.
+function ceilingStepThresholds() {
+  const trends = [
+    "ws_connect_time",
+    "ws_auth_ok_time",
+    "auth_time",
+    "ws_broadcast_latency_ms",
+    "ws_delivery_latency_ms",
+  ];
+  const counters = ["obs_db_writer_wait_count", "obs_db_writer_wait_seconds"];
+  const out = {};
+  for (const v of CEILING_STEPS) {
+    for (const t of trends) out[`${t}{step:${v}}`] = ["p(95)>=0"];
+    for (const c of counters) out[`${c}{step:${v}}`] = ["count>=0"];
+  }
+  return out;
+}
+
+// envelope wraps a client->server frame in the protocol's outer shape.
 function envelope(type, payload) {
   return JSON.stringify({ type: type, payload: payload });
 }
@@ -352,7 +454,7 @@ function authenticate(username) {
     JSON.stringify({ username, password: PASSWORD }),
     { headers: { "Content-Type": "application/json" } },
   );
-  authTime.add(Date.now() - start);
+  authTime.add(Date.now() - start, stepTags());
 
   if (res.status !== 200) {
     wsErrors.add(1);
@@ -393,7 +495,7 @@ export default function () {
   const connectStart = Date.now();
   const res = ws.connect(WS_URL, null, function (socket) {
     const openAt = Date.now();
-    wsConnectTime.add(openAt - connectStart);
+    wsConnectTime.add(openAt - connectStart, stepTags());
     wsConnections.add(1);
 
     let authed = false;
@@ -466,7 +568,7 @@ export default function () {
               // channel_focus after auth_ok is idempotent (protocol.md:160).
               socket.send(envelope("channel_focus", { channel_id: CHANNEL_ID }));
             } else {
-              wsAuthOkTime.add(Date.now() - authSentAt);
+              wsAuthOkTime.add(Date.now() - authSentAt, stepTags());
             }
             break;
           case "auth_error":
@@ -492,7 +594,7 @@ export default function () {
             wsAcks.add(1);
             wsMessageRate.add(true);
             if (data.id && pendingSends[data.id]) {
-              broadcastLatency.add(Date.now() - pendingSends[data.id]);
+              broadcastLatency.add(Date.now() - pendingSends[data.id], stepTags());
               delete pendingSends[data.id];
             }
             break;
@@ -508,7 +610,7 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at);
+              deliveryLatency.add(Date.now() - at, stepTags());
               deliveries.add(1);
             }
             break;
@@ -715,26 +817,37 @@ export function observerScenario() {
     return;
   }
 
-  const phase = obsPhase(Date.now() - obsStart);
   const d = (k) => (body[k] || 0) - ((obsPrev && obsPrev[k]) || 0);
 
-  obsDbWriterWaitCount.add(d("db_writer_wait_count"), { phase });
-  obsDbWriterWaitSeconds.add(d("db_writer_wait_seconds"), { phase });
-  obsDbReaderWaitCount.add(d("db_reader_wait_count"), { phase });
-  obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), { phase });
-  obsReconnectTier.add(d("reconnect_tier_buffer"), { tier: "buffer" });
-  obsReconnectTier.add(d("reconnect_tier_db"), { tier: "db" });
-  obsReconnectTier.add(d("reconnect_tier_full"), { tier: "full" });
-  obsBackpressure.add(d("backpressure_queue_disconnects"), {
-    kind: "queue_disconnects",
-  });
-  obsBackpressure.add(d("backpressure_high_fallbacks"), {
-    kind: "high_fallbacks",
-  });
-  obsBackpressure.add(d("backpressure_low_drops"), { kind: "low_drops" });
-  obsConnRejects.add(d("ws_conn_rejects"), { phase });
-  if (body.upload_storage_used_mb !== undefined) {
-    obsUploadStorage.add(body.upload_storage_used_mb, { phase });
+  if (IS_CEILING) {
+    // The per-step deltas: the writer-wait pair is the plan's Task 2 observer
+    // row; the reader pair and the reject counter ride the same grid.
+    const stepTag = { step: String(runStep()) };
+    obsDbWriterWaitCount.add(d("db_writer_wait_count"), stepTag);
+    obsDbWriterWaitSeconds.add(d("db_writer_wait_seconds"), stepTag);
+    obsDbReaderWaitCount.add(d("db_reader_wait_count"), stepTag);
+    obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), stepTag);
+    obsConnRejects.add(d("ws_conn_rejects"), stepTag);
+  } else {
+    const phase = obsPhase(Date.now() - obsStart);
+    obsDbWriterWaitCount.add(d("db_writer_wait_count"), { phase });
+    obsDbWriterWaitSeconds.add(d("db_writer_wait_seconds"), { phase });
+    obsDbReaderWaitCount.add(d("db_reader_wait_count"), { phase });
+    obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), { phase });
+    obsReconnectTier.add(d("reconnect_tier_buffer"), { tier: "buffer" });
+    obsReconnectTier.add(d("reconnect_tier_db"), { tier: "db" });
+    obsReconnectTier.add(d("reconnect_tier_full"), { tier: "full" });
+    obsBackpressure.add(d("backpressure_queue_disconnects"), {
+      kind: "queue_disconnects",
+    });
+    obsBackpressure.add(d("backpressure_high_fallbacks"), {
+      kind: "high_fallbacks",
+    });
+    obsBackpressure.add(d("backpressure_low_drops"), { kind: "low_drops" });
+    obsConnRejects.add(d("ws_conn_rejects"), { phase });
+    if (body.upload_storage_used_mb !== undefined) {
+      obsUploadStorage.add(body.upload_storage_used_mb, { phase });
+    }
   }
   obsPrev = body;
 
