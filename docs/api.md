@@ -2847,6 +2847,8 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "disk_free_mb": 51200.5,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
+  "db_reader_wait_count": 11,
+  "db_reader_wait_seconds": 0.004,
   "perm_cache_hits": 5120,
   "perm_cache_misses": 84,
   "event_persister": {
@@ -2871,7 +2873,10 @@ attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
 small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
-the most direct saturation signal for the write path. `perm_cache_*` report
+the most direct saturation signal for the write path. `db_reader_wait_count`/
+`_seconds` are the same pair for the reader pool (`max_readers` connections);
+on in-memory databases reader and writer are the same handle, so the two
+pairs report one pool. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
 database). `ws_conn_rejects` counts upgrades refused by the
 `server.max_ws_connections` cap, and `disk_free_mb` is free space on the data

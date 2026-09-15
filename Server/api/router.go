@@ -550,6 +550,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			ConnRejects:    hub.ConnRejectCount,
 			PersisterStats: hub.EventPersisterStats,
 			DBStats:        func() sql.DBStats { return database.SQLDb().Stats() },
+			DBReaderStats:  func() sql.DBStats { return database.SQLReaderDb().Stats() },
 			PermCache:      svc.Permissions.CacheStats,
 			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
 			DiskMinFree:    cfg.Server.MinFreeDiskBytes(),
