@@ -459,10 +459,21 @@ func (d *drill) boot(logName string, extraEnv ...string) error {
 // bootAt is boot in another install directory, which phase S's second step
 // needs: an install told to use an SFU somebody else manages must not inherit
 // the config.yaml step 1's boot wrote, or it is the same install asked twice.
+//
+// The install directory's own data/ is created first, and it is not redundant:
+// config.yaml ships tls.cert_file as "data/cert.pem", relative to the WORKING
+// directory rather than to server.data_dir, and a boot that moves data_dir
+// (phase D) is exactly the boot that stops the server creating this one. Left
+// out, that boot dies writing its self-signed certificate — before it can
+// measure any disk pressure, and with a message about a certificate rather than
+// about the directory that is missing.
 func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	d.dir = dir
 	d.boots++
 	name := fmt.Sprintf("boot%d-%s", d.boots, logName)
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o700); err != nil {
+		return err
+	}
 	s, err := start(d.bin, dir, name, append([]string{noLiveKitDownload}, extraEnv...)...)
 	if err != nil {
 		return err
@@ -1995,12 +2006,18 @@ func damageBytes(path string, offset int64, n int) error {
 
 // ─── phase D: headroom, then full, then recovery ────────────────────────────
 
-// diskEnv points every writable path at the size-limited filesystem.
-// server.data_dir alone is not enough and the difference is not obvious:
-// database.path, backup.dir and upload.storage_dir are separate keys whose
-// defaults are relative to the install directory, so a drill that moved only
-// data_dir would fill a filesystem the database is not on and never reach
+// diskEnv points every writable path that phase D measures at the size-limited
+// filesystem. server.data_dir alone is not enough and the difference is not
+// obvious: database.path, backup.dir and upload.storage_dir are separate keys
+// whose defaults are relative to the install directory, so a drill that moved
+// only data_dir would fill a filesystem the database is not on and never reach
 // ENOSPC at all.
+//
+// The TLS pair is deliberately NOT here. It is written once at boot and never
+// again, so it is not something the fill can push to the wall, and moving it
+// would move it out from under the healthcheck: that probe is a second process
+// reading the same config.yaml and it is not given this environment. See
+// bootAt for the directory the pair therefore needs.
 func (d *drill) diskEnv() []string {
 	fs := d.dataFS
 	return []string{
@@ -2113,7 +2130,14 @@ func (d *drill) phaseD() error {
 			return foundErr
 		}
 	}
-	return d.failures(problems)
+	if err := d.failures(problems); err != nil {
+		return err
+	}
+	// dRecover's last step leaves the rebooted server running, and the phases
+	// after this one start by asserting nothing is serving :8443 yet. Without
+	// this the next phase fails with "a previous phase left a server behind" —
+	// a true statement blamed on the wrong phase.
+	return d.stop()
 }
 
 // tmpfsReachable reports whether this harness can put bytes into the container's
