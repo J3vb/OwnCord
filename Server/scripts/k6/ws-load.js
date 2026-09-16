@@ -228,6 +228,9 @@ const sendsLost = IS_RESTART ? new Counter("sends_lost") : null;
 // under operational and step=<n> under the search: a
 // phase's count is its total delta over that window, which is what the
 // document publishes, not the end-of-run cumulative B6-9 recorded.
+// The observer's phase windows, in obsPhase()'s vocabulary. Declared here
+// because the threshold block below runs at module init, before obsPhase.
+const PHASES = ["ramp", "sustain", "storm", "upload"];
 const obsPollTime = OBS_ON ? new Trend("obs_poll_time", true) : null;
 const obsDbWriterWaitCount = OBS_ON ? new Counter("obs_db_writer_wait_count") : null;
 const obsDbWriterWaitSeconds = OBS_ON ? new Counter("obs_db_writer_wait_seconds") : null;
@@ -236,6 +239,11 @@ const obsDbReaderWaitSeconds = OBS_ON ? new Counter("obs_db_reader_wait_seconds"
 const obsReconnectTier = IS_OPERATIONAL ? new Counter("obs_reconnect_tier") : null;
 const obsBackpressure = IS_OPERATIONAL ? new Counter("obs_backpressure") : null;
 const obsConnRejects = OBS_ON ? new Counter("obs_ws_conn_rejects") : null;
+// The ceiling search's per-step population, read from the server's own
+// connected_users (api/metrics_handler.go). ws_connections cannot answer it:
+// it counts ARRIVALS in a window, so a step that held 300 sockets opened by
+// earlier steps records none of them. A level, so a Gauge.
+const obsConnectedUsers = IS_CEILING ? new Gauge("obs_connected_users") : null;
 const obsUploadStorage = IS_OPERATIONAL ? new Gauge("obs_upload_storage_used_mb") : null;
 
 // --- configuration ---------------------------------------------------------
@@ -306,6 +314,13 @@ function stormFireAt(holdEndMs) {
 const CEILING_STEPS = [];
 for (let v = CEILING_START; v <= CEILING_MAX; v += CEILING_STEP) {
   CEILING_STEPS.push(v);
+}
+// K6_CEILING_MAX is a probe target, not a grid offset: at max 250 / step 100
+// the loop stops at 200 and the run never probes the number it was asked for.
+// Everything downstream (stages, step clock, thresholds, total duration)
+// iterates this array, so appending the remainder is the whole fix.
+if (CEILING_STEPS[CEILING_STEPS.length - 1] < CEILING_MAX) {
+  CEILING_STEPS.push(CEILING_MAX);
 }
 const CEILING_TOTAL_S = CEILING_STEPS.length * CEILING_PERIOD_S + seconds(RAMP_DOWN);
 const CEILING_STAGES = CEILING_STEPS.flatMap((v) => [
@@ -454,10 +469,14 @@ export const options = {
           // documented tier.
           // The count>0 gates live on the paired counters above — k6 rejects
           // a count threshold on a Trend.
-          ws_resumes: ["count>0"],
+          // The storm is every connection reconnecting, so the gate is the
+          // whole cohort, not one survivor. `>=`, not `==`: a socket that
+          // dropped for some other reason also resumes, and that is not a
+          // failure of the storm.
+          ws_resumes: [`count>=${PEAK_VUS}`],
           ws_replay_gap: ["max==0"],
           "ws_replay_source{tier:none}": ["count==0"],
-          "ws_replay_source{tier:buffer}": ["count>0"],
+          "ws_replay_source{tier:buffer}": [`count>=${PEAK_VUS}`],
           // Churn and upload admission: empty-sample traps. A percentile over
           // zero samples passes, so every phase asserts it happened.
           // (voice_states lives with the voice thresholds above: it only
@@ -483,7 +502,11 @@ export const options = {
     // measurement-only — the PRD excludes new latency budgets.
     ...(IS_RESTART
       ? {
-          server_restart_received: ["count>0"],
+          // Every held connection, not merely one: the frame's contract is
+          // that it reaches all of them, and a drill where 3 of 100 heard it
+          // measured nothing. Exactly PEAK_VUS — one frame per connection,
+          // counted once (restartReceivedAt guards a repeat).
+          server_restart_received: [`count==${PEAK_VUS}`],
           ws_replay_gap: ["max==0"],
           "ws_replay_source{tier:none}": ["count>0"],
           sends_during_drain: ["count>0"],
@@ -561,15 +584,19 @@ function ceilingStepThresholds() {
     "ws_broadcast_latency_ms",
     "ws_delivery_latency_ms",
   ];
-  // ws_connections belongs here for the same reason as the writer-wait pair:
-  // it is the evidence that the step held the connections it claims to have
-  // probed. A step whose connections fell short of its label is generator-
-  // limited, and the table has to be able to say so.
+  // ws_connections belongs here for the same reason as the writer-wait pair —
+  // it is the step's arrivals, i.e. how many sockets that step's ramp opened.
+  // The population the step actually HELD is obs_connected_users, the server's
+  // own count, because sockets opened by an earlier step are still up.
+  // A step whose population fell short of its label is generator-limited, and
+  // the table has to be able to say so.
   const counters = ["obs_db_writer_wait_count", "obs_db_writer_wait_seconds", "ws_connections"];
   const out = {};
   for (const v of CEILING_STEPS) {
     for (const t of trends) out[`${t}{step:${v}}`] = ["p(95)>=0"];
     for (const c of counters) out[`${c}{step:${v}}`] = ["count>=0"];
+    // A Gauge aggregates as value; informational like every step key here.
+    out[`obs_connected_users{step:${v}}`] = ["value>=0"];
   }
   return out;
 }
@@ -598,14 +625,23 @@ function passThroughThresholds() {
     "obs_db_reader_wait_seconds",
     "obs_ws_conn_rejects",
   ];
-  for (const p of ["ramp", "sustain", "storm", "upload"]) {
+  for (const p of PHASES) {
     for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
     out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
   }
-  for (const t of ["buffer", "db", "full"]) out[`obs_reconnect_tier{tier:${t}}`] = ["count>=0"];
-  for (const k of ["queue_disconnects", "high_fallbacks", "low_drops"]) {
-    out[`obs_backpressure{kind:${k}}`] = ["count>=0"];
+  // Tier and backpressure come in two shapes: the run total per tier/kind,
+  // and the per-phase delta (a sub-metric key takes several comma-separated
+  // tags, and a sample matches a key whose tags are a subset of its own, so
+  // the same sample feeds both). The per-phase pair is what the storm row
+  // publishes; the totals stay because the tier split is also a run figure.
+  const reconnectTiers = ["buffer", "db", "full"];
+  const kinds = ["queue_disconnects", "high_fallbacks", "low_drops"];
+  for (const t of reconnectTiers) out[`obs_reconnect_tier{tier:${t}}`] = ["count>=0"];
+  for (const k of kinds) out[`obs_backpressure{kind:${k}}`] = ["count>=0"];
+  for (const p of PHASES) {
+    for (const t of reconnectTiers) out[`obs_reconnect_tier{phase:${p},tier:${t}}`] = ["count>=0"];
+    for (const k of kinds) out[`obs_backpressure{phase:${p},kind:${k}}`] = ["count>=0"];
   }
   return out;
 }
@@ -704,7 +740,19 @@ function authenticate(username) {
       continue;
     }
     if (res.status !== 200) {
+      // Counted whatever happens next: a failed login attempt is a real error
+      // and the published "0 WebSocket errors" claim has to see it.
       wsErrors.add(1);
+      // A transport failure (k6 reports status 0) or a 5xx is transient, and
+      // one of them cost the self_signed operational leg on eb344cc8 its run:
+      // zero 429s all run, one login answered non-200, and this function gave
+      // up on the first attempt — one VU of a hundred took login_giveups to 1
+      // and the whole run red. A refusal the server MEANT (400/401/403) is not
+      // retryable and still returns at once.
+      if ((res.status === 0 || res.status >= 500) && attempt < LOGIN_ATTEMPTS - 1) {
+        sleep(1 + attempt * 0.5);
+        continue;
+      }
       return null;
     }
 
@@ -801,11 +849,14 @@ export default function () {
   const res = ws.connect(WS_URL, null, function (socket) {
     const openAt = Date.now();
     wsConnectTime.add(openAt - connectStart, stepTags());
-    // Tagged so the ceiling search can publish how many sockets each step
-    // actually opened. Without it a step where most VUs never got a token is
-    // indistinguishable from one that connected and degraded — which is how a
-    // contaminated ceiling run passed. Untagged on capacity (stepTags() is
-    // undefined there, and k6 leaves an undefined tag off the sample).
+    // One ARRIVAL, tagged with the step whose ramp opened it — not the
+    // population the step held: a socket opened at step 100 is still up at
+    // step 300 and is counted by neither. Arrivals are what says whether a
+    // step's VUs got on the wire at all (a step where most never got a token
+    // is otherwise indistinguishable from one that connected and degraded —
+    // how a contaminated ceiling run passed); the population each step held
+    // is obs_connected_users, read from the server. Untagged on capacity
+    // (stepTags() is undefined there, and k6 leaves an undefined tag off).
     wsConnections.add(1, stepTags());
 
     let authed = false;
@@ -1241,22 +1292,29 @@ export function observerScenario() {
     obsDbReaderWaitCount.add(d("db_reader_wait_count"), stepTag);
     obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), stepTag);
     obsConnRejects.add(d("ws_conn_rejects"), stepTag);
+    obsConnectedUsers.add(body.connected_users || 0, stepTag);
   } else {
     const phase = obsPhase(Date.now());
     obsDbWriterWaitCount.add(d("db_writer_wait_count"), { phase });
     obsDbWriterWaitSeconds.add(d("db_writer_wait_seconds"), { phase });
     obsDbReaderWaitCount.add(d("db_reader_wait_count"), { phase });
     obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), { phase });
-    obsReconnectTier.add(d("reconnect_tier_buffer"), { tier: "buffer" });
-    obsReconnectTier.add(d("reconnect_tier_db"), { tier: "db" });
-    obsReconnectTier.add(d("reconnect_tier_full"), { tier: "full" });
+    // Tagged with the phase as well as the tier/kind: the storm's tier split
+    // and backpressure delta are per-phase figures (a run total cannot say
+    // which phase the reconnects or the drops happened in), and k6 sub-metric
+    // keys take both tags — `obs_reconnect_tier{phase:storm,tier:buffer}`.
+    obsReconnectTier.add(d("reconnect_tier_buffer"), { phase, tier: "buffer" });
+    obsReconnectTier.add(d("reconnect_tier_db"), { phase, tier: "db" });
+    obsReconnectTier.add(d("reconnect_tier_full"), { phase, tier: "full" });
     obsBackpressure.add(d("backpressure_queue_disconnects"), {
+      phase,
       kind: "queue_disconnects",
     });
     obsBackpressure.add(d("backpressure_high_fallbacks"), {
+      phase,
       kind: "high_fallbacks",
     });
-    obsBackpressure.add(d("backpressure_low_drops"), { kind: "low_drops" });
+    obsBackpressure.add(d("backpressure_low_drops"), { phase, kind: "low_drops" });
     obsConnRejects.add(d("ws_conn_rejects"), { phase });
     if (body.upload_storage_used_mb !== undefined) {
       obsUploadStorage.add(body.upload_storage_used_mb, { phase });

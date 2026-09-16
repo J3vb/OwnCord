@@ -265,6 +265,12 @@ alongside the reconnect tier split, backpressure and connection rejects.
 Upload storage (`obs_upload_storage_used_mb`) is the one Gauge: it is a level,
 not a delta.
 
+The tier split and backpressure carry the phase alongside their own tag —
+`obs_reconnect_tier{phase:storm,tier:buffer}`,
+`obs_backpressure{phase:storm,kind:low_drops}` — which is what makes the
+storm's reconnect tiers and dropped frames a **storm** figure rather than a run
+total. The tier-only and kind-only keys stay beside them for the run total.
+
 **The published figure is the per-phase delta, not the run total.** The total is
 what the section above already had; the delta is what says which scenario the
 writer queued behind.
@@ -287,7 +293,11 @@ against a four-slot bcrypt admission budget), and a step's published figure is
 the minute it was held at that count, not the bcrypt that got it there.
 
 - **Publishes** the last step at which every budget above still held, plus the
-  per-step table. The steps are informational and nothing is gated on them.
+  per-step table. The steps are informational and nothing is gated on them. The
+  table's population column is `obs_connected_users{step:<n>}` — the server's
+  own `connected_users`, sampled by the observer, because a socket opened at
+  step 100 is still held at step 300. `ws_connections{step:<n>}` beside it is
+  that step's arrivals only, i.e. whether its VUs got on the wire at all.
 - **Gated on** `obs_ws_conn_rejects: count==0`. The workflow caps connections at
   twice the probe maximum for exactly this assertion: without it, a "ceiling"
   could be a configuration default rather than the hardware's.

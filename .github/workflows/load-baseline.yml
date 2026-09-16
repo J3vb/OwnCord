@@ -233,8 +233,19 @@ jobs:
           # The ceiling search has to connect `CEILING_MAX` sockets for its top
           # step to be the connection count it claims, so it seeds that many
           # regardless of `users`. Every other profile seeds `users`.
+          # The operational profile runs the uploads scenario alongside the
+          # WebSocket one, and k6 hands out VU ids test-wide: the uploads VUs
+          # take ids above the WebSocket VUs' and log in as loadtest accounts
+          # above `connections` (ws-load.js, `__VU - OBS_VUS`), so the two
+          # cohorts need DISJOINT accounts — 2 x connections of them. With the
+          # BPR-030 defaults (250 users, 100 connections) `users` already
+          # covers it; a smaller `users` would strand every uploads VU on a
+          # login that cannot succeed.
           if [ "$PROFILE" = "ceiling-search" ]; then
             seed_users="$CEILING_MAX"
+          elif [ "$PROFILE" = "operational" ] &&
+            [ "${{ inputs.users }}" -lt $((2 * ${{ inputs.connections }})) ]; then
+            seed_users=$((2 * ${{ inputs.connections }}))
           else
             seed_users="${{ inputs.users }}"
           fi
