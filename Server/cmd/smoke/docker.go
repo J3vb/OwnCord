@@ -61,7 +61,7 @@ const (
 type dockerTarget struct {
 	oldImage string
 	newImage string
-	vol      string // named volume mapped at containerData, created per run
+	vol      string // named volume mapped at containerData; docker creates it on the first mount
 	// dir is the host side of the install: the bind-mounted config.yaml plus
 	// a snapshot of the volume under data/. See installDir.
 	dir     string
@@ -85,10 +85,10 @@ type dockerTarget struct {
 	extraEnv []string
 }
 
-// newDockerTarget prepares the volume and the operator-owned config.yaml. The
-// images are checked here rather than at first use, for the same reason
-// serverBinary stats the binaries: "no such image" arriving as a failed phase 1
-// reads like the rehearsal found something.
+// newDockerTarget prepares the operator-owned config.yaml and the volume name
+// start() will mount. The images are checked here rather than at first use, for
+// the same reason serverBinary stats the binaries: "no such image" arriving as a
+// failed phase 1 reads like the rehearsal found something.
 //
 // Building or pulling the images is the caller's job (the workflow's), not
 // this harness's: it rehearses two given images and never decides what they
@@ -113,10 +113,12 @@ func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 		t.cleanup()
 		return nil, err
 	}
-	if _, err := docker("volume", "create", t.vol); err != nil {
-		t.cleanup()
-		return nil, err
-	}
+	// The volume is deliberately NOT created here. `docker run -v <name>:<path>`
+	// creates a named volume on first mount, and restore() removes and recreates
+	// it anyway, so a create here only ever produced a volume that start() might
+	// never mount: the tmpfs leg mounts a tmpfs at containerData INSTEAD (see
+	// t.tmpfs), which left this harness creating a named volume no container
+	// attached to and cleanup() removing.
 	return t, nil
 }
 

@@ -57,28 +57,24 @@ func main() {
 	useDocker := flag.Bool("docker", false, "rehearse containers on a named volume instead of processes in a temporary directory")
 	phases := flag.String("phases", "", "which drill phases to run — any of R, C, D, S (default: all of them)")
 	dataFS := flag.String("data-fs", "", "the size-limited filesystem phase D fills; without it phase D is skipped")
-	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids this run may downgrade to ::warning:: (release path only)")
+	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids a release-path run may downgrade to ::warning::; the ids are validated against the ledger, but no drill failure carries a ledger id yet, so the flag is inert until one does")
 	flag.Usage = usage
 	flag.Parse()
 
 	// One positional argument in every mode: the binary (or image) under test.
 	// The mode's own flags only mean anything to that mode, so accepting them
 	// without it would silently run something else instead.
-	args := flag.Args()
-	switch {
-	case len(args) != 1:
-		usageError("want exactly one positional argument, got %d", len(args))
-	case *upgrade && *drills:
-		usageError("-upgrade and -drills are two different rehearsals, pick one")
-	case !*upgrade && *from != "":
-		usageError("-from is only meaningful together with -upgrade")
-	case *upgrade && *from == "":
-		usageError("-upgrade needs -from <old-binary|old-image> to upgrade from")
-	case !*upgrade && !*drills && *useDocker:
-		usageError("-docker is only meaningful together with -upgrade or -drills")
-	case !*drills && (*phases != "" || *dataFS != "" || *findings != ""):
-		usageError("-phases, -data-fs and -known-findings are only meaningful together with -drills")
+	if err := (invocation{
+		args:       flag.Args(),
+		upgrade:    *upgrade,
+		drills:     *drills,
+		docker:     *useDocker,
+		from:       *from,
+		drillFlags: *phases != "" || *dataFS != "" || *findings != "",
+	}).validate(); err != nil {
+		usageError("%v", err)
 	}
+	args := flag.Args()
 
 	action := func() error { return run(args[0]) }
 	summary := "standalone smoke passed: boot, migrate, healthy, drain, restart"
@@ -119,6 +115,39 @@ func main() {
 	if summary != "" {
 		fmt.Println(summary)
 	}
+}
+
+// invocation is the command line as the caller typed it, checked as a whole
+// rather than flag by flag: every one of these combinations would otherwise run
+// something the caller did not ask for.
+type invocation struct {
+	args       []string
+	upgrade    bool
+	drills     bool
+	docker     bool
+	from       string
+	drillFlags bool // -phases, -data-fs or -known-findings was set
+}
+
+// validate names the first thing wrong with the invocation, or nil. Returning
+// an error rather than exiting keeps the exit code in main, beside every other
+// way the command line can be rejected.
+func (in invocation) validate() error {
+	switch {
+	case len(in.args) != 1:
+		return fmt.Errorf("want exactly one positional argument, got %d", len(in.args))
+	case in.upgrade && in.drills:
+		return fmt.Errorf("-upgrade and -drills are two different rehearsals, pick one")
+	case !in.upgrade && in.from != "":
+		return fmt.Errorf("-from is only meaningful together with -upgrade")
+	case in.upgrade && in.from == "":
+		return fmt.Errorf("-upgrade needs -from <old-binary|old-image> to upgrade from")
+	case !in.upgrade && !in.drills && in.docker:
+		return fmt.Errorf("-docker is only meaningful together with -upgrade or -drills")
+	case !in.drills && in.drillFlags:
+		return fmt.Errorf("-phases, -data-fs and -known-findings are only meaningful together with -drills")
+	}
+	return nil
 }
 
 func usage() {

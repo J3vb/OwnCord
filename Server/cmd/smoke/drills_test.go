@@ -251,3 +251,99 @@ func TestKnownTriage(t *testing.T) {
 		})
 	}
 }
+
+// TestSkipNeverReadsAsPassed pins the rule the whole skip mechanism exists for,
+// on both lines a reader can take the run's verdict from: the phase's own line
+// and the run's summary. Nothing else can — the failure mode is a GREEN run, so
+// a step that never executed leaves no trace in it, and the only other way to
+// see it is to be on a machine where the step happens to be skipped (Windows,
+// for step 6; a host with no tmpfs, for phase D).
+//
+// The phase is synthetic so the assertions pin the mechanism rather than the
+// brief's prose: a reworded phase description must not redden this test.
+func TestSkipNeverReadsAsPassed(t *testing.T) {
+	r := phase{letter: 'R', what: "described"}
+	d := phase{letter: 'D', what: "described"}
+	all := []phase{r, d}
+
+	verdicts := []struct {
+		name string
+		d    drill
+		want string // the exact line, "" meaning the phase must print none
+	}{
+		{
+			name: "a phase that measured every step still says passed",
+			d:    drill{},
+			want: "phase R (described): passed",
+		},
+		{
+			name: "a step that never ran is named on the phase's own line",
+			d:    drill{partial: map[byte][]string{'R': {"step 6 did not run"}}},
+			want: "phase R (described): passed, except step 6 did not run",
+		},
+		{
+			name: "several steps that never ran are all named",
+			d:    drill{partial: map[byte][]string{'R': {"step 6 did not run", "step 7 did not run"}}},
+			want: "phase R (described): passed, except step 6 did not run; except step 7 did not run",
+		},
+		{
+			name: "a step of ANOTHER phase does not touch this one's verdict",
+			d:    drill{partial: map[byte][]string{'D': {"step 4 did not run"}}},
+			want: "phase R (described): passed",
+		},
+		{
+			name: "a phase that measured nothing prints no verdict at all",
+			d:    drill{skipped: []byte{'R'}},
+			want: "",
+		},
+	}
+	for _, tt := range verdicts {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.d.letter = 'R'
+			got := tt.d.verdict(r)
+			if got != tt.want {
+				t.Fatalf("verdict = %q, want %q", got, tt.want)
+			}
+			if tt.want == "" && got != "" {
+				t.Fatalf("a phase that never ran printed a verdict: %q", got)
+			}
+		})
+	}
+
+	summaries := []struct {
+		name string
+		d    drill
+		want string
+	}{
+		{
+			name: "a run with nothing skipped reads as a plain pass",
+			d:    drill{},
+			want: "failure and recovery drills passed: phase RD",
+		},
+		{
+			name: "a step-level skip reaches the run's last line",
+			d:    drill{partial: map[byte][]string{'R': {"step 6 did not run"}}},
+			want: "failure and recovery drills passed: phase RD (phase R: step 6 did not run)",
+		},
+		{
+			name: "a whole-phase skip is named and the phase is not counted as run",
+			d:    drill{skipped: []byte{'D'}},
+			want: "failure and recovery drills passed: phase R (D skipped — no measurement was made)",
+		},
+		{
+			name: "both kinds of skip appear, each as itself",
+			d: drill{
+				skipped: []byte{'D'},
+				partial: map[byte][]string{'R': {"step 6 did not run"}},
+			},
+			want: "failure and recovery drills passed: phase R (D skipped — no measurement was made) (phase R: step 6 did not run)",
+		},
+	}
+	for _, tt := range summaries {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.d.summary(all); got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

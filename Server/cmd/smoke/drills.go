@@ -170,6 +170,15 @@ func (l ledger) find(id string) (ledgerRow, bool) {
 
 // known is the -known-findings flag: the ledger ids this run may downgrade a
 // failure to a warning for.
+//
+// The flag is currently inert by construction. triage downgrades only a failure
+// that carries an id, no failure construction in this file sets one, and the
+// ledger holds no open row a drill could name — so every run that can pass
+// validation today downgrades nothing. That is deliberate rather than
+// unfinished: R12 keeps an unfixed security-adjacent finding out of the tracked
+// ledger and R13 forbids inventing an id for one, so there is nothing honest to
+// name yet. Read the flag as a gate being prepared, never as a gate that is
+// holding something open.
 type known struct {
 	// ids are the OPEN ledger ids the flag named.
 	ids map[string]bool
@@ -187,7 +196,7 @@ type known struct {
 // moment it was repaired (R14).
 func newKnown(spec string, l ledger, release bool) (known, error) {
 	k := known{ids: map[string]bool{}, release: release}
-	for _, id := range strings.Split(spec, ",") {
+	for id := range strings.SplitSeq(spec, ",") {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
@@ -295,6 +304,15 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 	// Printed here rather than by main, because a phase that skipped is not a
 	// pass and the run's last line is where that has to be legible: "phase D:
 	// passed" over a skip is the read the brief's gotcha forbids.
+	fmt.Println(d.summary(phases))
+	return nil
+}
+
+// summary is the run's last line. It exists as a function for the same reason
+// verdict does: a reader who skims past the per-phase lines reads only this one,
+// so a step that did not run has to be legible here too — and a green run is
+// exactly when nobody notices that it is not.
+func (d *drill) summary(phases []phase) string {
 	ran := make([]byte, 0, len(phases))
 	for _, p := range phases {
 		if !slices.Contains(d.skipped, p.letter) {
@@ -308,12 +326,24 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 	if len(d.skipped) > 0 {
 		summary += fmt.Sprintf(" (%s skipped — no measurement was made)", string(d.skipped))
 	}
-	fmt.Println(summary)
-	return nil
+	// A step-level skip is not a pass, so the run's last line carries it too: a
+	// reader who skips the per-step output and reads only this line still learns
+	// that part of a phase never ran.
+	var never []string
+	for _, p := range phases {
+		for _, step := range d.partial[p.letter] {
+			never = append(never, fmt.Sprintf("phase %c: %s", p.letter, step))
+		}
+	}
+	if len(never) > 0 {
+		summary += " (" + strings.Join(never, "; ") + ")"
+	}
+	return summary
 }
 
 func (d *drill) runPhase(p phase) error {
 	d.phase = fmt.Sprintf("phase %c", p.letter)
+	d.letter = p.letter
 	// Each phase owns its install directory. Phase R's restores leave a
 	// replacement process behind when it boots, and that process holds both
 	// the directory and the port, so the directory is not removed here — the
@@ -344,13 +374,42 @@ func (d *drill) runPhase(p phase) error {
 	if runErr != nil {
 		return fmt.Errorf("phase %c (%s): %w", p.letter, p.what, runErr)
 	}
-	if slices.Contains(d.skipped, p.letter) {
-		// Not "passed": no assertion in the phase was ever evaluated, and the
-		// line a reader skims must not say otherwise.
-		return nil
+	if line := d.verdict(p); line != "" {
+		fmt.Println(line)
 	}
-	fmt.Printf("phase %c (%s): passed\n", p.letter, p.what)
 	return nil
+}
+
+// verdict is the line a completed phase prints, or "" for a phase that must
+// print none. Every branch of it exists to keep one word off that line —
+// "passed" — for work that did not run, which is the brief's gotcha and the
+// reason the skip machinery exists at all. It is a function rather than three
+// prints at their call sites so a test can hold that, since nothing in a green
+// run can.
+func (d *drill) verdict(p phase) string {
+	if slices.Contains(d.skipped, p.letter) {
+		// No line: the phase measured nothing, and the run's summary is the one
+		// place that says so.
+		return ""
+	}
+	if steps := d.partial[p.letter]; len(steps) > 0 {
+		// The rest of the phase measured, so neither word alone is true. Name
+		// the step, and the reason, on the line a reader skims.
+		return fmt.Sprintf("phase %c (%s): passed, except %s", p.letter, p.what, strings.Join(steps, "; except "))
+	}
+	return fmt.Sprintf("phase %c (%s): passed", p.letter, p.what)
+}
+
+// skipStep records a step that did not run and prints why. Recording is the
+// half that matters: without it the phase's verdict is computed as though the
+// step had passed, which is how a whole brief step once went unexecuted behind
+// a green run.
+func (d *drill) skipStep(reason string) {
+	if d.partial == nil {
+		d.partial = make(map[byte][]string)
+	}
+	d.partial[d.letter] = append(d.partial[d.letter], reason)
+	fmt.Printf("%s: skipped — %s\n", d.phase, reason)
 }
 
 // drill is one phase's state: the artefact under test, the install directory it
@@ -377,6 +436,14 @@ type drill struct {
 	// not give them what they assert on. Collected so the run's own last line
 	// cannot report a skip as a pass.
 	skipped []byte
+	// partial are the steps within a phase that never ran, keyed by phase. A
+	// step-level skip is neither a pass nor a phase skip: the phase's other
+	// steps did measure, so the phase has to name the part of itself that did
+	// not happen rather than choosing between "passed" and "skipped".
+	partial map[byte][]string
+	// letter is the running phase's letter, so a step can record its own skip
+	// without being handed it.
+	letter byte
 }
 
 func (d *drill) baseURL() string { return defaultBaseURL }
@@ -570,16 +637,8 @@ func get(path string, token string, out any) error {
 
 // wantStatus issues a request whose status is the assertion, without decoding a
 // body.
-func wantStatus(method, path, token string, status int, body []byte) error {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	contentType := ""
-	if body != nil {
-		contentType = "application/json"
-	}
-	return request(method, defaultBaseURL+path, token, contentType, reader, status, nil)
+func wantStatus(method, path, token string, status int) error {
+	return request(method, defaultBaseURL+path, token, "", nil, status, nil)
 }
 
 // healthBody is GET /health's shape: unauthenticated, so the reason names a
@@ -886,7 +945,13 @@ func wsURL(baseURL string) string {
 func dialWS(token string) (*wsConn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fixtureTimeout)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, wsURL(defaultBaseURL), &websocket.DialOptions{HTTPClient: fixtureClient})
+	conn, dialResp, err := websocket.Dial(ctx, wsURL(defaultBaseURL), &websocket.DialOptions{HTTPClient: fixtureClient})
+	if dialResp != nil && dialResp.Body != nil {
+		// Dial has already closed it (coder/websocket v1.8.15); the guard is
+		// here because bodyclose cannot see that, and the repo's own websocket
+		// proxy closes it the same way (api/livekit_proxy.go).
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close of an already-closed body
+	}
 	if err != nil {
 		return nil, fmt.Errorf("dialling %s: %w", wsURL(defaultBaseURL), err)
 	}
@@ -1141,10 +1206,10 @@ func (d *drill) stepRFix(r *rState) ([]failure, error) {
 	for i := range victimMessages {
 		frame, err := victim.chatSend(r.text.ID, fmt.Sprintf("victim message %d", i))
 		if err != nil {
-			return nil, d.annotate(fmt.Errorf("V sending message %d: %w", i, err))
+			return nil, d.annotate(fmt.Errorf("victim sending message %d: %w", i, err))
 		}
 		if err := wantOK(frame, "chat_send_ok"); err != nil {
-			return nil, d.annotate(fmt.Errorf("V sending message %d: %w", i, err))
+			return nil, d.annotate(fmt.Errorf("victim sending message %d: %w", i, err))
 		}
 	}
 	if r.victimFile, err = uploadAttachment(d.baseURL(), victimToken); err != nil {
@@ -1215,7 +1280,7 @@ func (d *drill) stepRBackup(r *rState) ([]failure, error) {
 // erased account, and nothing else in the run would notice.
 func (d *drill) stepRErase(r *rState) ([]failure, error) {
 	if err := wantStatus(http.MethodDelete,
-		fmt.Sprintf("/admin/api/users/%d", r.victimID), r.token, http.StatusNoContent, nil); err != nil {
+		fmt.Sprintf("/admin/api/users/%d", r.victimID), r.token, http.StatusNoContent); err != nil {
 		return nil, d.annotate(err)
 	}
 	state, err := readMarkers(d.dataDir())
@@ -1264,7 +1329,7 @@ func (d *drill) stepRRestore(r *rState) ([]failure, error) {
 	reader := readWhileRestoring(r.token, r.text.ID)
 
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+r.backup+"/restore",
-		r.token, http.StatusOK, nil); err != nil {
+		r.token, http.StatusOK); err != nil {
 		return nil, d.annotate(err)
 	}
 	fmt.Printf("%s: the restore answered 200; the reader in flight says %s\n", d.phase, <-reader)
@@ -1293,95 +1358,124 @@ func (d *drill) stepRRestore(r *rState) ([]failure, error) {
 }
 
 // stepRInspect reads the install the restore produced. Every assertion here is
-// one an owner would make after restoring, in the order they would make it.
+// one an owner would make after restoring, in the order they would make it —
+// which is also why each one is its own function: the sequence is the spec, and
+// a reader checking it against the brief follows the list below.
 func (d *drill) stepRInspect(r *rState) ([]failure, error) {
 	var problems []failure
 	fail := func(format string, args ...any) {
 		problems = append(problems, failure{what: fmt.Sprintf(format, args...)})
 	}
+	for _, inspect := range []func() error{
+		func() error { return d.inspectSafetyCopies(fail) },
+		func() error { return d.inspectLiveDatabase(fail) },
+		func() error { return d.inspectErasureHeld(r, fail) },
+		func() error { return d.inspectPostBackupDataGone(r, fail) },
+		func() error { return d.inspectAuditTrail(r, fail) },
+		func() error { return d.inspectUploadGone(r, fail) },
+		func() error { return d.inspectMarkerSurvived(r, fail) },
+	} {
+		if err := inspect(); err != nil {
+			return nil, d.annotate(err)
+		}
+	}
+	return problems, nil
+}
 
-	// 1. The safety copy the admin panel promises before an irreversible
-	//    overwrite, and that it is a usable database rather than a file.
+// inspectSafetyCopies: the safety copy the admin panel promises before an
+// irreversible overwrite, and that it is a usable database rather than a file.
+func (d *drill) inspectSafetyCopies(fail func(string, ...any)) error {
 	copies, err := preRestoreCopies(d.backupDir())
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
-	switch {
-	case len(copies) == 0:
+	if len(copies) == 0 {
 		fail("the restore left no pre_restore_*.db in %s, and the admin panel promises one before it overwrites", d.backupDir())
-	default:
-		for _, name := range copies {
-			answer, err := integrityCheck(filepath.Join(d.backupDir(), name))
-			if err != nil {
-				return nil, d.annotate(err)
-			}
-			if answer != "ok" {
-				fail("the pre-restore safety copy %s does not integrity_check: %s", name, answer)
-			}
-		}
-		fmt.Printf("%s: pre-restore safety copy %v integrity_checks to ok\n", d.phase, copies)
+		return nil
 	}
+	for _, name := range copies {
+		answer, err := integrityCheck(filepath.Join(d.backupDir(), name))
+		if err != nil {
+			return err
+		}
+		if answer != "ok" {
+			fail("the pre-restore safety copy %s does not integrity_check: %s", name, answer)
+		}
+	}
+	fmt.Printf("%s: pre-restore safety copy %v integrity_checks to ok\n", d.phase, copies)
+	return nil
+}
 
-	// 2. The live database is a valid database. It was written by overwriting
-	//    a file a closed server was holding, which is the one moment a restore
-	//    can corrupt it.
+// inspectLiveDatabase: the live database is a valid database. It was written by
+// overwriting a file a closed server was holding, which is the one moment a
+// restore can corrupt it.
+func (d *drill) inspectLiveDatabase(fail func(string, ...any)) error {
 	answer, err := integrityCheck(filepath.Join(d.dataDir(), "chatserver.db"))
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
 	if answer != "ok" {
 		fail("the restored database does not integrity_check: %s", answer)
 	}
+	return nil
+}
 
-	// 3. The erased account did not come back, and neither did its messages.
-	//    Both were in the backup (it predates the erasure) and only the startup
-	//    replay removes them again — a replay that does nothing leaves V
-	//    serving, which is exactly what drill 2 is for.
+// inspectErasureHeld: the erased account did not come back, and neither did its
+// messages. Both were in the backup (it predates the erasure) and only the
+// startup replay removes them again — a replay that does nothing leaves V
+// serving, which is exactly what drill 2 is for.
+func (d *drill) inspectErasureHeld(r *rState, fail func(string, ...any)) error {
 	if alive, who, err := authenticated(r.victimToken); err != nil {
-		return nil, d.annotate(err)
+		return err
 	} else if alive {
 		fail("the erased account %s is authenticated again after the restore: the startup replay did not erase it", who)
 	}
 	count, err := messageCount(r.token, r.text.ID)
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
 	if count != 0 {
 		fail("the restored channel shows %d message(s) after the restore; the erased account's %d were restored and not removed again",
 			count, victimMessages)
 	}
+	return nil
+}
 
-	// 4. D3: the restore drops what was written after the backup. The third
-	//    account is that data, and it goes through the real path rather than a
-	//    synthetic one.
+// inspectPostBackupDataGone: D3, the restore drops what was written after the
+// backup. The third account is that data, and it goes through the real path
+// rather than a synthetic one.
+func (d *drill) inspectPostBackupDataGone(r *rState, fail func(string, ...any)) error {
 	if alive, who, err := authenticated(r.newcomer); err != nil {
-		return nil, d.annotate(err)
+		return err
 	} else if alive {
 		fail("the account created after the backup (%s) is still authenticated after the restore — restoring did not roll it back", who)
 	}
+	return nil
+}
 
-	// 5. The audit trail says what happened, including the replay under the
-	//    marker's own token: that token is the only link between the erase and
-	//    the erasure the operator cannot see (the account is gone).
-	//
-	//    Where each row LIVES is the assertion, and the two halves are in
-	//    different databases by design. The restore writes backup_restore into
-	//    the live database and then overwrites that file with the backup, so the
-	//    row survives only inside the pre-restore safety copy — the handler says
-	//    so, and admin/handlers_backup_test.go asserts it — while the replay runs
-	//    after the boot and lands in the restored database. Measured on the first
-	//    run of this drill: the live log holds no backup_restore row. The brief
-	//    predicts both in one place; this is where they are.
+// inspectAuditTrail: the audit trail says what happened, including the replay
+// under the marker's own token — that token is the only link between the erase
+// and the erasure the operator cannot see (the account is gone).
+//
+// Where each row LIVES is the assertion, and the two halves are in different
+// databases by design. The restore writes backup_restore into the live database
+// and then overwrites that file with the backup, so the row survives only inside
+// the pre-restore safety copy — the handler says so, and
+// admin/handlers_backup_test.go asserts it — while the replay runs after the boot
+// and lands in the restored database. Measured on the first run of this drill:
+// the live log holds no backup_restore row. The brief predicts both in one place;
+// this is where they are.
+func (d *drill) inspectAuditTrail(r *rState, fail func(string, ...any)) error {
 	rows, err := auditLog(r.token)
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
 	if !hasAuditRow(rows, "account_erasure_replayed", r.markers.token) {
 		fail("the live audit log holds no account_erasure_replayed entry carrying the marker token %s", shortToken(r.markers.token))
 	}
-	copies, err = preRestoreCopies(d.backupDir())
+	copies, err := preRestoreCopies(d.backupDir())
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
 	if len(copies) == 0 {
 		fail("there is no pre-restore safety copy to hold the backup_restore entry the restore wrote before overwriting the live database")
@@ -1389,27 +1483,33 @@ func (d *drill) stepRInspect(r *rState) ([]failure, error) {
 	for _, name := range copies {
 		inside, err := auditRowsOf(filepath.Join(d.backupDir(), name))
 		if err != nil {
-			return nil, d.annotate(err)
+			return err
 		}
 		if !hasAuditRow(inside, "backup_restore", "") {
 			fail("the pre-restore safety copy %s holds no backup_restore entry, so nothing anywhere records that the restore happened", name)
 		}
 	}
+	return nil
+}
 
-	// 6. V's file is gone from disk. The replay removes files as well as rows,
-	//    and a restored upload whose row is gone is an orphan nobody can serve.
+// inspectUploadGone: V's file is gone from disk. The replay removes files as well
+// as rows, and a restored upload whose row is gone is an orphan nobody can serve.
+func (d *drill) inspectUploadGone(r *rState, fail func(string, ...any)) error {
 	if _, err := os.Stat(filepath.Join(d.uploadsDir(), r.victimFile)); err == nil {
 		fail("the erased account's upload file is still on disk at uploads/%s after the restore: the replay removed the row and not the file", r.victimFile)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, d.annotate(err)
+		return err
 	}
+	return nil
+}
 
-	// 7. The marker survived the restore. The markers are the one thing the
-	//    restore cannot roll back, and a replay that consumed or discarded the
-	//    marker would erase V once and leave the next restore to resurrect it.
+// inspectMarkerSurvived: the marker survived the restore. The markers are the one
+// thing the restore cannot roll back, and a replay that consumed or discarded the
+// marker would erase V once and leave the next restore to resurrect it.
+func (d *drill) inspectMarkerSurvived(r *rState, fail func(string, ...any)) error {
 	state, err := readMarkers(d.dataDir())
 	if err != nil {
-		return nil, d.annotate(err)
+		return err
 	}
 	if state.count != 1 {
 		fail("the marker file holds %d marker(s) after the replay, want the one it held before", state.count)
@@ -1417,7 +1517,7 @@ func (d *drill) stepRInspect(r *rState) ([]failure, error) {
 	if state.token != r.markers.token {
 		fail("the marker file's token changed across the restore (%s -> %s)", shortToken(r.markers.token), shortToken(state.token))
 	}
-	return problems, nil
+	return nil
 }
 
 // stepRNoMarkerFile is drill 2's first half: the marker file is gone and the
@@ -1445,22 +1545,29 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 		default:
 			// Windows refuses to unlink a file another process holds open, and
 			// the running server holds this one open for its whole life. That
-			// is a limit of this machine, not a measurement, and a skip is
-			// printed rather than counted as a pass.
-			fmt.Printf("%s: step 6 skipped (%v — the running server holds the marker file open; only a stopped server can lose it on this platform)\n", d.phase, err)
+			// is a limit of this machine, not a measurement, so the step is
+			// recorded as not having run — never as a pass.
+			d.skipStep(fmt.Sprintf("step 6 did not run (%v — the running server holds the marker file open; only a stopped server can lose it on this platform)", err))
 			return nil, nil
 		}
 	}
 	if deleted == 0 {
-		fmt.Printf("%s: step 6 skipped (there was no marker file to delete)\n", d.phase)
+		d.skipStep("step 6 did not run (there was no marker file to delete)")
 		return nil, nil
+	}
+	if deleted < 3 {
+		// The marker file went but a sidecar did not. The install is already
+		// mutated, so this is neither a skip nor a clean run: say which files
+		// survived and carry on, so the boot below is measured against the
+		// state the operator would actually be in.
+		d.skipStep(fmt.Sprintf("step 6 ran on a partially deleted marker set (%d of 3 files removed; SQLite's sidecars are still present)", deleted))
 	}
 	offset, err := logOffset(d.srv.logPath)
 	if err != nil {
 		return nil, d.annotate(err)
 	}
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+r.backup+"/restore",
-		r.token, http.StatusOK, nil); err != nil {
+		r.token, http.StatusOK); err != nil {
 		return nil, d.annotate(err)
 	}
 	outcome, err := d.awaitUnwatchedRestart(offset)
@@ -1482,8 +1589,14 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 		fmt.Printf("%s: with the marker file deleted the install booted and the erased account is %s\n",
 			d.phase, erasedPhrase(alive))
 		if alive {
-			problems = append(problems, failure{what: fmt.Sprintf(
-				"with the marker file deleted, the erased account %s is authenticated again after the restore — nothing removes it", who)})
+			// Recorded, not failed. Open question 1 decided that a missing
+			// marker file boots, and the markers are what names an erased
+			// account in a restored backup — with them gone nothing is left
+			// that could remove it, so the resurrection is the decided
+			// behaviour rather than a defect this drill can assert against.
+			// It is still the loudest thing step 6 measures.
+			fmt.Printf("%s: RESURRECTION — %s authenticated again after the restore and nothing removes it (the markers that named it are gone). Decided behaviour, measured here rather than asserted.\n",
+				d.phase, who)
 		}
 	}
 	// The decided behaviour, asserted as a whole: it boots, and it says its
@@ -1516,7 +1629,7 @@ func (d *drill) stepRNoErasureKey(r *rState) ([]failure, error) {
 		return nil, d.annotate(err)
 	}
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+r.backup+"/restore",
-		r.token, http.StatusOK, nil); err != nil {
+		r.token, http.StatusOK); err != nil {
 		return nil, d.annotate(err)
 	}
 	outcome, err := d.awaitUnwatchedRestart(offset)
@@ -1524,15 +1637,16 @@ func (d *drill) stepRNoErasureKey(r *rState) ([]failure, error) {
 		return nil, err
 	}
 	var problems []failure
-	if outcome.booted {
+	switch {
+	case outcome.booted:
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"the erasure key was deleted and the server booted anyway on a marker file created under a different key: its markers name subjects the running key cannot match, so a restored backup leaves erased accounts serving (OC-0388). The boot said:\n%s",
 			tailExcerpt(outcome.tail))})
-	} else if !strings.Contains(outcome.tail, "different erasure key") {
+	case !strings.Contains(outcome.tail, "different erasure key"):
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"the erasure key was deleted and the boot failed, but without naming the reason — a refusal an operator cannot act on is indistinguishable from a crash. The boot said:\n%s",
 			tailExcerpt(outcome.tail))})
-	} else {
+	default:
 		fmt.Printf("%s: with the erasure key deleted the boot failed closed and named the reason\n", d.phase)
 	}
 	return problems, nil
@@ -1634,7 +1748,7 @@ func auditRowsOf(path string) ([]auditRow, error) {
 // behaviour ("log a startup error that the erasure history is absent") and not
 // a sentence, and only the tail this step's boot wrote is searched.
 func saysHistoryGone(log string) bool {
-	for _, line := range strings.Split(log, "\n") {
+	for line := range strings.SplitSeq(log, "\n") {
 		lower := strings.ToLower(line)
 		if strings.Contains(lower, "erasure") &&
 			(strings.Contains(lower, "missing") || strings.Contains(lower, "absent") || strings.Contains(lower, "gone")) {
@@ -1730,7 +1844,7 @@ func (d *drill) stepCCorruptBackup() ([]failure, error) {
 	// a file SQLite rejects, and the run should stop rather than measure a
 	// install that no longer holds what the fixture put there.
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+name+"/restore",
-		token, http.StatusBadRequest, nil); err != nil {
+		token, http.StatusBadRequest); err != nil {
 		return nil, d.annotate(fmt.Errorf("restoring a corrupt backup: %w", err))
 	}
 	after, err := hashFile(dbPath)
@@ -1856,7 +1970,7 @@ func corruptDetectably(path string) (int64, error) {
 		// An error from integrity_check is detection too: the pragma reporting
 		// "database disk image is malformed" is the file being rejected.
 		if answer, err := integrityCheck(path); err != nil || answer != "ok" {
-			return offset, nil
+			return offset, nil //nolint:nilerr // an error from integrity_check IS the corruption this loop looks for, not a failure to detect it
 		}
 	}
 	return 0, fmt.Errorf(
@@ -1910,6 +2024,25 @@ type dStage struct {
 	oks   int
 }
 
+// dirFiller is phase D's non-container filesystem: the directory -data-fs names.
+// A nil filler means this machine has none to give it — the skip is recorded and
+// printed here, never scored as a pass.
+func (d *drill) dirFiller() (filler, error) {
+	// No -data-fs, or Windows: NTFS has no tmpfs, and the drill's own cap would
+	// still be 64 MiB written to somebody's real volume before it gave up.
+	if d.dataFS == "" || runtime.GOOS == "windows" {
+		// The run's exit status and the phases after this one must not read as
+		// "phase D measured nothing and was fine".
+		d.skipped = append(d.skipped, 'D')
+		fmt.Printf("%s: skipped (no size-limited filesystem)\n", d.phase)
+		return nil, nil
+	}
+	if err := d.boot("D.log", d.diskEnv()...); err != nil {
+		return nil, err
+	}
+	return newDirFiller(d.dataFS)
+}
+
 // phaseD is drills 3 and 4: the filesystem under the reserved headroom, then
 // full to the wall, then given back. Standalone it runs against whatever
 // -data-fs names; with -docker it runs against the tmpfs task 4 mounts at
@@ -1922,6 +2055,14 @@ func (d *drill) phaseD() error {
 		f   filler
 		err error
 	)
+	// Two sibling branches rather than one if/else: each owns its own nesting,
+	// and keeping them flat is what holds this function inside its complexity
+	// budget without moving a number.
+	if !d.docker {
+		if f, err = d.dirFiller(); err != nil || f == nil {
+			return err
+		}
+	}
 	if d.docker {
 		t, err := newDockerTarget(d.bin, d.bin)
 		if err != nil {
@@ -1934,51 +2075,15 @@ func (d *drill) phaseD() error {
 			return err
 		}
 		d.container = t
-		f, err = newDockerFiller(t)
-		if err != nil {
+		if f, err = newDockerFiller(t); err != nil {
 			return err
 		}
 		// Phase D asserts on a filesystem of a known size, and docker cp is the
 		// only way this harness can put bytes into a container (the image is
-		// distroless: no shell, no dd). Measured: docker cp resolves its
-		// destination in the container's rootfs, BELOW a mount at that path, so
-		// bytes copied into a --tmpfs mount point land in the layer underneath
-		// while the filesystem the server writes to stays empty — the copy
-		// reports success and the tmpfs reports zero used. The probe copies more
-		// than the mount is declared to hold: if that succeeds, nothing after it
-		// would measure disk pressure, and a stage that measured nothing must
-		// not report anything but a skip.
-		probe := uint64(drillTmpfsBytes + drillFillStep)
-		n, err := f.fill(probe)
-		switch {
-		case err == nil && n == probe:
-			if err := f.release(); err != nil {
-				return d.annotate(err)
-			}
-			d.skipped = append(d.skipped, 'D')
-			fmt.Printf("%s: skipped (docker cp put %d MiB into the container's %d MiB tmpfs and the copy succeeded — it writes below the mount, so the filesystem the server writes to never took a byte)\n",
-				d.phase, probe>>20, drillTmpfsBytes>>20)
-			return nil
-		case err != nil && !errors.Is(err, errNoSpace):
-			return d.annotate(err)
-		}
-	} else {
-		// No -data-fs, or Windows: there is no size-limited filesystem to fill
-		// here. Windows because NTFS has no tmpfs and the drill's own cap would
-		// still be 64 MiB written to somebody's real volume before it gave up.
-		if d.dataFS == "" || runtime.GOOS == "windows" {
-			// A skip, printed, never a pass: the phases after this one and the
-			// run's exit status must not read as "phase D measured nothing and
-			// was fine".
-			d.skipped = append(d.skipped, 'D')
-			fmt.Printf("%s: skipped (no size-limited filesystem)\n", d.phase)
-			return nil
-		}
-		if err := d.boot("D.log", d.diskEnv()...); err != nil {
-			return err
-		}
-		f, err = newDirFiller(d.dataFS)
-		if err != nil {
+		// distroless: no shell, no dd), so before measuring anything it asks
+		// whether this harness can reach that filesystem at all.
+		reachable, err := d.tmpfsReachable(f)
+		if err != nil || !reachable {
 			return err
 		}
 	}
@@ -2009,6 +2114,36 @@ func (d *drill) phaseD() error {
 		}
 	}
 	return d.failures(problems)
+}
+
+// tmpfsReachable reports whether this harness can put bytes into the container's
+// tmpfs at all.
+//
+// docker cp resolves its destination in the container's rootfs, BELOW a mount at
+// that path, so bytes copied into a --tmpfs mount point land in the layer
+// underneath while the filesystem the server writes to stays empty — the copy
+// reports success and the tmpfs reports zero used. The probe copies more than the
+// mount is declared to hold: if that succeeds, nothing after it would measure
+// disk pressure, and a stage that measured nothing must not report anything but a
+// skip. A false result has already recorded that skip.
+func (d *drill) tmpfsReachable(f filler) (bool, error) {
+	probe := uint64(drillTmpfsBytes + drillFillStep)
+	n, err := f.fill(probe)
+	switch {
+	case err == nil && n == probe:
+		if err := f.release(); err != nil {
+			return false, d.annotate(err)
+		}
+		d.skipped = append(d.skipped, 'D')
+		fmt.Printf("%s: skipped (docker cp put %d MiB into the container's %d MiB tmpfs and the copy succeeded — it writes below the mount, so the filesystem the server writes to never took a byte)\n",
+			d.phase, probe>>20, drillTmpfsBytes>>20)
+		return false, nil
+	case err != nil && !errors.Is(err, errNoSpace):
+		// Neither a full filesystem nor a success: this is the harness failing,
+		// and the raw error is what a reader needs to tell that from ENOSPC.
+		return false, d.annotate(err)
+	}
+	return true, nil
 }
 
 // dHeadroom fills until the product's own health report says the disk is under
@@ -2402,7 +2537,7 @@ func quietPaths(log string) []string {
 		"audit", "persist", "session touch", "session_touch", "flush",
 	}
 	var lines []string
-	for _, line := range strings.Split(log, "\n") {
+	for line := range strings.SplitSeq(log, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -2517,6 +2652,14 @@ func (f *dockerFiller) fill(n uint64) (uint64, error) {
 		if isNoSpace(err) {
 			return 0, errNoSpace
 		}
+		// isNoSpace matches the daemon's wording, not an errno — docker cp
+		// extracts inside the daemon, so the ENOSPC it hit is not the error this
+		// process can inspect. A daemon that reworded that message therefore
+		// lands here, and the raw text is printed as itself: otherwise the run
+		// reports a full tmpfs as a harness failure whose message names neither
+		// the filesystem nor the missing match.
+		fmt.Printf("%s: the container refused %d bytes with an error matching no known ENOSPC wording (%v) — if the tmpfs is full, the daemon's message has changed and isNoSpace needs the new text\n",
+			f.t.name, n, err)
 		return 0, fmt.Errorf("putting %d bytes into the container: %w", n, err)
 	}
 	f.junk = append(f.junk, name)
@@ -2623,33 +2766,27 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	// each time: a socket that already holds a voice state would get
 	// ALREADY_JOINED whatever the SFU is doing, and a minted token from a
 	// fresh socket is real evidence of the guard being absent.
-	deadline := time.Now().Add(restartWindow)
-	var (
-		code, message string
-		minted        int
-	)
-	for time.Now().Before(deadline) {
-		probe, err := dialWS(token)
-		if err != nil {
-			return nil, d.annotate(err)
-		}
-		frame, err := probe.voiceJoin(voice.ID)
-		probe.close()
-		if err != nil {
-			return nil, d.annotate(err)
-		}
-		if frame.Type == "error" {
-			code, message = frame.errCode()
-			break
-		}
-		minted++
-		time.Sleep(pollInterval / 4)
+	seen, err := probeVoiceJoin(token, voice.ID, restartWindow, pollInterval/4,
+		func(f wsFrame) bool { return f.Type == "error" })
+	if err != nil {
+		return nil, d.annotate(err)
 	}
-	if code == "" {
+	if len(seen) == 0 {
+		return nil, d.annotate(errors.New("the voice_join probe produced no frame at all, so the kill measured nothing"))
+	}
+	last := seen[len(seen)-1]
+	if last.Type != "error" {
+		minted := 0
+		for _, f := range seen {
+			if f.Type != "error" {
+				minted++
+			}
+		}
 		return []failure{{what: fmt.Sprintf(
 			"the SFU was killed and voice_join still answered with a minted token on all %d attempt(s): a client is handed a LiveKit token for a room nothing is serving (B6-6's disguised success), and it finds out only when the connection fails",
 			minted)}}, nil
 	}
+	code, message := last.errCode()
 	fmt.Printf("%s: with the SFU killed voice_join refused with %s: %s\n", d.phase, code, message)
 
 	// The diagnostics endpoint is administrator-gated and rate-limited to five
@@ -2671,31 +2808,46 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	// no voice state (the refusal happens before the join persists), but the
 	// first socket is still in the channel and a re-join from it would answer
 	// ALREADY_JOINED.
-	deadline = time.Now().Add(supervisorRestartBudget)
-	restarted := false
-	for time.Now().Before(deadline) {
-		probe, err := dialWS(token)
-		if err != nil {
-			return nil, d.annotate(err)
-		}
-		frame, err := probe.voiceJoin(voice.ID)
-		probe.close()
-		if err != nil {
-			return nil, d.annotate(err)
-		}
-		if frame.Type == "voice_token" {
-			restarted = true
-			break
-		}
-		time.Sleep(pollInterval / 2)
+	seen, err = probeVoiceJoin(token, voice.ID, supervisorRestartBudget, pollInterval/2,
+		func(f wsFrame) bool { return f.Type == "voice_token" })
+	if err != nil {
+		return nil, d.annotate(err)
 	}
-	if !restarted {
+	if len(seen) == 0 || seen[len(seen)-1].Type != "voice_token" {
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"the managed SFU never came back: voice_join still refuses %s after the supervisor's first restart window", supervisorRestartBudget)})
 	} else {
 		fmt.Printf("%s: the supervisor restarted the SFU and voice_join mints a token again\n", d.phase)
 	}
 	return problems, nil
+}
+
+// probeVoiceJoin asks to join on a fresh socket until done(frame), or until the
+// budget runs out, and returns every frame it saw in order.
+//
+// A fresh socket per attempt is the point rather than a detail: a socket that
+// already holds a voice state answers ALREADY_JOINED whatever the SFU is doing,
+// so a re-join from a reused socket would measure the socket and not the guard.
+func probeVoiceJoin(token string, voiceID int64, budget, pause time.Duration, done func(wsFrame) bool) ([]wsFrame, error) {
+	var seen []wsFrame
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		probe, err := dialWS(token)
+		if err != nil {
+			return seen, err
+		}
+		frame, err := probe.voiceJoin(voiceID)
+		probe.close()
+		if err != nil {
+			return seen, err
+		}
+		seen = append(seen, frame)
+		if done(frame) {
+			return seen, nil
+		}
+		time.Sleep(pause)
+	}
+	return seen, nil
 }
 
 // stepSExternalAbsent boots an install pointed at an externally managed SFU
