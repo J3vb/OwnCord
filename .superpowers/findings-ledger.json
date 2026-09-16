@@ -1,5 +1,5 @@
 {
-  "nextId": 445,
+  "nextId": 448,
   "findings": [
     {
       "id": "OC-0001",
@@ -10326,6 +10326,54 @@
         "revertProof": "pass (manual: the pre-fix PATCH was observed returning 400 against dev before the step was removed, and the step's own `!= 200` guard made that fatal)"
       },
       "suggestedFix": "Delete the PATCH and rely on the invite, with a comment recording that a fresh install is invite mode -- which is what was done."
+    },
+    {
+      "id": "OC-0445",
+      "title": "Sender-acknowledgement and recipient-delivery p95 miss their published budgets under the operational profile, on both TLS legs",
+      "file": "Server/ws/hub_broadcast.go",
+      "line": 402,
+      "severity": "medium",
+      "why": "docs/capacity.md publishes < 150 ms / < 300 ms for send -> sender acknowledgement and < 200 ms / < 400 ms for send -> recipient delivery, both met with room by the B6-9 steady profile (57/83 ms and 60/85 ms). The B6-10 operational profile is the same 100 connections and the same 2-vCPU cgroup with the storm, the voice churn and the upload scenario running alongside, and both budgets break: self_signed measured ack 228/348 ms and delivery 250/361 ms, tls off measured ack 329/472 ms and delivery 333/470 ms. These were the only two thresholds either run crossed. The server was not CPU-bound while it happened -- the cgroup averaged 0.41 of 2 CPUs (self_signed) and 0.31 (off), peaking at 1.23 -- so the cost is in the fan-out path, not the machine. The extra fan-out is the voice churn: 58,243 voice_state broadcasts against 12,044 chat sends, i.e. roughly five times as many broadcasts per second as the capacity profile carries.",
+      "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=operational, then read k6-summary.json from the constrained artifact: ws_broadcast_latency_ms p(95) 228 against its p(95)<150 threshold and ws_delivery_latency_ms p(95) 250 against p(95)<200.",
+      "evidence": "Run 35113946945 at e57335c7 (2026-09-16). Jobs 104854470744 (self_signed) and 104854471050 (tls off), constrained leg only. k6-summary.json: ws_broadcast_latency_ms thresholds p(95)<150 and p(99)<300 both ok:false on both legs; ws_delivery_latency_ms p(95)<200 ok:false on both, p(99)<400 ok:false on tls off. Published in docs/capacity.md, 'The operational profiles'. cpu.stat.log shows the cgroup never above 1.23 of 2 CPUs.",
+      "status": "open",
+      "found": "2026-09-16",
+      "hunt": "operational-measurements-2026-09-16",
+      "lens": "run-the-thing",
+      "finder": "b6-10-operational-measurements",
+      "suggestedFix": "Profile the channel broadcast path under a voice_state-heavy fan-out before touching the budget. The budget is not to be loosened: it is met with 3x room by the steady profile on the same hardware, so the operational shape is doing something the steady shape does not."
+    },
+    {
+      "id": "OC-0446",
+      "title": "The restart drill's post-restart delivery p95 is ~10x its pre-restart window, and the drill cannot say how much of that is the restart",
+      "file": "Server/scripts/k6/ws-load.js",
+      "line": 577,
+      "severity": "medium",
+      "why": "restartPhase() tags every delivery sample pre-restart or post-restart, which is what lets a missed budget be placed on one side of the stop. On the qualifying run the two sides are 34/51 ms and 393/452 ms -- an order of magnitude -- and the profile's run-level delivery budget (200/400 ms) is missed at 378/444 ms because of the post side. But the two windows are not comparable: pre-restart is the first 90 s, which is 60 s of ramp with most connections not yet on the wire plus 30 s at full fan-out, and post-restart is the remaining ~186 s all at full fan-out. The delivery rates confirm the imbalance (3,012/s before against ~4,620/s after). Server CPU inside the cgroup was flat across the stop (0.23 CPUs of 2 over the 30 s at full fan-out before it, 0.20 over the whole window after it), so CPU does not explain the gap either way, and no observer VU runs under the restart profile, so there are no per-phase writer-wait deltas to check. The drill therefore reports a large number it cannot attribute.",
+      "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=restart, then compare ws_delivery_latency_ms{phase:pre-restart} (p95 34, count 271051) with ws_delivery_latency_ms{phase:post-restart} (p95 393, count 859303) in the constrained artifact's k6-summary.json.",
+      "evidence": "Run 35113950011, job 104854480908, at e57335c7 (2026-09-16), constrained leg. The workflow sends the stop at RESTART_AT=90 (60 ramp + 30), so the pre-restart tag spans the ramp. cpu.stat.log for that run: 0.23 CPUs avg over 60-90 s, 0.20 CPUs avg over 100-240 s, with the cgroup counter reset at the second boot. Published with the caveat in docs/capacity.md, 'Restart under load'.",
+      "status": "open",
+      "found": "2026-09-16",
+      "hunt": "operational-measurements-2026-09-16",
+      "lens": "run-the-thing",
+      "finder": "b6-10-operational-measurements",
+      "suggestedFix": "Hold the connections at full fan-out for as long before the stop as the drill runs after it (raise K6_RAMP's tail or push RESTART_AT out), and enable the observer VU under the restart profile so the per-phase writer-wait delta exists on both sides. Only then is a post-restart figure worth publishing as a server property."
+    },
+    {
+      "id": "OC-0447",
+      "title": "The ceiling search puts every connection in one channel, so from step 200 up it measures topicRateLimitPerSecond = 100, not the hardware",
+      "file": "Server/scripts/k6/ws-load.js",
+      "line": 1184,
+      "severity": "medium",
+      "why": "The sender loop sends one chat message every K6_SEND_INTERVAL_MS (2000) per connection into K6_CHANNEL_ID, and the ceiling-search profile points every step's connections at that single channel. Step 200 is therefore exactly 200 messages/s into one channel, and Server/ws/hub_stats.go:73 hard-codes topicRateLimitPerSecond = 100 per channel topic, enforced at Server/ws/hub_broadcast.go:402. The server log for the qualifying run carries 24,893 'hub: topic rate limit exceeded, dropping message' lines. Every step at or above 200 is shed by a constant in the code, and the latency reported there (27-30 s at step 300, ~29 s at 400 and 500) is the shed queue plus a quadratic single-channel fan-out, not the machine running out: the cgroup peaked at 1.93 of 2 CPUs and nr_throttled rose by 3 over the whole 500 s run. The plan's own rule is that a configuration or code cap must never be published as the ceiling, so this is a harness finding: the search as shaped cannot locate a hardware ceiling above 100 connections.",
+      "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=ceiling-search -f ceiling_max=500, then grep -c 'topic rate limit exceeded' the constrained artifact's server.log (24,893) and read ws_delivery_latency_ms{step:200} p(95) 397 ms against the 200 ms budget.",
+      "evidence": "Run 35113953670, job 104854495119, at e57335c7 (2026-09-16), constrained leg. k6-summary.json per-step p95/p99 and obs_connected_users; obs_ws_conn_rejects 0 and login_giveups 0, so the cap is not max_ws_connections and not the login path. Steps 400 and 500 also failed to hold their population (370 of 400, 411 of 500) with host loadavg 3.43 and 3.76 on a 4-CPU runner and 797 'client send buffer full, closing connection to force reconnect' plus 857 write-pump errors in server.log. Published as such in docs/capacity.md, 'Ceiling search'.",
+      "status": "open",
+      "found": "2026-09-16",
+      "hunt": "operational-measurements-2026-09-16",
+      "lens": "run-the-thing",
+      "finder": "b6-10-operational-measurements",
+      "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number."
     }
   ]
 }

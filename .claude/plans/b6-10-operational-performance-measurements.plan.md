@@ -429,32 +429,36 @@ node .superpowers/render-ledger.mjs --check
 ## Acceptance
 
 Ticked only where a run actually happened; evidence is the run id and commit in
-`docs/capacity.md`'s Measured blocks.
+`docs/capacity.md`'s Measured blocks. All four qualifying runs are at commit
+`e57335c7`, 2026-09-16, constrained leg only.
 
-- [ ] `K6_PROFILE=capacity` produces the same metric key set and thresholds as
+- [x] `K6_PROFILE=capacity` produces the same metric key set and thresholds as
       before this branch (diff of `k6-summary.json` keys attached to the PR)
-- [ ] Reconnect storm: 100 resumes with `replay_source == buffer`,
+- [x] Reconnect storm: 100 resumes with `replay_source == buffer`,
       `ws_replay_gap` max 0, `ws_resume_time` published with its count, the
       storm-phase deltas of `ws_conn_rejects` and `backpressure_*` published
-- [ ] Writer-pool wait count/seconds published as **per-phase deltas** (and
+- [x] Writer-pool wait count/seconds published as **per-phase deltas** (and
       the reader pair, or the documented reason it does not exist)
-- [ ] Ceiling search: per-step p95/p99 table, the last step where every
+- [x] Ceiling search: per-step p95/p99 table, the last step where every
       capacity budget held, `ws_conn_rejects == 0`, generator-limited steps
       labelled from `cpu.stat` evidence
-- [ ] Voice churn: `voice_join_time` under join/leave churn against its
+- [x] Voice churn: `voice_join_time` under join/leave churn against its
       existing budget, `voice_state` cross-VU delivery published
-- [ ] Upload admission: 201 admit and 507 quota-refuse latencies published,
+- [x] Upload admission: 201 admit and 507 quota-refuse latencies published,
       zero `STORAGE_LOW_DISK`, zero 400; authenticated download (with range)
       latency under the WebSocket load published
-- [ ] TLS: the operational profile on `self_signed` and `off`, delta per
+- [x] TLS: the operational profile on `self_signed` and `off`, delta per
       capacity.md row, with the noise caveat where the delta is inside
       run-to-run movement
-- [ ] Restart under load: `server_restart` received by all 100, drain wall
+- [x] Restart under load: `server_restart` received by all 100, drain wall
       clock and exit 0 inside 30 s, `replay_source == none` on resume (corrected
       from `db`; see Task 3),
       `ws_replay_gap` max 0, `sends_during_drain` accounted — none lost
-- [ ] Every published number comes from the constrained cgroup and the
+- [x] Every published number comes from the constrained cgroup and the
       "Operational measurements" section's commit precedes each run's commit
       in `git log`
-- [ ] Any miss or loss is a ledger finding, never a re-run on bigger hardware
+- [x] Any miss or loss is a ledger finding, never a re-run on bigger hardware
+      (OC-0445, OC-0446, OC-0447 — all `open`)
 - [ ] PRD row, changelog and `ci-check` green for the legs this branch touches
+      — PRD row and changelog done; `ci-check` has not been run against the
+      final documentation and ledger commit.
