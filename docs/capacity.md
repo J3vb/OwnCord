@@ -238,7 +238,7 @@ not tuning.
 
 ### Reconnect storm
 
-At `K6_STORM_AT` (default 120 s before each connection's own hold ends) every
+At `K6_STORM_AT` (default 120 s into the sustain, on the scenario clock) every
 connection closes its socket and reconnects at once, carrying
 `auth {last_seq, active_channel_id}`.
 

@@ -33,9 +33,8 @@
 //     sleeps a second — B6-9's login path, unchanged.
 //   operational — the 100-connection sustain PLUS, concurrently: the observer
 //     VU polling /api/v1/metrics every 5 s (per-phase deltas), the reconnect
-//     storm (each socket closes at the next whole-minute boundary at or after
-//     `hold end − K6_STORM_AT`, reconnects with last_seq + active_channel_id
-//     and resumes), the voice churn (voice VUs leave+rejoin on epoch-aligned
+//     storm (every socket closes at K6_RAMP + K6_STORM_AT on the scenario
+//     clock, reconnects with last_seq + active_channel_id and resumes), the voice churn (voice VUs leave+rejoin on epoch-aligned
 //     K6_VOICE_CHURN_MS boundaries), and the upload-admission scenario. No
 //     voice-load.sh SFU cohort — the churn exercises the control plane, not
 //     the media path.
@@ -68,9 +67,10 @@
 // target channel readable by them. BPR-030's profile is 250 registered users
 // while K6_PEAK_VUS of them are connected; seeding all 250 is the caller's job
 // (.github/workflows/load-baseline.yml). k6 numbers VUs once per test, not
-// per scenario, so the uploads VUs are loadtest accounts the WebSocket VUs
-// never use (ids above K6_PEAK_VUS, inside the 250 seeded) and per-user quota
-// cycles cleanly: 4 admits → refuses at K6_UPLOAD_BYTES and user_quota_mb=1.
+// per scenario, and every VU logs in as loadtest<its own id>, so the uploads
+// VUs are loadtest accounts the WebSocket VUs never use (one VU, one account,
+// all inside the 250 seeded) and per-user quota cycles cleanly: 4 admits →
+// refuses at K6_UPLOAD_BYTES and user_quota_mb=1.
 //
 // Environment variables:
 //   K6_PROFILE          - capacity (default) | operational | restart |
@@ -87,11 +87,10 @@
 //   K6_VOICE_CHANNEL_ID - Voice channel id; unset disables the voice leg
 //   K6_VOICE_VUS        - How many VUs join voice (default: 25 when the
 //                         voice channel is set, 0 otherwise)
-//   K6_STORM_AT         - operational: seconds before each VU's own hold end
-//                         at which the storm lands; the exact fire time is
-//                         the next whole-minute wall-clock boundary at or
-//                         after (hold end − K6_STORM_AT), which mass the
-//                         VUs' reconnects into shared waves (default: 120)
+//   K6_STORM_AT         - operational: seconds into the sustain (after
+//                         K6_RAMP) at which every socket closes at once and
+//                         reconnects — one wave, anchored on the scenario
+//                         clock (default: 120)
 //   K6_VOICE_CHURN_MS   - operational: voice leave+rejoin period (default: 10000)
 //   K6_UPLOAD_BYTES     - operational: per-upload payload size (default: 262144)
 //   K6_CEILING_MAX      - ceiling-search: highest connection count probed (default: 500)
@@ -121,12 +120,13 @@ const IS_B6_10 = PROFILE !== "capacity";
 // The observer scenario and its metrics run under operational and
 // ceiling-search — one measures per phase, the other per step.
 const OBS_ON = IS_OPERATIONAL || IS_CEILING;
-// k6 hands out VU ids test-wide, in the order scenarios ask for them. The
-// observer (constant-vus, 1 VU, t=0) asks first; the WebSocket scenario
-// starts at 0 VUs and asks ~1 s later — so with the observer on, WebSocket
-// VU ids run 2..N+1. The loadtest<i> usernames and the "first VOICE_VUS
-// VUs join voice" rule both want 1..N, so the WebSocket and uploads
-// scenarios subtract the observer. Zero on capacity: nothing moves there.
+// k6 hands out VU ids test-wide from a pool filled in VU-init completion
+// order, so which id the observer holds is NOT deterministic: a dispatch on
+// 77fdce30 gave a WebSocket VU id 1, and the old `__VU - OBS_VUS` username
+// logged it in as loadtest0 (never seeded, 401, login_giveups red). Every VU
+// therefore logs in as loadtest<__VU> — one VU, one account, no arithmetic —
+// and the caller seeds at least vus_max accounts. The "first VOICE_VUS VUs
+// join voice" rule widens by the observer's slot, whichever id it took.
 const OBS_VUS = OBS_ON ? 1 : 0;
 // The resume path (last_seq + active_channel_id) runs under operational and
 // restart: the storm closes and reopens sockets, the drill loses the process.
@@ -297,13 +297,15 @@ function seconds(d) {
 const RAMP_S = seconds(RAMP);
 const SUSTAIN_S = seconds(SUSTAIN);
 const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
-// The storm's fire time for a connection that holds until holdEndMs: the first
-// whole-minute wall-clock boundary at or after (hold end − K6_STORM_AT). The
-// quantization is what masses the per-VU closes into shared waves. Both the
-// VU timer and the observer's storm window derive from this one function, so
-// the window cannot drift off the wave it is supposed to cover.
-function stormFireAt(holdEndMs) {
-  return Math.ceil((holdEndMs - STORM_AT * 1000) / 60000) * 60000;
+// The storm's fire time: K6_STORM_AT seconds into the sustain, on the
+// scenario clock (scenarioStartMs is exec.scenario.startTime for the VU, the
+// observer's own start for the phase window — both scenarios start at t=0).
+// One shared instant, so the closes land as one wave. It used to be the next
+// whole-minute WALL-CLOCK boundary after (hold end − K6_STORM_AT), which
+// depends on when the run happened to start: on 77fdce30 that pushed 25 of
+// 100 VUs past the ramp-down, and they never got the iteration that resumes.
+function stormFireAt(scenarioStartMs) {
+  return scenarioStartMs + (RAMP_S + STORM_AT) * 1000;
 }
 
 // The ceiling-search schedule. Each step is a CEILING_RAMP_S ramp to the
@@ -815,9 +817,11 @@ function accountForDrainSends(token) {
 }
 
 export default function () {
-  const vuId = __VU - OBS_VUS;
+  const vuId = __VU;
   const username = `${USERNAME_PREFIX}${vuId}`;
-  const joinsVoice = VOICE_VUS > 0 && vuId <= VOICE_VUS;
+  // The first VOICE_VUS WebSocket VUs join voice; the observer, when on,
+  // holds one of the low ids, so the cut-off makes room for it.
+  const joinsVoice = VOICE_VUS > 0 && vuId <= VOICE_VUS + OBS_VUS;
 
   // A resume is any connection opened after this VU has seen a seq — i.e.
   // every storm reconnect. Capacity never resumes: vuLastSeq stays 0.
@@ -1112,12 +1116,11 @@ export default function () {
     // B6-10 reconnect storm: the VU closes its own socket deliberately — this
     // is not an error and must not count into ws_errors — and the next
     // iteration of the same VU reconnects with last_seq + active_channel_id.
-    // The fire time is the next whole-minute wall-clock boundary at or after
-    // (hold end - K6_STORM_AT): the shared minute grid mass the per-VU
-    // reconnects into waves, which is what makes it a storm rather than
-    // smeared churn. Skipped when it would leave too short a resumed window.
+    // Every VU fires at the same scenario-clock instant (stormFireAt), which
+    // is what makes it a storm rather than smeared churn. Skipped when it
+    // would leave too short a resumed window.
     if (IS_OPERATIONAL && !vuStormDone) {
-      const fireAt = stormFireAt(openAt + HOLD_MS);
+      const fireAt = stormFireAt(exec.scenario.startTime);
       const inMs = fireAt - openAt;
       if (inMs > 30000) {
         socket.setTimeout(function () {
@@ -1235,10 +1238,8 @@ let obsPrev = null;
 
 // The four windows, in priority order:
 //   ramp    — run start to the end of the ramp (K6_RAMP);
-//   storm   — the quantized wave: from the fire boundary of a VU that opened
-//             at run start to that of one that opened at the end of the ramp,
-//             plus 30 s for the reconnects to land. Derived from the same
-//             stormFireAt() the VU timers use, so it cannot drift off them;
+//   storm   — the wave: stormFireAt() plus 30 s for the reconnects to land.
+//             The same function the VU timers use, so it cannot drift off them;
 //   upload  — the uploads scenario's start (K6_RAMP + 60 s) to the end of the
 //             run: the uploads VUs keep uploading until the run drains, so
 //             booking only the first 30 s would leave most of the pressure
@@ -1247,11 +1248,7 @@ let obsPrev = null;
 function obsPhase(nowMs) {
   const t = (nowMs - obsStart) / 1000;
   if (t < RAMP_S) return "ramp";
-  if (
-    IS_OPERATIONAL &&
-    nowMs >= stormFireAt(obsStart + HOLD_MS) &&
-    nowMs <= stormFireAt(obsStart + RAMP_S * 1000 + HOLD_MS) + 30000
-  ) {
+  if (IS_OPERATIONAL && nowMs >= stormFireAt(obsStart) && nowMs <= stormFireAt(obsStart) + 30000) {
     return "storm";
   }
   if (t >= UPLOADS_START_S) return "upload";
@@ -1347,7 +1344,7 @@ let upCount = 0;
 let upFileId = null;
 
 export function uploadsScenario() {
-  const username = `${USERNAME_PREFIX}${__VU - OBS_VUS}`;
+  const username = `${USERNAME_PREFIX}${__VU}`;
   if (!upToken) {
     upToken = authenticate(username);
     if (!upToken) {
