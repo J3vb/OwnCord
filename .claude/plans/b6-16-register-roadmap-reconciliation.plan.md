@@ -6,6 +6,13 @@
 **Complexity**: Small (documents only; the work is an inventory and exact wording)
 **Drafted**: 2026-09-15 at `dev` `96258158`. Runs **after HP-6 signs** — it records what shipped, so it cannot run before the last thing ships. A first pass may run earlier for the rows already stale (Task 1's "stale today" column); the final pass is at the exit SHA, as B5-12's carryover demanded (`b5:2802-2810`)
 
+**Executor rule**: Where this plan proposes a default for an open question, apply
+that default unless the owner has overridden it in this file. Where a step needs
+hardware, a human, a network, or a merged PR that is not available to you, do not
+guess and do not invent a value: mark the row `unverified`, state what was
+missing in the PR description, and continue with the next step. Never leave a
+`<placeholder>` in committed text.
+
 ## Summary
 
 B5-12 established the shape: for every register row the phase touched, open
@@ -100,10 +107,15 @@ truth this step copies from.
 ### Task 0: Branch and the first-pass boundary
 
 - **Action**: branch `docs/b6-16-register-roadmap` from `dev`. Decide the
-  pass: if HP-6 is not yet signed, this is the **first pass** — only the
+  pass: HP-6 is signed once a `docs/plans/hp-6-scorecard-*.md` file exists on
+  `dev` (the HP-4 and HP-5 scorecards follow this pattern:
+  `hp-4-scorecard-2026-09-02.md`, `hp-5-scorecard-2026-09-05.md`). If HP-6 is
+  not yet signed, this is the **first pass** — only the
   "stale today" rows (Task 1's column) are edited, and the PR title says so
   (`docs(b6-16): first-pass register reconciliation for rows the ledger has
-already closed`). The final pass is a second PR at the exit SHA.
+already closed`). The final pass is a second PR at the exit SHA. On the final
+  pass, a row whose PR is still unmerged keeps the wording `PR not yet merged`
+  instead of a guessed number.
 - **Why**: B5-12's carryover: "initial reconciliation merged… a final pass is
   still owed at the B5 exit SHA" (`b5:2802-2804`). Doing it in two named
   passes is the honest version of that.
@@ -157,8 +169,16 @@ already closed`). The final pass is a second PR at the exit SHA.
 
 - **Action**: apply, in this order, each cell's text fixed before editing:
 
+  Ledger fields: the fix date is the top-level `fixed` (found unset on 71 of
+  439 fixed rows ledger-wide, but present on all thirteen `OC-*` rows this
+  task touches — `fixedDate` is a different, older field used on other rows
+  and is not the one to read here); there is no summary field, paraphrase
+  `title`; the PR is not in the ledger (`fix` carries `commit`/`test`/
+  `revertProof` only — no `pr` field on any of these thirteen rows) and must
+  be found per the Gotcha below.
+
   **Register `OC-*`** (twelve rows — all but OC-0346): prefix
-  `**Fixed <ledger fix.date>, <step> (#<pr>, `<sha>`):** <ledger fix.summary>; pinned by <fix.test or "the tests in #<pr>">.`
+  `**Fixed <ledger top-level fixed date>, <step> (#<pr>, `<sha>`):** <ledger title, paraphrased to one clause>; pinned by <fix.test or "the tests in #<pr>">.`
   OC-0353's closure clause "reverse-proxy voice join passes in the B6
   deployment rehearsal" is replaced by the fix's own test; phase stays
   `B6/B7` with "(client half B7)" if the ledger says the client side is

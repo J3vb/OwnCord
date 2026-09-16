@@ -6,6 +6,13 @@
 **Complexity**: Small (documentation and traceability; zero code unless the owner answers question 3 or 4 with "change the code")
 **Drafted**: 2026-09-15 at `dev` `96258158`. Must land **after** B6-11 (`prd.md:271`: "B6-11 measures first; B6-15 aligns the wording to the measurement, never the reverse") and **before** HP-6 (`prd.md:158`). B6-10 and B6-11 are in flight. Files both this plan and B6-11 touch: `docs/trust-model.md` (B6-11 `:416-417` only if its drill 9 retains bytes; this plan `:429-434`), `docs/architecture/data-lifecycle.md` (B6-11: O4 A1 at `:238`, class 25 at `:418`, a new drills block; this plan: `:165`, `:414`, `:596-597`, the header), the PRD and `CHANGELOG.md`. Different lines in every case; this plan branches after B6-11 merges, so there is nothing to rebase (Task 0, Task 5's gotcha)
 
+**Executor rule**: Where this plan proposes a default for an open question, apply
+that default unless the owner has overridden it in this file. Where a step needs
+hardware, a human, a network, or a merged PR that is not available to you, do not
+guess and do not invent a value: mark the row `unverified`, state what was
+missing in the PR description, and continue with the next step. Never leave a
+`<placeholder>` in committed text.
+
 ## Summary
 
 BPR-053 was written on 2026-08-23, before anything existed. B4-10 built the
@@ -137,12 +144,16 @@ B6-16 pastes the sentence.
   sentence verbatim into Task 3's evidence block. If B6-11 changed nothing
   there, the evidence block cites its E1 test name and "measured, not
   assumed". Flip the PRD row to `in-progress` with this plan linked. Confirm
-  with `git diff --stat dev...<b6-11 branch>` that nothing else in "Files to
-  Change" overlaps.
+  with `git diff --stat dev...<b6-11 branch, found as follows>` that nothing else in "Files to
+  Change" overlaps. Find B6-11's branch in the `plan:` cell of its PRD row
+  (`docs/plans/b6-server-deployment-operations-capacity.prd.md`) or with
+  `gh pr list --search 'B6-11' --json headRefName`. If none exists yet, skip
+  this check and record "B6-11 not yet branched" in the PR description.
 - **Why**: `prd.md:271` — wording follows measurement. Reconciling before the
   measurement lands would be the reverse.
 - **Gotcha**: if B6-11 is still open at HP-6 planning time, this milestone
-  is blocked, not started early; say so in the PRD row rather than reconcile
+  is blocked, not started early; write `blocked on B6-11 (#<pr number, or
+'not yet branched'>)` in the B6-15 row's Status cell rather than reconcile
   to a claim B6-11 may retract.
 - **Validate**: `npm run format` clean; PRD row renders; `git log -1 -- docs/trust-model.md` is B6-11's commit or older.
 
@@ -160,6 +171,9 @@ B6-16 pastes the sentence.
   > anyone who may read them, and to the identity only by whoever holds
   > `erasure.key` — the operator. "Unlinkable" in this requirement means
   > unlinkable to the identity without the key, not uncorrelatable._
+
+  (Replace every `2026-09-__` with the merge date before committing; the grep
+  gate in the Risks table catches leftovers.)
 
   Nothing before the italics changes: the original requirement stays
   readable as what was asked for on 2026-08-23.
@@ -268,7 +282,7 @@ B6-16 pastes the sentence.
   (`:545-547`). The new clause cites `erasureUnlinkPrincipalRows` and the
   tests already named in Task 2; it adds no claim the tests do not carry.
 - **Mirror**: `trust-model.md:429-437`.
-- **Validate**: `diff <(sed -n '247,255p' docs/security.md) <(sed -n '<bullet lines>' docs/trust-model.md)` shows wording differences only in the lead-in; `npm run check:docs`.
+- **Validate**: `diff <(sed -n '247,255p' docs/security.md) <(sed -n '/Erasure is not undone/,/re-identifies an erased/p' docs/trust-model.md)` shows wording differences only in the lead-in; `npm run check:docs`.
 
 ### Task 5: `data-lifecycle.md` — class 21, the appendix, and the id residue
 

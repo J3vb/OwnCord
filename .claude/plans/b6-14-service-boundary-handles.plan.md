@@ -6,6 +6,8 @@
 **Complexity**: Medium
 **Drafted**: 2026-09-15 at `dev` `96258158`; B6-10 is in flight on `feat/b6-10-operational-measurements` and touches one inventory row (`api/router.go`, see the claims table) — nothing else this plan edits is on that branch
 
+**Executor rule**: Where this plan proposes a default for an open question, apply that default unless the owner has overridden it in this file. Where a step needs hardware, a human, a network, or a merged PR that is not available to you, do not guess and do not invent a value: mark the row `unverified`, state what was missing in the PR description, and continue with the next step. Never leave a `<placeholder>` in committed text.
+
 ## Summary
 
 B3-0 built a guard on **imports**: a production file above the domain layer
@@ -255,10 +257,63 @@ replay-purge deletes do not move.
   one; the exit code and `TestServerBoundariesDocIsCurrent` (`doc_test.go:44-47`)
   already fail on any problem count.
 
+  ```go
+  // skeleton — keep the existing helper's structure
+  type fileUse struct {
+      rel     string
+      types   map[string]int
+      funcs   map[string]int
+      values  map[string]int
+      methods map[string]int
+      hands   map[string]int // NEW: callee ("pkg.Func", "pkg.Type", "(*T).Method") -> count
+  }
+
+  // countMethodCalls (main.go:325-347) gains a hands map alongside methods.
+  func countMethodCalls(f *ast.File, dbVars, dbFields map[string]bool, methods, hands map[string]int) {
+      ast.Inspect(f, func(n ast.Node) bool {
+          switch x := n.(type) {
+          case *ast.CallExpr: // existing method-call case, plus: a *db.DB
+              // identifier passed bare as a call argument is a hand-off.
+              for _, arg := range x.Args {
+                  if id, ok := arg.(*ast.Ident); ok && dbVars[id.Name] {
+                      hands[calleeName(x.Fun)]++ // e.g. "ws.NewEventPersister"
+                  }
+              }
+          case *ast.CompositeLit: // ws.HubOptions{DB: database} — a *db.DB
+              // identifier assigned to a struct-literal field is a hand-off.
+              for _, elt := range x.Elts {
+                  if kv, ok := elt.(*ast.KeyValueExpr); ok {
+                      if id, ok := kv.Value.(*ast.Ident); ok && dbVars[id.Name] {
+                          hands[compositeTypeName(x.Type)]++ // e.g. "ws.HubOptions"
+                      }
+                  }
+              }
+          }
+          return true
+      })
+  }
+  ```
+
+  The four new problem classes are emitted from `printTable` (`main.go:402-447`)
+  the same way `unlisted`/`stale` already are: after the existing `entry,
+listed := invariants.DBImportAllow[r.rel]` lookup, compare `r.methods`/`r.hands`
+  against `entry.Calls`/`entry.Hands` and increment a counter per class,
+  returned in the same `int` `printTable` already returns so `main`'s
+  non-zero exit (`main.go:65-77`) covers them for free.
+
   The summary line becomes
   `N files use `db`outside`db/`and`service/` (… ); I import it, U use the handle without importing it; T are type-only; P unlisted.`
-  and `doc_test.go`'s `summaryRe` (`:167`) and the three prose patterns
-  (`:229-239`) are re-pointed in the same commit, plus one for `U`.
+  matched by the corresponding `doc_test.go` `summaryRe` (`:167`), re-pointed
+  from the current pattern to:
+
+  ```go
+  summaryRe = regexp.MustCompile(`(?m)^(\d+) files use ` + "`db`" + ` outside ` +
+      "`db/`" + ` and ` + "`service/`" + ` \(.*\); (\d+) import it, (\d+) use ` +
+      `the handle without importing it; (\d+) are type-only; (\d+) unlisted\.$`)
+  ```
+
+  and the three prose patterns (`:229-239`) are re-pointed in the same
+  commit, plus one for `U`.
 
   **RED proof**, B3-0 style, recorded in the PR: (1) add
   `_ = h.db.GetUserByID` in a `ws` file with no row → unlisted-by-use; (2)

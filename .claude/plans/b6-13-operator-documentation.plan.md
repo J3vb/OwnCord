@@ -6,6 +6,8 @@
 **Complexity**: Medium
 **Drafted**: 2026-09-15 at `dev` `96258158`; B6-10 is in flight on `feat/b6-10-operational-measurements` (touches `docs/api.md`, `docs/deployment.md:738-756` and the PRD — not `docs/capacity.md`), B6-11's plan is drafted but unmerged (it will touch `docs/deployment.md` Restore and Health), and B6-12 adds "Verifying a download" after Auto-Update. All three boundaries are handled in Task 0. `docs/deployment.md` lines are cited from the B6-10 working tree (dev + 5 lines after `:738`)
 
+**Executor rule**: Where this plan proposes a default for an open question, apply that default unless the owner has overridden it in this file. Where a step needs hardware, a human, a network, or a merged PR that is not available to you, do not guess and do not invent a value: mark the row `unverified`, state what was missing in the PR description, and continue with the next step. Never leave a `<placeholder>` in committed text.
+
 ## Summary
 
 Almost everything the row names is already written down **somewhere** — but a
@@ -44,30 +46,30 @@ Facts established from source at `96258158`. Rows marked **Refuted**,
 existing docs or an obvious first design would assume, and the plan is built on
 the correction.
 
-| Claim                                                                  | Status        | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Support-bundle generation must be built for the row to hold            | **Refuted**   | Implemented: `Server/admin/api.go:234-235` mounts `/support-bundles/preview` and `/download` behind `ADMINISTRATOR`; `Server/admin/support_bundle.go:146,176,220` preview/download/collect; six fixed ZIP files, 256 KiB cap, 5-minute preview TTL (`docs/architecture/diagnostics.md:197-233`). Tests named at `:242-250`. **No guidance doc mentions it** — grep of `docs/*.md` finds only `security.md:231` calling it "a future support bundle" |
-| The server writes a log file                                           | **Refuted**   | `Server/main.go:45-49`: `slog.NewTextHandler(os.Stdout)` wrapped by `admin.NewMultiHandler` into the ring buffer; `LoggingConfig` has one field, `Level` (`Server/config/config.go:62-67`). No file, no rotation, no `logging.file` key. Where stdout lands is the supervisor's business, and the docs say so nowhere                                                                                                                               |
-| Each supported supervisor captures stdout                              | **Corrected** | systemd: journal (`deploy/owncord.service:11` `journalctl -u owncord -f`). Docker: `json-file`, `max-size: "10m"` (`Server/docker-compose.yml:15-18,55`). **NSSM: the documented install sets no `AppStdout`/`AppStderr`** (`docs/deployment.md:243-253`), so a Windows service discards every log line. Task Scheduler (`:261-272`) likewise                                                                                                       |
-| Secrets can appear in the log if a call site is careless               | **Confirmed** | Redaction is by construction: `Server/config/logvalue.go:5-15,23,38` — `slog.LogValuer` on `VoiceConfig` and `GitHubConfig`; `Server/logctx/logctx.go:24-36` adds `req_id` to every record. Usernames, ids and client addresses **do** appear at `info` (`diagnostics.md:34-36`; data-lifecycle class 22 at `data-lifecycle.md:415`) — the doc says so rather than implying the log is clean                                                        |
-| `owncord --healthcheck` is the container probe                         | **Corrected** | `diagnostics.md:33` says `owncord --healthcheck`; the binary is `chatserver healthcheck` — `Server/main.go:22-25`, `Server/Dockerfile:58-59`, and `docs/deployment.md:73-76` already has it right. One line in the architecture doc is fixed in passing                                                                                                                                                                                             |
-| `/health` names the failing subsystem                                  | **Confirmed** | `Server/api/router.go:585-592` `reason` ∈ `hub`/`database`/`disk`, first failure wins (`:697-714`); 5 s cache, 1 s DB ping (`:611-618`); `docs/deployment.md:687-711` already documents it. Voice is **not** on `/health` — it is `livekit_healthy` on `/api/v1/metrics` (`deployment.md:727`) and `GET /api/v1/livekit/health` (`:764-766`)                                                                                                        |
-| The Deployment Guide's "Background Maintenance" list is current        | **Refuted**   | `docs/deployment.md:852-858` lists three things. `Server/internal/app/maintenance.go:161-179` runs **thirteen** steps per 15-minute tick: sessions, delivery receipts, second-factor state, push subscriptions, backups, orphans, retention, report content, moderation actions, voice mutes, erasure resume, file reconciliation, storage recount. The section is rewritten from `steps()`                                                         |
-| Backup retention is a config key                                       | **Confirmed** | It is an admin-panel **setting**, not a key: `backup_schedule` / `backup_retention` read from `settings` (`Server/admin/backup_maintenance.go:25,40,121-128`); `BackupConfig` has only `Dir` (`config.go:378-380`). `deployment.md:400-410` already says so; the storage-growth section cites it rather than inventing a key                                                                                                                        |
-| The built-in backup is the whole recovery set                          | **Refuted**   | Database only (`deployment.md:364-366`; `data-lifecycle.md:224-226`). The set is `data/uploads/`, `totp.key`, `erasure.key`, `erasure/markers.sqlite`, `push_vapid.key`, `config.yaml` — each with its loss cost already written at `deployment.md:500-553` under **Upgrade**, where a stranger doing a routine backup never reads it. Task 4 moves the list to Backup Strategy and leaves a pointer                                                |
-| `audit_log` is pruned                                                  | **Refuted**   | No maintenance step touches it (`maintenance.go:161-179`); no `audit_log` delete outside erasure unlinking (`security.md:244-252`). It grows for the life of the server. The storage-growth table says "never pruned" rather than omitting the row                                                                                                                                                                                                  |
-| A full `data/` inventory exists in one place                           | **Refuted**   | Scattered: `chatserver.db` `config.go:423`; `backups/` `:426`; `cert.pem`/`key.pem` `:430-431`; `acme_certs/` `:432`; `uploads/` `:436`; `plugins/` `:467`; `livekit/` `:573` and `Server/ws/livekit_download.go:8,82`; `totp.key`/`erasure.key`/`push_vapid.key` `Server/internal/app/lifecycle.go:198-202`; `erasure/markers.sqlite` `Server/internal/app/erasure.go:21`. Task 3 writes the table                                                 |
-| What grows, and what bounds it                                         | **Confirmed** | uploads: `upload.max_size_mb` 100, `user_quota_mb` 0 = unlimited (`server-configuration.md:81-88`), orphans swept after 1 h (`data-lifecycle.md:196-206`), reconciliation ≤ 500 files/tick (`:210`), retention sweep 5 000 msg/tick (`:324-335`); `events` 24 h / pruner 60 min / ring 1000 / cold 5000 (`server-configuration.md:163-172`); report content 180 d, actions 90 d (`:226-236`); disk floor 256 MB (`config.go:255-257`)               |
-| The self-signed certificate renews itself                              | **Refuted**   | `Server/auth/tls.go:62` `NotAfter: now + 2 years`; `:124-134` generates **only when a file is absent** and never checks expiry; `:138-148` `loadCertPair` loads once — no reload. `acme` alone has `GetCertificate` (`:223`). An expired self-signed certificate is served until the operator deletes the pair; `deployment.md:540-546` already states the load-if-present rule                                                                     |
-| A desktop client rejects an expired-but-pinned self-signed certificate | **Unknown**   | The pin is the SHA-256 of the leaf (`docs/trust-model.md:164`) and "the desktop does not validate a public-CA certificate against the CA list" (`:172-181`). Whether `tofu.rs` also skips the validity window is not stated. Task 5 measures with a certificate generated with `NotAfter` in the past before the sentence is written; a browser client is out of scope (B7)                                                                         |
-| Rotating a self-signed certificate is documented                       | **Refuted**   | Only the consequence is: "clients lose their pinned certificate" (`deployment.md:544-546`), the mismatch modal (`trust-model.md:164-171`), and the out-of-band fingerprint rule (`:27-33`). No procedure. HP-6 says the owner "rotates trust" (`roadmap:857-861`) — Task 5 writes it                                                                                                                                                                |
-| The deferred-TLS boundary is stated where TLS is configured            | **Corrected** | It is stated under **Firewall and Ports** (`deployment.md:828-834`) and in `port-forwarding.md:164-181`; the TLS Setup section (`deployment.md:274-318`) that a stranger reads to choose a mode says nothing about it. Task 5 puts one paragraph there; the PRD's wording rule is "implemented, not exercised at release quality" for domain ACME and "do not claim a public-IP or offline TLS story" (PRD `:186-190`)                              |
-| The three port tables agree                                            | **Corrected** | `deployment.md:816-826` (5 rows incl. port 80 for ACME), `port-forwarding.md:50-64` (4 rows, **no port 80**), `livekit-setup.md:112-118` (3 LiveKit rows), `security.md:329` (prose). Numbers agree; the port-forwarding guide — the one a stranger opens to open ports — omits the ACME port. One row added; the others keep their tables and gain a "canonical table" pointer                                                                     |
-| Update failure is documented                                           | **Corrected** | Success path is complete (`deployment.md:772-807`, `:554-570`). The audit rows `update_apply`/`update_applied`/`update_failed` exist (`security.md:241-242`), `.old` rotation and its deletion (`:596-598`, `:787-789,795-796`), Docker refusal `503 CONTAINER_DEPLOYMENT` (`:150-157`). What a **failed** apply looks like from the outside is written nowhere. Task 6 adds it from those sources                                                  |
-| B6-11 owns the disk-stage and backup-set paragraphs in `deployment.md` | **Confirmed** | `.claude/plans/b6-11-failure-recovery-drills.plan.md:121,397-400`: "one paragraph under Restore … under Health: what disk-full looks like. B6-13 owns the full operator docs". B6-11 is unmerged (`git status`: `??`). Task 0 decides the order; this plan writes around those two paragraphs, never over them                                                                                                                                      |
-| `npm run check:docs` checks links                                      | **Refuted**   | `scripts/run.mjs:150-160`: `check-doc-counts.mjs`, `check-migrations`, ledger render. No link checker. Prettier is `check:hygiene` (`:179`); gendocs drift is `DOCS_VERIFY` inside `check:server` (`:74-80,129`). Anchors this plan adds are verified by hand (Task 7), and no `gendocs:` block is hand-edited (`.claude/rules/gendocs.md`)                                                                                                         |
-| `docs/README.md` must list every document                              | **Confirmed** | `docs/README.md:3-4` "If it is not on this page it is not current guidance"; the Start-here table (`:14-24`) has no "something is wrong" row. This plan creates **no new document**, so only that row changes                                                                                                                                                                                                                                       |
-| `.claude/plans/` is tracked and Prettier-gated                         | **Confirmed** | `.gitignore` whitelist; PRD decision 2026-09-08                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Claim                                                                  | Status        | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Support-bundle generation must be built for the row to hold            | **Refuted**   | Implemented: `Server/admin/api.go:234-235` mounts `/support-bundles/preview` and `/download` behind `ADMINISTRATOR`; `Server/admin/support_bundle.go:146,176,220` preview/download/collect; six fixed ZIP files, 256 KiB cap, 5-minute preview TTL (`docs/architecture/diagnostics.md:197-233`). Tests named at `:242-250`. **No guidance doc mentions it** — grep of `docs/*.md` finds only `security.md:231` calling it "a future support bundle"     |
+| The server writes a log file                                           | **Refuted**   | `Server/main.go:45-49`: `slog.NewTextHandler(os.Stdout)` wrapped by `admin.NewMultiHandler` into the ring buffer; `LoggingConfig` has one field, `Level` (`Server/config/config.go:62-67`). No file, no rotation, no `logging.file` key. Where stdout lands is the supervisor's business, and the docs say so nowhere                                                                                                                                   |
+| Each supported supervisor captures stdout                              | **Corrected** | systemd: journal (`deploy/owncord.service:11` `journalctl -u owncord -f`). Docker: `json-file`, `max-size: "10m"` (`Server/docker-compose.yml:15-18,55`). **NSSM: the documented install sets no `AppStdout`/`AppStderr`** (`docs/deployment.md:243-253`), so a Windows service discards every log line. Task Scheduler (`:261-272`) likewise                                                                                                           |
+| Secrets can appear in the log if a call site is careless               | **Confirmed** | Redaction is by construction: `Server/config/logvalue.go:5-15,23,38` — `slog.LogValuer` on `VoiceConfig` and `GitHubConfig`; `Server/logctx/logctx.go:24-36` adds `req_id` to every record. Usernames, ids and client addresses **do** appear at `info` (`diagnostics.md:34-36`; data-lifecycle class 22 at `docs/architecture/data-lifecycle.md:415`) — the doc says so rather than implying the log is clean                                          |
+| `owncord --healthcheck` is the container probe                         | **Corrected** | `diagnostics.md:33` says `owncord --healthcheck`; the binary is `chatserver healthcheck` — `Server/main.go:22-25`, `Server/Dockerfile:58-59`, and `docs/deployment.md:73-76` already has it right. One line in the architecture doc is fixed in passing                                                                                                                                                                                                 |
+| `/health` names the failing subsystem                                  | **Confirmed** | `Server/api/router.go:585-592` `reason` ∈ `hub`/`database`/`disk`, first failure wins (`:697-714`); 5 s cache, 1 s DB ping (`:611-618`); `docs/deployment.md:687-711` already documents it. Voice is **not** on `/health` — it is `livekit_healthy` on `/api/v1/metrics` (`deployment.md:727`) and `GET /api/v1/livekit/health` (`:764-766`)                                                                                                            |
+| The Deployment Guide's "Background Maintenance" list is current        | **Refuted**   | `docs/deployment.md:852-858` lists three things. `Server/internal/app/maintenance.go:161-179` runs **thirteen** steps per 15-minute tick: sessions, delivery receipts, second-factor state, push subscriptions, backups, orphans, retention, report content, moderation actions, voice mutes, erasure resume, file reconciliation, storage recount. The section is rewritten from `steps()`                                                             |
+| Backup retention is a config key                                       | **Confirmed** | It is an admin-panel **setting**, not a key: `backup_schedule` / `backup_retention` read from `settings` (`Server/admin/backup_maintenance.go:25,40,121-128`); `BackupConfig` has only `Dir` (`config.go:378-380`). `deployment.md:400-410` already says so; the storage-growth section cites it rather than inventing a key                                                                                                                            |
+| The built-in backup is the whole recovery set                          | **Refuted**   | Database only (`deployment.md:364-366`; `docs/architecture/data-lifecycle.md:224-226`). The set is `data/uploads/`, `totp.key`, `erasure.key`, `erasure/markers.sqlite`, `push_vapid.key`, `config.yaml` — each with its loss cost already written at `deployment.md:500-553` under **Upgrade**, where a stranger doing a routine backup never reads it. Task 4 moves the list to Backup Strategy and leaves a pointer                                  |
+| `audit_log` is pruned                                                  | **Refuted**   | No maintenance step touches it (`maintenance.go:161-179`); no `audit_log` delete outside erasure unlinking (`security.md:244-252`). It grows for the life of the server. The storage-growth table says "never pruned" rather than omitting the row                                                                                                                                                                                                      |
+| A full `data/` inventory exists in one place                           | **Refuted**   | Scattered: `chatserver.db` `config.go:423`; `backups/` `:426`; `cert.pem`/`key.pem` `:430-431`; `acme_certs/` `:432`; `uploads/` `:436`; `plugins/` `:467`; `livekit/` `:573` and `Server/ws/livekit_download.go:8,82`; `totp.key`/`erasure.key`/`push_vapid.key` `Server/internal/app/lifecycle.go:198-202`; `erasure/markers.sqlite` `Server/internal/app/erasure.go:21`. Task 3 writes the table                                                     |
+| What grows, and what bounds it                                         | **Confirmed** | uploads: `upload.max_size_mb` 100, `user_quota_mb` 0 = unlimited (`server-configuration.md:81-88`), orphans swept after 1 h (`docs/architecture/data-lifecycle.md:196-206`), reconciliation ≤ 500 files/tick (`:210`), retention sweep 5 000 msg/tick (`:324-335`); `events` 24 h / pruner 60 min / ring 1000 / cold 5000 (`server-configuration.md:163-172`); report content 180 d, actions 90 d (`:226-236`); disk floor 256 MB (`config.go:255-257`) |
+| The self-signed certificate renews itself                              | **Refuted**   | `Server/auth/tls.go:62` `NotAfter: now + 2 years`; `:124-134` generates **only when a file is absent** and never checks expiry; `:138-148` `loadCertPair` loads once — no reload. `acme` alone has `GetCertificate` (`:223`). An expired self-signed certificate is served until the operator deletes the pair; `deployment.md:540-546` already states the load-if-present rule                                                                         |
+| A desktop client rejects an expired-but-pinned self-signed certificate | **Unknown**   | The pin is the SHA-256 of the leaf (`docs/trust-model.md:164`) and "the desktop does not validate a public-CA certificate against the CA list" (`:172-181`). Whether `tofu.rs` also skips the validity window is not stated. Task 5 measures with a certificate generated with `NotAfter` in the past before the sentence is written; a browser client is out of scope (B7)                                                                             |
+| Rotating a self-signed certificate is documented                       | **Refuted**   | Only the consequence is: "clients lose their pinned certificate" (`deployment.md:544-546`), the mismatch modal (`trust-model.md:164-171`), and the out-of-band fingerprint rule (`:27-33`). No procedure. HP-6 says the owner "rotates trust" (`roadmap:857-861`) — Task 5 writes it                                                                                                                                                                    |
+| The deferred-TLS boundary is stated where TLS is configured            | **Corrected** | It is stated under **Firewall and Ports** (`deployment.md:828-834`) and in `port-forwarding.md:164-181`; the TLS Setup section (`deployment.md:274-318`) that a stranger reads to choose a mode says nothing about it. Task 5 puts one paragraph there; the PRD's wording rule is "implemented, not exercised at release quality" for domain ACME and "do not claim a public-IP or offline TLS story" (PRD `:186-190`)                                  |
+| The three port tables agree                                            | **Corrected** | `deployment.md:816-826` (5 rows incl. port 80 for ACME), `port-forwarding.md:50-64` (4 rows, **no port 80**), `livekit-setup.md:112-118` (3 LiveKit rows), `security.md:329` (prose). Numbers agree; the port-forwarding guide — the one a stranger opens to open ports — omits the ACME port. One row added; the others keep their tables and gain a "canonical table" pointer                                                                         |
+| Update failure is documented                                           | **Corrected** | Success path is complete (`deployment.md:772-807`, `:554-570`). The audit rows `update_apply`/`update_applied`/`update_failed` exist (`security.md:241-242`), `.old` rotation and its deletion (`:596-598`, `:787-789,795-796`), Docker refusal `503 CONTAINER_DEPLOYMENT` (`:150-157`). What a **failed** apply looks like from the outside is written nowhere. Task 6 adds it from those sources                                                      |
+| B6-11 owns the disk-stage and backup-set paragraphs in `deployment.md` | **Confirmed** | `.claude/plans/b6-11-failure-recovery-drills.plan.md:121,397-400`: "one paragraph under Restore … under Health: what disk-full looks like. B6-13 owns the full operator docs". B6-11 is unmerged (`git status`: `??`). Task 0 decides the order; this plan writes around those two paragraphs, never over them                                                                                                                                          |
+| `npm run check:docs` checks links                                      | **Refuted**   | `scripts/run.mjs:150-160`: `check-doc-counts.mjs`, `check-migrations`, ledger render. No link checker. Prettier is `check:hygiene` (`:179`); gendocs drift is `DOCS_VERIFY` inside `check:server` (`:74-80,129`). Anchors this plan adds are verified by hand (Task 7), and no `gendocs:` block is hand-edited (`.claude/rules/gendocs.md`)                                                                                                             |
+| `docs/README.md` must list every document                              | **Confirmed** | `docs/README.md:3-4` "If it is not on this page it is not current guidance"; the Start-here table (`:14-24`) has no "something is wrong" row. This plan creates **no new document**, so only that row changes                                                                                                                                                                                                                                           |
+| `.claude/plans/` is tracked and Prettier-gated                         | **Confirmed** | `.gitignore` whitelist; PRD decision 2026-09-08                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ### What the corrections change
 
@@ -127,7 +129,10 @@ one guide over two, and the See Also plus the README row keep it navigable.
 ### Task 0: Branch, PRD row, and the two in-flight boundaries
 
 - **Action**: branch `feat/b6-13-operator-documentation` from `dev`. Flip the
-  PRD row to `in-progress` with this plan linked. Then:
+  PRD row to `in-progress` with this plan linked (the `Status` cell of the
+  B6-13 row in the milestone table of
+  `docs/plans/b6-server-deployment-operations-capacity.prd.md`; copy the
+  exact wording used by the B6-9 row). Then:
   - `git diff --stat dev...feat/b6-10-operational-measurements -- docs/` —
     B6-10 edits `docs/api.md`, `docs/deployment.md:738-756` (the
     reader-pool metric rows) and the PRD; it does **not** edit
@@ -189,7 +194,10 @@ owncord -f`, retention is journald's (`deploy/owncord.service:11`);
 - **Validate**: each command in the table run once locally on the platform it
   names (journalctl on WSL is not systemd — run the NSSM lines on Windows,
   the compose line on Linux/WSL with Docker, and cite the systemd line from
-  the unit file).
+  the unit file). If a platform (Windows/NSSM, systemd, Docker) is not
+  available, do not fake the run: cite the `file:line` in the repo that the
+  command is derived from, mark that row `unverified (no <platform> host)` in
+  the PR description, and continue.
 
 ### Task 2: Support bundle and capacity limits
 
@@ -232,10 +240,32 @@ owncord -f`, retention is journald's (`deploy/owncord.service:11`);
   limits exist as config keys and nobody has said which one a growing
   community hits first.
 - **Mirror**: `deployment.md:748-762` for the arrow shape.
-- **Validate**: run the bundle flow once on a local server and confirm the
-  six file names in the ZIP match the list written; every config key named
-  exists in the generated key index at `server-configuration.md:239-313`
-  (the index is generated — read it, never edit it).
+- **Validate**: run the bundle flow once on a local server: `cd Server && go
+run .` starts it on `server.port` (default `8443`, TLS self-signed —
+  `server-configuration.md:33`, so `curl -k`). Get an admin token the same way
+  `Server/cmd/smoke/fixture.go`'s `runSetup` (`:163-194`) does — `POST
+/admin/api/setup` with a JSON body of `username`, `password` and a
+  `wizard` object (server_name, motd only; any other wizard field triggers a
+  restart) — or run `go run ./cmd/smoke <path to a built chatserver binary>`
+  and read the token it prints. Then:
+  ```bash
+  curl -sk -X POST https://localhost:8443/admin/api/support-bundles/preview \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
+  # copy preview_id and sha256 from the response, then:
+  curl -sk -X POST https://localhost:8443/admin/api/support-bundles/download \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"preview_id":"<preview_id>","sha256":"<sha256>"}' -o bundle.zip
+  unzip -l bundle.zip
+  ```
+  A pass is `unzip -l bundle.zip` listing exactly the six files named in the
+  table (`build.json`, `configuration.json`, `database.json`, `health.json`,
+  `events.json`, `manifest.json`) and every config key named in this section
+  existing in the generated key index at `server-configuration.md:239-313`
+  (the index is generated — read it, never edit it). If no server can be
+  started, confirm instead by reading `Server/admin/support_bundle.go:146,176,220`
+  and `docs/architecture/diagnostics.md:204-233` that the handler writes those
+  six fields, and mark this row `unverified (no running server)` in the PR
+  description.
 
 ### Task 3: Storage growth
 
@@ -259,7 +289,7 @@ owncord -f`, retention is journald's (`deploy/owncord.service:11`);
     (`maintenance.go:161-179`); it is the trail. On a busy server it is the
     slowest-growing large table, not the fastest, but it is unbounded and
     the doc says so.
-  - **Retention is off by default** (`data-lifecycle.md:326-328`
+  - **Retention is off by default** (`docs/architecture/data-lifecycle.md:326-328`
     `settings.retention_days = 0`); message growth is unbounded until the
     owner sets a window in the panel, and `GET /admin/api/retention/preview`
     shows the effect before it runs (`:362-363`). Pinned messages and DMs
@@ -304,10 +334,10 @@ owncord -f`, retention is journald's (`deploy/owncord.service:11`);
     the server exits and the supervisor relaunches it (or it relaunches
     itself under `restart_mode: spawn`) → on the first boot every deletion
     marker recorded after the backup is replayed before anything serves
-    (`data-lifecycle.md:228-235`, `security.md:169-172`). Then what a
+    (`docs/architecture/data-lifecycle.md:228-235`, `security.md:169-172`). Then what a
     restore **cannot** bring back: uploads (never in it), and anything
     after the backup's `VACUUM INTO` — accounts, messages, settings, bans
-    (`data-lifecycle.md` O4 A5). And the two refusals the marker file can
+    (`docs/architecture/data-lifecycle.md` O4 A5). And the two refusals the marker file can
     produce at boot, by pointer to `security.md#erasure-marker-key`
     (`:182-220`) — the SQL is there, not copied.
   - **Restore is not rollback**: the sentence at `:640-644` is right and
@@ -317,7 +347,7 @@ owncord -f`, retention is journald's (`deploy/owncord.service:11`);
 - **Validate**: the moved bullets are byte-identical (diff the two
   revisions); the restore sequence matches `handlers_backup.go:188-341` as
   B6-11's plan read it (this plan does not re-verify the code — it cites
-  B6-11's Confirmed row and `data-lifecycle.md:228-235`).
+  B6-11's Confirmed row and `docs/architecture/data-lifecycle.md:228-235`).
 
 ### Task 5: Certificate trust — what exists, how to rotate it, what is not qualified
 
@@ -342,9 +372,16 @@ self-signed certificate` procedure: stop; move `data/cert.pem` and
     which they should compare with the one you publish out of band
     (`trust-model.md:27-33`); there is no server-side push of a new pin.
     Plus the Unknown row: **measure** whether a desktop client connects to
-    an expired-but-pinned certificate (generate a pair with `NotAfter` in
-    the past using the same `GenerateSelfSigned` shape, point a client at
-    it) and write the measured sentence — "the desktop keeps connecting
+    an expired-but-pinned certificate. Write it as `TestExpiredCertRejected`
+    in `Server/auth/tls_expiry_test.go`, next to `GenerateSelfSigned`'s own
+    test (`TestGenerateSelfSignedProducesValidCert`, `Server/auth/tls_test.go:39-77`,
+    package `auth_test` — cite that file:line as the pattern to follow); the
+    test generates a cert with `NotAfter` one hour in the past (`GenerateSelfSigned`,
+    `Server/auth/tls.go:62`, hard-codes `NotAfter: now + 2 years` and takes no
+    override, so the expired pair is built directly with `x509.CreateCertificate`
+    the same way `tls_test.go` already does), starts the listener, and asserts
+    the exact error string the client sees. Keep the test; it is the
+    measurement. Write the measured sentence — "the desktop keeps connecting
     past expiry because the pin is the fingerprint, not the validity" or
     "the desktop refuses at expiry; rotate before the two years are up" —
     never the guess.
@@ -516,7 +553,7 @@ git diff dev -- docs/deployment.md | grep '^[-+]- \*\*`data/' | sort | uniq -c |
 - **A link checker in CI.** Wanted, not this milestone; the anchors are
   walked by hand in Task 7 and the gap is noted for the roadmap's hygiene
   workstream.
-- **Rewriting `trust-model.md` or `data-lifecycle.md`.** Both are reference
+- **Rewriting `trust-model.md` or `docs/architecture/data-lifecycle.md`.** Both are reference
   documents that are right; the guide links down to them.
 
 ## Open questions for the owner
