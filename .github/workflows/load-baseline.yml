@@ -56,12 +56,13 @@
 #     (internal/app/lifecycle.go shutdownBudget), not the 20 s an idle server
 #     proves, so the step fails on a non-zero exit or a drain over 30 s.
 #   ceiling-search — one ramping-vus scenario stepping connections from 100 to
-#     `inputs.ceiling_max`, 60 s per step, to find the step where a capacity
-#     budget first breaks. Constrained-only: a ceiling measured outside the
-#     reference cgroup is the number B6-9 exists to prevent. Seeds
-#     `ceiling_max` users and boots with OWNCORD_SERVER_MAX_WS_CONNECTIONS at
-#     twice the probe maximum, so a config cap can never be published as the
-#     ceiling the search "found" — the run asserts ws_conn_rejects stayed 0.
+#     `inputs.ceiling_max`, a 30 s ramp then a 60 s hold per step, to find the
+#     step where a capacity budget first breaks. Constrained-only: a ceiling
+#     measured outside the reference cgroup is the number B6-9 exists to
+#     prevent. Seeds `ceiling_max` users and boots with
+#     OWNCORD_SERVER_MAX_WS_CONNECTIONS at twice the probe maximum, so a config
+#     cap can never be published as the ceiling the search "found" — the run
+#     asserts ws_conn_rejects stayed 0.
 #
 # The restart and ceiling-search profiles set no voice channel: their voice leg
 # is off, both in the script (no K6_VOICE_VUS) and in the server load, because

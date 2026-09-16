@@ -23,11 +23,13 @@
 // K6_PROFILE selects the scenario set, and it is the only knob that changes
 // scenarios or thresholds:
 //
-//   capacity (default) — the B6-9 run, byte-for-byte unchanged in behaviour:
-//     same scenario, same thresholds, same metric names. Every B6-10 code
-//     path below is gated on the other profiles and emits nothing otherwise;
-//     the new metrics are only *registered* on non-capacity profiles, so a
-//     capacity run's k6-summary.json metric key set stays byte-identical.
+//   capacity (default) — the B6-9 run: same scenario, same thresholds, same
+//     metric names. Every B6-10 code path below is gated on the other
+//     profiles and emits nothing otherwise; the new metrics are only
+//     *registered* on non-capacity profiles, so a capacity run's
+//     k6-summary.json metric key set stays byte-identical. The one shared
+//     change is authenticate()'s bounded login retry, and on capacity a
+//     refusal still counts into ws_errors exactly as B6-9 counted it.
 //   operational — the 100-connection sustain PLUS, concurrently: the observer
 //     VU polling /api/v1/metrics every 5 s (per-phase deltas), the reconnect
 //     storm (each socket closes at the next whole-minute boundary at or after
@@ -42,19 +44,32 @@
 //     sending through the frame's delay_seconds drain window, then reconnects
 //     with last_seq + active_channel_id and measures the resume.
 //   ceiling-search — one ramping-vus scenario stepping connections by
-//     K6_CEILING_STEP from 100 to K6_CEILING_MAX, holding each step 60 s,
-//     sending at the capacity rate, with the observer VU recording the
-//     writer-wait delta per step. Every trend is tagged step=<n>; the steps
-//     are informational and no threshold gates any of them.
+//     K6_CEILING_STEP from 100 to K6_CEILING_MAX, ramping each step in over
+//     30 s and then holding it 60 s, sending at the capacity rate, with the
+//     observer VU recording the writer-wait delta per step. Every trend is
+//     tagged step=<n> (delivery and acknowledgement only during the hold —
+//     the ramp-in is tagged step=<n>-ramp and folds into the aggregate); the
+//     steps are informational and no threshold gates any of them.
+//
+// Logins are paced everywhere, never burst. POST /api/v1/auth/login sits
+// behind a process-wide bcrypt admission budget of max(2*NumCPU, 4) — four
+// slots on the constrained leg, ~13 admissions/s — and a per-IP window that
+// counts REFUSED attempts too (api/middleware.go, "one timestamp per call").
+// A hundred VUs logging in at the same instant therefore refuse each other,
+// their retries burn the per-IP window, and the whole cohort gives up: the
+// second B6-10 dispatch connected 189 of 500 ceiling sockets and lost every
+// uploads VU that way. So the uploads scenario ramps its VUs in like the
+// WebSocket scenario does, each ceiling step ramps in over 30 s, and a VU
+// that still cannot log in sits the run out rather than iterating again.
 //
 // Prerequisites: the target server must already have the loadtest users
 // (K6_USERNAME<vu-number>, all sharing K6_PASSWORD) registered, and the
 // target channel readable by them. BPR-030's profile is 250 registered users
 // while K6_PEAK_VUS of them are connected; seeding all 250 is the caller's job
-// (.github/workflows/load-baseline.yml). The uploads scenario shares the
-// loadtest<i> accounts (a user may hold several sessions at once; only the
-// uploads VU uploads, so per-user quota cycles cleanly 4 admits → refuses at
-// K6_UPLOAD_BYTES and user_quota_mb=1).
+// (.github/workflows/load-baseline.yml). k6 numbers VUs once per test, not
+// per scenario, so the uploads VUs are loadtest accounts the WebSocket VUs
+// never use (ids above K6_PEAK_VUS, inside the 250 seeded) and per-user quota
+// cycles cleanly: 4 admits → refuses at K6_UPLOAD_BYTES and user_quota_mb=1.
 //
 // Environment variables:
 //   K6_PROFILE          - capacity (default) | operational | restart |
@@ -86,6 +101,7 @@
 import ws from "k6/ws";
 import http from "k6/http";
 import { check, sleep } from "k6";
+import exec from "k6/execution";
 import { Counter, Gauge, Rate, Trend } from "k6/metrics";
 
 // Configuration
@@ -104,6 +120,13 @@ const IS_B6_10 = PROFILE !== "capacity";
 // The observer scenario and its metrics run under operational and
 // ceiling-search — one measures per phase, the other per step.
 const OBS_ON = IS_OPERATIONAL || IS_CEILING;
+// k6 hands out VU ids test-wide, in the order scenarios ask for them. The
+// observer (constant-vus, 1 VU, t=0) asks first; the WebSocket scenario
+// starts at 0 VUs and asks ~1 s later — so with the observer on, WebSocket
+// VU ids run 2..N+1. The loadtest<i> usernames and the "first VOICE_VUS
+// VUs join voice" rule both want 1..N, so the WebSocket and uploads
+// scenarios subtract the observer. Zero on capacity: nothing moves there.
+const OBS_VUS = OBS_ON ? 1 : 0;
 // The resume path (last_seq + active_channel_id) runs under operational and
 // restart: the storm closes and reopens sockets, the drill loses the process.
 const RESUMES_ON = IS_OPERATIONAL || IS_RESTART;
@@ -233,11 +256,19 @@ const STORM_AT = parseInt(__ENV.K6_STORM_AT || "120"); // seconds
 const CHURN_MS = parseInt(__ENV.K6_VOICE_CHURN_MS || "10000");
 const UPLOAD_BYTES = parseInt(__ENV.K6_UPLOAD_BYTES || "262144");
 // Ceiling-search knobs. The search probes CEILING_START connections, then
-// steps by K6_CEILING_STEP holding each step CEILING_HOLD_S, up to
-// K6_CEILING_MAX; the caller must have registered at least K6_CEILING_MAX
-// loadtest users for the top step to fully connect.
+// steps by K6_CEILING_STEP, ramping each step in over CEILING_RAMP_S and
+// holding it CEILING_HOLD_S, up to K6_CEILING_MAX; the caller must have
+// registered at least K6_CEILING_MAX loadtest users for the top step to
+// fully connect. 100 logins over 30 s is ~3/s against the constrained leg's
+// ~13 admissions/s; a 0 s jump was 100 logins at once, and the header above
+// says what that did.
 const CEILING_START = 100;
+const CEILING_RAMP_S = 30;
 const CEILING_HOLD_S = 60;
+const CEILING_PERIOD_S = CEILING_RAMP_S + CEILING_HOLD_S;
+// The uploads scenario's login ramp: PEAK_VUS logins over this many seconds,
+// for the same reason. 30 s keeps it clear of the storm window.
+const UPLOAD_RAMP_S = 30;
 const CEILING_MAX = parseInt(__ENV.K6_CEILING_MAX || "500");
 const CEILING_STEP = parseInt(__ENV.K6_CEILING_STEP || "100");
 // 1 upload / 10 s = 6/min per user, inside the 10/min limit (docs/api.md:1965).
@@ -262,19 +293,18 @@ const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
 // hold the quantized wave(s).
 const STORM_NOMINAL_S = RAMP_S + STORM_AT;
 
-// The ceiling-search schedule. Each step is a 0 s stage (ramping-vus jumps to
-// the target immediately, so the step's connection count is held the whole
-// CEILING_HOLD_S window) followed by the hold stage itself; a trailing
-// ramp-down drains the sockets the same way capacity drains. HOLD_MS below
-// covers the whole search, so every VU holds one connection from its first
-// step to the ramp-down and the executor's targets ARE the connection counts.
+// The ceiling-search schedule. Each step is a CEILING_RAMP_S ramp to the
+// target followed by a CEILING_HOLD_S hold at it; a trailing ramp-down drains
+// the sockets the same way capacity drains. HOLD_MS below covers the whole
+// search, so every VU holds one connection from its first step to the
+// ramp-down and the executor's targets ARE the connection counts.
 const CEILING_STEPS = [];
 for (let v = CEILING_START; v <= CEILING_MAX; v += CEILING_STEP) {
   CEILING_STEPS.push(v);
 }
-const CEILING_TOTAL_S = CEILING_STEPS.length * CEILING_HOLD_S + seconds(RAMP_DOWN);
+const CEILING_TOTAL_S = CEILING_STEPS.length * CEILING_PERIOD_S + seconds(RAMP_DOWN);
 const CEILING_STAGES = CEILING_STEPS.flatMap((v) => [
-  { duration: "0s", target: v },
+  { duration: `${CEILING_RAMP_S}s`, target: v },
   { duration: `${CEILING_HOLD_S}s`, target: v },
 ]).concat([{ duration: RAMP_DOWN, target: 0 }]);
 const TOTAL_S = IS_CEILING ? CEILING_TOTAL_S : RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN);
@@ -325,11 +355,16 @@ export const options = {
       : {}),
     ...(IS_OPERATIONAL
       ? {
+          // Ramped in, not started at once: PEAK_VUS logins in one instant
+          // is the burst the header describes.
           uploads: {
-            executor: "constant-vus",
-            vus: PEAK_VUS,
+            executor: "ramping-vus",
+            startVUs: 0,
+            stages: [
+              { duration: `${UPLOAD_RAMP_S}s`, target: PEAK_VUS },
+              { duration: `${TOTAL_S - UPLOADS_START_S - UPLOAD_RAMP_S}s`, target: PEAK_VUS },
+            ],
             startTime: `${UPLOADS_START_S}s`,
-            duration: `${TOTAL_S - UPLOADS_START_S}s`,
             exec: "uploadsScenario",
             gracefulStop: "30s",
           },
@@ -440,6 +475,12 @@ export const options = {
           "ws_replay_source{tier:none}": ["count>0"],
           sends_during_drain: ["count>0"],
           sends_lost: ["count==0"],
+          // Pass-through thresholds (see ceilingStepThresholds) that only
+          // materialize the pre/post-restart series in the summary.
+          "ws_delivery_latency_ms{phase:pre-restart}": ["p(95)>=0"],
+          "ws_delivery_latency_ms{phase:post-restart}": ["p(95)>=0"],
+          "ws_broadcast_latency_ms{phase:pre-restart}": ["p(95)>=0"],
+          "ws_broadcast_latency_ms{phase:post-restart}": ["p(95)>=0"],
         }
       : {}),
     // A cap in config must never be published as the hardware ceiling. Only
@@ -463,19 +504,39 @@ export const options = {
 
 // --- ceiling-search step clock ----------------------------------------------
 
-// One run anchor, set by the first execution of any scenario. Its sub-second
-// jitter against the executor's own t=0 is far inside one 60 s step.
-let runStart = 0;
+// The run anchor is the executor's own start time. Module scope in k6 is
+// per VU, so a `let runStart` set on first use would be each VU's FIRST
+// ITERATION, and a VU that joins at step 300 would tag the rest of its run
+// two steps low. Both ceiling scenarios (websocket_load and observer) start
+// at t=0, so their scenario start times are the same anchor.
+function runElapsedS() {
+  return (Date.now() - exec.scenario.startTime) / 1000;
+}
 function runStep() {
-  if (!runStart) runStart = Date.now();
-  const i = Math.floor((Date.now() - runStart) / (CEILING_HOLD_S * 1000));
+  const i = Math.floor(runElapsedS() / CEILING_PERIOD_S);
   return CEILING_STEPS[Math.min(Math.max(i, 0), CEILING_STEPS.length - 1)];
+}
+function inStepRamp() {
+  return runElapsedS() % CEILING_PERIOD_S < CEILING_RAMP_S;
 }
 // Sample tags for the current step, or undefined outside ceiling-search:
 // passing undefined tags to add() leaves the sample untagged, which is what
-// the capacity profile wants.
-function stepTags() {
-  return IS_CEILING ? { step: String(runStep()) } : undefined;
+// the capacity profile wants. Connection-establishment samples (connect,
+// login, auth_ok, the connection count) belong to the step whose ramp opened
+// them; with holdOnly the delivery and acknowledgement trends tag the ramp-in
+// as step=<n>-ramp instead, so a step's published p95/p99 is the 60 s it was
+// held at that count and not the 30 s of bcrypt that got it there.
+function stepTags(holdOnly) {
+  if (!IS_CEILING) return undefined;
+  const v = runStep();
+  return { step: holdOnly && inStepRamp() ? `${v}-ramp` : String(v) };
+}
+
+// Restart-drill phase tags: which side of the stop a sample landed on, so
+// the document can say whether a missed budget was the drained server, the
+// rebooted one, or both. A resumed connection is by construction post-restart.
+function restartTags(resumedConn) {
+  return IS_RESTART ? { phase: resumedConn ? "post-restart" : "pre-restart" } : undefined;
 }
 
 // The pass-through thresholds, one per (metric, step) pair.
@@ -573,9 +634,12 @@ function authenticate(username) {
       // one to look for; the lowercase spelling is here only so a k6 that
       // stops canonicalising cannot silently reclassify every per-IP refusal
       // as an admission refusal — which is the distinction this split exists
-      // to draw.
-      if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited?.add(1);
-      else authAdmissionRefused?.add(1);
+      // to draw. Capacity has neither counter and keeps B6-9's accounting:
+      // a refusal is a ws_error there, so it stays visible under the
+      // ws_errors gate instead of vanishing into a null counter.
+      if (!IS_B6_10) wsErrors.add(1);
+      else if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited.add(1);
+      else authAdmissionRefused.add(1);
       // Backoff, so the retries of many stuck VUs de-synchronise instead of
       // arriving in lockstep and re-colliding on the same slots.
       if (attempt < LOGIN_ATTEMPTS - 1) sleep(1 + attempt * 0.5);
@@ -602,9 +666,47 @@ let vuLastSeq = 0; // highest seq this VU has seen on any connection
 let vuHoldEnd = 0; // wall-clock ms when this VU's first connection ends
 let vuStormDone = false; // the storm already fired for this VU
 let vuInVoice = false; // this VU believes it holds a voice session
+// Restart drill: contents of this VU's drain sends that got neither an ack
+// nor an error before the socket closed. VU scope on purpose — the socket
+// they were sent on is gone, and the check happens on the next iteration.
+let vuDrainUnanswered = [];
+
+// After the restart, is every unanswered drain send in the channel history?
+// The post-restart resume is a full re-sync (tier none), so no replay will
+// ever show them; the persisted history is the only place a message that
+// was sent-but-never-acked can be found. Pages back through
+// GET /api/v1/channels/{id}/messages until the oldest message on the page
+// predates the drain (every content carries its send time as t=<ms>), then
+// anything still unseen is a lost message.
+function accountForDrainSends(token) {
+  const unseen = vuDrainUnanswered.slice();
+  vuDrainUnanswered = [];
+  const oldest = Math.min(...unseen.map(sentAt));
+  let before = 0;
+  for (let page = 0; page < 50 && unseen.length; page++) {
+    const q = `limit=100${before ? `&before=${before}` : ""}`;
+    const res = http.get(`${HTTP_URL}/api/v1/channels/${CHANNEL_ID}/messages?${q}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) {
+      wsErrors.add(1);
+      break;
+    }
+    const msgs = res.json("messages") || [];
+    if (!msgs.length) break;
+    for (const m of msgs) {
+      const at = unseen.indexOf(m.content);
+      if (at !== -1) unseen.splice(at, 1);
+    }
+    const last = msgs[msgs.length - 1];
+    if (sentAt(last.content) && sentAt(last.content) < oldest) break;
+    before = last.id;
+  }
+  sendsLost.add(unseen.length);
+}
 
 export default function () {
-  const vuId = __VU;
+  const vuId = __VU - OBS_VUS;
   const username = `${USERNAME_PREFIX}${vuId}`;
   const joinsVoice = VOICE_VUS > 0 && vuId <= VOICE_VUS;
 
@@ -617,12 +719,20 @@ export default function () {
   if (!token) {
     token = authenticate(username);
     if (!token) {
-      // Give up loudly. The threshold on login_giveups fails the run, because
-      // every number in it was measured over a population missing this VU.
+      // Give up loudly, then sit the run out. The threshold on login_giveups
+      // fails the run, because every number in it was measured over a
+      // population missing this VU; returning here would start the next
+      // iteration at once and turn one give-up into a login loop for the
+      // rest of the run (1758 give-ups from 500 VUs, second dispatch).
       loginGiveUps?.add(1);
+      sleep(TOTAL_S);
       return;
     }
     vuToken = token;
+  }
+
+  if (IS_RESTART && vuDrainUnanswered.length) {
+    accountForDrainSends(token);
   }
 
   const connectStart = Date.now();
@@ -644,11 +754,11 @@ export default function () {
     // Restart-drill per-connection state.
     let restartReceivedAt = 0; // Date.now() when server_restart arrived
     let drainPending = {}; // send-id -> content, sent after the frame
-    let drainUnanswered = []; // contents with no ack and no replay sighting
     // Per-connection resume bookkeeping.
     const resumedConn = resumed;
     let resumeStartedAt = 0;
     let resumeGap = 0;
+    let gapRecorded = false;
     // Post-restart the server's per-boot seq floor (OC-0210) renumbers the
     // sequence space and the boot marks visibility changed, so every
     // post-restart resume is served tier none (full re-sync). The client
@@ -728,12 +838,7 @@ export default function () {
               // channel_focus after auth_ok is idempotent (protocol.md:160).
               socket.send(envelope("channel_focus", { channel_id: CHANNEL_ID }));
               if (IS_RESTART) {
-                // The full re-sync re-delivers state in the ready payload;
-                // anything still unanswered and unseen here is absent from
-                // every replay — a lost message.
                 restartResumeTime.add(Date.now() - resumeStartedAt);
-                sendsLost.add(drainUnanswered.length);
-                drainUnanswered = [];
               }
             } else {
               wsAuthOkTime.add(Date.now() - authSentAt, stepTags());
@@ -762,7 +867,10 @@ export default function () {
             wsAcks.add(1);
             wsMessageRate.add(true);
             if (data.id && pendingSends[data.id]) {
-              broadcastLatency.add(Date.now() - pendingSends[data.id], stepTags());
+              broadcastLatency.add(
+                Date.now() - pendingSends[data.id],
+                stepTags(true) ?? restartTags(resumedConn),
+              );
               delete pendingSends[data.id];
             }
             if (IS_RESTART && data.id && drainPending[data.id]) {
@@ -782,18 +890,8 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags());
+              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags(resumedConn));
               deliveries.add(1);
-            }
-            // Restart drill: a replay sighting of a drain send removes it
-            // from the unanswered set. Replay precedes auth_ok
-            // (protocol.md:305-315), so everything arriving before auth_ok
-            // is replay by construction.
-            if (IS_RESTART && !authed && drainUnanswered.length) {
-              const at2 = drainUnanswered.indexOf(content);
-              if (at2 !== -1) {
-                drainUnanswered.splice(at2, 1);
-              }
             }
             break;
           }
@@ -865,20 +963,35 @@ export default function () {
       wsErrors.add(1);
     });
 
-    // ws_replay_gap is asserted once per resumed connection, at its close:
-    // the number of seq values the replay skipped, 0 when contiguity held.
+    // ws_replay_gap: the seq values skipped between the stored last_seq and
+    // the live stream that follows the replay, 0 when contiguity held. The
+    // server writes auth_ok and THEN the replayed events (ws/replay.go,
+    // reconnectWriteReplay), so the sample is taken 20 s after the resume —
+    // a 1000-frame ring replays in well under a second — rather than at the
+    // first frame after auth_ok, which would be the first replayed one.
+    // Recording only at close under-reported it: k6's ramp-down kills most
+    // held sockets before their own close fires (37 samples for 100 resumes
+    // in the second dispatch); close remains the fallback for a resumed
+    // socket that went away sooner.
+    const recordGap = function () {
+      if (resumedConn && !gapRecorded) {
+        wsReplayGap.add(resumeGap);
+        gapRecorded = true;
+      }
+    };
+    if (RESUMES_ON && resumedConn) {
+      socket.setTimeout(recordGap, 20000);
+    }
     // The drill's drain sends classify at close: acked/errored removed
     // earlier; the rest are unanswered, their contents kept for the next
-    // connection's replay watcher.
+    // iteration's history check.
     socket.on("close", function () {
-      if (RESUMES_ON && resumedConn) {
-        wsReplayGap.add(resumeGap);
-      }
+      if (RESUMES_ON) recordGap();
       if (IS_RESTART && restartReceivedAt) {
         serverRestartLead.add(Date.now() - restartReceivedAt);
         for (const id of Object.keys(drainPending)) {
           drainSends.add(1, { outcome: "unanswered" });
-          drainUnanswered.push(drainPending[id]);
+          vuDrainUnanswered.push(drainPending[id]);
         }
       }
     });
@@ -990,7 +1103,10 @@ export default function () {
 
   if (!res || res.status !== 101) {
     wsErrors.add(1);
-    wsMessageRate.add(false);
+    // Under the drill, a refused connect during the outage is the drill
+    // working; it must not drag down the send-success rate that still gates
+    // the run (ws_errors is already exempt there for the same reason).
+    if (!IS_RESTART) wsMessageRate.add(false);
   }
 
   sleep(1);
@@ -1028,7 +1144,15 @@ export function observerScenario() {
     return;
   }
 
-  const d = (k) => (body[k] || 0) - ((obsPrev && obsPrev[k]) || 0);
+  // The first poll is the baseline: without it the "delta" would be the
+  // server's cumulative count since boot (the seeding's bcrypt and writes),
+  // booked to the first phase or step.
+  if (!obsPrev) {
+    obsPrev = body;
+    sleep(5);
+    return;
+  }
+  const d = (k) => (body[k] || 0) - (obsPrev[k] || 0);
 
   if (IS_CEILING) {
     // The per-step deltas: the writer-wait pair is the plan's Task 2 observer
@@ -1087,11 +1211,13 @@ let upCount = 0;
 let upFileId = null;
 
 export function uploadsScenario() {
-  const username = `${USERNAME_PREFIX}${__VU}`;
+  const username = `${USERNAME_PREFIX}${__VU - OBS_VUS}`;
   if (!upToken) {
     upToken = authenticate(username);
     if (!upToken) {
+      // As in the WebSocket loop: count it once and sit the run out.
       loginGiveUps?.add(1);
+      sleep(TOTAL_S);
       return;
     }
   }

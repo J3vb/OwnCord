@@ -225,8 +225,7 @@ or is not published at all.
 They are selected by `K6_PROFILE`, and `capacity` remains the default.
 
 ```
-gh workflow run load-baseline.yml -f profile=operational    --ref <branch>
-gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # with tls off, second leg
+gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # both TLS legs in one run
 gh workflow run load-baseline.yml -f profile=restart        --ref <branch>
 gh workflow run load-baseline.yml -f profile=ceiling-search -f ceiling_max=500 --ref <branch>
 ```
@@ -276,9 +275,13 @@ only make after looking.
 ### Message fan-out, to the ceiling
 
 `ceiling-search` steps connections by `K6_CEILING_STEP` (default 100) up to
-`K6_CEILING_MAX` (default 500), holding each step 60 s at the capacity profile's
-send rate. Every trend is tagged `step=<n>`, so the summary carries a per-step
-p95/p99 for recipient delivery, sender acknowledgement and login.
+`K6_CEILING_MAX` (default 500), ramping each step in over 30 s and holding it
+60 s at the capacity profile's send rate. Every trend is tagged `step=<n>`, so
+the summary carries a per-step p95/p99 for recipient delivery, sender
+acknowledgement and login. Delivery and acknowledgement carry the tag only
+during the hold: the 30 s ramp-in is the step's logins landing (paced at ~3/s
+against a four-slot bcrypt admission budget), and a step's published figure is
+the minute it was held at that count, not the bcrypt that got it there.
 
 - **Publishes** the last step at which every budget above still held, plus the
   per-step table. The steps are informational and nothing is gated on them.
@@ -349,9 +352,14 @@ and not a lookalike.
   boot; the sends attempted during the drain; and the sends lost.
 - **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
 count==0`, and no replay gap across the restart. A message that was sent,
-  never acknowledged and appears in no replay is a **lost message** — a defect
-  recorded in the findings ledger and published as "lost N of M" until it is
-  fixed, not a number to round.
+  never acknowledged and absent from the channel history after the second boot
+  is a **lost message** — a defect recorded in the findings ledger and
+  published as "lost N of M" until it is fixed, not a number to round. The
+  history is the only place to look: the post-restart resume is a full re-sync
+  (next point), so no replay will ever carry a drain-window send.
+- **Delivery and acknowledgement are tagged `pre-restart` / `post-restart`**,
+  so a budget missed under this profile can be placed on one side of the stop
+  or the other rather than averaged across it.
 - **Post-restart resume is always the `none` tier, by design.** A restart
   renumbers the sequence space and marks visibility changed, so a connection
   that resumes after one cannot be served from the `events` table and the server
