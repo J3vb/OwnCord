@@ -130,6 +130,8 @@ jobs:
       PROFILE: ${{ inputs.profile }}
       TLS_MODE: ${{ matrix.tls }}
       CEILING_MAX: ${{ inputs.ceiling_max }}
+      SEED_USERS_INPUT: ${{ inputs.users }}
+      CONNECTIONS: ${{ inputs.connections }}
     strategy:
       fail-fast: false
       matrix:
@@ -243,11 +245,10 @@ jobs:
           # login that cannot succeed.
           if [ "$PROFILE" = "ceiling-search" ]; then
             seed_users="$CEILING_MAX"
-          elif [ "$PROFILE" = "operational" ] &&
-            [ "${{ inputs.users }}" -lt $((2 * ${{ inputs.connections }})) ]; then
-            seed_users=$((2 * ${{ inputs.connections }}))
+          elif [ "$PROFILE" = "operational" ] && [ "$SEED_USERS_INPUT" -lt $((2 * CONNECTIONS)) ]; then
+            seed_users=$((2 * CONNECTIONS))
           else
-            seed_users="${{ inputs.users }}"
+            seed_users="$SEED_USERS_INPUT"
           fi
 
           # Only capacity and operational have a voice leg. restart and
