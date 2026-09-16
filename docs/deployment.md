@@ -425,7 +425,36 @@ Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backup" -Method POST -H
 
 ### Restore
 
-Restoring replaces the live database file. A pre-restore safety backup is created automatically. A server restart is recommended after restore.
+Restoring replaces the live database file. A pre-restore safety backup is
+created automatically, and the restore is aborted before anything is touched if
+that copy cannot be written. The server then restarts itself. With
+`server.restart_mode` on `supervised` — which `auto` picks for systemd, NSSM and
+containers — it drains and exits cleanly and the supervisor relaunches it
+instead; the shipped `docker-compose.yml` sets `restart: unless-stopped` for
+exactly this ([Upgrading](#upgrading)).
+
+**A restorable install is a set, not one file.** The backup endpoint's file is
+the database only. What has to travel with it is everything the database
+_points at_ — the uploads, and the three key files plus the marker file that
+live beside `data/`. **Back up `data/` wholesale on the same schedule as the
+database**, not only before an upgrade: the list of what each file costs you if
+it is missing is in the upgrade section's
+[Before upgrading: take the archive](#before-upgrading-take-the-archive), and
+it is the same list here.
+
+Measured, because both halves are easy to assume the wrong way round
+(`cmd/smoke -drills` phase R, and the B6-11 block in
+[data-lifecycle.md](architecture/data-lifecycle.md)):
+
+- Restore a backup **without** `data/erasure/markers.sqlite` and every account
+  erased since that backup comes back, and nothing removes it again — the
+  markers were the only record that they were erased, and the restored database
+  does not carry one. The server boots and logs an error saying the erasure
+  history is absent; it is a warning, not a refusal.
+- Restore a backup **without** `data/erasure.key` and the server **refuses to
+  start**, naming the reason. That is deliberate: without the key the markers
+  cannot name anybody, so a server that booted would be serving a database it
+  cannot reconcile with its own deletion history.
 
 ## Upgrade and Rollback
 
@@ -708,6 +737,24 @@ actionable.
 
 The server version is deliberately not exposed on this unauthenticated
 endpoint (anti-fingerprinting hardening).
+
+**Disk, in the three stages an operator can be in.** The check is free space on
+the volumes the server writes to against `server.min_free_disk_mb` (default
+256 MiB; `0` disables the floor — see
+[server-configuration.md](server-configuration.md)). All three stages were
+measured against a filesystem that was actually filled (`cmd/smoke -drills`
+phase D):
+
+| Free space                 | `/health`                                                 | Everything else                                                                                                                                                                                                                                                                                                              |
+| -------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Above the floor            | `200` `ok`                                                | Normal.                                                                                                                                                                                                                                                                                                                      |
+| Below the floor            | `503` `degraded`, `"reason": "disk"`                      | Uploads and other writes that need headroom are refused with `507 STORAGE_LOW_DISK`. **Messages still flow**, and a backup still runs — and a backup taken here is still either refused or a file `integrity_check` accepts, never a partial one.                                                                            |
+| Completely full (`ENOSPC`) | `503` `degraded`, `"reason": "disk"` — it keeps answering | Writes that touch the database are refused, each with an error frame rather than silence, and the log carries `database or disk is full`. **The server does not exit.** Give the space back — delete the junk, grow the volume, move `backup.dir` elsewhere — and chat, uploads and `/health` recover **without a restart**. |
+
+The floor is a reserved headroom for the upload path, not a message-path limit:
+a server below its floor still accepts chat, which is what keeps a filled disk
+from becoming a silent outage. Set it below what your database grows by and you
+have chosen the third stage as your normal state.
 
 ### Metrics Endpoint
 

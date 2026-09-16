@@ -193,6 +193,15 @@ server's internals were reorganised behind service boundaries.
   it, including after a restore of a backup taken before the deletion.
 - Audit history about a deleted account keeps its integrity — what happened and
   when — without keeping who.
+- **An account deletion now finishes its own disk-level cleanup.** If a reader
+  is holding the database open while the deletion runs, the final compaction is
+  retried at the next start and by the background maintenance pass, instead of
+  waiting for an unrelated later write to happen along.
+- **A server whose deletion history has gone missing now says so.** If the
+  deletion markers are absent but the key that names them is still there — the
+  shape a restore from a database-only backup leaves — start-up logs an error
+  naming the absent history. It still starts, deliberately: losing one small
+  file should not be a total outage.
 - **Message retention.** Off by default: messages are kept forever unless you
   say otherwise. An operator can set a server-wide window and override it per
   channel in either direction. Pinned messages are exempt and DMs are never in
@@ -239,6 +248,18 @@ server's internals were reorganised behind service boundaries.
   archive the install, swap the binary or image, and — because migrations only
   ever run forward — restore that archive first if you need the old version
   back.
+- **`docs/deployment.md` says what a backup has to contain to be restorable.**
+  The backup endpoint's file is the database only; the uploads and the key and
+  marker files beside `data/` are what a restore needs with it, and restoring
+  without the markers brings deleted accounts back. The same page describes the
+  three stages a server passes through as its disk fills, and what an operator
+  sees at each.
+- **`docs/architecture/data-lifecycle.md` carries the failure and recovery
+  drill results.** Every destructive operation is now measured against the
+  failure axes that matter — interrupted, out of disk, racing a reader,
+  crashed, undone by a restore — with each row naming the test or the drill run
+  that produced it, and the byte-level erasure evidence under an active reader
+  tabulated file by file.
 - **`docs/capacity.md` says how much one server carries, and on what.** 250
   registered accounts, 100 connections held for three minutes, and 25 people in
   voice — measured on a 2 vCPU / 4 GB machine, with the exact commands to
@@ -274,6 +295,12 @@ server's internals were reorganised behind service boundaries.
   miss, the restart that drained in six seconds losing nothing, and why the
   connection search stops telling you about the hardware past 100 connections
   in one channel.
+- `upgrade-rehearsal.yml` now also runs the failure and recovery drills, on the
+  nightly and on dispatch: backup and restore through the real admin endpoints
+  with clients connected, the deletion-marker restore, disk pressure both as a
+  process and inside the container image, corrupt operator input, and the SFU
+  drill against a checksum-verified LiveKit release. A drill that cannot run
+  reports `skipped`; none of them can report a pass they did not measure.
 
 ## v1.2.0-alpha.4
 
