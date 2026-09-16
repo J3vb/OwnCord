@@ -543,14 +543,17 @@ first scan shows why the truncate is a hygiene question rather than a
 resurrection one: the subject's rows are gone from the crash image and
 `ReplayAccounts` reports nothing to replay. E2 is the trap this measurement
 exists to close — `busy = 0` with `log == checkpointed` is not evidence that
-the log is empty. The byte counts are **fixture-shaped and not properties**: in
-one run E2's planted `-wal` was 9,933,352 bytes at `log=2411` while E3's and
-E4's, same fixture and same code path, were 9,945,712 at `log=2414`
-(`Migrate`'s conditional `PRAGMA optimize` writes `sqlite_stat` on a copy whose
-schema changed). What repeats is the shape — sentinel bytes in a full-length
-`-wal` after a checkpoint that completed — so E1 alone asserts "0 everywhere",
-and E2–E4 assert the strictly later thing: no file that was clean when the
-erasure committed has gained a copy since.
+the log is empty. The byte counts **in that table** are fixture-shaped
+magnitudes, not asserted properties: in one run E2's planted `-wal` was
+9,933,352 bytes at `log=2411` while E3's and E4's, same fixture and same code
+path, were 9,945,712 at `log=2414` (`Migrate`'s conditional `PRAGMA optimize`
+writes `sqlite_stat` on a copy whose schema changed). What the assertions hold
+is the shape — sentinel bytes in a full-length `-wal` after a checkpoint that
+completed — and every scenario ends with the same exact claim: **zero** sentinel
+occurrences in all eight roots, checked after the whole recovery path and not
+merely after the erasure, with a positive control proving the sentinel was
+readable in the `-wal` and the upload first. E1 reaches "0 everywhere" from a
+clean start; E2–E4 reach it having first held a copy.
 
 **Limitations recorded, not fixed here.**
 

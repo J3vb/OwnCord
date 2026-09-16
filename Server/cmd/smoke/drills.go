@@ -2293,6 +2293,15 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 			"%d of %d chat_sends on a full filesystem were answered with nothing at all: the server must answer every send with an error frame, and an unanswered send is a client that waits forever",
 			silent, drillFullSends)})
 	}
+	if refused == 0 {
+		// The other half of the same claim, and the one silence cannot catch: if
+		// nothing was refused then the filesystem was not actually full, and the
+		// drill has measured nothing about the disk path — the fill did not do
+		// its job, so it must not report as though it had.
+		problems = append(problems, failure{what: fmt.Sprintf(
+			"%d chat_sends on a full filesystem and not one was refused: the fixture proves nothing about the disk path, and a pass here would assert that a full disk refuses writes having never seen one refused",
+			drillFullSends)})
+	}
 
 	body, status, err := healthOf()
 	if err != nil {
@@ -2358,8 +2367,11 @@ func (d *drill) dRecover(f filler, s *dStage) ([]failure, error) {
 	if d.docker {
 		// A container's /app/data is a tmpfs: it is destroyed with the
 		// container, so a reboot here would measure a fresh install rather than
-		// a recovery. Said out loud rather than skipped silently.
-		fmt.Printf("%s: the durability half is standalone-only — /app/data is a tmpfs, destroyed with the container\n", d.phase)
+		// a recovery. This is the one place the container leg runs, and it runs
+		// only this phase, so a plain print here would leave the whole leg
+		// reporting a pass over a step that never ran — the exact read the skip
+		// machinery exists to prevent.
+		d.skipStep("the durability half is standalone-only — /app/data is a tmpfs, destroyed with the container")
 		return problems, nil
 	}
 	found, err := d.dRebootCount(s)

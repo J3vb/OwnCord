@@ -449,8 +449,10 @@ Measured, because both halves are easy to assume the wrong way round
 - Restore a backup **without** `data/erasure/markers.sqlite` and every account
   erased since that backup comes back, and nothing removes it again — the
   markers were the only record that they were erased, and the restored database
-  does not carry one. The server boots and logs an error saying the erasure
-  history is absent; it is a warning, not a refusal.
+  does not carry one. The server boots and logs an `ERROR` naming the absent
+  erasure history — an error in the log, not a refusal to start. It is gated on
+  the key file existing, so a first boot says nothing: an install that never had
+  erasure history has none to lose.
 - Restore a backup **without** `data/erasure.key` and the server **refuses to
   start**, naming the reason. That is deliberate: without the key the markers
   cannot name anybody, so a server that booted would be serving a database it
