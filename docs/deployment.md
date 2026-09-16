@@ -452,7 +452,9 @@ Measured, because both halves are easy to assume the wrong way round
   does not carry one. The server boots and logs an `ERROR` naming the absent
   erasure history — an error in the log, not a refusal to start. It is gated on
   the key file existing, so a first boot says nothing: an install that never had
-  erasure history has none to lose.
+  erasure history has none to lose. An install holding its key in
+  `OWNCORD_ERASURE_KEY` has no key file either way, so this check stays silent
+  for it — the loud case is the key on disk.
 - Restore a backup **without** `data/erasure.key` and the server **refuses to
   start**, naming the reason. That is deliberate: without the key the markers
   cannot name anybody, so a server that booted would be serving a database it

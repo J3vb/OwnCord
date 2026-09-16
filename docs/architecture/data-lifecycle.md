@@ -547,9 +547,9 @@ the log is empty. The byte counts **in that table** are fixture-shaped
 magnitudes, not asserted properties: in one run E2's planted `-wal` was
 9,933,352 bytes at `log=2411` while E3's and E4's, same fixture and same code
 path, were 9,945,712 at `log=2414` (`Migrate`'s conditional `PRAGMA optimize`
-writes `sqlite_stat` on a copy whose schema changed). What the assertions hold
-is the shape — sentinel bytes in a full-length `-wal` after a checkpoint that
-completed — and every scenario ends with the same exact claim: **zero** sentinel
+writes `sqlite_stat` on a copy whose schema changed). What the runs repeat is
+the shape — sentinel bytes in a full-length `-wal` after a checkpoint that
+completed — and what every scenario asserts is the same exact claim: **zero** sentinel
 occurrences in all eight roots, checked after the whole recovery path and not
 merely after the erasure, with a positive control proving the sentinel was
 readable in the `-wal` and the upload first. E1 reaches "0 everywhere" from a

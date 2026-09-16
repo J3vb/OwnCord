@@ -2293,11 +2293,14 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 			"%d of %d chat_sends on a full filesystem were answered with nothing at all: the server must answer every send with an error frame, and an unanswered send is a client that waits forever",
 			silent, drillFullSends)})
 	}
-	if refused == 0 {
+	if refused == 0 && silent == 0 {
 		// The other half of the same claim, and the one silence cannot catch: if
 		// nothing was refused then the filesystem was not actually full, and the
 		// drill has measured nothing about the disk path — the fill did not do
-		// its job, so it must not report as though it had.
+		// its job, so it must not report as though it had. Guarded on no silence
+		// too, because fifty unanswered sends is a server that stopped
+		// answering, and blaming the fill for that would be the wrong sentence
+		// in the log an operator reads.
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"%d chat_sends on a full filesystem and not one was refused: the fixture proves nothing about the disk path, and a pass here would assert that a full disk refuses writes having never seen one refused",
 			drillFullSends)})
