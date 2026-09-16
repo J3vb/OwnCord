@@ -27,9 +27,10 @@
 //     metric names. Every B6-10 code path below is gated on the other
 //     profiles and emits nothing otherwise; the new metrics are only
 //     *registered* on non-capacity profiles, so a capacity run's
-//     k6-summary.json metric key set stays byte-identical. The one shared
-//     change is authenticate()'s bounded login retry, and on capacity a
-//     refusal still counts into ws_errors exactly as B6-9 counted it.
+//     k6-summary.json metric key set stays byte-identical. authenticate()'s
+//     bounded login retry is gated too: on capacity it is one attempt, timed
+//     whatever the outcome, a refusal counts one ws_error, and the caller
+//     sleeps a second — B6-9's login path, unchanged.
 //   operational — the 100-connection sustain PLUS, concurrently: the observer
 //     VU polling /api/v1/metrics every 5 s (per-phase deltas), the reconnect
 //     storm (each socket closes at the next whole-minute boundary at or after
@@ -220,10 +221,11 @@ const restartResumeTime = IS_RESTART ? new Trend("restart_resume_time", true) : 
 const drainSends = IS_RESTART ? new Counter("sends_during_drain") : null;
 const sendsLost = IS_RESTART ? new Counter("sends_lost") : null;
 
-// The observer's window onto the server, one poll every 5 s (operational
-// only; the VU polls /api/v1/metrics — IP-restricted, and the load generator
-// is on the same loopback — with no token). Each entry records the DELTA
-// since the previous poll, tagged phase=<ramp|sustain|storm|upload>: a
+// The observer's window onto the server, one poll every 5 s (operational and
+// ceiling-search; the VU polls /api/v1/metrics — IP-restricted, and the load
+// generator is on the same loopback — with no token). Each entry records the
+// DELTA since the previous poll, tagged phase=<ramp|sustain|storm|upload>
+// under operational and step=<n> under the search: a
 // phase's count is its total delta over that window, which is what the
 // document publishes, not the end-of-run cumulative B6-9 recorded.
 const obsPollTime = OBS_ON ? new Trend("obs_poll_time", true) : null;
@@ -287,11 +289,14 @@ function seconds(d) {
 const RAMP_S = seconds(RAMP);
 const SUSTAIN_S = seconds(SUSTAIN);
 const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
-// The storm's nominal wall-clock moment: RAMP + STORM_AT. Per-VU timers
-// quantize to whole minutes (below), so the wave lands on the first minute
-// boundary at or after this; the observer's storm window is wide enough to
-// hold the quantized wave(s).
-const STORM_NOMINAL_S = RAMP_S + STORM_AT;
+// The storm's fire time for a connection that holds until holdEndMs: the first
+// whole-minute wall-clock boundary at or after (hold end − K6_STORM_AT). The
+// quantization is what masses the per-VU closes into shared waves. Both the
+// VU timer and the observer's storm window derive from this one function, so
+// the window cannot drift off the wave it is supposed to cover.
+function stormFireAt(holdEndMs) {
+  return Math.ceil((holdEndMs - STORM_AT * 1000) / 60000) * 60000;
+}
 
 // The ceiling-search schedule. Each step is a CEILING_RAMP_S ramp to the
 // target followed by a CEILING_HOLD_S hold at it; a trailing ramp-down drains
@@ -329,9 +334,9 @@ export const options = {
       // default would cut the ramp-down short at this hold length.
       gracefulRampDown: "30s",
       gracefulStop: "30s",
-      // Capacity: ramp to the peak, hold, drain. Ceiling-search: jump to each
-      // step (0 s stages — ramping-vus reaches the target before the hold
-      // begins) and hold it CEILING_HOLD_S, then the same drain.
+      // Capacity: ramp to the peak, hold, drain. Ceiling-search: ramp to
+      // each step over CEILING_RAMP_S, hold it CEILING_HOLD_S, then the same
+      // drain (CEILING_STAGES).
       stages: IS_CEILING
         ? CEILING_STAGES
         : [
@@ -428,8 +433,15 @@ export const options = {
           // and a session lookup, not a network round trip to an SFU.
           voice_join_time: ["p(95)<250", "p(99)<500"],
           voice_tokens: ["count>0"],
+          // The churn's cross-VU voice_state delivery only happens when the
+          // voice leg does — an operational run without K6_VOICE_CHANNEL_ID
+          // has no voice VUs and must not fail on a leg it never ran.
+          ...(IS_OPERATIONAL ? { voice_states: ["count>0"] } : {}),
         }
       : {}),
+    // Pass-through thresholds (see passThroughThresholds) that only
+    // materialize the tagged operational/restart series in the summary.
+    ...(IS_OPERATIONAL || IS_RESTART ? passThroughThresholds() : {}),
     // B6-10 operational sanity gates. No latency budgets: the PRD excludes
     // new targets, so these only assert the phase happened and replay
     // integrity held. Under capacity none of these exist.
@@ -448,7 +460,8 @@ export const options = {
           "ws_replay_source{tier:buffer}": ["count>0"],
           // Churn and upload admission: empty-sample traps. A percentile over
           // zero samples passes, so every phase asserts it happened.
-          voice_states: ["count>0"],
+          // (voice_states lives with the voice thresholds above: it only
+          // exists when the voice leg does.)
           upload_admits: ["count>0"],
           upload_refuses: ["count>0"],
           // A 507 STORAGE_LOW_DISK or a 400 says the scenario or the runner is
@@ -475,7 +488,7 @@ export const options = {
           "ws_replay_source{tier:none}": ["count>0"],
           sends_during_drain: ["count>0"],
           sends_lost: ["count==0"],
-          // Pass-through thresholds (see ceilingStepThresholds) that only
+          // Pass-through thresholds (see passThroughThresholds) that only
           // materialize the pre/post-restart series in the summary.
           "ws_delivery_latency_ms{phase:pre-restart}": ["p(95)>=0"],
           "ws_delivery_latency_ms{phase:post-restart}": ["p(95)>=0"],
@@ -561,6 +574,42 @@ function ceilingStepThresholds() {
   return out;
 }
 
+// The operational/restart pass-through thresholds, the same trick as
+// ceilingStepThresholds(): k6 collapses a tagged sample into its parent metric
+// in handleSummary unless a threshold names the sub-metric, and docs/capacity.md
+// quotes every series below. count>=0 (Counter), value>=0 (Gauge) and
+// p(95)>=0 (Trend) always hold, and an empty series passes — these gate
+// nothing, they only make the sub-metric exist in k6-summary.json. Spread
+// BEFORE the real gates so a real threshold on the same key wins.
+function passThroughThresholds() {
+  const out = {};
+  const tiers = ["buffer", "db", "none"];
+  for (const t of tiers) out[`ws_replay_source{tier:${t}}`] = ["count>=0"];
+  if (IS_RESTART) {
+    for (const o of ["acked", "errored", "unanswered"]) {
+      out[`sends_during_drain{outcome:${o}}`] = ["count>=0"];
+    }
+    return out; // no observer scenario under the restart drill
+  }
+  const perPhase = [
+    "obs_db_writer_wait_count",
+    "obs_db_writer_wait_seconds",
+    "obs_db_reader_wait_count",
+    "obs_db_reader_wait_seconds",
+    "obs_ws_conn_rejects",
+  ];
+  for (const p of ["ramp", "sustain", "storm", "upload"]) {
+    for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
+    // The one Gauge among the observer's metrics; a Gauge aggregates as value.
+    out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
+  }
+  for (const t of ["buffer", "db", "full"]) out[`obs_reconnect_tier{tier:${t}}`] = ["count>=0"];
+  for (const k of ["queue_disconnects", "high_fallbacks", "low_drops"]) {
+    out[`obs_backpressure{kind:${k}}`] = ["count>=0"];
+  }
+  return out;
+}
+
 // envelope wraps a client->server frame in the protocol's outer shape.
 function envelope(type, payload) {
   return JSON.stringify({ type: type, payload: payload });
@@ -624,6 +673,18 @@ function authenticate(username) {
       { headers: { "Content-Type": "application/json" } },
     );
 
+    // Capacity is B6-9's login verbatim: one attempt, timed whatever the
+    // outcome, any non-200 (429 included) one ws_error, plain return — the
+    // caller's sleep(1) follows. Everything below this line is B6-10's.
+    if (!IS_B6_10) {
+      authTime.add(Date.now() - start);
+      if (res.status !== 200) {
+        wsErrors.add(1);
+        return null;
+      }
+      return JSON.parse(res.body).token;
+    }
+
     // A 429 is the server shedding load on purpose, and it is retryable — the
     // admission budget frees its slots every ~250 ms. It is NOT a ws_error:
     // that counter backs the published "0 WebSocket errors" claim, and a run
@@ -634,11 +695,8 @@ function authenticate(username) {
       // one to look for; the lowercase spelling is here only so a k6 that
       // stops canonicalising cannot silently reclassify every per-IP refusal
       // as an admission refusal — which is the distinction this split exists
-      // to draw. Capacity has neither counter and keeps B6-9's accounting:
-      // a refusal is a ws_error there, so it stays visible under the
-      // ws_errors gate instead of vanishing into a null counter.
-      if (!IS_B6_10) wsErrors.add(1);
-      else if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited.add(1);
+      // to draw.
+      if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited.add(1);
       else authAdmissionRefused.add(1);
       // Backoff, so the retries of many stuck VUs de-synchronise instead of
       // arriving in lockstep and re-colliding on the same slots.
@@ -680,7 +738,6 @@ let vuDrainUnanswered = [];
 // anything still unseen is a lost message.
 function accountForDrainSends(token) {
   const unseen = vuDrainUnanswered.slice();
-  vuDrainUnanswered = [];
   const oldest = Math.min(...unseen.map(sentAt));
   let before = 0;
   for (let page = 0; page < 50 && unseen.length; page++) {
@@ -689,8 +746,11 @@ function accountForDrainSends(token) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status !== 200) {
+      // The first post-drain iteration usually lands while the server is
+      // still booting: an unreadable history says nothing about loss, so
+      // keep the list and check again on the next iteration.
       wsErrors.add(1);
-      break;
+      return;
     }
     const msgs = res.json("messages") || [];
     if (!msgs.length) break;
@@ -702,6 +762,7 @@ function accountForDrainSends(token) {
     if (sentAt(last.content) && sentAt(last.content) < oldest) break;
     before = last.id;
   }
+  vuDrainUnanswered = [];
   sendsLost.add(unseen.length);
 }
 
@@ -724,8 +785,9 @@ export default function () {
       // population missing this VU; returning here would start the next
       // iteration at once and turn one give-up into a login loop for the
       // rest of the run (1758 give-ups from 500 VUs, second dispatch).
+      // Capacity keeps B6-9's one-second retry loop instead.
       loginGiveUps?.add(1);
-      sleep(TOTAL_S);
+      sleep(IS_B6_10 ? TOTAL_S : 1);
       return;
     }
     vuToken = token;
@@ -800,8 +862,8 @@ export default function () {
       try {
         const data = JSON.parse(msg);
 
-        // Track the highest seq on any sequenced frame (operational only;
-        // capacity runs never track and never resume). A resumed connection
+        // Track the highest seq on any sequenced frame (the resuming
+        // profiles only; capacity never tracks and never resumes). A resumed connection
         // checks contiguity against its stored last_seq: every skipped seq
         // is a lost frame — a defect, not a latency number. A seq at or
         // below vuLastSeq is replay overlap — already accounted, ignored.
@@ -1004,7 +1066,7 @@ export default function () {
     // reconnects into waves, which is what makes it a storm rather than
     // smeared churn. Skipped when it would leave too short a resumed window.
     if (IS_OPERATIONAL && !vuStormDone) {
-      const fireAt = Math.ceil((openAt + HOLD_MS - STORM_AT * 1000) / 60000) * 60000;
+      const fireAt = stormFireAt(openAt + HOLD_MS);
       const inMs = fireAt - openAt;
       if (inMs > 30000) {
         socket.setTimeout(function () {
@@ -1048,18 +1110,19 @@ export default function () {
       }
       const id = `${vuId}-${msgCount}-${Date.now()}`;
       pendingSends[id] = Date.now();
+      // Built once: two Date.now() reads could straddle a millisecond, and the
+      // drain-send accounting matches the SENT content against channel history
+      // by string — a one-ms difference would publish a false sends_lost.
+      // t= and v= are read back by every other connection; see sentAt.
+      const content = `Load test message ${vuId}-${msgCount} t=${Date.now()} v=${vuId}`;
       if (IS_RESTART && restartReceivedAt) {
-        drainPending[id] = `Load test message ${vuId}-${msgCount} t=${Date.now()} v=${vuId}`;
+        drainPending[id] = content;
       }
       socket.send(
         JSON.stringify({
           type: "chat_send",
           id: id,
-          payload: {
-            channel_id: CHANNEL_ID,
-            // t= and v= are read back by every other connection; see sentAt.
-            content: `Load test message ${vuId}-${msgCount} t=${Date.now()} v=${vuId}`,
-          },
+          payload: { channel_id: CHANNEL_ID, content: content },
         }),
       );
       wsMessages.add(1);
@@ -1119,12 +1182,27 @@ export default function () {
 let obsStart = 0;
 let obsPrev = null;
 
-function obsPhase(elapsedMs) {
-  const t = elapsedMs / 1000;
+// The four windows, in priority order:
+//   ramp    — run start to the end of the ramp (K6_RAMP);
+//   storm   — the quantized wave: from the fire boundary of a VU that opened
+//             at run start to that of one that opened at the end of the ramp,
+//             plus 30 s for the reconnects to land. Derived from the same
+//             stormFireAt() the VU timers use, so it cannot drift off them;
+//   upload  — the uploads scenario's start (K6_RAMP + 60 s) to the end of the
+//             run: the uploads VUs keep uploading until the run drains, so
+//             booking only the first 30 s would leave most of the pressure
+//             tagged `sustain`;
+//   sustain — the peak before either of those.
+function obsPhase(nowMs) {
+  const t = (nowMs - obsStart) / 1000;
   if (t < RAMP_S) return "ramp";
-  // The storm window: nominal RAMP+STORM_AT, wide enough to hold the
-  // quantized wave(s) on either side of it. Priority over upload/sustain.
-  if (t >= STORM_NOMINAL_S - 30 && t <= STORM_NOMINAL_S + 90) return "storm";
+  if (
+    IS_OPERATIONAL &&
+    nowMs >= stormFireAt(obsStart + HOLD_MS) &&
+    nowMs <= stormFireAt(obsStart + RAMP_S * 1000 + HOLD_MS) + 30000
+  ) {
+    return "storm";
+  }
   if (t >= UPLOADS_START_S) return "upload";
   return "sustain";
 }
@@ -1164,7 +1242,7 @@ export function observerScenario() {
     obsDbReaderWaitSeconds.add(d("db_reader_wait_seconds"), stepTag);
     obsConnRejects.add(d("ws_conn_rejects"), stepTag);
   } else {
-    const phase = obsPhase(Date.now() - obsStart);
+    const phase = obsPhase(Date.now());
     obsDbWriterWaitCount.add(d("db_writer_wait_count"), { phase });
     obsDbWriterWaitSeconds.add(d("db_writer_wait_seconds"), { phase });
     obsDbReaderWaitCount.add(d("db_reader_wait_count"), { phase });
@@ -1193,9 +1271,9 @@ export function observerScenario() {
 // K6_UPLOAD_BYTES file every UPLOAD_INTERVAL_S (6/min, inside the 10/min
 // limit, docs/api.md:1965) with OWNCORD_UPLOAD_USER_QUOTA_MB=1 on the server,
 // so each user's quota crosses inside the run: four admits, then refusals.
-// It shares the loadtest<i> accounts with the WebSocket VUs — a user may hold
-// several sessions at once, and only this scenario uploads, so the per-user
-// quota cycles cleanly. It runs concurrently with the WebSocket sustain: the
+// Its VU ids are handed out above the WebSocket scenario's (k6 numbers VUs
+// test-wide), so it uses loadtest accounts the WebSocket VUs never touch and
+// the per-user quota cycles cleanly. It runs concurrently with the WebSocket sustain: the
 // point is the interaction (the writer charging quotas while the
 // recipient-delivery trend is measured).
 //

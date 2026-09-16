@@ -246,7 +246,7 @@ connection closes its socket and reconnects at once, carrying
   the `ws_replay_source{buffer,db,none}` split, and `ws_replay_gap` — the `seq`
   values between a connection's stored `last_seq` and the first live frame after
   `auth_ok` that were never delivered.
-- **Gated on** `ws_replay_gap: max==0` and `ws_replay_source_none: count==0`. A
+- **Gated on** `ws_replay_gap: max==0` and `ws_replay_source{tier:none}: count==0`. A
   replay with holes is a defect rather than a latency figure, and a storm that
   fell through to a full re-sync measured the wrong tier.
 - **No latency budget.** A storm has none published here, and this document does
@@ -258,9 +258,12 @@ connection closes its socket and reconnects at once, carrying
 
 An observer VU polls `/api/v1/metrics` every 5 s for the whole run, recording
 the writer pair (`db_writer_wait_count`, `db_writer_wait_seconds`) and the reader
-pair (`db_reader_wait_count`, `db_reader_wait_seconds`) as gauges tagged
-`phase=<sustain|storm|churn|upload>`, alongside the reconnect tier split,
-backpressure, connection rejects and upload storage.
+pair (`db_reader_wait_count`, `db_reader_wait_seconds`) as k6 **Counters** —
+each sample is the delta since the previous poll, so the counter's total over a
+window _is_ that window's delta — tagged `phase=<ramp|sustain|storm|upload>`,
+alongside the reconnect tier split, backpressure and connection rejects.
+Upload storage (`obs_upload_storage_used_mb`) is the one Gauge: it is a level,
+not a delta.
 
 **The published figure is the per-phase delta, not the run total.** The total is
 what the section above already had; the delta is what says which scenario the
@@ -342,8 +345,9 @@ TLS delta rather than a configuration delta.
 ### Graceful shutdown under load
 
 The **workflow**, not k6, sends the stop: it waits until the connections are up
-and sending, `docker stop --time=30`s the container, records the server's exit
-code and the drain wall clock, then starts the same container again — same
+and sending, `docker stop --time=90`s the container (a grace past the 30 s
+budget, so an overrun is measured rather than SIGKILLed), records the server's
+exit code and the drain wall clock, then starts the same container again — same
 cgroup, same flags, same data directory, so the second boot is the same server
 and not a lookalike.
 
@@ -386,10 +390,11 @@ K6_RAMP=60s K6_SUSTAIN=180s \
   taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
 ```
 
-k6 does not read the ambient environment on Windows, so `K6_PROFILE=… k6` there
-silently measures the default profile. Use k6's own flag (`k6 -e
-K6_PROFILE=operational`) when reproducing on Windows; the prefix form above
-works on Linux, which is where these runs are made.
+The `VAR=value command` prefix above is POSIX shell syntax; neither PowerShell
+nor cmd understands it, so on Windows that line runs k6 with no knobs set and
+silently measures the default profile. Pass them with k6's own flag instead
+(`k6 run -e K6_PROFILE=operational …`), which works everywhere. These runs are
+made on Linux, which is where the form above applies.
 
 ## Measured
 

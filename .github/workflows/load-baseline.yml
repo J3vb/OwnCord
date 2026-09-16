@@ -113,7 +113,14 @@ jobs:
   baseline:
     name: ${{ inputs.profile }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 min covers every profile whose k6 run is ~4.5 min (60 s ramp + 180 s
+    # sustain + 20 s drain) on top of the build, boot and seeding. The ceiling
+    # search is the outlier at both ends: its schedule is 5 steps x (30 s ramp
+    # + 60 s hold) + 20 s drain ~= 8 min, and it seeds `ceiling_max` users at
+    # bcrypt cost 12 on two cores (~0.5 s each, ~4 min at the 500 default)
+    # before any of it starts — so it gets the headroom the plan's risk row
+    # promised rather than a timeout in the middle of a probe.
+    timeout-minutes: ${{ inputs.profile == 'ceiling-search' && 75 || 45 }}
     # Per-run parameters, so the profile logic is one derive step rather than
     # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
     # `matrix` is not an available context in the workflow-level `env:` block.
@@ -493,8 +500,10 @@ jobs:
           ) >"$WORK/cpu.stat.log" 2>&1 &
           sample_pid=$!
 
+          # The lk cohort is capacity's alone; VOICE_LEG also covers the
+          # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
-          if [ "$VOICE_LEG" = "1" ]; then
+          if [ "$PROFILE" = "capacity" ]; then
             PUBLISHERS="${{ inputs.voice }}" SUBSCRIBERS="${{ inputs.voice }}" \
             DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
             LIVEKIT_URL=http://127.0.0.1:7880 \
@@ -508,7 +517,10 @@ jobs:
             (
               sleep "$RESTART_AT"
               start=$(date +%s%N)
-              docker stop --time=30 owncord-sut
+              # Grace well past the 30 s shutdownBudget, so an over-budget
+              # drain is measured by the assertion below rather than cut
+              # short by docker's SIGKILL (rc 137, drain_ms pinned at 30 s).
+              docker stop --time=90 owncord-sut
               rc=$(docker wait owncord-sut)
               drain_ms=$((($(date +%s%N) - start) / 1000000))
               {
