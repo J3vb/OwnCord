@@ -56,9 +56,9 @@ design would assume, and the plan is built on the correction.
 | Every file that calls the handle is in the inventory                      | **Refuted**   | `ws/hub_events.go:173,213` (`h.db.DeleteEventsForMessages`, `h.db.DeleteEventsForUser`) and `ws/moderation_queue.go:88,111` (`h.db.GetReport`, `h.db.GetAppeal`) import no `db` (`hub_events.go:3-13`) and have no row. Both are invisible to both gates today                                                                                                                                                      |
 | `adapter` means "no persistence call" and that is enforced                | **Refuted**   | The definition is at `db_import_boundary.go:25-26`; nothing compares the measured calls column to the disposition. Live run: `ws/serve_ready.go` is `adapter` with `MessageDeliveryFloorMS` (`serve_ready.go:422`, `h.db.MessageDeliveryFloorMS()`)                                                                                                                                                                 |
 | `adapter` rows reach the handle only through their named seam             | **Refuted**   | `ws/hub_visibility.go:400` passes `h.db` to `computeAllowedChannels(ctx, database VisibilityReader, …)` (`:474`) while the same function read the user through `h.readers.Visibility` three lines earlier (`:397`); `ws/deps.go:224` passes `h.db` to `subjectFor(ctx, database DispatchReader, …)` (`:205`). Same handle, bare instead of narrowed — the row's own note (`db_import_boundary.go:96,106`) says seam |
-| `service/` makes no raw handle use                                        | **Confirmed** | grep of `service/` for `SQLDb`, `SQLReaderDb`, `*sql.DB`, `*sql.Tx`, `BeginTx`, `dbgen.`, `"database/sql"`: 0 hits. Services see `service.Store` (`service/datastore.go:11-20`), which `*db.DB` satisfies; `service.New(st Store, …)` (`service/service.go:68`)                                                                                                                                                     |
+| `service/` makes no raw handle use                                        | **Confirmed** | grep of `service/` for `SQLDb`, `SQLReaderDB`, `*sql.DB`, `*sql.Tx`, `BeginTx`, `dbgen.`, `"database/sql"`: 0 hits. Services see `service.Store` (`service/datastore.go:11-20`), which `*db.DB` satisfies; `service.New(st Store, …)` (`service/service.go:68`)                                                                                                                                                     |
 | `dbgen` is used outside `db/`                                             | **Refuted**   | 0 production hits outside `Server/db/`. The sqlc layer is fully encapsulated by `db.DB.q` (`db/db.go:43,292`)                                                                                                                                                                                                                                                                                                       |
-| Raw `*sql.DB` / `*sql.Tx` escapes are widespread                          | **Refuted**   | Three files: `admin/handlers_backup.go:269` (`SQLDb().ExecContext` for `wal_checkpoint(TRUNCATE)`), `api/router.go:552` (`SQLDb().Stats()`; `:553` `SQLReaderDb().Stats()` on the B6-10 branch only), `cmd/seed/profile_alpha.go:186` (`BeginTx`) with `*sql.Tx` threaded through eight funcs (`:290,337,407,515,534,611,647,676`) and twelve `tx.Exec` sites. All three are `boundary` rows already                |
+| Raw `*sql.DB` / `*sql.Tx` escapes are widespread                          | **Refuted**   | Three files: `admin/handlers_backup.go:269` (`SQLDb().ExecContext` for `wal_checkpoint(TRUNCATE)`), `api/router.go:552` (`SQLDb().Stats()`; `:553` `SQLReaderDB().Stats()` on the B6-10 branch only), `cmd/seed/profile_alpha.go:186` (`BeginTx`) with `*sql.Tx` threaded through eight funcs (`:290,337,407,515,534,611,647,676`) and twelve `tx.Exec` sites. All three are `boundary` rows already                |
 | `database/sql` imports outside `db/` are all handle use                   | **Corrected** | Four importers; two are not handles: `api/metrics_handler.go:103-104` (`sql.DBStats` values) and `api/plugins_handler.go:185` (`sql.ErrNoRows`). The rule must key on `*sql.DB`/`*sql.Tx`/`*sql.Conn` types and the accessor methods, not on the import                                                                                                                                                             |
 | The `*db.DB` wrapper methods are used outside `db/`                       | **Confirmed** | `cmd/gendocs/main.go:440,470` (`QueryContext`), `cmd/seed/main.go:332`, `cmd/seed/profile_alpha.go:173,253,261` — all `boundary` rows; `db.go:429-457` is the wrapper surface (`QueryRowContext`, `ExecContext`, `QueryContext`, `BeginTx`)                                                                                                                                                                         |
 | B3-8's exit criterion still holds                                         | **Confirmed** | Live `go run ./cmd/dbinventory`: `Dispositions: adapter 42, boundary 20`, `move` 0, 62 rows, 41 type-only, 0 unlisted                                                                                                                                                                                                                                                                                               |
@@ -74,7 +74,7 @@ design would assume, and the plan is built on the correction.
 | A symbol-keyed exact-multiset allowlist already exists to mirror          | **Confirmed** | `authz_chokepoint.go` `AuthzResidueEntry.Calls` — "the exact multiset of raw helper calls the symbol may contain … one with fewer fails TestAuthzResidueAllowIsLive, which compares the multiset exactly". Same shape, keyed by file here because the inventory is per file                                                                                                                                         |
 | Both gates run in CI and locally                                          | **Confirmed** | `ci.yml:165` `go test -tags deadlock -count=1 ./...` (includes `./invariants/`); `ci.yml:174-175` "Run document gates (-count=1)" → `./cmd/dbinventory/`; `run.mjs:106,112`; `Makefile:32`                                                                                                                                                                                                                          |
 | The doc gate's prose regexes survive a changed summary line               | **Refuted**   | `doc_test.go:167` `summaryRe` anchors on `^(\d+) files import …`; `:229-239` pin "down/up from N rows to M", "N of the M rows are type-only, K of them adapter", "Type-only rows (N, of which K are adapter)". Adding no-import rows changes N and the sentence — every pattern must be re-pointed in the same PR or the gate fails, and the test says so on purpose (`:245`)                                       |
-| B6-10 leaves the inventory document consistent                            | **Refuted**   | On `feat/b6-10-operational-measurements`, `db.go:472` adds `SQLReaderDb` and `router.go:553` calls it; the live run's `api/router.go` row reads `PingRead SQLDb SQLReaderDb` while `server-boundaries.md:214` still reads `PingRead SQLDb`. `TestServerBoundariesDocIsCurrent` will fail on that branch until the block is regenerated — B6-10's fix, told to it in Task 0, not made here                           |
+| B6-10 leaves the inventory document consistent                            | **Refuted**   | On `feat/b6-10-operational-measurements`, `db.go:472` adds `SQLReaderDB` and `router.go:553` calls it; the live run's `api/router.go` row reads `PingRead SQLDb SQLReaderDB` while `server-boundaries.md:214` still reads `PingRead SQLDb`. `TestServerBoundariesDocIsCurrent` will fail on that branch until the block is regenerated — B6-10's fix, told to it in Task 0, not made here                           |
 | `.claude/plans/` is tracked and Prettier-gated                            | **Confirmed** | `.gitignore:9-18` whitelist; PRD decision 2026-09-08                                                                                                                                                                                                                                                                                                                                                                |
 
 ### The census
@@ -85,7 +85,7 @@ is the plan's evidence for "handle use, not only imports".
 | Package        | Import rows (live run) | Handle **calls** the inventory sees                                                                                                 | Handle use the inventory does **not** see                                                                                                                                             | Raw `*sql.*`                                                         |
 | -------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `admin`        | 12 (8 type-only)       | `backup_maintenance.go` `BackupToSafe`; `handlers_backup.go` `BackupToSafe×2 Close LogAudit SQLDb`; `update_handlers.go` `LogAudit` | —                                                                                                                                                                                     | `handlers_backup.go:269` `SQLDb().ExecContext(wal_checkpoint)`       |
-| `api`          | 16 (14 type-only)      | `router.go` `PingRead SQLDb` (+`SQLReaderDb` on B6-10)                                                                              | —                                                                                                                                                                                     | `router.go:552-553` `.Stats()` only                                  |
+| `api`          | 16 (14 type-only)      | `router.go` `PingRead SQLDb` (+`SQLReaderDB` on B6-10)                                                                              | —                                                                                                                                                                                     | `router.go:552-553` `.Stats()` only                                  |
 | `auth`         | 2 (2 type-only)        | —                                                                                                                                   | `ratelimit.go:220,285,337` through `LockoutPersister` (seam)                                                                                                                          | —                                                                    |
 | `internal/app` | 7 (3 type-only)        | `database.go` 2; `erasure.go` `Close×2`; `maintenance.go` 6; `persistence.go` 4                                                     | **hand-offs**: `hub.go:40,46,52,56`; `persistence.go:33,41,45`; `plugins.go:23` — eight places the bare handle is passed to another package                                           | —                                                                    |
 | `plugin`       | 1 (type-only)          | —                                                                                                                                   | `host_storage.go:40,48,56`, `registry.go:198,523,541` through `PluginStore` (seam)                                                                                                    | —                                                                    |
@@ -116,7 +116,7 @@ than flagged.
   see `h.db`, so the doc gate — which runs in CI already — is where
   unclassified field access is rejected. The per-file rule takes only what a
   single file can prove: `*sql.Tx`/`*sql.DB`/`*sql.Conn` types, and
-  `SQLDb()`/`SQLReaderDb()`/`BeginTx()` calls, in a file that is not
+  `SQLDb()`/`SQLReaderDB()`/`BeginTx()` calls, in a file that is not
   `boundary`.
 - **`hub_events.go` is a `boundary` row, not a seam conversion.** The
   replay-purge deletes are part of a critical section whose order is the
@@ -133,7 +133,7 @@ than flagged.
 - **The audit's evidence is unknown, so the census is written into the
   document.** The carryover names no file; the reconciliation is only
   checkable if the document says what was counted and how.
-- **B6-10 gets a heads-up, not a fix.** Its `SQLReaderDb` accessor is a new
+- **B6-10 gets a heads-up, not a fix.** Its `SQLReaderDB` accessor is a new
   handle escape (`db.go:468-474`) used at one `boundary` row; the row's pin
   will include it once that branch merges. Regenerating the block is B6-10's
   duty on its own branch.
@@ -185,7 +185,7 @@ replay-purge deletes do not move.
   (+test), `Server/scripts/k6/ws-load.js`, `docs/api.md`,
   `docs/deployment.md` and the PRD; no workflow file; none of this plan's
   files. Leave a note on the B6-10 PR that its `api/router.go` row now reads
-  `PingRead SQLDb SQLReaderDb`, that `TestServerBoundariesDocIsCurrent` is
+  `PingRead SQLDb SQLReaderDB`, that `TestServerBoundariesDocIsCurrent` is
   red on that branch today, and that the block at
   `server-boundaries.md:214` must be regenerated there.
   Record the RED baseline before any code moves: the measured 5 files / 7
@@ -205,7 +205,7 @@ replay-purge deletes do not move.
 
   ```go
   // Calls is the exact multiset of *db.DB method calls the file may make
-  // (method name → count), including the raw accessors SQLDb, SQLReaderDb,
+  // (method name → count), including the raw accessors SQLDb, SQLReaderDB,
   // BeginTx and the ExecContext/QueryContext/QueryRowContext wrappers.
   // adapter and remove rows pin nothing and must measure nothing.
   Calls map[string]int
@@ -228,7 +228,7 @@ replay-purge deletes do not move.
   `checkDBImportBoundary` gains the per-file half, after the import check,
   for any listed file whose disposition is not `boundary` and any unlisted
   file: a `*sql.DB`, `*sql.Tx` or `*sql.Conn` type expression, or a call
-  whose selector is `SQLDb`, `SQLReaderDb` or `BeginTx` on an identifier
+  whose selector is `SQLDb`, `SQLReaderDB` or `BeginTx` on an identifier
   `collectDBVars` resolves, is a violation with sub-id
   `db-handle-owner`. A sub-id, not a new rule: the registry already keys
   allow comments on what the rule emits (`v.Rule`), not on `r.ID`, exactly
@@ -403,7 +403,7 @@ cd Server && go test -tags deadlock -count=1 ./ws/
 cd Server && go test -count=1 -run 'TestHP4_' ./db/
 # the census, independent of the tool (must agree with the tool's row set)
 grep -rn --include='*.go' --exclude='*_test.go' -E '\bh\.db\.[A-Z]' Server/ws   # 0 after Task 2
-grep -rn --include='*.go' --exclude='*_test.go' -E '\.SQLDb\(\)|\.SQLReaderDb\(\)|BeginTx\(|\*sql\.(DB|Tx|Conn)\b' Server | grep -v '^Server/db/'   # boundary files only
+grep -rn --include='*.go' --exclude='*_test.go' -E '\.SQLDb\(\)|\.SQLReaderDB\(\)|BeginTx\(|\*sql\.(DB|Tx|Conn)\b' Server | grep -v '^Server/db/'   # boundary files only
 # docs + everything
 npm run format && npm run check:docs && npm run check:hygiene
 # → ci-check skill
@@ -419,7 +419,7 @@ npm run format && npm run check:docs && npm run check:hygiene
 | The prose regexes are re-pointed to match a sentence that no longer states a count                      | Medium     | Medium | Each pattern keeps a capture per count and the test still fails on zero matches (`doc_test.go:243-247`); the PR shows each regex beside the sentence it pins                   |
 | Hand-off detection over-counts (a `*db.DB` passed to a `db.` package func, e.g. `db.Migrate(database)`) | High       | Low    | Callees in the `db` package itself are excluded from `Hands` — they are the handle's own package, not an owner                                                                 |
 | `parser.ParseFile` without type info misses a handle reached through an interface-typed field           | Medium     | Medium | Declared as the remaining limitation in the document (Task 3); the carriers table lists every interface the handle satisfies, so a new one is a reviewable doc edit            |
-| B6-10 merges first and its `SQLReaderDb` row conflicts with the pinned `api/router.go` multiset         | High       | Low    | Rebase; the pin gains `SQLReaderDb: 1`; the accessor is a `boundary`-only escape either way                                                                                    |
+| B6-10 merges first and its `SQLReaderDB` row conflicts with the pinned `api/router.go` multiset         | High       | Low    | Rebase; the pin gains `SQLReaderDB: 1`; the accessor is a `boundary`-only escape either way                                                                                    |
 | The nil-receiver panic through a seam in bare test hubs                                                 | Medium     | Medium | The `h.db != nil` guards stay; Task 2's gotcha checks test-hub construction before the first seam switch                                                                       |
 | The moderation-queue seam is read as "the hub bypasses moderation confidentiality"                      | Low        | Medium | The seam doc line states the audience path has no actor and the service `Get` is actor-scoped; the broadcast payload is a public id and a state, unchanged                     |
 
@@ -431,7 +431,7 @@ npm run format && npm run check:docs && npm run check:hygiene
 - **Recording the hub lock order in `hub.go`** (B3-5's promise, status
   unknown). B6-14 adds no lock edge; writing the order is a `ws`
   documentation task.
-- **Removing `SQLDb()` / `SQLReaderDb()`.** They serve the backup checkpoint
+- **Removing `SQLDb()` / `SQLReaderDB()`.** They serve the backup checkpoint
   and the metrics pair; both are `boundary`. A typed `Checkpoint()` method on
   `*db.DB` would let the backup handler drop `database/sql` — one row's
   multiset shrinks — but it is not what the carryover asks for.
@@ -467,7 +467,7 @@ the regenerated block in the PR.
       hand-off in an `adapter` row, a drifted multiset — each proven RED with
       a probe and reverted
 - [ ] `db-import-boundary` reports `db-handle-owner` on a `*sql.Tx`/`*sql.DB`
-      type or `SQLDb()`/`SQLReaderDb()`/`BeginTx()` call in a non-`boundary`
+      type or `SQLDb()`/`SQLReaderDB()`/`BeginTx()` call in a non-`boundary`
       file — proven RED with a probe and reverted
 - [ ] `ws/hub_events.go` has a `boundary` row pinning exactly
       `DeleteEventsForMessages: 1, DeleteEventsForUser: 1`; the file is
