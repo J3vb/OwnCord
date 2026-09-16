@@ -6,6 +6,8 @@
 **Complexity**: Large
 **Drafted**: 2026-09-15 at `dev` `96258158`; B6-10 is in flight on `feat/b6-10-operational-measurements` and is not merged. That branch touches `Server/api/metrics_handler.go` (+test), `Server/api/router.go`, `Server/db/db.go`, `Server/scripts/k6/ws-load.js`, `docs/api.md`, `docs/deployment.md` (5 lines after `:738`) and the PRD. The overlap with this plan is `docs/deployment.md` and the PRD; both are resolved by rebasing after B6-10 merges (Task 0)
 
+**Executor rule**: Where this plan proposes a default for an open question, apply that default unless the owner has overridden it in this file. Where a step needs hardware, a human, a network, or a merged PR that is not available to you, do not guess and do not invent a value: mark the row `unverified`, state what was missing in the PR description, and continue with the next step. Never leave a `<placeholder>` in committed text.
+
 ## Summary
 
 B6-8 proved an upgrade and a rollback work when nothing goes wrong. B4's HP-4
@@ -49,7 +51,7 @@ the correction.
 | ---------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | A backup is the database only, taken online                                        | **Confirmed** | `admin/handlers_backup.go:68-115` `VACUUM INTO` then `integrity_check`, partial removed on error (OC-0212). Uploads, `totp.key`, `erasure.key`, `push_vapid.key`, `config.yaml` and `data/erasure/markers.sqlite` are **not** in it (`docs/deployment.md:372,514-515`)                                                                                                                           |
 | Restore is ordered and has a safety copy                                           | **Confirmed** | `handlers_backup.go:188-341`: integrity-check source → audit row → `pre_restore_<ts>.db` (abort if it fails) → broadcast restart → `wal_checkpoint(TRUNCATE)` (`:269`, warn-only) → close → copy → rollback from the safety copy on copy failure → process restart                                                                                                                               |
-| A kill during the restore copy leaves a truncated live file that `db.Open` refuses | **Unknown**   | `data-lifecycle.md:238` claims it. `db/db.go:129` `Open` runs **no** `integrity_check`/`quick_check`; the only integrity check in the tree is `CheckBackupIntegrity` (`admin_queries.go:521-547`). A truncated SQLite file can open and fail only when a page past EOF is read. Drill 5 measures; the doc line is corrected to what is measured                                                  |
+| A kill during the restore copy leaves a truncated live file that `db.Open` refuses | **Unknown**   | `data-lifecycle.md:238` claims it. `db/db.go:129` `Open` runs **no** `integrity_check`/`quick_check`; the only integrity check in the tree is `CheckBackupIntegrity` (`Server/db/admin_queries.go:520-550`). A truncated SQLite file can open and fail only when a page past EOF is read. Drill 5 measures; the doc line is corrected to what is measured                                        |
 | Deletion markers survive a restore and are replayed before anything serves         | **Confirmed** | `db/markers.go:17-29,425` `MarkerStore.ReplayAccounts`; `internal/app/erasure.go:27` `openMarkers` stage after migrations and before the hub; `TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure` (`db/hp4_drills_test.go:197`) — on an in-process copy, **never through the real restore endpoint and a real restart**                                                                 |
 | "Deletion-marker restore" is a restore of a soft-deleted item                      | **Refuted**   | No undelete exists (grep `deletion.marker` in docs/plans: only B4-10's marker file). The roadmap phrase means drill 2 above: restoring a backup that predates a marker, and proving the marker wins                                                                                                                                                                                              |
 | The erasure transaction zeroes freed content and truncates the WAL                 | **Confirmed** | `db/erasure.go:136-143` `PRAGMA secure_delete = ON` on the single writer connection for the transaction; `:164` `PRAGMA wal_checkpoint(TRUNCATE)` after commit                                                                                                                                                                                                                                   |
@@ -98,7 +100,7 @@ the correction.
 | Category                       | Source                                            | Pattern                                                                                                                            |
 | ------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | In-process drill on a snapshot | `Server/db/hp4_drills_test.go:144-360`            | `alphasnap.Copy` → act → assert per data class; the test name is the evidence cited in the doc                                     |
-| Process-level phase            | `Server/cmd/smoke/upgrade.go`, `main.go:118-168`  | `start` / `waitHealthy` / `drain` / `annotate` — every failure carries the server log; phases numbered and printed                 |
+| Process-level phase            | `Server/cmd/smoke/upgrade.go`, `main.go:187-266`  | `start` / `waitHealthy` / `drain` / `annotate` — every failure carries the server log; phases numbered and printed                 |
 | Fixture through the public API | `Server/cmd/smoke/fixture.go`                     | setup wizard → session → upload → backup; one call each, never in a retry loop (rate limits)                                       |
 | Crash image without timing     | `Server/internal/alphasnap/alphasnap_test.go:64`  | copy `db`, `-wal`, `-shm` as files; "a crash" is a byte copy taken while a transaction is open, not a `kill` raced against a clock |
 | Failure-axis table             | `docs/architecture/data-lifecycle.md:145-160`     | A1–A5 per operation; each cell names the test that proves it                                                                       |
@@ -174,6 +176,13 @@ a real restart or a real filesystem is the point.
     `secure_delete` transaction made long by 200 000 planted rows; the seam is
     the honest option and is a test-only hook on `*DB`); open the copy as the
     server would (`Open` → migrations → marker replay); scan.
+    Concretely: add an unexported field `testEraseCommitHook func()` on
+    `*DB` (`Server/db/db.go:56-77`, alongside the other private fields on the
+    `DB` struct). `eraseAccount` (`Server/db/erasure.go:126-171`) calls it,
+    if non-nil, immediately after `eraseAccountTx` commits at
+    `erasure.go:148` and before the `wal_checkpoint(TRUNCATE)` call at
+    `erasure.go:164`. Production never sets it. The test sets it to a func
+    that closes the DB handle and returns, simulating the crash.
 
   The assertions are **the doc's claims, not a wish**: E1 must be 0 in every
   file (`trust-model.md:416` is stated unconditionally). E2–E4 `t.Log` the

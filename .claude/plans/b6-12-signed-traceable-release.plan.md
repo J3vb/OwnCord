@@ -6,6 +6,8 @@
 **Complexity**: Medium
 **Drafted**: 2026-09-15 at `dev` `96258158`; B6-10 (`feat/b6-10-operational-measurements`) and B6-11 (planned) are in flight. Neither touches `release.yml`, `Server/Dockerfile`, `.github/dependabot.yml` or `scripts/check-release-environment.mjs`; B6-11 edits `upgrade-rehearsal.yml`, which this plan only calls. `docs/deployment.md` lines are cited from the B6-10 working tree (dev + 5 lines after `:738`)
 
+**Executor rule**: Where this plan proposes a default for an open question, apply that default unless the owner has overridden it in this file. Where a step needs hardware, a human, a network, or a merged PR that is not available to you, do not guess and do not invent a value: mark the row `unverified`, state what was missing in the PR description, and continue with the next step. Never leave a `<placeholder>` in committed text.
+
 ## Summary
 
 Most of what the roadmap row asks for already exists in some form and is
@@ -278,6 +280,10 @@ next Monday.
      tag commits, resolved 2026-09-15 with
      `gh api repos/actions/<action>/git/ref/tags/<tag>` (both are `commit`
      objects, not annotated tags), pinned like every other `uses:`.
+     Re-resolve both SHAs before merging with
+     `gh api repos/actions/attest-build-provenance/git/ref/tags/<tag>` and
+     `gh api repos/actions/attest-sbom/git/ref/tags/<tag>`; if a SHA moved,
+     use the new one and note it in the PR.
 
   2. `release-server-docker` (`:504-587`): add the same two permissions;
      after the manifest verification step (`:570-587`):
