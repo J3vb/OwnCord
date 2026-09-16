@@ -21,11 +21,14 @@ import (
 // B6-11 drill 9 — byte-level erasure.
 //
 // TestHP4_D1_ErasureLeavesNoClass proves logical absence: every inventory
-// class counts zero once EraseAccount returns. This drill proves the physical
-// claim docs/trust-model.md makes beside it: after an account erasure the
-// erased bytes are gone from the live database file, its -wal and -shm
-// sidecars, the uploads directory, the backup directory and
-// data/erasure/markers.sqlite.
+// class counts zero once EraseAccount returns. This drill measures the physical
+// claim docs/trust-model.md makes beside it — whether the erased bytes are
+// still on disk anywhere in the set that claim names: the database file, its
+// -wal and -shm sidecars, the uploads directory, the backup directory and
+// data/erasure/markers.sqlite. E1 asserts that absence outright, for the shape
+// the claim describes; E2, E3 and E4 measure it across the three recovery
+// shapes where the truncating checkpoint the claim rests on cannot run, which
+// is why the two halves of this drill are split the way they are below.
 //
 // One sentinel string is planted in the subject's rows and in its upload, and
 // every file in that set is then scanned for it with bytes.Count — the check
@@ -44,10 +47,12 @@ import (
 // and E4 (a crash between the commit and the checkpoint) measure the three
 // recovery shapes the claim has never had a row for, and log the full table:
 // every path with its count, PRAGMA freelist_count, and the -wal size. What
-// they assert is what holds whatever the recovery did in between — that the
-// scan read every path it was given, that the uploads, backup and marker files
-// hold nothing, and that no file which was clean when the erasure committed
-// has gained a copy since.
+// they assert is what holds whatever the recovery did in between — that every
+// path which must be on disk was read, that the uploads, backup and marker
+// files hold nothing, and that no file which was clean when the erasure
+// committed has gained a copy since. The per-file byte count stays a
+// measurement in those three: it is the number the milestone reads, not a
+// constant this suite may pin.
 //
 //	go test -count=1 -v -run TestB611_Erasure ./db/
 
@@ -444,25 +449,21 @@ func assertB611Clean(t *testing.T, what, dbPath string, counts map[string]int) {
 	}
 }
 
-// assertB611Scanned fails when the scan did not read a root it was given:
-// every root is a key of the result, a path that is not on disk included, so
-// an all-zero table cannot be a table of paths nobody opened.
-func assertB611Scanned(t *testing.T, dbPath string, roots []string, counts map[string]int) {
-	t.Helper()
-	for _, root := range roots {
-		if _, ok := counts[root]; !ok {
-			t.Errorf("the scan never read %s", b611Display(dbPath, root))
-		}
-	}
-}
-
 // assertB611Readable fails when a path that must exist at this point was not on
-// disk to read at all: the plain half of the completeness check, so a zero can
-// never be a file the drill never opened.
+// disk to read at all: either the scan never read it, or it counted -1 because
+// the file was not there. It is the completeness guard that can fail — a key's
+// mere presence proves nothing, since scanForSentinel writes one for every root
+// it was handed whether or not the file exists — so a zero can never be a file
+// the drill never opened.
 func assertB611Readable(t *testing.T, dbPath string, counts map[string]int, must ...string) {
 	t.Helper()
 	for _, path := range must {
-		if counts[path] < 0 {
+		n, ok := counts[path]
+		if !ok {
+			t.Errorf("the scan never read %s: it is not one of the paths the scan was given", b611Display(dbPath, path))
+			continue
+		}
+		if n < 0 {
 			t.Errorf("%s is not on disk, so the scan read nothing there", b611Display(dbPath, path))
 		}
 	}
@@ -487,15 +488,13 @@ func assertB611NoNewCopy(t *testing.T, refPath, countsPath string, reference, co
 }
 
 // assertB611Settled is what every scenario's last scan must hold whatever the
-// recovery did in between: the scan read every path it was given; the uploads
-// directory, the backup directory and the marker file hold no sentinel bytes
-// (the file half has run, the backup was taken after the erasure, and the
-// marker file names its subject by an HMAC); and no file that was clean when
-// the erasure committed has gained a copy since, which is what makes the
-// erasure stick rather than move.
-func assertB611Settled(t *testing.T, w *b611World, refPath, dbPath string, roots []string, reference, counts map[string]int) {
+// recovery did in between: the uploads directory, the backup directory and the
+// marker file hold no sentinel bytes (the file half has run, the backup was
+// taken after the erasure, and the marker file names its subject by an HMAC);
+// and no file that was clean when the erasure committed has gained a copy
+// since, which is what makes the erasure stick rather than move.
+func assertB611Settled(t *testing.T, w *b611World, refPath, dbPath string, reference, counts map[string]int) {
 	t.Helper()
-	assertB611Scanned(t, dbPath, roots, counts)
 	for _, path := range []string{w.uploads, w.backups, w.markerPath, w.markerPath + "-wal", w.markerPath + "-shm"} {
 		if n := counts[path]; n > 0 {
 			t.Errorf("%s still holds the sentinel %d times", b611Display(dbPath, path), n)
@@ -584,8 +583,8 @@ func b611E1Idle(t *testing.T) {
 	after := w.scan(t)
 	b611LogEraseLogs(t, "E1 (idle)", logs)
 	b611LogScan(t, "E1 after the erasure (idle)", w.db, w.dbPath, after)
-	assertB611Readable(t, w.dbPath, after, w.dbPath, w.uploads, w.backups, w.markerPath)
-	assertB611Settled(t, w, w.dbPath, w.dbPath, w.paths(), before, after)
+	assertB611Readable(t, w.dbPath, after, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
+	assertB611Settled(t, w, w.dbPath, w.dbPath, before, after)
 	assertB611Clean(t, "E1 (idle)", w.dbPath, after)
 }
 
@@ -631,8 +630,8 @@ func b611E2ActiveReader(t *testing.T) {
 	}
 	next := w.scan(t)
 	b611LogScan(t, "E2 scan 3: after the next checkpoint (the writer's autocheckpoint)", w.db, w.dbPath, next)
-	assertB611Readable(t, w.dbPath, next, w.dbPath, w.uploads, w.backups, w.markerPath)
-	assertB611Settled(t, w, w.dbPath, w.dbPath, w.paths(), before, next)
+	assertB611Readable(t, w.dbPath, next, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
+	assertB611Settled(t, w, w.dbPath, w.dbPath, before, next)
 }
 
 // E3 — Failed checkpoint: as E2, but the reader is not released. The database
@@ -675,8 +674,8 @@ func b611E3CheckpointFailed(t *testing.T) {
 	w.backup(t, again)
 	after := w.scan(t)
 	b611LogScan(t, "E3 scan 2: after the last close (checkpoint + WAL delete)", again, w.dbPath, after)
-	assertB611Readable(t, w.dbPath, after, w.dbPath, w.uploads, w.backups, w.markerPath)
-	assertB611Settled(t, w, w.dbPath, w.dbPath, w.paths(), before, after)
+	assertB611Readable(t, w.dbPath, after, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
+	assertB611Settled(t, w, w.dbPath, w.dbPath, before, after)
 }
 
 // E4 — Crash and restart: the erasure commits and the process is gone before
@@ -704,17 +703,8 @@ func b611E4CrashRestart(t *testing.T) {
 		b611CopyFile(t, w.dbPath+"-wal", copyPath+"-wal")
 		b611CopyFile(t, w.dbPath+"-shm", copyPath+"-shm")
 	}
-	var job *ErasureJob
-	logs := b611SilenceLogs(func() {
-		var err error
-		job, err = w.db.EraseAccount(ctx, w.userID, w.token)
-		if err != nil {
-			t.Fatalf("EraseAccount: %v", err)
-		}
-	})
-	if err := w.markers.ConfirmAccount(ctx, w.token); err != nil {
-		t.Fatalf("ConfirmAccount: %v", err)
-	}
+	defer func() { w.db.testEraseCommitHook = nil }()
+	job, logs := w.erase(t)
 
 	copyPaths := b611ScanPaths(copyPath, w.uploads, w.backups, w.markerPath)
 	crashed := scanForSentinel(t, w.sentinel, copyPaths...)
@@ -723,9 +713,11 @@ func b611E4CrashRestart(t *testing.T) {
 	assertB611NoNewCopy(t, w.dbPath, copyPath, before, crashed)
 
 	// Restart on the crash image. The erased account is only in the WAL, so
-	// recovery has to apply it before anything serves: a copy that opens with
-	// the subject still present is the restore case the markers exist for, and
-	// the drill says which of the two it is.
+	// recovery has to apply it before anything serves. This copy must be the
+	// already-durable case rather than the restore case the markers exist for:
+	// the subject is gone from the recovered database and the marker file has
+	// nothing pending, so the replay has no work — and it says so, rather than
+	// leaving "which of the two it is" to the reader.
 	restored := openDrillDB(t, copyPath)
 	if err := Migrate(restored); err != nil {
 		t.Fatalf("Migrate the crash image: %v", err)
@@ -744,6 +736,9 @@ func b611E4CrashRestart(t *testing.T) {
 		t.Fatalf("ReplayAccounts: %v", err)
 	}
 	t.Logf("E4 marker replay after the crash: %+v", report)
+	if report.Erased != 0 {
+		t.Errorf("the marker replay erased %d account(s) after the crash: the crash image had resurrected the subject, so this is the restore case and the erasure was not durable before it", report.Erased)
+	}
 
 	// The file half the next maintenance tick runs (ErasureService.Resume):
 	// the journal's files are still on disk, because the crash landed between
@@ -753,6 +748,6 @@ func b611E4CrashRestart(t *testing.T) {
 
 	after := scanForSentinel(t, w.sentinel, copyPaths...)
 	b611LogScan(t, "E4 scan 2: restarted (Open → migrations → marker replay → resume)", restored, copyPath, after)
-	assertB611Readable(t, copyPath, after, copyPath, w.uploads, w.backups, w.markerPath)
-	assertB611Settled(t, w, copyPath, copyPath, copyPaths, crashed, after)
+	assertB611Readable(t, copyPath, after, copyPath, copyPath+"-wal", w.uploads, w.backups, w.markerPath)
+	assertB611Settled(t, w, copyPath, copyPath, crashed, after)
 }
