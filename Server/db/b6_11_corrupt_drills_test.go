@@ -30,9 +30,11 @@ import (
 //     stops mid-file (sqlite3 -bail, the operator flow in
 //     Server/rollback/README.md) leaves the schema and schema_versions
 //     exactly as they were.
-//   - Drill 5, TestB611_CorruptFilesFailClosed — damaged input fails closed
-//     rather than being served. One subtest per corrupt file; the backup-file
-//     case is the restore handler's own gate and is cited, not repeated.
+//   - Drill 5, TestB611_CorruptFilesFailClosed — three damaged files (a page
+//     flipped in place, the database truncated to half, the marker row's cell
+//     overwritten) each fail closed rather than being served. One subtest per
+//     file; the backup-file case is the restore handler's own gate and is
+//     cited, not repeated.
 //
 // Run with -v to read which step each corrupt file stops at:
 //
@@ -103,18 +105,28 @@ func copySidecar(t *testing.T, src, dst string) {
 // taken while that transaction is still open is the crash image — what the
 // next start finds.
 //
-// The assertion is that the next start finds nothing half-applied: the
-// tracker row is absent, so the forward-only runner applies the migration
-// again, and the schema it reaches is the intact HEAD schema the uninterrupted
-// database had — which a half-applied migration, or a runner skipping an
-// already-present object, could not produce.
+// The assertion is that the next start finds nothing half-applied, and that it
+// ends up where an uninterrupted database ends up. The tracker row is absent,
+// so the forward-only runner must apply the migration again; the migration's
+// objects are absent from the crash image (the reversal at the top of the
+// fixture removed them), so reaching the HEAD fingerprint requires the re-apply
+// to have created them, and the tracker row then records it exactly once. What
+// this proves is the re-apply path: the reversal is a genuine inverse, and
+// MigrateFS brings the database from the pre-migration level back to the HEAD
+// schema. The comparison is over sqlite_master's (type, name, sql) text, so it
+// is a schema-object comparison, not a data one.
 //
-// Measured: on this fixture the interrupted statements never leave the pager
-// cache, so the -wal is the same size before and after them (the log line
-// records it) and the crash image is the pre-transaction database. That makes
-// the schema comparison the assertion that would catch either a recovery that
-// kept uncommitted frames or a half-applied migration; the drill does not
-// depend on which of the two the machine would have produced.
+// Measured, and the reason this is a re-apply drill rather than a WAL-recovery
+// one: on this fixture the interrupted statements never reach the -wal, so the
+// crash image is the pre-transaction database. Spilling itself works — with
+// cache_size=1 and cache_spill=1 read back from the pager, a ~2MB uncommitted
+// transaction in the same session took the -wal from 902312 to 3658592 bytes —
+// but the newest migration's two statements dirty too few pages to exceed the
+// pager's minimum cache, and left the -wal at 902312 bytes before and 902312
+// bytes after them. Recovering uncommitted frames from a WAL is therefore
+// untested here; the log line records both sizes, so a platform or a future
+// migration that does spill shows up in the drill's output rather than
+// silently changing what was proven.
 func TestB611_InterruptedMigrationRollsBack(t *testing.T) {
 	ctx := context.Background()
 	database, dbPath := drillCopy(t)
@@ -166,6 +178,8 @@ func TestB611_InterruptedMigrationRollsBack(t *testing.T) {
 
 	crashDir := t.TempDir()
 	crashPath := filepath.Join(crashDir, filepath.Base(dbPath))
+	// -shm is best-effort: Windows refuses the read while a live connection
+	// holds it, which is why the copy is logged and skipped there.
 	for _, sidecar := range []string{"", "-wal", "-shm"} {
 		copySidecar(t, dbPath+sidecar, crashPath+sidecar)
 	}
@@ -183,13 +197,10 @@ func TestB611_InterruptedMigrationRollsBack(t *testing.T) {
 	// Nothing half-applied: no tracker row, and the schema the transaction
 	// was building is not there either.
 	if n := countQ(t, image, `SELECT COUNT(*) FROM schema_versions WHERE version = ?`, migration); n != 0 {
-		t.Errorf("the crash image records %s %d times; the interrupted transaction reached the tracker", migration, n)
+		t.Fatalf("the crash image records %s %d times; the interrupted transaction reached the tracker", migration, n)
 	}
 	if got := schemaFingerprint(t, image); got != preSchema {
-		t.Errorf("the crash image carries a schema the interrupted migration left behind:\n%s", firstSchemaDiff(preSchema, got))
-	}
-	if t.Failed() {
-		t.FailNow()
+		t.Fatalf("the crash image carries a schema the interrupted migration left behind:\n%s", firstSchemaDiff(preSchema, got))
 	}
 
 	// The next start: the forward-only runner re-applies it, once.
@@ -257,6 +268,7 @@ func TestB611_InterruptedRollbackLeavesSchema(t *testing.T) {
 		t.Fatalf("opening the operator's connection: %v", err)
 	}
 	conn.SetMaxOpenConns(1)
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Exec("BEGIN"); err != nil {
 		t.Fatalf("BEGIN: %v", err)
 	}
@@ -278,13 +290,10 @@ func TestB611_InterruptedRollbackLeavesSchema(t *testing.T) {
 
 	// Nothing of the reversal survives the bail.
 	if got := schemaFingerprint(t, database); got != before {
-		t.Errorf("the interrupted reversal changed the schema:\n%s", firstSchemaDiff(before, got))
+		t.Fatalf("the interrupted reversal changed the schema:\n%s", firstSchemaDiff(before, got))
 	}
 	if got := appliedVersions(t, database); !slices.Equal(got, beforeVersions) {
-		t.Errorf("schema_versions after the interrupted reversal holds %d rows, want the %d it held before — a tracker row was cleared without its reversal committing", len(got), len(beforeVersions))
-	}
-	if t.Failed() {
-		t.FailNow()
+		t.Fatalf("schema_versions after the interrupted reversal holds %d rows, want the %d it held before — a tracker row was cleared without its reversal committing", len(got), len(beforeVersions))
 	}
 
 	// The interrupted file was the real reversal of a real migration: run the
@@ -419,8 +428,12 @@ func b611CellStart(t *testing.T, path string, page int) int64 {
 	return pageStart + int64(binary.BigEndian.Uint16(pageBuf[8:10]))
 }
 
-// b611PageOwner names the schema object whose b-tree holds a page, so a
-// drill's log says what the bytes it flipped landed in rather than only where.
+// b611PageOwner names the nearest schema object whose root page is at or before
+// page, so a drill's log says what the bytes it flipped are most likely inside
+// rather than only where. SQLite allocates a b-tree's pages from its root
+// upward, so for a page that is in use this is the object that owns it — but
+// the lookup does not verify that the page is in use, and it is a log line, not
+// something the drill asserts on.
 func b611PageOwner(t *testing.T, path string, page int) string {
 	t.Helper()
 	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(2000)")
