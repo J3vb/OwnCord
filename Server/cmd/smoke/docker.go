@@ -70,6 +70,19 @@ type dockerTarget struct {
 	version string // "old" | "new"
 	running bool
 	runs    int // one container name per launch, so a stale one cannot be reused
+	// tmpfs mounts a size-limited tmpfs at containerData INSTEAD of the named
+	// volume, which is what phase D needs: a filesystem that can be filled to
+	// the wall without filling the runner's own disk, in the deployment shape a
+	// container actually has. A Dockerfile-declared VOLUME is overridden by an
+	// explicit mount, so this is the volume's replacement rather than an
+	// addition to it.
+	tmpfs bool
+	// extraEnv is appended to the container's environment as -e pairs, the
+	// container half of start()'s extraEnv on the process leg: the same
+	// OWNCORD_<SECTION>_<KEY> override channel, so a phase changes a setting
+	// without rewriting the config.yaml that is bind-mounted read-only-in-
+	// practice (see writeMountedConfig).
+	extraEnv []string
 }
 
 // newDockerTarget prepares the volume and the operator-owned config.yaml. The
@@ -184,14 +197,25 @@ func (t *dockerTarget) start(version string) error {
 	// fixture needs and the LiveKit override every launch in this rehearsal
 	// gets. Anything more (a user override, an extra capability) would test a
 	// posture no owner is told to run.
-	if _, err := docker("run", "-d", "--name", t.name,
-		"-v", t.vol+":"+containerData,
+	data := []string{"-v", t.vol + ":" + containerData}
+	if t.tmpfs {
+		// The size and the uid are the tmpfs task 4 mounts for the standalone
+		// leg, expressed as the container's own mount: 24 MiB, owned by the
+		// image's user, so the server can write its database into it.
+		data = []string{"--tmpfs", containerData + ":size=24m,uid=" + strconv.Itoa(containerUser) + ",gid=" + strconv.Itoa(containerUser)}
+	}
+	args := []string{"run", "-d", "--name", t.name}
+	args = append(args, data...)
+	args = append(args,
 		"-v", filepath.ToSlash(t.configPath())+":"+containerConfig,
 		"-p", containerPublish,
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
-		"-e", noLiveKitDownload,
-		image); err != nil {
+		"-e", noLiveKitDownload)
+	for _, kv := range t.extraEnv {
+		args = append(args, "-e", kv)
+	}
+	if _, err := docker(append(args, image)...); err != nil {
 		return err
 	}
 	t.image, t.version, t.running = image, version, true
