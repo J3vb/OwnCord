@@ -261,6 +261,19 @@ server's internals were reorganised behind service boundaries.
   as a headroom check. A voice harness drives 25 publishers and 25 subscribers
   through LiveKit's own load tester and checks the result, rather than trusting
   its exit status.
+- The load baseline gained three operational profiles beside the capacity run:
+  `operational` (reconnect storm, per-phase database-wait deltas, voice
+  join/leave churn, upload admission through the quota, and the same run with
+  TLS off for a cost delta), `restart` (the server is stopped and started under
+  100 connections, with drain time, exit code and lost drain-window sends
+  checked) and `ceiling-search` (connections stepped up to 500 to find where a
+  capacity budget first breaks). `GET /api/v1/metrics` now reports the SQLite
+  reader pool's wait count and seconds beside the writer's.
+- All four of those profiles have now been run on the 2-CPU cgroup and the
+  numbers published in `docs/capacity.md` — including the two budgets they
+  miss, the restart that drained in six seconds losing nothing, and why the
+  connection search stops telling you about the hardware past 100 connections
+  in one channel.
 
 ## v1.2.0-alpha.4
 

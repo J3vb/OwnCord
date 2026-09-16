@@ -738,6 +738,8 @@ endpoint (anti-fingerprinting hardening).
   "upload_storage_used_mb": 3072.25,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
+  "db_reader_wait_count": 11,
+  "db_reader_wait_seconds": 0.004,
   "perm_cache_hits": 5120,
   "perm_cache_misses": 84,
   "event_persister": { "persisted": 4021, "dropped": 0, "flushes": 311, "errors": 0 }
@@ -751,6 +753,9 @@ descriptions):
   and sequenced events were lost; alert on any growth.
 - `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
   on SQLite's single write connection; the write path is saturating.
+- `db_reader_wait_seconds` growing → read queries are queueing behind all
+  reader-pool connections (`database.max_readers`); raise it or check for slow
+  reads. (On in-memory databases this pair duplicates the writer's.)
 - `reconnect_tier_full` becoming a noticeable share of reconnects → the replay
   budget is too small for real disconnect gaps.
 - `backpressure_queue_disconnects` growing → clients are being force-cycled

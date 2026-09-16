@@ -465,6 +465,14 @@ func (d *DB) SQLDb() *sql.DB {
 	return d.writer
 }
 
+// SQLReaderDB returns the underlying reader *sql.DB. It exists so
+// /api/v1/metrics can report reader-pool wait stats beside the writer pair —
+// for in-memory databases reader == writer, so the two reports then cover
+// the same pool.
+func (d *DB) SQLReaderDB() *sql.DB {
+	return d.reader
+}
+
 // PingRead answers whether the database can serve reads, via a bounded
 // SELECT 1 on the READER pool. The health endpoint uses it deliberately:
 // pinging the single-connection writer would queue behind any long write —

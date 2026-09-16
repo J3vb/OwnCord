@@ -26,6 +26,7 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			Backpressure:   func() (uint64, uint64, uint64) { return 4, 9, 11 },
 			PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
 			DBStats:        func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
+			DBReaderStats:  func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
 			PermCache:      func() (uint64, uint64) { return 42, 8 },
 		}))
 	return r
@@ -55,6 +56,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
 		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
 		"db_writer_wait_count", "db_writer_wait_seconds",
+		"db_reader_wait_count", "db_reader_wait_seconds",
 		"perm_cache_hits", "perm_cache_misses",
 		"event_persister",
 	}
@@ -82,6 +84,9 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if got := resp["db_writer_wait_seconds"].(float64); got != 1.5 {
 		t.Errorf("db_writer_wait_seconds = %v, want 1.5", got)
+	}
+	if got := resp["db_reader_wait_seconds"].(float64); got != 0.7 {
+		t.Errorf("db_reader_wait_seconds = %v, want 0.7", got)
 	}
 	if int(resp["perm_cache_hits"].(float64)) != 42 {
 		t.Errorf("perm_cache_hits = %v, want 42", resp["perm_cache_hits"])

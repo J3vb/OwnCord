@@ -68,6 +68,12 @@ type ServerMetrics struct {
 	DBWriterWaitCount   int64   `json:"db_writer_wait_count"`
 	DBWriterWaitSeconds float64 `json:"db_writer_wait_seconds"`
 
+	// SQLite reader-pool saturation: time spent queueing for a reader
+	// connection (max_readers per pool). On in-memory databases reader ==
+	// writer, so this duplicates the writer pair there.
+	DBReaderWaitCount   int64   `json:"db_reader_wait_count"`
+	DBReaderWaitSeconds float64 `json:"db_reader_wait_seconds"`
+
 	// Permission cache effectiveness.
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
@@ -95,6 +101,7 @@ type MetricsSources struct {
 	ConnRejects    func() uint64
 	PersisterStats func() (persisted, dropped, flushes, errs uint64, ok bool)
 	DBStats        func() sql.DBStats // writer pool
+	DBReaderStats  func() sql.DBStats // reader pool
 	PermCache      func() (hits, misses uint64)
 	DiskFree       func() (uint64, error)
 	DiskMinFree    uint64
@@ -153,6 +160,11 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 			st := src.DBStats()
 			metrics.DBWriterWaitCount = st.WaitCount
 			metrics.DBWriterWaitSeconds = st.WaitDuration.Seconds()
+		}
+		if src.DBReaderStats != nil {
+			st := src.DBReaderStats()
+			metrics.DBReaderWaitCount = st.WaitCount
+			metrics.DBReaderWaitSeconds = st.WaitDuration.Seconds()
 		}
 		if src.PermCache != nil {
 			metrics.PermCacheHits, metrics.PermCacheMisses = src.PermCache()
