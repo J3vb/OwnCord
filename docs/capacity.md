@@ -207,6 +207,181 @@ assertions offline, with no SFU and no `lk` binary.
 - **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
   recorded and published. `load-baseline.yml` is `workflow_dispatch` only,
   because a perf run on shared runners is a flake source.
+- **The operational profiles below are per-phase, not per-run.** That section's
+  database figures are deltas between phases of one run, so they answer "which
+  scenario did the writer queue behind" and not "how long did the run wait".
+  The run total is the figure this section already publishes.
+
+## Operational measurements
+
+The profile above is a **steady** load: connections that arrive once, hold, and
+send. These seven measurements are what an operator meets afterwards — a storm
+of reconnects, a writer under load, a restart during an update, a quota that
+fills, TLS turned off. They use the same cgroup, the same generators and the
+same rule as the profile: **the scenarios and their commands are published
+before the first qualifying run**, and a figure comes from the constrained leg
+or is not published at all.
+
+They are selected by `K6_PROFILE`, and `capacity` remains the default.
+
+```
+gh workflow run load-baseline.yml -f profile=operational    --ref <branch>
+gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # with tls off, second leg
+gh workflow run load-baseline.yml -f profile=restart        --ref <branch>
+gh workflow run load-baseline.yml -f profile=ceiling-search -f ceiling_max=500 --ref <branch>
+```
+
+**None of them introduces a latency budget.** A scenario either applies a budget
+this document already publishes, or publishes its number as what it is with no
+budget attached — stated in its own subsection rather than left to inference.
+That is the whole of the rule: a new target would need a PRD, and measuring is
+not tuning.
+
+### Reconnect storm
+
+At `K6_STORM_AT` (default 120 s before each connection's own hold ends) every
+connection closes its socket and reconnects at once, carrying
+`auth {last_seq, active_channel_id}`.
+
+- **Measures** `ws_resume_time` (socket open → `auth_ok` with `last_seq > 0`),
+  the `ws_replay_source{buffer,db,none}` split, and `ws_replay_gap` — the `seq`
+  values between a connection's stored `last_seq` and the first live frame after
+  `auth_ok` that were never delivered.
+- **Gated on** `ws_replay_gap: max==0` and `ws_replay_source_none: count==0`. A
+  replay with holes is a defect rather than a latency figure, and a storm that
+  fell through to a full re-sync measured the wrong tier.
+- **No latency budget.** A storm has none published here, and this document does
+  not invent one for it.
+- **Not `BenchmarkReconnectStorm`.** That is a Go microbenchmark with no sockets
+  and no server; it shares a name with this scenario and nothing else.
+
+### Database waits
+
+An observer VU polls `/api/v1/metrics` every 5 s for the whole run, recording
+the writer pair (`db_writer_wait_count`, `db_writer_wait_seconds`) and the reader
+pair (`db_reader_wait_count`, `db_reader_wait_seconds`) as gauges tagged
+`phase=<sustain|storm|churn|upload>`, alongside the reconnect tier split,
+backpressure, connection rejects and upload storage.
+
+**The published figure is the per-phase delta, not the run total.** The total is
+what the section above already had; the delta is what says which scenario the
+writer queued behind.
+
+**The reader pool was not surfaced before this, and now is.** The audit
+carryover asked for pool wait deltas, and `/api/v1/metrics` reported only the
+writer's `Stats()`. OwnCord runs one writer and a separate reader pool, so both
+are reported side by side — "the reader never waited" is a claim a document can
+only make after looking.
+
+### Message fan-out, to the ceiling
+
+`ceiling-search` steps connections by `K6_CEILING_STEP` (default 100) up to
+`K6_CEILING_MAX` (default 500), holding each step 60 s at the capacity profile's
+send rate. Every trend is tagged `step=<n>`, so the summary carries a per-step
+p95/p99 for recipient delivery, sender acknowledgement and login.
+
+- **Publishes** the last step at which every budget above still held, plus the
+  per-step table. The steps are informational and nothing is gated on them.
+- **Gated on** `obs_ws_conn_rejects: count==0`. The workflow caps connections at
+  twice the probe maximum for exactly this assertion: without it, a "ceiling"
+  could be a configuration default rather than the hardware's.
+- **A generator-limited step is marked, not published as a ceiling.** k6 shares
+  a four-CPU runner with the server; the sampler records the generator's load
+  average and the container's `cpu.stat` per step, and where the generator
+  saturates first the document says so.
+- **If every step holds at `K6_CEILING_MAX`, the answer is "above 500"** and the
+  search stops there. It is not chased further on a shared runner.
+
+### Voice control churn
+
+The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
+(default 10 000) each leaves and rejoins. The voice-join budget above is
+therefore applied under churn rather than under a single join, and a new
+`voice_state_delivery_ms` measures a `voice_state` broadcast reaching a
+_different_ connection.
+
+- **Budget**: the voice-join row above. `voice_state_delivery_ms` has none.
+- **Still not a WebRTC measurement.** k6 speaks OwnCord's control plane only;
+  the media path remains `lk load-test`'s, as the profile's caveats say.
+
+### Upload and download pressure
+
+An HTTP scenario runs alongside the WebSocket sustain: connections upload one
+`K6_UPLOAD_BYTES` file (default 256 KiB) at a time, against a server running a
+1 MB per-user quota so that the quota bound is reachable inside the upload rate
+limit. Downloads cover `GET /api/v1/files/{id}` of a file the caller admitted,
+with a `Range` header on one request in four.
+
+- **Measures both sides of the bound** — admission and refusal. A refusal path
+  that was never exercised is a path with no evidence behind it, and the quota
+  is the one that users actually hit.
+- **Gated on** `upload_low_disk: count==0` and `upload_oversize: count==0`. A
+  507 `STORAGE_LOW_DISK` means the runner's disk is filling rather than the
+  server refusing, and an oversize rejection is a 400 here — so a non-zero count
+  on either means the scenario is wrong, not that the server behaved.
+- **The quota is 1 MB to be crossed, not to be recommended.** The shipped
+  default is untouched; this is a measurement setting, like the auth rate-limit
+  multiplier above.
+
+### TLS overhead
+
+The operational profile runs twice on the constrained leg, identical except for
+`tls.mode`: `self_signed`, and `off` with both URLs flipped to the plaintext
+scheme. Nothing else in the job differs, which is what makes the difference a
+TLS delta rather than a configuration delta.
+
+- **Publishes a delta per budget row**, `self_signed − off`, and nothing else.
+  The delta is the measurement; neither leg is a new budget.
+- **`tls: off` is measured and never shipped.** It exists to isolate what the
+  handshake costs on this profile. No figure here recommends running without
+  TLS, and the default remains `self_signed`.
+
+### Graceful shutdown under load
+
+The **workflow**, not k6, sends the stop: it waits until the connections are up
+and sending, `docker stop --time=30`s the container, records the server's exit
+code and the drain wall clock, then starts the same container again — same
+cgroup, same flags, same data directory, so the second boot is the same server
+and not a lookalike.
+
+- **Measures** the restart frame reaching every connection and the lead from
+  frame arrival to the socket actually closing; the resume time after the second
+  boot; the sends attempted during the drain; and the sends lost.
+- **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
+count==0`, and no replay gap across the restart. A message that was sent,
+  never acknowledged and appears in no replay is a **lost message** — a defect
+  recorded in the findings ledger and published as "lost N of M" until it is
+  fixed, not a number to round.
+- **Post-restart resume is always the `none` tier, by design.** A restart
+  renumbers the sequence space and marks visibility changed, so a connection
+  that resumes after one cannot be served from the `events` table and the server
+  says so rather than replaying a gap. The tier split above is therefore
+  measured on the storm, where the tiers are reachable.
+- **The 20 s figure above is not this gate.** That is the idle smoke's drain;
+  this drill's hard bound is the 30 s stop timeout, after which the container is
+  killed and the run fails.
+
+### Reproducing an operational scenario by hand
+
+```bash
+# server, with the profile's extra knobs; the boot itself is unchanged
+docker run -d --name owncord-sut ... \
+  -e OWNCORD_TLS_MODE=self_signed \
+  -e OWNCORD_UPLOAD_USER_QUOTA_MB=1 \
+  debian:bookworm-slim /app/chatserver
+
+cd Server/scripts/k6 && mkdir -p reports
+K6_PROFILE=operational K6_WS_URL=wss://127.0.0.1:8443/api/v1/ws \
+K6_HTTP_URL=https://127.0.0.1:8443 K6_CHANNEL_ID="$CHANNEL_ID" \
+K6_VOICE_CHANNEL_ID="$VOICE_ID" K6_PEAK_VUS=100 K6_VOICE_VUS=25 \
+K6_RAMP=60s K6_SUSTAIN=180s \
+  taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
+```
+
+k6 does not read the ambient environment on Windows, so `K6_PROFILE=… k6` there
+silently measures the default profile. Use k6's own flag (`k6 -e
+K6_PROFILE=operational`) when reproducing on Windows; the prefix form above
+works on Linux, which is where these runs are made.
 
 ## Measured
 
@@ -275,7 +450,7 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
   60 ms, p99 83 ms vs 85 ms). Two CPUs and 4 GB are not saturated by 100
   connections and 25 voice participants, so the profile is met with room rather
   than met at the edge. It follows that these figures say little about where the
-  real ceiling is; finding that is B6-10's job, not this document's.
+  real ceiling is; locating it is the `ceiling-search` profile's job, below.
 - **The budgets were tightened, not met-and-left.** Every initial budget was
   between 3× and 1000× the measured figure, which would have let a large
   regression land without failing anything.
@@ -283,3 +458,35 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
   during development reported 150/625 tracks at 0% loss and exit status 0 under
   `lk load-test`'s default layout. Every figure above comes from a run that
   asserted the track total.
+
+### The operational profiles
+
+The four runs named in [Operational measurements](#operational-measurements)
+have not been made yet. Their blocks are here, empty, because the scenarios and
+the shape of the record were published first — the same ordering the top of this
+document describes. Each is filled from its own constrained leg only, and the
+`tls off` row is published as a delta against the `self_signed` one, never on
+its own.
+
+```
+commit:          pending
+date (UTC):      pending
+workflow run:    pending
+runner:          ubuntu-latest, 4 CPU / 16 GB host (declared, not measured)
+cgroup as seen from inside the container:  (declared by the docker run above)
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+That shape is one block per run: `operational` on `self_signed`, `operational`
+on `tls: off`, `restart`, and `ceiling-search`. The runner and cgroup lines are
+declared rather than observed there — they come from the recipe above and from
+the workflow's own `limits.txt`, which records what the container reported; a
+run whose `limits.txt` disagrees with the declaration is a finding about the
+measurement, not a number for this document.
