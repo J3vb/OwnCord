@@ -149,6 +149,12 @@ func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string
 	if err != nil {
 		return nil, err
 	}
+	// B6-11 drill 9's crash seam: the transaction has committed and the
+	// checkpoint below has not run, which is the window a test needs to read
+	// the bytes as a crash leaves them. Nil in production.
+	if d.testEraseCommitHook != nil {
+		d.testEraseCommitHook()
+	}
 	// The audit writer's rule for the subject, now that the transaction has
 	// committed and while this connection is still held: an audit entry
 	// about the subject that a flush inserts after the UPDATE above is
