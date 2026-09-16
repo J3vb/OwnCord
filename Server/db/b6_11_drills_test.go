@@ -45,14 +45,20 @@ import (
 //
 // E2 (a reader holds the checkpoint off), E3 (a close that cannot checkpoint)
 // and E4 (a crash between the commit and the checkpoint) measure the three
-// recovery shapes the claim has never had a row for, and log the full table:
-// every path with its count, PRAGMA freelist_count, and the -wal size. What
-// they assert is what holds whatever the recovery did in between — that every
-// path which must be on disk was read, that the uploads, backup and marker
-// files hold nothing, and that no file which was clean when the erasure
-// committed has gained a copy since. The per-file byte count stays a
-// measurement in those three: it is the number the milestone reads, not a
-// constant this suite may pin.
+// recovery shapes the claim has never had a row for, and log the full table at
+// every scan point: every path with its count, PRAGMA freelist_count, and the
+// -wal size. Up to the recovery step they assert only what holds whatever the
+// recovery did in between — that every path which must be on disk was read,
+// that the uploads, backup and marker files hold nothing, and that no file
+// which was clean when the erasure committed has gained a copy since — because
+// the per-file count before the recovery is the number the milestone reads,
+// not a constant this suite may pin.
+//
+// Each of the three ends with the recovery itself (B6-11 task 5), and there
+// the count stops being a measurement and becomes the claim: E2 the runner
+// tick's retry, E3 the start-up pass over an already-truncated log, E4 the
+// start-up pass over the crash image. Zero bytes in every file of the set,
+// asserted — the row this drill was written to fill.
 //
 //	go test -count=1 -v -run TestB611_Erasure ./db/
 
@@ -591,9 +597,10 @@ func b611E1Idle(t *testing.T) {
 // E2 — Active reader: a read transaction is open on the reader pool before the
 // erasure runs, so the checkpoint behind the commit cannot complete and the
 // WAL keeps every frame the transaction wrote — and every older frame of the
-// pages it rewrote. The three counts are the row the claim has never had: while
-// the reader is held, after it commits, and after the checkpoint SQLite runs by
-// itself, which is the "next one" erasure.go's log line promises.
+// pages it rewrote. Four counts: while the reader is held, after it commits,
+// after the checkpoint SQLite runs by itself, and after the retry the runner
+// tick makes (B6-11 task 5) — the count that is finally clean, and the row the
+// claim has never had.
 func b611E2ActiveReader(t *testing.T) {
 	w := newB611World(t)
 	ctx := context.Background()
@@ -631,7 +638,26 @@ func b611E2ActiveReader(t *testing.T) {
 	next := w.scan(t)
 	b611LogScan(t, "E2 scan 3: after the next checkpoint (the writer's autocheckpoint)", w.db, w.dbPath, next)
 	assertB611Readable(t, w.dbPath, next, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
-	assertB611Settled(t, w, w.dbPath, w.dbPath, before, next)
+
+	// Scan 3 is the measurement the claim's sentence is about, and it is still
+	// dirty: an autocheckpoint is PASSIVE — it copies frames into the main file
+	// and never truncates the log — so the erased bytes are still in the -wal
+	// and the file is still full length. That is exactly the state B6-11 task 5
+	// is for, and the recovery it adds is the runner tick's retry below.
+	truncated, err := w.db.FinishOwedErasureCheckpoint(ctx)
+	if err != nil {
+		t.Fatalf("FinishOwedErasureCheckpoint: %v", err)
+	}
+	if !truncated {
+		t.Errorf("the tick's retry left the WAL untruncated: the erasure's own checkpoint came back blocked, so a debt was owed and nothing is holding the log now")
+	}
+	ticked := w.scan(t)
+	b611LogScan(t, "E2 scan 4: after the maintenance tick's retry (B6-11 task 5)", w.db, w.dbPath, ticked)
+	assertB611Readable(t, w.dbPath, ticked, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
+	assertB611Settled(t, w, w.dbPath, w.dbPath, before, ticked)
+	// The claim, and only after the recovery: 0 bytes of the sentinel in every
+	// file of the set. The count is no longer a measurement here.
+	assertB611Clean(t, "E2 (a reader held the checkpoint off)", w.dbPath, ticked)
 }
 
 // E3 — Failed checkpoint: as E2, but the reader is not released. The database
@@ -642,6 +668,7 @@ func b611E2ActiveReader(t *testing.T) {
 // checkpoint finally happens.
 func b611E3CheckpointFailed(t *testing.T) {
 	w := newB611World(t)
+	ctx := context.Background()
 	before := w.scan(t)
 	b611LogScan(t, "E3 before the erasure (planted)", w.db, w.dbPath, before)
 	assertB611Planted(t, w, before)
@@ -671,11 +698,27 @@ func b611E3CheckpointFailed(t *testing.T) {
 	reader.end(t, "ROLLBACK")
 
 	again := openDrillDB(t, w.dbPath)
+	// The start-up pass, which a restart runs before anything serves (B6-11
+	// task 5). Here it has nothing to do — the last close truncated and deleted
+	// the log — and that is what this asserts: the pass a crash needs must be
+	// safe and silent on a healthy database, which is what every ordinary boot
+	// hands it.
+	truncated, err := again.CheckpointErasureWAL(ctx)
+	if err != nil {
+		t.Fatalf("the start-up pass refused a healthy database: %v", err)
+	}
+	if !truncated {
+		t.Errorf("the start-up pass reported the WAL untruncated on a database whose last close already deleted it")
+	}
 	w.backup(t, again)
 	after := w.scan(t)
-	b611LogScan(t, "E3 scan 2: after the last close (checkpoint + WAL delete)", again, w.dbPath, after)
+	b611LogScan(t, "E3 scan 2: after the last close (checkpoint + WAL delete) and the start-up pass", again, w.dbPath, after)
 	assertB611Readable(t, w.dbPath, after, w.dbPath, w.dbPath+"-wal", w.uploads, w.backups, w.markerPath)
 	assertB611Settled(t, w, w.dbPath, w.dbPath, before, after)
+	// The claim for this shape: 0 bytes of the sentinel in every file of the
+	// set once the log SQLite could not truncate while the reader held it has
+	// been dropped.
+	assertB611Clean(t, "E3 (a close that could not checkpoint)", w.dbPath, after)
 }
 
 // E4 — Crash and restart: the erasure commits and the process is gone before
@@ -683,8 +726,10 @@ func b611E3CheckpointFailed(t *testing.T) {
 // eraseAccountTx — the three files are copied there, which is the state a
 // process that died in that window leaves on disk — and the copy is then
 // opened the way the server opens a database: Open, migrations, the
-// deletion-marker replay. The file half the next maintenance tick runs follows,
-// because the crash landed between the database half and the files.
+// deletion-marker replay, and the start-up WAL checkpoint (B6-11 task 5), which
+// is the only pass that can finish a checkpoint no process survived to make.
+// The file half the next maintenance tick runs follows, because the crash
+// landed between the database half and the files.
 //
 // The live handle finishes its own checkpoint behind the hook; that is what a
 // restarted process does too, and it touches nothing in the copy the drill
@@ -740,6 +785,20 @@ func b611E4CrashRestart(t *testing.T) {
 		t.Errorf("the marker replay erased %d account(s) after the crash: the crash image had resurrected the subject, so this is the restore case and the erasure was not durable before it", report.Erased)
 	}
 
+	// The start-up pass (B6-11 task 5), which is the whole recovery for this
+	// shape: the flag the erasure set died with the process, so the pass that
+	// finishes the checkpoint is unconditional — and this is the crash image it
+	// exists to truncate. The three files above were copied between the commit
+	// and the checkpoint, so the erased bytes are frames of the -wal and
+	// nothing else will ever drop them: SQLite's autocheckpoint is PASSIVE.
+	truncated, err := restored.CheckpointErasureWAL(ctx)
+	if err != nil {
+		t.Fatalf("CheckpointErasureWAL on the crash image: %v", err)
+	}
+	if !truncated {
+		t.Errorf("the start-up pass left the crash image's WAL untruncated: no reader holds it and the pass is the only thing that would")
+	}
+
 	// The file half the next maintenance tick runs (ErasureService.Resume):
 	// the journal's files are still on disk, because the crash landed between
 	// the two halves.
@@ -747,7 +806,10 @@ func b611E4CrashRestart(t *testing.T) {
 	w.backup(t, restored)
 
 	after := scanForSentinel(t, w.sentinel, copyPaths...)
-	b611LogScan(t, "E4 scan 2: restarted (Open → migrations → marker replay → resume)", restored, copyPath, after)
+	b611LogScan(t, "E4 scan 2: restarted (Open → migrations → marker replay → start-up pass → resume)", restored, copyPath, after)
 	assertB611Readable(t, copyPath, after, copyPath, copyPath+"-wal", w.uploads, w.backups, w.markerPath)
 	assertB611Settled(t, w, copyPath, copyPath, crashed, after)
+	// The claim for this shape: 0 bytes of the sentinel in every file of the
+	// set once the restart has run the checkpoint the crash interrupted.
+	assertB611Clean(t, "E4 (a crash between the commit and the checkpoint)", copyPath, after)
 }

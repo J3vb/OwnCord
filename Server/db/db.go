@@ -77,6 +77,20 @@ type DB struct {
 	// landing the recipient open. Nil in production, no exported setter.
 	afterDMParticipantsInsertHook func() error
 
+	// checkpointOwed records that an erasure's wal_checkpoint(TRUNCATE) came
+	// back blocked or partial, so frames holding erased bytes are still in the
+	// -wal and a retry is needed. Process-local on purpose: a crash loses it,
+	// which is why the start-up pass (CheckpointErasureWAL) runs
+	// unconditionally rather than on this flag.
+	//
+	// ponytail: process-local flag; persist in erasure_jobs if a tick ever
+	// needs to survive a crash before the startup pass runs
+	checkpointOwed atomic.Bool
+
+	// checkpointAttempts counts the retries the flag has driven, for the log
+	// line an operator reads when a checkpoint stays blocked.
+	checkpointAttempts atomic.Int64
+
 	// testEraseCommitHook is a test seam (B6-11 drill 9): called by
 	// eraseAccount once eraseAccountTx has committed and before the
 	// wal_checkpoint(TRUNCATE) that follows it. It is the window the drill is

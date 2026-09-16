@@ -99,5 +99,24 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	} else if removed > 0 {
 		log.Warn("retention markers replayed", "messages_removed", removed)
 	}
+	// The WAL half of a restart (B6-11 task 5), and it goes after both replays
+	// rather than straight after ReplayAccounts: the replay above writes too,
+	// and its frames carry the same kind of content this pass exists to get out
+	// of the log. An erasure that committed while the process died before its
+	// checkpoint leaves its frames — erased bytes among them — in the -wal, and
+	// nothing downstream would ever truncate that log: SQLite's autocheckpoint
+	// is PASSIVE and leaves the file full. It runs unconditionally because the
+	// flag that would name the debt is process-local and died with the process;
+	// one pragma on a healthy log is the price of covering a crash.
+	//
+	// Best effort: a blocked checkpoint is the maintenance tick's to finish, and
+	// a lost 40 KB file's worth of frames is not a reason to refuse a boot. Both
+	// branches are logged because both mean bytes the operator erased are still
+	// on disk.
+	if truncated, err := database.CheckpointErasureWAL(ctx); err != nil {
+		log.Warn("erasure: the start-up WAL checkpoint failed; the maintenance tick retries", "error", err)
+	} else if !truncated {
+		log.Warn("erasure: the start-up WAL checkpoint is still blocked; the maintenance tick retries")
+	}
 	return markers, nil
 }
