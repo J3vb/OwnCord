@@ -98,6 +98,9 @@ if (!["capacity", "operational", "restart", "ceiling-search"].includes(PROFILE))
 const IS_OPERATIONAL = PROFILE === "operational";
 const IS_RESTART = PROFILE === "restart";
 const IS_CEILING = PROFILE === "ceiling-search";
+// The B6-10 profiles. A metric registered under this flag must not exist on a
+// capacity run: that summary's metric key set is B6-9's, byte for byte.
+const IS_B6_10 = PROFILE !== "capacity";
 // The observer scenario and its metrics run under operational and
 // ceiling-search — one measures per phase, the other per step.
 const OBS_ON = IS_OPERATIONAL || IS_CEILING;
@@ -160,6 +163,25 @@ const voiceStates = IS_OPERATIONAL ? new Counter("voice_states") : null;
 const uploadAdmits = IS_OPERATIONAL ? new Counter("upload_admits") : null;
 const uploadRefuses = IS_OPERATIONAL ? new Counter("upload_refuses") : null;
 const downloads = IS_OPERATIONAL ? new Counter("downloads") : null;
+
+// The two 429s POST /api/v1/auth/login can answer with, split out so a refusal
+// the server made on purpose is never counted as a WebSocket error.
+//
+// They are different gates and only one is about the server. The per-IP sliding
+// window (api/middleware.go:251) sets Retry-After and fires because every
+// generator shares one address — an artifact of this topology, which is what
+// OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER is for. The process-wide bcrypt
+// admission budget (auth/admission.go:60) sets no Retry-After and is sized
+// max(2*NumCPU, 4), i.e. 4 concurrent compares on the constrained leg — a real
+// operational signal, and the one that binds a simultaneous login burst.
+//
+// Neither is a defect: both refuse before any bcrypt runs and charge no lockout
+// attempt. Both cost the VU its token, so both have to be visible.
+const authRateLimited = IS_B6_10 ? new Counter("auth_rate_limited") : null;
+const authAdmissionRefused = IS_B6_10 ? new Counter("auth_admission_refused") : null;
+// A VU that never obtained a token never connects, and a run full of those
+// still reports green. This counter is the gate that says so.
+const loginGiveUps = IS_B6_10 ? new Counter("login_giveups") : null;
 
 // Restart-drill metrics (K6_PROFILE=restart). The frame is the sequenced
 // server_restart broadcast (protocol.md:1815-1826, reason + delay_seconds);
@@ -353,6 +375,15 @@ export const options = {
     ws_authed: ["count>0"],
     ws_ready: ["count>0"],
     ws_deliveries: ["count>0"],
+    // ...and a run where the VUs that logged in did so is not enough on its
+    // own. Under a simultaneous login burst the admission budget refuses most
+    // of it (4 concurrent bcrypts on the constrained leg), and a VU that gives
+    // up never connects — so the percentiles get computed over whoever made it
+    // through, and the run is green while measuring the wrong population. This
+    // is the gate that was missing when a ceiling run reported 173 sockets
+    // against a vus_max of 501 and passed. Refusals are expected and are not
+    // gated; a give-up means the measurement is incomplete.
+    ...(IS_B6_10 ? { login_giveups: ["count==0"] } : {}),
     // Voice thresholds only exist when the voice leg does: a `count>0` on a
     // deliberately-disabled leg would fail every non-voice run, while a bare
     // p95 over zero samples would pass a run where voice was silently off.
@@ -456,7 +487,11 @@ function ceilingStepThresholds() {
     "ws_broadcast_latency_ms",
     "ws_delivery_latency_ms",
   ];
-  const counters = ["obs_db_writer_wait_count", "obs_db_writer_wait_seconds"];
+  // ws_connections belongs here for the same reason as the writer-wait pair:
+  // it is the evidence that the step held the connections it claims to have
+  // probed. A step whose connections fell short of its label is generator-
+  // limited, and the table has to be able to say so.
+  const counters = ["obs_db_writer_wait_count", "obs_db_writer_wait_seconds", "ws_connections"];
   const out = {};
   for (const v of CEILING_STEPS) {
     for (const t of trends) out[`${t}{step:${v}}`] = ["p(95)>=0"];
@@ -493,23 +528,72 @@ function sentBy(content) {
   return v ? parseInt(v[1]) : 0;
 }
 
-// Login and get session token
+// How many times authenticate() will re-attempt one login before giving up,
+// and so the ceiling on how long a VU can spend getting a token. Sized against
+// the constrained leg's admission budget (4 concurrent bcrypts at cost 12 ≈ 16
+// admissions/s), not against the budget itself — the budget is the server's
+// and does not move for a test. Twelve attempts with the backoff below span
+// ~45 s.
+const LOGIN_ATTEMPTS = 12;
+
+// Login and get session token.
+//
+// The retry lives here rather than in the callers, because there are two of
+// them (the WebSocket loop and the uploads scenario) and a refusal has to be
+// handled identically in both. This is the bug that invalidated B6-10's first
+// three runs: an unbounded `sleep(1); return` at a call site means ONE
+// transient 429 converts that VU into a permanent ~1/s login-hammering loop,
+// and the loop is self-sustaining — every retry is refused because every other
+// stuck VU is retrying too — so it never recovers on its own.
+//
+// The artifact counts bear it out. Refusals arrive at a *steady* 24.78/s in the
+// operational run and ~224/s in the ceiling run, which is a stuck population,
+// not a startup burst. In the operational run the WebSocket side was intact
+// (ws_connections and ws_authed both 200 against 100 WS VUs, i.e. every VU
+// connected and the storm reconnected each one) — the refusals came from a
+// minority of the 100 uploads VUs. In the ceiling run they came from the
+// majority: 173 sockets opened against a vus_max of 501, and the run passed
+// anyway, because nothing asserted that the VUs had got on the wire.
 function authenticate(username) {
-  const start = Date.now();
-  const res = http.post(
-    `${HTTP_URL}/api/v1/auth/login`,
-    JSON.stringify({ username, password: PASSWORD }),
-    { headers: { "Content-Type": "application/json" } },
-  );
-  authTime.add(Date.now() - start, stepTags());
+  for (let attempt = 0; attempt < LOGIN_ATTEMPTS; attempt++) {
+    const start = Date.now();
+    const res = http.post(
+      `${HTTP_URL}/api/v1/auth/login`,
+      JSON.stringify({ username, password: PASSWORD }),
+      { headers: { "Content-Type": "application/json" } },
+    );
 
-  if (res.status !== 200) {
-    wsErrors.add(1);
-    return null;
+    // A 429 is the server shedding load on purpose, and it is retryable — the
+    // admission budget frees its slots every ~250 ms. It is NOT a ws_error:
+    // that counter backs the published "0 WebSocket errors" claim, and a run
+    // that counted refusals there published a defect that did not exist while
+    // hiding the one that did (VUs that never connected).
+    if (res.status === 429) {
+      // k6 exposes headers under their canonical names, so Retry-After is the
+      // one to look for; the lowercase spelling is here only so a k6 that
+      // stops canonicalising cannot silently reclassify every per-IP refusal
+      // as an admission refusal — which is the distinction this split exists
+      // to draw.
+      if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited?.add(1);
+      else authAdmissionRefused?.add(1);
+      // Backoff, so the retries of many stuck VUs de-synchronise instead of
+      // arriving in lockstep and re-colliding on the same slots.
+      if (attempt < LOGIN_ATTEMPTS - 1) sleep(1 + attempt * 0.5);
+      continue;
+    }
+    if (res.status !== 200) {
+      wsErrors.add(1);
+      return null;
+    }
+
+    // Timed on success only. A refusal returns in ~0 ms, so timing every
+    // attempt would drag the auth_time percentiles down and flatter the budget
+    // — and "REST login" means a login, not an attempt.
+    authTime.add(Date.now() - start, stepTags());
+
+    return JSON.parse(res.body).token;
   }
-
-  const body = JSON.parse(res.body);
-  return body.token;
+  return null;
 } // Per-VU state. Module scope in k6 is per-VU and persists across
 // iterations — the resume path relies on this: when a socket ends, the next
 // iteration of the same VU reconnects with the state it kept.
@@ -533,7 +617,9 @@ export default function () {
   if (!token) {
     token = authenticate(username);
     if (!token) {
-      sleep(1);
+      // Give up loudly. The threshold on login_giveups fails the run, because
+      // every number in it was measured over a population missing this VU.
+      loginGiveUps?.add(1);
       return;
     }
     vuToken = token;
@@ -543,7 +629,12 @@ export default function () {
   const res = ws.connect(WS_URL, null, function (socket) {
     const openAt = Date.now();
     wsConnectTime.add(openAt - connectStart, stepTags());
-    wsConnections.add(1);
+    // Tagged so the ceiling search can publish how many sockets each step
+    // actually opened. Without it a step where most VUs never got a token is
+    // indistinguishable from one that connected and degraded — which is how a
+    // contaminated ceiling run passed. Untagged on capacity (stepTags() is
+    // undefined there, and k6 leaves an undefined tag off the sample).
+    wsConnections.add(1, stepTags());
 
     let authed = false;
     let ready = false;
@@ -1000,7 +1091,7 @@ export function uploadsScenario() {
   if (!upToken) {
     upToken = authenticate(username);
     if (!upToken) {
-      sleep(1);
+      loginGiveUps?.add(1);
       return;
     }
   }
