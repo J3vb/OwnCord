@@ -465,11 +465,11 @@ func (d *DB) SQLDb() *sql.DB {
 	return d.writer
 }
 
-// SQLReaderDb returns the underlying reader *sql.DB. It exists so
+// SQLReaderDB returns the underlying reader *sql.DB. It exists so
 // /api/v1/metrics can report reader-pool wait stats beside the writer pair —
 // for in-memory databases reader == writer, so the two reports then cover
 // the same pool.
-func (d *DB) SQLReaderDb() *sql.DB {
+func (d *DB) SQLReaderDB() *sql.DB {
 	return d.reader
 }
 
