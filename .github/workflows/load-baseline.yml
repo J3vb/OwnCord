@@ -35,11 +35,52 @@
 # pipeline doesn't need. Like the bench baseline, these numbers are recorded
 # and published, never gated. Re-run it deliberately before a release, or
 # after changes to the hub, the write path or the replay budget.
+#
+# FOUR PROFILES (B6-10), one cgroup recipe. `inputs.profile` selects the
+# scenario set inside Server/scripts/k6/ws-load.js; the legs and the extra
+# environment follow from it:
+#
+#   capacity (default) — the B6-9 run, unchanged. Both legs. 25 k6 voice VUs
+#     AND the lk SFU cohort, one text channel, no extra server env.
+#   operational — the 100-connection sustain plus, concurrently, the per-phase
+#     observer, the reconnect storm, voice churn and upload admission. ONE leg
+#     (constrained) TWICE: `tls: self_signed` and `tls: off`. That pair is the
+#     TLS row — a delta between two runs of the same profile on the same cgroup,
+#     never a promise about running TLS-less. `OWNCORD_UPLOAD_USER_QUOTA_MB=1`
+#     makes the 507 quota-refuse path reachable inside the 10/min upload limit,
+#     which is the only reason that value is there. No lk cohort: the churn
+#     exercises the control plane, not the media path.
+#   restart — 100 connections at the capacity rate while the WORKFLOW, not k6,
+#     stops the server 30 s into the sustain (T+90s) and starts it again on the
+#     same container. The drain contract under load is 30 s
+#     (internal/app/lifecycle.go shutdownBudget), not the 20 s an idle server
+#     proves, so the step fails on a non-zero exit or a drain over 30 s.
+#   ceiling-search — one ramping-vus scenario stepping connections from 100 to
+#     `inputs.ceiling_max`, 60 s per step, to find the step where a capacity
+#     budget first breaks. Constrained-only: a ceiling measured outside the
+#     reference cgroup is the number B6-9 exists to prevent. Seeds
+#     `ceiling_max` users and boots with OWNCORD_SERVER_MAX_WS_CONNECTIONS at
+#     twice the probe maximum, so a config cap can never be published as the
+#     ceiling the search "found" — the run asserts ws_conn_rejects stayed 0.
+#
+# The restart and ceiling-search profiles set no voice channel: their voice leg
+# is off, both in the script (no K6_VOICE_VUS) and in the server load, because
+# neither measures the media path.
 name: Load Baseline
 
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: "Which scenario set to measure (B6-10)"
+        required: false
+        type: choice
+        default: capacity
+        options:
+          - capacity
+          - operational
+          - restart
+          - ceiling-search
       users:
         description: "Registered users to seed (BPR-030 says 250)"
         required: false
@@ -52,6 +93,10 @@ on:
         description: "Concurrent voice participants (BPR-030 says 25)"
         required: false
         default: "25"
+      ceiling_max:
+        description: "ceiling-search: highest connection count probed (and users to seed)"
+        required: false
+        default: "500"
 
 permissions:
   contents: read
@@ -65,13 +110,32 @@ env:
 
 jobs:
   baseline:
-    name: Capacity profile (${{ matrix.leg }})
+    name: ${{ inputs.profile }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Per-run parameters, so the profile logic is one derive step rather than
+    # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
+    # `matrix` is not an available context in the workflow-level `env:` block.
+    # TLS_MODE is `matrix.tls` (always self_signed outside the operational
+    # profile) and drives both the URL scheme and the server's own tls.mode.
+    env:
+      PROFILE: ${{ inputs.profile }}
+      TLS_MODE: ${{ matrix.tls }}
+      CEILING_MAX: ${{ inputs.ceiling_max }}
     strategy:
       fail-fast: false
       matrix:
-        leg: [constrained, ceiling]
+        # capacity keeps B6-9's two legs. Everything else is constrained-only:
+        # the operational, restart and ceiling-search numbers all publish, and
+        # a published number may only come from the reference cgroup.
+        #
+        # `tls` is a real matrix dimension only for operational, where the two
+        # values are the two runs the TLS delta is computed from. Elsewhere it
+        # is pinned at self_signed — the shipped default — so the scheme
+        # expressions below stay total. The ceiling leg runs only for capacity,
+        # as before: it is a labelled headroom check, not a second measurement.
+        leg: ${{ fromJSON(inputs.profile == 'capacity' && '["constrained", "ceiling"]' || '["constrained"]') }}
+        tls: ${{ fromJSON(inputs.profile == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -143,6 +207,55 @@ jobs:
           cp Server/chatserver livekit-server "$work/"
           echo "WORK=$work" >>"$GITHUB_ENV"
 
+      # Everything below reads these instead of testing the profile again.
+      # The scheme is the whole of the TLS dimension: `tls: off` sets the
+      # server's tls.mode to off and flips both URLs, and nothing else in the
+      # job changes — which is exactly what makes the difference between the
+      # two operational legs a TLS delta and not a config delta.
+      - name: Derive the profile's run parameters
+        run: |
+          if [ "$TLS_MODE" = "off" ]; then
+            scheme=http
+            ws_scheme=ws
+          else
+            scheme=https
+            ws_scheme=wss
+          fi
+
+          # The ceiling search has to connect `CEILING_MAX` sockets for its top
+          # step to be the connection count it claims, so it seeds that many
+          # regardless of `users`. Every other profile seeds `users`.
+          if [ "$PROFILE" = "ceiling-search" ]; then
+            seed_users="$CEILING_MAX"
+          else
+            seed_users="${{ inputs.users }}"
+          fi
+
+          # Only capacity and operational have a voice leg. restart and
+          # ceiling-search measure the connection path; leaving the channel
+          # unset makes ws-load.js set K6_VOICE_VUS to 0 and drop every voice
+          # threshold, so a disabled leg neither fails nor passes vacuously.
+          case "$PROFILE" in
+          capacity | operational) voice_leg=1 ;;
+          *)
+            voice_leg=0
+            ;;
+          esac
+
+          # The restart drill stops the server 30 s into the sustain. K6_RAMP
+          # below is 60 s, so this is 90 s from run start; it is derived rather
+          # than written as 90 so the two cannot drift apart.
+          restart_at=$((60 + 30))
+
+          {
+            echo "HTTP_BASE=$scheme://127.0.0.1:8443"
+            echo "SUT_WS_URL=$ws_scheme://127.0.0.1:8443/api/v1/ws"
+            echo "SUT_HTTP_URL=$scheme://127.0.0.1:8443"
+            echo "SEED_USERS=$seed_users"
+            echo "VOICE_LEG=$voice_leg"
+            echo "RESTART_AT=$restart_at"
+          } >>"$GITHUB_ENV"
+
       # --- boot, one step per leg -------------------------------------------
       #
       # Registration/login are per-IP rate limited and every connection comes
@@ -164,6 +277,31 @@ jobs:
       - name: Boot server (constrained — 2 CPUs, 4 GB, no swap)
         if: matrix.leg == 'constrained'
         run: |
+          # The per-profile server environment. Everything above this line is
+          # B6-9's recipe and does not move: the profile changes these three
+          # flags and nothing else about the boot.
+          extra_env=()
+          case "$PROFILE" in
+          operational)
+            # 1 MB is the value that makes the 507 quota-refuse path reachable
+            # inside the 10/min upload limit. It is a way to cross the bound,
+            # not a recommended quota.
+            extra_env+=(-e OWNCORD_UPLOAD_USER_QUOTA_MB=1)
+            ;;
+          ceiling-search)
+            # Twice the probe maximum, so a config cap can never be the
+            # "ceiling" the search reports. The run asserts ws_conn_rejects
+            # stayed 0, which is what makes that claim checkable.
+            extra_env+=(-e "OWNCORD_SERVER_MAX_WS_CONNECTIONS=$((CEILING_MAX * 2))")
+            ;;
+          esac
+          if [ "$TLS_MODE" = "off" ]; then
+            extra_env+=(-e OWNCORD_TLS_MODE=off)
+          fi
+
+          # Removed first so a re-run on the same runner is idempotent, and so
+          # the restart drill's `docker start` finds the container it stopped.
+          docker rm -f owncord-sut >/dev/null 2>&1 || true
           docker run -d --name owncord-sut \
             --network=host \
             --cpuset-cpus=0,1 --cpus=2 \
@@ -176,6 +314,7 @@ jobs:
             -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
             -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
             -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
+            "${extra_env[@]}" \
             debian:bookworm-slim /app/chatserver
           for _ in $(seq 1 90); do
             if docker exec owncord-sut /app/chatserver healthcheck >/dev/null 2>&1; then
@@ -220,6 +359,8 @@ jobs:
       - name: Record the machine the numbers came from
         run: |
           {
+            echo "profile: $PROFILE"
+            echo "tls_mode: $TLS_MODE"
             echo "leg: ${{ matrix.leg }}"
             echo "host_nproc: $(nproc)"
             echo "host_mem_kb: $(awk '/MemTotal/{print $2}' /proc/meminfo)"
@@ -239,9 +380,9 @@ jobs:
       # `invite` mode (docs/api.md), so the invite below admits every
       # registration. The old PATCH {"registration_open":"true"} predates
       # B4-1's registration_mode and now returns 400.
-      - name: Seed owner, channels, invite and ${{ inputs.users }} users
+      - name: Seed owner, channels, invite and ${{ env.SEED_USERS }} users
         run: |
-          BASE=https://127.0.0.1:8443
+          BASE="$HTTP_BASE"
           TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
             -H 'Content-Type: application/json' \
             -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
@@ -276,7 +417,7 @@ jobs:
             exit 1
           fi
 
-          USERS="${{ inputs.users }}"
+          USERS="$SEED_USERS"
           for i in $(seq 1 "${USERS:-250}"); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/auth/register" \
               -H 'Content-Type: application/json' \
@@ -297,39 +438,108 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
           sudo apt-get update -qq && sudo apt-get install -y k6
 
-      # Both halves of the profile run AT THE SAME TIME. The claim is 100
-      # connections and 25 voice participants on one server, not each in turn:
-      # measuring them separately would publish two numbers no single run ever
-      # held together. The SFU cohort's duration covers the whole k6 run
-      # (ramp + sustain + drain) so voice load is present throughout.
+      # Per profile. The capacity profile (both legs) runs the lk SFU cohort
+      # alongside k6, because its claim is 100 connections AND 25 voice
+      # participants on one server at once — measuring them in turn would
+      # publish two numbers no single run ever held together. The other
+      # profiles have no lk cohort: the operational churn exercises the control
+      # plane, and restart/ceiling-search measure the connection path.
       #
-      # taskset keeps both generators on CPUs 2-3, off the server's cpuset.
-      - name: Run the capacity profile
+      # The restart drill's stop has to fire WHILE k6 holds sockets, so the
+      # workflow, not k6, sends it: a background subshell sleeps to RESTART_AT
+      # (60 s ramp + 30 s of sustain), stops the container, records the drain
+      # wall clock and the server's own exit code, then `docker start`s the
+      # SAME container — same cgroup, same flags, same data dir, and no second
+      # `docker run` text to drift from the line docs/capacity.md publishes.
+      #
+      # taskset keeps the generators on CPUs 2-3, off the server's cpuset.
+      - name: Run the ${{ inputs.profile }} profile
         id: profile
         env:
-          K6_WS_URL: wss://127.0.0.1:8443/api/v1/ws
-          K6_HTTP_URL: https://127.0.0.1:8443
+          K6_PROFILE: ${{ inputs.profile }}
+          K6_WS_URL: ${{ env.SUT_WS_URL }}
+          K6_HTTP_URL: ${{ env.SUT_HTTP_URL }}
           K6_CHANNEL_ID: ${{ env.CHANNEL_ID }}
-          K6_VOICE_CHANNEL_ID: ${{ env.VOICE_ID }}
+          # Empty on the profiles with no voice leg. ws-load.js then sets
+          # K6_VOICE_VUS to 0 and registers no voice threshold, so a disabled
+          # leg neither fails nor passes vacuously.
+          K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
           K6_VOICE_VUS: ${{ inputs.voice }}
           K6_PEAK_VUS: ${{ inputs.connections }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
+          K6_CEILING_MAX: ${{ inputs.ceiling_max }}
         run: |
           mkdir -p Server/scripts/k6/reports
-          PUBLISHERS="${{ inputs.voice }}" SUBSCRIBERS="${{ inputs.voice }}" \
-          DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
-          LIVEKIT_URL=http://127.0.0.1:7880 \
-          REPORT="$WORK/voice-load.txt" \
-            taskset -c 2,3 bash Server/scripts/voice-load.sh &
-          voice_pid=$!
+
+          # cgroup + generator evidence, one sample every 5 s with a wall-clock
+          # stamp, so the document can slice it by phase (operational, restart)
+          # or by step (ceiling-search). loadavg is the HOST's and is where k6
+          # itself runs: if the generator saturates before the server's cgroup
+          # is throttled, the step is generator-limited and is published as
+          # such, never as a server ceiling.
+          #
+          # The loop watches a flag rather than the container, so the restart
+          # drill's outage window is sampled too.
+          (
+            while [ ! -f "$WORK/.sampling-done" ]; do
+              printf '%s loadavg=%s %s\n' \
+                "$(date -u +%s)" \
+                "$(cut -d' ' -f1-3 /proc/loadavg)" \
+                "$(docker exec owncord-sut cat /sys/fs/cgroup/cpu.stat 2>/dev/null | tr '\n' ' ' || true)"
+              sleep 5
+            done
+          ) >"$WORK/cpu.stat.log" 2>&1 &
+          sample_pid=$!
+
+          voice_pid=""
+          if [ "$VOICE_LEG" = "1" ]; then
+            PUBLISHERS="${{ inputs.voice }}" SUBSCRIBERS="${{ inputs.voice }}" \
+            DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
+            LIVEKIT_URL=http://127.0.0.1:7880 \
+            REPORT="$WORK/voice-load.txt" \
+              taskset -c 2,3 bash Server/scripts/voice-load.sh &
+            voice_pid=$!
+          fi
+
+          drill_pid=""
+          if [ "$PROFILE" = "restart" ]; then
+            (
+              sleep "$RESTART_AT"
+              start=$(date +%s%N)
+              docker stop --time=30 owncord-sut
+              rc=$(docker wait owncord-sut)
+              drain_ms=$((($(date +%s%N) - start) / 1000000))
+              {
+                echo "drill_rc=$rc"
+                echo "drill_drain_ms=$drain_ms"
+              } >"$WORK/drain.txt"
+              echo "restart drill: server exited $rc after ${drain_ms} ms of drain"
+              docker start owncord-sut >/dev/null
+              for _ in $(seq 1 90); do
+                if docker exec owncord-sut /app/chatserver healthcheck >/dev/null 2>&1; then
+                  echo "restart drill: back up and healthy"
+                  exit 0
+                fi
+                sleep 1
+              done
+              echo "::error::the server never came back healthy after the restart"
+              exit 1
+            ) &
+            drill_pid=$!
+          fi
 
           k6_rc=0
           (cd Server/scripts/k6 && taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js) || k6_rc=$?
           cp Server/scripts/k6/reports/k6-summary.json "$WORK/" 2>/dev/null || true
 
+          touch "$WORK/.sampling-done"
+          wait "$sample_pid" || true
+
           voice_rc=0
-          wait "$voice_pid" || voice_rc=$?
+          if [ -n "$voice_pid" ]; then
+            wait "$voice_pid" || voice_rc=$?
+          fi
 
           echo "k6_rc=$k6_rc voice_rc=$voice_rc"
           if [ "${{ matrix.leg }}" != "constrained" ]; then
@@ -338,12 +548,31 @@ jobs:
             echo "::notice::ceiling leg finished with k6=$k6_rc voice=$voice_rc (not gating)"
             exit 0
           fi
+
+          if [ -n "$drill_pid" ]; then
+            # A failing wait aborts the step here (the subshell has already
+            # said why), and drain.txt is written before the reboot is
+            # attempted, so the drain figure survives a failed reboot.
+            wait "$drill_pid"
+            # shellcheck source=/dev/null
+            . "$WORK/drain.txt"
+            if [ "$drill_rc" -ne 0 ]; then
+              echo "::error::the server exited $drill_rc on a graceful stop under load. That is a defect, not a number: open a findings-ledger entry, do NOT re-run this on a bigger box."
+              exit 1
+            fi
+            if [ "$drill_drain_ms" -gt 30000 ]; then
+              echo "::error::the drain took ${drill_drain_ms} ms, over the 30 s shutdownBudget. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
+              exit 1
+            fi
+            echo "drain $drill_drain_ms ms, exit $drill_rc — inside the 30 s budget"
+          fi
+
           if [ "$voice_rc" -ne 0 ]; then
             echo "::error::the 25-participant voice leg did not meet its assertions — see the voice-load report"
             exit 1
           fi
           if [ "$k6_rc" -eq 99 ]; then
-            echo "::error::a latency budget was missed on the constrained leg. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
+            echo "::error::a threshold was missed on the constrained leg — a latency budget, or one of the count / max==0 sanity gates. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
             exit 1
           fi
           exit "$k6_rc"
@@ -351,7 +580,7 @@ jobs:
       - name: Snapshot server metrics
         if: always()
         run: |
-          curl -sk https://127.0.0.1:8443/api/v1/metrics | tee "$WORK/metrics-after.json" || true
+          curl -sk "$HTTP_BASE/api/v1/metrics" | tee "$WORK/metrics-after.json" || true
 
       - name: Stop server
         if: always()
@@ -369,11 +598,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: capacity-${{ matrix.leg }}
+          # capacity keeps B6-9's exact artifact name, so the published runs
+          # stay findable; the other profiles name themselves.
+          name: ${{ inputs.profile == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', inputs.profile, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
           path: |
             ${{ runner.temp }}/loadtest/k6-summary.json
             ${{ runner.temp }}/loadtest/voice-load.txt
             ${{ runner.temp }}/loadtest/limits.txt
             ${{ runner.temp }}/loadtest/metrics-after.json
             ${{ runner.temp }}/loadtest/server.log
+            ${{ runner.temp }}/loadtest/cpu.stat.log
+            ${{ runner.temp }}/loadtest/drain.txt
           retention-days: 30
