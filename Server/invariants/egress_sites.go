@@ -86,6 +86,14 @@ var EgressAllow = map[string]EgressEntry{
 	"cmd/smoke/docker.go": {"loopback", "the same address, published on 127.0.0.1 by the container under test", "someone invoking cmd/smoke",
 		"one /health probe confirming the drained container stopped answering; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
 		[]string{"serving"}},
+	// B6-11's recovery drills (phases R, C and D): six probes against the same
+	// loopback server — health while the disk is full, an authenticated read, a
+	// WebSocket dial, a read taken while a restore runs underneath it, and the
+	// upload and backup routes the rehearsals drive. Same row shape as the two
+	// above, for the same reason.
+	"cmd/smoke/drills.go": {"loopback", "the same address, plus the /api/v1/ws that upgrades on it (defaultBaseURL, https://127.0.0.1:8443)", "someone invoking cmd/smoke",
+		"the drills' own probes: /health under disk pressure, an authenticated read, a WebSocket dial, a read while a restore runs, and the upload and backup routes the rehearsals drive; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
+		[]string{"healthOf", "authenticated", "dialWS", "readWhileRestoring", "uploadStatus", "backupStatus"}},
 	"telemetry/telemetry_otel.go": {"config", "telemetry.otlp_endpoint", "-tags otel build with telemetry.enabled and exporter: otlp",
 		"OpenTelemetry export; absent from the default build",
 		[]string{"(file scope)"}},
