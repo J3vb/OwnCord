@@ -9,6 +9,11 @@
 # so it stays hermetic and an owner can run the same rehearsal offline. Every
 # line below that reaches the network is in THIS file, on purpose.
 #
+# B6-11 adds four steps after the container rehearsal: a checksum-verified
+# livekit-server fetch, a 24 MB tmpfs the disk-pressure phase fills, and the two
+# drill legs (standalone, and phase D in the container). So this job now supplies
+# the harness with a fourth thing — an SFU — and a filesystem it can fill up.
+#
 # Its own file, with a job name that is no required status context, for the
 # reason nightly-docker-smoke.yml's header spells out: a `schedule:` only ever
 # runs from the default branch and its check runs land on that branch's tip, so
@@ -65,13 +70,21 @@ on:
 permissions:
   contents: read
 
+env:
+  # The livekit-server release OwnCord itself downloads
+  # (ws.DefaultLiveKitVersion), same value and same reason as
+  # load-baseline.yml's: phase S kills what the product would have started, so
+  # measuring a different SFU release would measure something no owner runs.
+  LIVEKIT_VERSION: "1.13.5"
+
 jobs:
   upgrade-rehearsal:
     # Not a required status context — see the header.
     name: Upgrade and Rollback Rehearsal
     runs-on: ubuntu-latest
-    # Two image builds plus two eight-phase rehearsals; ~15 minutes when the
-    # runner is cold. Anything past this is a hung server, not a slow one.
+    # Two image builds and two eight-phase rehearsals, ~15 minutes when the
+    # runner is cold, plus the drill steps below on top of them. Anything past
+    # this is a hung server, not a slow one.
     timeout-minutes: 30
     permissions:
       # Only to read a release's assets with `gh`. Nothing here publishes.
@@ -204,6 +217,60 @@ jobs:
       - name: Rehearse upgrade and rollback (containers)
         working-directory: Server
         run: go run ./cmd/smoke -upgrade -docker -from owncord-rehearsal:from owncord-rehearsal:head
+
+      # B6-11's failure and recovery drills. They live in this job because it
+      # already owns the built binary, the two images and the port; a second
+      # workflow would rebuild all three. `owncord-rehearsal:head` is still
+      # present here — the cleanup is two steps down.
+      #
+      # Guarded off the workflow_call path until the owner answers the plan's
+      # question 5 (whether a known finding may block a release). Until then a
+      # release rehearses the happy path only, exactly as it does today, and
+      # these steps run on the nightly and on dispatch.
+      - name: Fetch and verify livekit-server ${{ env.LIVEKIT_VERSION }}
+        if: github.event_name != 'workflow_call'
+        working-directory: Server
+        # continue-on-error, because a fetch that fails must cost phase S its
+        # measurement and not cost the run: the drill prints `skipped` when
+        # OWNCORD_DRILL_LIVEKIT_BINARY is unset, and a skip is never a pass.
+        # Nothing unverified is used either way — the variable is written only
+        # after sha256sum -c - accepted the asset.
+        continue-on-error: true
+        run: |
+          base="https://github.com/livekit/livekit/releases/download/v$LIVEKIT_VERSION"
+          asset="livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz"
+          dir="$RUNNER_TEMP/livekit"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/$asset" "$base/$asset"
+          curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+          ( cd "$dir" && grep " $asset\$" checksums.txt | sha256sum -c - )
+          tar xzf "$dir/$asset" -C "$dir" livekit-server
+          "$dir/livekit-server" --version
+          echo "OWNCORD_DRILL_LIVEKIT_BINARY=$dir/livekit-server" >> "$GITHUB_ENV"
+
+      # Phase D fills a filesystem and watches the server refuse, so it needs
+      # one whose size it knows: 24 MB is the budget the drill's own arithmetic
+      # assumes (R7 measured the ENOSPC on that figure).
+      - name: Mount a filesystem that can fill
+        if: github.event_name != 'workflow_call'
+        working-directory: Server
+        run: |
+          mkdir -p "$RUNNER_TEMP/drill-fs"
+          sudo mount -t tmpfs -o "size=24m,uid=$(id -u),gid=$(id -g)" tmpfs "$RUNNER_TEMP/drill-fs"
+
+      - name: Failure and recovery drills (standalone)
+        if: github.event_name != 'workflow_call'
+        working-directory: Server
+        run: go run ./cmd/smoke -drills -data-fs "$RUNNER_TEMP/drill-fs" "$HEAD_BINARY"
+
+      # Disk pressure only, and only in the container: that is the shape an
+      # owner deploys, and its /app/data is a 24 MB tmpfs the harness mounts
+      # itself, so this leg needs no host mount. R, C and S are properties of
+      # the process and the standalone leg above already measured them.
+      - name: Failure and recovery drills (container, disk pressure only)
+        if: github.event_name != 'workflow_call'
+        working-directory: Server
+        run: go run ./cmd/smoke -drills -docker -phases D owncord-rehearsal:head
 
       # A hosted runner is discarded with its images; a self-hosted one is not,
       # and would accumulate two rehearsal images per run. `always()` so a
