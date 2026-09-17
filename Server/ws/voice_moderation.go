@@ -248,11 +248,11 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if r := voiceModRateLimited(d, "voice_mod_mute", info.UserID); r != nil {
 		return *r
 	}
-	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID())
+	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID)
 	if r != nil {
 		return *r
 	}
-	if r := requireTargetInChannel(state, c.ChannelID()); r != nil {
+	if r := requireTargetInChannel(state, c.ChannelID); r != nil {
 		return *r
 	}
 
@@ -263,15 +263,15 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	var matched bool
 	var err error
 	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
-		matched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID(), state.ChannelID, c.Muted())
+		matched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID, state.ChannelID, c.Muted)
 	} else {
-		matched, err = d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
+		matched, err = d.Voice.SetServerMute(ctx, c.TargetID, state.ChannelID, c.Muted)
 	}
 	if err != nil {
-		slog.Error("ws handleVoiceModMuteV2 SetServerMute", "err", err, "target_id", c.TargetID())
+		slog.Error("ws handleVoiceModMuteV2 SetServerMute", "err", err, "target_id", c.TargetID)
 		if errors.Is(err, errVoiceMediaPending) {
-			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID(),
-				fmt.Sprintf("server mute %s in channel %d; media update pending", onOff(c.Muted()), state.ChannelID))
+			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID,
+				fmt.Sprintf("server mute %s in channel %d; media update pending", onOff(c.Muted), state.ChannelID))
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "server mute saved, but the media update failed; please retry"}}
 		}
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server mute"}}
@@ -284,12 +284,12 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 
-	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID(),
-		fmt.Sprintf("server mute %s in channel %d", onOff(c.Muted()), state.ChannelID))
-	slog.Info("voice server mute", "actor_id", info.UserID, "target_id", c.TargetID(),
-		"channel_id", state.ChannelID, "muted", c.Muted())
+	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_mute", c.TargetID,
+		fmt.Sprintf("server mute %s in channel %d", onOff(c.Muted), state.ChannelID))
+	slog.Info("voice server mute", "actor_id", info.UserID, "target_id", c.TargetID,
+		"channel_id", state.ChannelID, "muted", c.Muted)
 
-	return voiceStateBroadcast(ctx, d, c.TargetID())
+	return voiceStateBroadcast(ctx, d, c.TargetID)
 }
 
 // voiceModDeafenPreMuteRaceHook, when non-nil, runs immediately after the
@@ -311,17 +311,17 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	if r := voiceModRateLimited(d, "voice_mod_deafen", info.UserID); r != nil {
 		return *r
 	}
-	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID())
+	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID)
 	if r != nil {
 		return *r
 	}
-	if r := requireTargetInChannel(state, c.ChannelID()); r != nil {
+	if r := requireTargetInChannel(state, c.ChannelID); r != nil {
 		return *r
 	}
 
-	deafenMatched, err := d.Voice.SetServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	deafenMatched, err := d.Voice.SetServerDeafen(ctx, c.TargetID, state.ChannelID, c.Deafened)
 	if err != nil {
-		slog.Error("ws handleVoiceModDeafenV2 SetServerDeafen", "err", err, "target_id", c.TargetID())
+		slog.Error("ws handleVoiceModDeafenV2 SetServerDeafen", "err", err, "target_id", c.TargetID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 	}
 	if !deafenMatched {
@@ -332,7 +332,7 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 	if voiceModDeafenPreMuteRaceHook != nil {
-		voiceModDeafenPreMuteRaceHook(ctx, d, c.TargetID())
+		voiceModDeafenPreMuteRaceHook(ctx, d, c.TargetID)
 	}
 	// A server deafen implies a server mute at the SFU: a deafened user must
 	// not keep talking into a room they cannot hear. Lifting the deafen must
@@ -349,34 +349,34 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	// test deps, exactly like handleVoiceModMuteV2.
 	var muteMatched bool
 	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
-		muteMatched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+		muteMatched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID, state.ChannelID, c.Deafened)
 	} else {
-		muteMatched, err = d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+		muteMatched, err = d.Voice.SetServerMute(ctx, c.TargetID, state.ChannelID, c.Deafened)
 	}
 	if err != nil || !muteMatched {
 		if err != nil {
-			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID())
+			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID)
 		}
 		if errors.Is(err, errVoiceMediaPending) {
 			// Both desired flags were saved. Keep them together so a retry or
 			// periodic reconciliation can finish the media update.
-			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID(),
-				fmt.Sprintf("server deafen %s in channel %d; media update pending", onOff(c.Deafened()), state.ChannelID))
+			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID,
+				fmt.Sprintf("server deafen %s in channel %d; media update pending", onOff(c.Deafened), state.ChannelID))
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "server deafen saved, but the media update failed; please retry"}}
 		}
-		d.Voice.RollbackServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+		d.Voice.RollbackServerDeafen(ctx, c.TargetID, state.ChannelID, c.Deafened)
 		if err != nil {
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 		}
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 
-	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID(),
-		fmt.Sprintf("server deafen %s in channel %d", onOff(c.Deafened()), state.ChannelID))
-	slog.Info("voice server deafen", "actor_id", info.UserID, "target_id", c.TargetID(),
-		"channel_id", state.ChannelID, "deafened", c.Deafened())
+	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID,
+		fmt.Sprintf("server deafen %s in channel %d", onOff(c.Deafened), state.ChannelID))
+	slog.Info("voice server deafen", "actor_id", info.UserID, "target_id", c.TargetID,
+		"channel_id", state.ChannelID, "deafened", c.Deafened)
 
-	return voiceStateBroadcast(ctx, d, c.TargetID())
+	return voiceStateBroadcast(ctx, d, c.TargetID)
 }
 
 // handleVoiceModMoveV2 processes a voice_mod_move command.
@@ -396,17 +396,17 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if r := voiceModRateLimited(d, "voice_mod_move", info.UserID); r != nil {
 		return *r
 	}
-	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID())
+	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID)
 	if r != nil {
 		return *r
 	}
-	if state.ChannelID == c.ToChannelID() {
+	if state.ChannelID == c.ToChannelID {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "user is already in that voice channel"}}
 	}
 
-	dest, err := d.Reader.GetChannel(ctx, c.ToChannelID())
+	dest, err := d.Reader.GetChannel(ctx, c.ToChannelID)
 	if err != nil {
-		slog.Error("ws handleVoiceModMoveV2 GetChannel", "err", err, "channel_id", c.ToChannelID())
+		slog.Error("ws handleVoiceModMoveV2 GetChannel", "err", err, "channel_id", c.ToChannelID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read destination channel"}}
 	}
 	if dest == nil {
@@ -420,9 +420,9 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// permissions.CanJoinVoice — so a move can neither place someone in a
 	// channel they could not join themselves nor commit the destructive half
 	// of the move for a re-join guaranteed to bounce (an archived channel).
-	targetSub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, c.TargetID(), dest, false)
+	targetSub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, c.TargetID, dest, false)
 	if subErr != nil {
-		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID())
+		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
 	}
 	switch joinErr := permissions.CanJoinVoice(targetSub); {
@@ -438,9 +438,9 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// atomic one still runs on the re-join; this one keeps the common case from
 	// dropping the target into a channel that is already full.
 	if dest.VoiceMaxUsers > 0 {
-		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID())
+		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID)
 		if cErr != nil {
-			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID())
+			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID)
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
 		}
 		if count >= dest.VoiceMaxUsers {
@@ -457,8 +457,8 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// voicePendingModFlagsSetter. The target's own re-join (handleVoiceJoin,
 	// via voiceJoinLeaveCurrent in voice_join.go) has no row left to read
 	// (currentChID == 0 by then) and takes this stash back out instead.
-	stashPendingModFlags(d.Mod, c.TargetID(), state.ServerMuted, state.ServerDeafened, state.ServerMutedBy)
-	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
+	stashPendingModFlags(d.Mod, c.TargetID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy)
+	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
 		// target left the checked channel while this handler was deciding, in
@@ -467,15 +467,15 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		// it (OC-0278): left in place, it has no expiry and no binding to
 		// this move, and the target's next unrelated voice_join would consume
 		// it as if a moderator had just muted them.
-		clearPendingModFlags(d.Mod, c.TargetID())
+		clearPendingModFlags(d.Mod, c.TargetID)
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
-	d.Mod.SendToUser(c.TargetID(), buildVoiceMoved(c.ToChannelID()))
+	d.Mod.SendToUser(c.TargetID, buildVoiceMoved(c.ToChannelID))
 
-	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_move", c.TargetID(),
-		fmt.Sprintf("moved from channel %d to channel %d", state.ChannelID, c.ToChannelID()))
-	slog.Info("voice moderator move", "actor_id", info.UserID, "target_id", c.TargetID(),
-		"from_channel_id", state.ChannelID, "to_channel_id", c.ToChannelID())
+	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_move", c.TargetID,
+		fmt.Sprintf("moved from channel %d to channel %d", state.ChannelID, c.ToChannelID))
+	slog.Info("voice moderator move", "actor_id", info.UserID, "target_id", c.TargetID,
+		"from_channel_id", state.ChannelID, "to_channel_id", c.ToChannelID)
 
 	// handleVoiceLeave already broadcast voice_leave for the old channel; the
 	// re-join broadcasts voice_state for the new one.
@@ -493,7 +493,7 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if r := voiceModRateLimited(d, "voice_mod_kick", info.UserID); r != nil {
 		return *r
 	}
-	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID())
+	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID)
 	if r != nil {
 		return *r
 	}
@@ -503,15 +503,15 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	// Scoped to the channel the gate above authorized: a target who switched
 	// channels mid-decision must not be kicked out of the new one.
-	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
+	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
-	d.Mod.SendToUser(c.TargetID(),
+	d.Mod.SendToUser(c.TargetID,
 		buildVoiceDisconnected(state.ChannelID, "You were disconnected from voice by a moderator"))
 
-	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID(),
+	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
 		fmt.Sprintf("disconnected from channel %d", state.ChannelID))
-	slog.Info("voice moderator disconnect", "actor_id", info.UserID, "target_id", c.TargetID(),
+	slog.Info("voice moderator disconnect", "actor_id", info.UserID, "target_id", c.TargetID,
 		"channel_id", state.ChannelID)
 
 	return Result{}

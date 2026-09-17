@@ -36,7 +36,7 @@ func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	typingCmd := cmd.(TypingStartCmd)
-	channelID := typingCmd.ChannelID()
+	channelID := typingCmd.ChannelID
 	userID := info.UserID
 
 	ch, err := d.ChannelSvc.HandleTyping(ctx, userID, channelID, d.Limiter)
@@ -95,9 +95,9 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	d := deps.(PresenceDeps)
 	presenceCmd := cmd.(PresenceUpdateCmd)
 	userID := info.UserID
-	status := presenceCmd.Status()
+	status := presenceCmd.Status
 
-	customStatus, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus(), d.Limiter)
+	customStatus, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus, d.Limiter)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
@@ -111,7 +111,7 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	focusCmd := cmd.(ChannelFocusCmd)
-	chID := focusCmd.ChannelID()
+	chID := focusCmd.ChannelID
 
 	// Every frame drives an unmetered SQLite write (UpdateReadState) plus
 	// perm checks and pubsub churn, so focus is metered on its own key —
@@ -150,7 +150,7 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return Result{}
 	}
 
-	_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, markCmd.ChannelID())
+	_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, markCmd.ChannelID)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
 			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}

@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -12,11 +13,6 @@ type Command interface {
 	Type() string
 	// UserID returns the authenticated user who sent this command.
 	UserID() int64
-}
-
-// ChannelScoped is an optional interface for commands targeting a channel.
-type ChannelScoped interface {
-	ChannelID() int64
 }
 
 // ── Concrete command structs ────────────────────────────────────────────────
@@ -31,90 +27,72 @@ func (c PingCmd) UserID() int64 { return c.userID }
 
 // ChatSendCmd represents a chat_send message.
 type ChatSendCmd struct {
-	clientMessageID string
+	ClientMessageID string
 	userID          int64
-	reqID           string
-	channelID       int64
-	content         string
-	replyTo         *int64
+	ReqID           string
+	ChannelID       int64
+	Content         string
+	ReplyTo         *int64
 	attachments     []string
 }
 
-func (c ChatSendCmd) Type() string            { return MsgTypeChatSend }
-func (c ChatSendCmd) UserID() int64           { return c.userID }
-func (c ChatSendCmd) ChannelID() int64        { return c.channelID }
-func (c ChatSendCmd) ReqID() string           { return c.reqID }
-func (c ChatSendCmd) Content() string         { return c.content }
-func (c ChatSendCmd) ReplyTo() *int64         { return c.replyTo }
-func (c ChatSendCmd) ClientMessageID() string { return c.clientMessageID }
-func (c ChatSendCmd) Attachments() []string {
-	dst := make([]string, len(c.attachments))
-	copy(dst, c.attachments)
-	return dst
-}
+func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
+func (c ChatSendCmd) UserID() int64         { return c.userID }
+func (c ChatSendCmd) Attachments() []string { return slices.Clone(c.attachments) }
 
 // ChatEditCmd represents a chat_edit message.
 type ChatEditCmd struct {
 	userID    int64
-	reqID     string
-	messageID int64
-	content   string
+	ReqID     string
+	MessageID int64
+	Content   string
 }
 
-func (c ChatEditCmd) Type() string     { return MsgTypeChatEdit }
-func (c ChatEditCmd) UserID() int64    { return c.userID }
-func (c ChatEditCmd) ReqID() string    { return c.reqID }
-func (c ChatEditCmd) MessageID() int64 { return c.messageID }
-func (c ChatEditCmd) Content() string  { return c.content }
+func (c ChatEditCmd) Type() string  { return MsgTypeChatEdit }
+func (c ChatEditCmd) UserID() int64 { return c.userID }
 
 // ChatDeleteCmd represents a chat_delete message.
 type ChatDeleteCmd struct {
 	userID    int64
-	reqID     string
-	messageID int64
+	ReqID     string
+	MessageID int64
 }
 
-func (c ChatDeleteCmd) Type() string     { return MsgTypeChatDelete }
-func (c ChatDeleteCmd) UserID() int64    { return c.userID }
-func (c ChatDeleteCmd) ReqID() string    { return c.reqID }
-func (c ChatDeleteCmd) MessageID() int64 { return c.messageID }
+func (c ChatDeleteCmd) Type() string  { return MsgTypeChatDelete }
+func (c ChatDeleteCmd) UserID() int64 { return c.userID }
 
 // TypingStartCmd represents a typing_start message.
 type TypingStartCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c TypingStartCmd) Type() string     { return MsgTypeTypingStart }
-func (c TypingStartCmd) UserID() int64    { return c.userID }
-func (c TypingStartCmd) ChannelID() int64 { return c.channelID }
+func (c TypingStartCmd) Type() string  { return MsgTypeTypingStart }
+func (c TypingStartCmd) UserID() int64 { return c.userID }
 
 // PresenceUpdateCmd represents a presence_update message.
 type PresenceUpdateCmd struct {
 	userID int64
-	status string
-	// customStatus is nil when the payload carried no custom_status field at
+	Status string
+	// CustomStatus is nil when the payload carried no custom_status field at
 	// all, which means "leave the stored text alone". A present-but-empty
 	// string clears it. The distinction matters because the auto-idle timer
 	// sends a bare status flip several times an hour and must not wipe the
 	// text the user typed.
-	customStatus *string
+	CustomStatus *string
 }
 
-func (c PresenceUpdateCmd) Type() string          { return MsgTypePresenceUpdate }
-func (c PresenceUpdateCmd) UserID() int64         { return c.userID }
-func (c PresenceUpdateCmd) Status() string        { return c.status }
-func (c PresenceUpdateCmd) CustomStatus() *string { return c.customStatus }
+func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
+func (c PresenceUpdateCmd) UserID() int64 { return c.userID }
 
 // ChannelFocusCmd represents a channel_focus message.
 type ChannelFocusCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c ChannelFocusCmd) Type() string     { return MsgTypeChannelFocus }
-func (c ChannelFocusCmd) UserID() int64    { return c.userID }
-func (c ChannelFocusCmd) ChannelID() int64 { return c.channelID }
+func (c ChannelFocusCmd) Type() string  { return MsgTypeChannelFocus }
+func (c ChannelFocusCmd) UserID() int64 { return c.userID }
 
 // MarkReadCmd represents a mark_read message: advance the caller's read state
 // for a channel without making it their focused channel. channel_focus already
@@ -122,46 +100,40 @@ func (c ChannelFocusCmd) ChannelID() int64 { return c.channelID }
 // the wrong tool for "mark that other channel read from its context menu".
 type MarkReadCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c MarkReadCmd) Type() string     { return MsgTypeMarkRead }
-func (c MarkReadCmd) UserID() int64    { return c.userID }
-func (c MarkReadCmd) ChannelID() int64 { return c.channelID }
+func (c MarkReadCmd) Type() string  { return MsgTypeMarkRead }
+func (c MarkReadCmd) UserID() int64 { return c.userID }
 
 // ReactionAddCmd represents a reaction_add message.
 type ReactionAddCmd struct {
 	userID    int64
-	messageID int64
-	emoji     string
+	MessageID int64
+	Emoji     string
 }
 
-func (c ReactionAddCmd) Type() string     { return MsgTypeReactionAdd }
-func (c ReactionAddCmd) UserID() int64    { return c.userID }
-func (c ReactionAddCmd) MessageID() int64 { return c.messageID }
-func (c ReactionAddCmd) Emoji() string    { return c.emoji }
+func (c ReactionAddCmd) Type() string  { return MsgTypeReactionAdd }
+func (c ReactionAddCmd) UserID() int64 { return c.userID }
 
 // ReactionRemoveCmd represents a reaction_remove message.
 type ReactionRemoveCmd struct {
 	userID    int64
-	messageID int64
-	emoji     string
+	MessageID int64
+	Emoji     string
 }
 
-func (c ReactionRemoveCmd) Type() string     { return MsgTypeReactionRemove }
-func (c ReactionRemoveCmd) UserID() int64    { return c.userID }
-func (c ReactionRemoveCmd) MessageID() int64 { return c.messageID }
-func (c ReactionRemoveCmd) Emoji() string    { return c.emoji }
+func (c ReactionRemoveCmd) Type() string  { return MsgTypeReactionRemove }
+func (c ReactionRemoveCmd) UserID() int64 { return c.userID }
 
 // VoiceJoinCmd represents a voice_join message.
 type VoiceJoinCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c VoiceJoinCmd) Type() string     { return MsgTypeVoiceJoin }
-func (c VoiceJoinCmd) UserID() int64    { return c.userID }
-func (c VoiceJoinCmd) ChannelID() int64 { return c.channelID }
+func (c VoiceJoinCmd) Type() string  { return MsgTypeVoiceJoin }
+func (c VoiceJoinCmd) UserID() int64 { return c.userID }
 
 // VoiceLeaveCmd represents a voice_leave message.
 type VoiceLeaveCmd struct {
@@ -182,42 +154,38 @@ func (c VoiceTokenRefreshCmd) UserID() int64 { return c.userID }
 // VoiceMuteCmd represents a voice_mute message.
 type VoiceMuteCmd struct {
 	userID int64
-	muted  bool
+	Muted  bool
 }
 
 func (c VoiceMuteCmd) Type() string  { return MsgTypeVoiceMute }
 func (c VoiceMuteCmd) UserID() int64 { return c.userID }
-func (c VoiceMuteCmd) Muted() bool   { return c.muted }
 
 // VoiceDeafenCmd represents a voice_deafen message.
 type VoiceDeafenCmd struct {
 	userID   int64
-	deafened bool
+	Deafened bool
 }
 
-func (c VoiceDeafenCmd) Type() string   { return MsgTypeVoiceDeafen }
-func (c VoiceDeafenCmd) UserID() int64  { return c.userID }
-func (c VoiceDeafenCmd) Deafened() bool { return c.deafened }
+func (c VoiceDeafenCmd) Type() string  { return MsgTypeVoiceDeafen }
+func (c VoiceDeafenCmd) UserID() int64 { return c.userID }
 
 // VoiceCameraCmd represents a voice_camera message.
 type VoiceCameraCmd struct {
 	userID  int64
-	enabled bool
+	Enabled bool
 }
 
 func (c VoiceCameraCmd) Type() string  { return MsgTypeVoiceCamera }
 func (c VoiceCameraCmd) UserID() int64 { return c.userID }
-func (c VoiceCameraCmd) Enabled() bool { return c.enabled }
 
 // VoiceScreenshareCmd represents a voice_screenshare message.
 type VoiceScreenshareCmd struct {
 	userID  int64
-	enabled bool
+	Enabled bool
 }
 
 func (c VoiceScreenshareCmd) Type() string  { return MsgTypeVoiceScreenshare }
 func (c VoiceScreenshareCmd) UserID() int64 { return c.userID }
-func (c VoiceScreenshareCmd) Enabled() bool { return c.enabled }
 
 // VoiceModMuteCmd represents a voice_mod_mute message: a moderator setting
 // another user's server mute. channelID is the voice channel the moderator
@@ -225,55 +193,46 @@ func (c VoiceScreenshareCmd) Enabled() bool { return c.enabled }
 // stale sidebar cannot mute someone who has since moved.
 type VoiceModMuteCmd struct {
 	userID    int64
-	channelID int64
-	targetID  int64
-	muted     bool
+	ChannelID int64
+	TargetID  int64
+	Muted     bool
 }
 
-func (c VoiceModMuteCmd) Type() string     { return MsgTypeVoiceModMute }
-func (c VoiceModMuteCmd) UserID() int64    { return c.userID }
-func (c VoiceModMuteCmd) ChannelID() int64 { return c.channelID }
-func (c VoiceModMuteCmd) TargetID() int64  { return c.targetID }
-func (c VoiceModMuteCmd) Muted() bool      { return c.muted }
+func (c VoiceModMuteCmd) Type() string  { return MsgTypeVoiceModMute }
+func (c VoiceModMuteCmd) UserID() int64 { return c.userID }
 
 // VoiceModDeafenCmd represents a voice_mod_deafen message. See VoiceModMuteCmd
 // for the channelID contract.
 type VoiceModDeafenCmd struct {
 	userID    int64
-	channelID int64
-	targetID  int64
-	deafened  bool
+	ChannelID int64
+	TargetID  int64
+	Deafened  bool
 }
 
-func (c VoiceModDeafenCmd) Type() string     { return MsgTypeVoiceModDeafen }
-func (c VoiceModDeafenCmd) UserID() int64    { return c.userID }
-func (c VoiceModDeafenCmd) ChannelID() int64 { return c.channelID }
-func (c VoiceModDeafenCmd) TargetID() int64  { return c.targetID }
-func (c VoiceModDeafenCmd) Deafened() bool   { return c.deafened }
+func (c VoiceModDeafenCmd) Type() string  { return MsgTypeVoiceModDeafen }
+func (c VoiceModDeafenCmd) UserID() int64 { return c.userID }
 
 // VoiceModMoveCmd represents a voice_mod_move message: a moderator moving a
 // user to another voice channel.
 type VoiceModMoveCmd struct {
 	userID      int64
-	targetID    int64
-	toChannelID int64
+	TargetID    int64
+	ToChannelID int64
 }
 
-func (c VoiceModMoveCmd) Type() string       { return MsgTypeVoiceModMove }
-func (c VoiceModMoveCmd) UserID() int64      { return c.userID }
-func (c VoiceModMoveCmd) TargetID() int64    { return c.targetID }
-func (c VoiceModMoveCmd) ToChannelID() int64 { return c.toChannelID }
+func (c VoiceModMoveCmd) Type() string  { return MsgTypeVoiceModMove }
+func (c VoiceModMoveCmd) UserID() int64 { return c.userID }
 
 // VoiceModKickCmd represents a voice_mod_kick message: a moderator
 // disconnecting a user from voice.
 type VoiceModKickCmd struct {
 	userID   int64
-	targetID int64
+	TargetID int64
 }
 
-func (c VoiceModKickCmd) Type() string    { return MsgTypeVoiceModKick }
-func (c VoiceModKickCmd) UserID() int64   { return c.userID }
-func (c VoiceModKickCmd) TargetID() int64 { return c.targetID }
+func (c VoiceModKickCmd) Type() string  { return MsgTypeVoiceModKick }
+func (c VoiceModKickCmd) UserID() int64 { return c.userID }
 
 // VoiceE2EEAnnounceCmd represents a voice_e2ee_announce message.
 // signature is the ECDSA identity-key signature over the ephemeral public key
@@ -281,48 +240,36 @@ func (c VoiceModKickCmd) TargetID() int64 { return c.targetID }
 // receiving client enforces the fail-closed posture.
 type VoiceE2EEAnnounceCmd struct {
 	userID    int64
-	publicKey string
-	signature string
+	PublicKey string
+	Signature string
 }
 
-func (c VoiceE2EEAnnounceCmd) Type() string      { return MsgTypeVoiceE2EEAnnounce }
-func (c VoiceE2EEAnnounceCmd) UserID() int64     { return c.userID }
-func (c VoiceE2EEAnnounceCmd) PublicKey() string { return c.publicKey }
-func (c VoiceE2EEAnnounceCmd) Signature() string { return c.signature }
+func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
+func (c VoiceE2EEAnnounceCmd) UserID() int64 { return c.userID }
 
 // ChatCommandCmd represents a chat_command (plugin slash command) message.
 type ChatCommandCmd struct {
 	userID    int64
-	reqID     string
-	channelID int64
-	command   string // trimmed, including leading slash, e.g. "/hello"
+	ReqID     string
+	ChannelID int64
+	Command   string // trimmed, including leading slash, e.g. "/hello"
 	args      []string
 }
 
-func (c ChatCommandCmd) Type() string     { return MsgTypeChatCommand }
-func (c ChatCommandCmd) UserID() int64    { return c.userID }
-func (c ChatCommandCmd) ChannelID() int64 { return c.channelID }
-func (c ChatCommandCmd) ReqID() string    { return c.reqID }
-func (c ChatCommandCmd) Command() string  { return c.command }
-func (c ChatCommandCmd) Args() []string {
-	dst := make([]string, len(c.args))
-	copy(dst, c.args)
-	return dst
-}
+func (c ChatCommandCmd) Type() string   { return MsgTypeChatCommand }
+func (c ChatCommandCmd) UserID() int64  { return c.userID }
+func (c ChatCommandCmd) Args() []string { return slices.Clone(c.args) }
 
 // VoiceE2EEOfferCmd represents a voice_e2ee_offer message.
 type VoiceE2EEOfferCmd struct {
 	userID       int64
-	targetUserID int64
-	encryptedKey string
-	iv           string
+	TargetUserID int64
+	EncryptedKey string
+	IV           string
 }
 
-func (c VoiceE2EEOfferCmd) Type() string         { return MsgTypeVoiceE2EEOffer }
-func (c VoiceE2EEOfferCmd) UserID() int64        { return c.userID }
-func (c VoiceE2EEOfferCmd) TargetUserID() int64  { return c.targetUserID }
-func (c VoiceE2EEOfferCmd) EncryptedKey() string { return c.encryptedKey }
-func (c VoiceE2EEOfferCmd) IV() string           { return c.iv }
+func (c VoiceE2EEOfferCmd) Type() string  { return MsgTypeVoiceE2EEOffer }
+func (c VoiceE2EEOfferCmd) UserID() int64 { return c.userID }
 
 // CallRingCmd represents a call_ring message: "start ringing the other people
 // in this DM". It carries only the channel — who is calling is the
@@ -330,22 +277,20 @@ func (c VoiceE2EEOfferCmd) IV() string           { return c.iv }
 // record (see registerCallHandlers).
 type CallRingCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c CallRingCmd) Type() string     { return MsgTypeCallRing }
-func (c CallRingCmd) UserID() int64    { return c.userID }
-func (c CallRingCmd) ChannelID() int64 { return c.channelID }
+func (c CallRingCmd) Type() string  { return MsgTypeCallRing }
+func (c CallRingCmd) UserID() int64 { return c.userID }
 
 // CallDeclineCmd represents a call_decline message.
 type CallDeclineCmd struct {
 	userID    int64
-	channelID int64
+	ChannelID int64
 }
 
-func (c CallDeclineCmd) Type() string     { return MsgTypeCallDecline }
-func (c CallDeclineCmd) UserID() int64    { return c.userID }
-func (c CallDeclineCmd) ChannelID() int64 { return c.channelID }
+func (c CallDeclineCmd) Type() string  { return MsgTypeCallDecline }
+func (c CallDeclineCmd) UserID() int64 { return c.userID }
 
 // ── Command constructors ────────────────────────────────────────────────────
 
@@ -434,12 +379,12 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		attachments := make([]string, len(p.Attachments))
 		copy(attachments, p.Attachments)
 		return ChatSendCmd{
-			clientMessageID: p.ClientMessageID,
+			ClientMessageID: p.ClientMessageID,
 			userID:          userID,
-			reqID:           reqID,
-			channelID:       chID,
-			content:         p.Content,
-			replyTo:         p.ReplyTo,
+			ReqID:           reqID,
+			ChannelID:       chID,
+			Content:         p.Content,
+			ReplyTo:         p.ReplyTo,
 			attachments:     attachments,
 		}, nil
 	},
@@ -458,9 +403,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		}
 		return ChatEditCmd{
 			userID:    userID,
-			reqID:     reqID,
-			messageID: msgID,
-			content:   p.Content,
+			ReqID:     reqID,
+			MessageID: msgID,
+			Content:   p.Content,
 		}, nil
 	},
 
@@ -477,8 +422,8 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		}
 		return ChatDeleteCmd{
 			userID:    userID,
-			reqID:     reqID,
-			messageID: msgID,
+			ReqID:     reqID,
+			MessageID: msgID,
 		}, nil
 	},
 
@@ -487,7 +432,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return TypingStartCmd{userID: userID, channelID: chID}, nil
+		return TypingStartCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypePresenceUpdate: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -498,7 +443,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid presence_update payload: %w", err)
 		}
-		return PresenceUpdateCmd{userID: userID, status: p.Status, customStatus: p.CustomStatus}, nil
+		return PresenceUpdateCmd{userID: userID, Status: p.Status, CustomStatus: p.CustomStatus}, nil
 	},
 
 	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -506,7 +451,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return ChannelFocusCmd{userID: userID, channelID: chID}, nil
+		return ChannelFocusCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -514,7 +459,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return MarkReadCmd{userID: userID, channelID: chID}, nil
+		return MarkReadCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypeCallRing: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -522,7 +467,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return CallRingCmd{userID: userID, channelID: chID}, nil
+		return CallRingCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypeCallDecline: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -530,7 +475,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return CallDeclineCmd{userID: userID, channelID: chID}, nil
+		return CallDeclineCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypeReactionAdd: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -545,7 +490,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, fmt.Errorf("message_id must be integer: %w", err)
 		}
-		return ReactionAddCmd{userID: userID, messageID: msgID, emoji: p.Emoji}, nil
+		return ReactionAddCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
 
 	MsgTypeReactionRemove: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -560,7 +505,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, fmt.Errorf("message_id must be integer: %w", err)
 		}
-		return ReactionRemoveCmd{userID: userID, messageID: msgID, emoji: p.Emoji}, nil
+		return ReactionRemoveCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
 
 	MsgTypeVoiceJoin: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -568,7 +513,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return VoiceJoinCmd{userID: userID, channelID: chID}, nil
+		return VoiceJoinCmd{userID: userID, ChannelID: chID}, nil
 	},
 
 	MsgTypeVoiceLeave: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
@@ -586,7 +531,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mute payload: %w", err)
 		}
-		return VoiceMuteCmd{userID: userID, muted: p.Muted}, nil
+		return VoiceMuteCmd{userID: userID, Muted: p.Muted}, nil
 	},
 
 	MsgTypeVoiceDeafen: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -596,7 +541,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_deafen payload: %w", err)
 		}
-		return VoiceDeafenCmd{userID: userID, deafened: p.Deafened}, nil
+		return VoiceDeafenCmd{userID: userID, Deafened: p.Deafened}, nil
 	},
 
 	MsgTypeVoiceCamera: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -606,7 +551,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_camera payload: %w", err)
 		}
-		return VoiceCameraCmd{userID: userID, enabled: p.Enabled}, nil
+		return VoiceCameraCmd{userID: userID, Enabled: p.Enabled}, nil
 	},
 
 	MsgTypeVoiceScreenshare: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -616,7 +561,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_screenshare payload: %w", err)
 		}
-		return VoiceScreenshareCmd{userID: userID, enabled: p.Enabled}, nil
+		return VoiceScreenshareCmd{userID: userID, Enabled: p.Enabled}, nil
 	},
 
 	MsgTypeVoiceModMute: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -632,7 +577,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return VoiceModMuteCmd{userID: userID, channelID: chID, targetID: targetID, muted: p.Muted}, nil
+		return VoiceModMuteCmd{userID: userID, ChannelID: chID, TargetID: targetID, Muted: p.Muted}, nil
 	},
 
 	MsgTypeVoiceModDeafen: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -648,7 +593,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return VoiceModDeafenCmd{userID: userID, channelID: chID, targetID: targetID, deafened: p.Deafened}, nil
+		return VoiceModDeafenCmd{userID: userID, ChannelID: chID, TargetID: targetID, Deafened: p.Deafened}, nil
 	},
 
 	MsgTypeVoiceModMove: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -663,7 +608,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err != nil {
 			return nil, err
 		}
-		return VoiceModMoveCmd{userID: userID, targetID: targetID, toChannelID: toChID}, nil
+		return VoiceModMoveCmd{userID: userID, TargetID: targetID, ToChannelID: toChID}, nil
 	},
 
 	MsgTypeVoiceModKick: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -680,7 +625,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if targetID <= 0 {
 			return nil, fmt.Errorf("user_id must be positive")
 		}
-		return VoiceModKickCmd{userID: userID, targetID: targetID}, nil
+		return VoiceModKickCmd{userID: userID, TargetID: targetID}, nil
 	},
 
 	MsgTypeVoiceE2EEAnnounce: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -691,7 +636,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, publicKey: p.PublicKey, signature: p.Signature}, nil
+		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
@@ -715,9 +660,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		copy(args, p.Args)
 		return ChatCommandCmd{
 			userID:    userID,
-			reqID:     reqID,
-			channelID: p.ChannelID,
-			command:   cmd,
+			ReqID:     reqID,
+			ChannelID: p.ChannelID,
+			Command:   cmd,
 			args:      args,
 		}, nil
 	},
@@ -733,9 +678,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		}
 		return VoiceE2EEOfferCmd{
 			userID:       userID,
-			targetUserID: p.TargetUserID,
-			encryptedKey: p.EncryptedKey,
-			iv:           p.IV,
+			TargetUserID: p.TargetUserID,
+			EncryptedKey: p.EncryptedKey,
+			IV:           p.IV,
 		}, nil
 	},
 }

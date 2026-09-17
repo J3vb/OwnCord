@@ -39,7 +39,7 @@ const (
 //   - a ClientError when no plugin registry is wired, the command is unknown,
 //     or the invoking user may not post the plugin's broadcast;
 //   - Result.Reply for an ephemeral plugin reply (sender only);
-//   - Result.Events with a PluginBroadcastEvent for a channel broadcast, gated
+//   - Result.Events with a plugin_broadcast event for a channel broadcast, gated
 //     by MessageService.CanPost (same policy as a real message send).
 func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps any) Result {
 	d := deps.(PluginDeps)
@@ -54,12 +54,12 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 		reg = d.Registry()
 	}
 	if reg == nil {
-		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s (no plugins loaded)", cc.command)}}
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s (no plugins loaded)", cc.Command)}}
 	}
 
-	result, handled := reg.DispatchCommand(ctx, cc.userID, cc.channelID, cc.command, cc.args)
+	result, handled := reg.DispatchCommand(ctx, cc.userID, cc.ChannelID, cc.Command, cc.args)
 	if !handled {
-		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s", cc.command)}}
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s", cc.Command)}}
 	}
 	if result == nil {
 		// Plugin acknowledged with no output.
@@ -69,40 +69,40 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 	var out Result
 	if result.Reply != "" {
 		// Ephemeral reply — sent only to the invoking client.
-		out.Reply = buildCommandReply(cc.reqID, result.Reply)
+		out.Reply = buildCommandReply(cc.ReqID, result.Reply)
 	}
 
-	if result.Broadcast != "" && cc.channelID != 0 {
+	if result.Broadcast != "" && cc.ChannelID != 0 {
 		// Verify the invoking client can post to this channel before broadcasting
 		// (same gate a real send uses: channel role perms + DM membership/blocks).
 		// ponytail: if the plugin returned both a reply and a broadcast and the
 		// gate denies, the error wins and the ephemeral reply is dropped (Result
 		// carries either an error or a reply, not both) — an untested edge; V1
 		// sent both. Preserve the security signal (denial) over the ack.
-		if gate := canPluginBroadcast(ctx, d.MessageSvc, cc.userID, cc.channelID); gate != nil {
+		if gate := canPluginBroadcast(ctx, d.MessageSvc, cc.userID, cc.ChannelID); gate != nil {
 			return *gate
 		}
-		msg := buildCommandBroadcast(cc.channelID, cc.userID, cc.command, result.Broadcast)
+		msg := buildCommandBroadcast(cc.ChannelID, cc.userID, cc.Command, result.Broadcast)
 		// B5-6 (Codex P1-2): a DM's plugin broadcast must reach the same
 		// sender-aware audience chat/typing/reactions do, not the plain
 		// per-channel-topic fan-out — channel_focus subscribes any DM
 		// participant to the topic regardless of message-request trust.
 		// A lookup failure fails closed to the DM shape (sender only),
 		// never to the wider, untrusted-reaching plain broadcast.
-		isDM, dmErr := d.MessageSvc.ChannelIsDM(ctx, cc.channelID)
+		isDM, dmErr := d.MessageSvc.ChannelIsDM(ctx, cc.ChannelID)
 		if dmErr != nil || isDM {
 			var participantIDs []int64
 			if dmErr == nil {
-				participantIDs, _ = d.MessageSvc.DMAudience(ctx, cc.channelID, cc.userID)
+				participantIDs, _ = d.MessageSvc.DMAudience(ctx, cc.ChannelID, cc.userID)
 			}
 			if len(participantIDs) == 0 {
 				participantIDs = []int64{cc.userID}
 			}
-			out.Events = append(out.Events, PluginBroadcastDMEvent{channelID: cc.channelID, participantIDs: participantIDs, payload: msg})
+			out.Events = append(out.Events, dmEvt{evType: MsgTypePluginBroadcast, channelID: cc.ChannelID, participantIDs: participantIDs, payload: msg})
 		} else {
-			out.Events = append(out.Events, PluginBroadcastEvent{channelID: cc.channelID, payload: msg})
+			out.Events = append(out.Events, channelEvt{evType: MsgTypePluginBroadcast, channelID: cc.ChannelID, payload: msg})
 		}
-		slog.Info("plugin command broadcast", "cmd", cc.command, "channel_id", cc.channelID, "user_id", cc.userID)
+		slog.Info("plugin command broadcast", "cmd", cc.Command, "channel_id", cc.ChannelID, "user_id", cc.userID)
 	}
 	return out
 }

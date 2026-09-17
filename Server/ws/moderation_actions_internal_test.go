@@ -522,7 +522,7 @@ func TestHandleVoiceModMuteV2_ModLessDepsFallsBackToUnlockedWrite(t *testing.T) 
 	}
 
 	deps := VoiceDeps{Voice: h.voice, Reader: database, Permissions: permissions.NewChecker(database)}
-	cmd := VoiceModMuteCmd{userID: actorID, channelID: chID, targetID: targetID, muted: true}
+	cmd := VoiceModMuteCmd{userID: actorID, ChannelID: chID, TargetID: targetID, Muted: true}
 	res := handleVoiceModMuteV2(ctx, cmd, ClientInfo{UserID: actorID}, deps)
 	if res.Error != nil {
 		t.Fatalf("handleVoiceModMuteV2: %+v", res.Error)

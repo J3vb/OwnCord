@@ -351,8 +351,3 @@ func (h *Hub) webhookLeftFinishLeave(ctx context.Context, c *Client, userID, cha
 		"user_id", userID,
 		"channel_id", channelID)
 }
-
-// MountWebhookRoute is a helper for the router to mount the webhook endpoint.
-func MountWebhookRoute(h *Hub, apiKey, apiSecret string) http.HandlerFunc {
-	return h.NewLiveKitWebhookHandler(apiKey, apiSecret)
-}

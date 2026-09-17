@@ -513,7 +513,7 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
 	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
 		Post("/api/v1/livekit/webhook",
-			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+			hub.NewLiveKitWebhookHandler(cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 	// LiveKit health check — same perimeter as the webhook.
 	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).

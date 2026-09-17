@@ -286,17 +286,17 @@ func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader,
 
 // readyVoiceStates gathers the voice states the ready payload may expose to
 // this user. A collect failure is non-fatal, so this returns no error.
-func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, channels []db.Channel, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
+func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
 	// Collect voice states, filtered to visible channels (BUG-095) plus the
 	// user's own open DM channels — mirroring computeAllowedChannels, which
 	// layers DM IDs onto the same checker result for reconnect replay
 	// filtering. Without this, a DM voice call's voice_state rows are
 	// structurally unreachable: VisibleChannelIDs skips ch.Type == "dm", and
 	// nothing else re-adds them for this filter.
-	allVoiceStates, err := collectAllVoiceStates(ctx, database, channels)
+	allVoiceStates, err := database.GetAllVoiceStates(ctx)
 	if err != nil {
 		// Non-fatal: send empty list rather than failing the whole ready payload.
-		slog.Warn("buildReady collectAllVoiceStates", "err", err)
+		slog.Warn("buildReady GetAllVoiceStates", "err", err)
 		allVoiceStates = []db.VoiceState{}
 	}
 	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels)+1)
@@ -409,7 +409,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, err
 	}
 
-	voiceStates := h.readyVoiceStates(ctx, database, channels, visibleChannels, dmChannels, userID)
+	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
 
 	serverName, motd := h.getCachedSettings(ctx)
 
@@ -464,12 +464,6 @@ func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int6
 		out = append(out, readyNoticePayload{ID: r.ID, Kind: r.Kind, Reason: r.Reason, CreatedAt: r.CreatedAt})
 	}
 	return out, nil
-}
-
-// collectAllVoiceStates gathers voice states across all channels in a single
-// query, replacing the previous N+1 per-channel pattern.
-func collectAllVoiceStates(ctx context.Context, database ReadySnapshotReader, _ []db.Channel) ([]db.VoiceState, error) {
-	return database.GetAllVoiceStates(ctx)
 }
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {

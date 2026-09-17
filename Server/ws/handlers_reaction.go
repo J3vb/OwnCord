@@ -23,12 +23,12 @@ func reactionV2Handler(add bool) HandlerV2 {
 		var emoji string
 		if add {
 			c := cmd.(ReactionAddCmd)
-			msgID = c.MessageID()
-			emoji = c.Emoji()
+			msgID = c.MessageID
+			emoji = c.Emoji
 		} else {
 			c := cmd.(ReactionRemoveCmd)
-			msgID = c.MessageID()
-			emoji = c.Emoji()
+			msgID = c.MessageID
+			emoji = c.Emoji
 		}
 
 		var result *service.ReactionResult
@@ -44,13 +44,15 @@ func reactionV2Handler(add bool) HandlerV2 {
 
 		reactionPayload := buildReactionUpdate(result.MessageID, result.ChannelID, result.UserID, result.Emoji, result.Action)
 		if result.IsDM {
-			return Result{Events: []Event{ReactionDMEvent{
+			return Result{Events: []Event{dmEvt{
+				evType:         MsgTypeReactionUpdate,
 				channelID:      result.ChannelID,
 				participantIDs: result.ParticipantIDs,
 				payload:        reactionPayload,
 			}}}
 		}
-		return Result{Events: []Event{ReactionChannelEvent{
+		return Result{Events: []Event{channelEvt{
+			evType:    MsgTypeReactionUpdate,
 			channelID: result.ChannelID,
 			payload:   reactionPayload,
 		}}}
