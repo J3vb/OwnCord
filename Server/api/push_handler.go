@@ -59,10 +59,7 @@ func pushDisabledMiddleware(enabled bool) func(http.Handler) http.Handler {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusServiceUnavailable, errorResponse{
-				Error:   "PUSH_DISABLED",
-				Message: "Web Push is not enabled on this server",
-			})
+			writeErr(w, http.StatusServiceUnavailable, "PUSH_DISABLED", "Web Push is not enabled on this server")
 		})
 	}
 }
@@ -80,9 +77,7 @@ func handlePushVAPID(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		pub, keyID, ok := push.PublicKey()
 		if !ok {
-			writeJSON(w, http.StatusServiceUnavailable, errorResponse{
-				Error: "PUSH_DISABLED", Message: "no VAPID key is installed",
-			})
+			writeErr(w, http.StatusServiceUnavailable, "PUSH_DISABLED", "no VAPID key is installed")
 			return
 		}
 		writeJSON(w, http.StatusOK, pushVAPIDResponse{PublicKey: pub, KeyID: keyID})
@@ -107,7 +102,7 @@ func handleListPushSubscriptions(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		rows, err := push.List(r.Context(), user.ID)
@@ -161,7 +156,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		var req pushSubscribeRequest
@@ -191,7 +186,7 @@ func handleRevokePushSubscription(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		id, ok := parseIDParam(w, r, "id")

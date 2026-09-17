@@ -66,9 +66,8 @@ type dmRequestListItem struct {
 // inbox, newest first.
 func handleListDMRequests(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -114,9 +113,8 @@ type dmRequestTransitionResponse struct {
 // sends dm_channel_open, since only acceptance opens the conversation.
 func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster, action dmRequestAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		id, ok := parseIDParam(w, r, "id")

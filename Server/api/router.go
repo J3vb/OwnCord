@@ -273,7 +273,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// and the other sensitive endpoints, so a client's 30/min auto-poll could
 	// 429 its user's own 2FA or password change.
 	MountClientUpdateRoute(
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		r.With(RateLimitMiddleware(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
 		u,
 	)
 
@@ -528,7 +528,7 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	// is handled by the LiveKit JWT (access_token query param) which the
 	// LiveKit server validates. Users can only obtain a valid JWT through
 	// the authenticated voice_join WS flow. Rate limiting prevents abuse.
-	r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
+	r.With(RateLimitMiddleware(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 }
 

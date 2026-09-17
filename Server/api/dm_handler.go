@@ -120,19 +120,14 @@ type listDMsResponse struct {
 // handleCreateDM creates or retrieves a DM channel with a recipient.
 func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		var req createDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -196,11 +191,8 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 // handleListDMs returns all open DM channels for the authenticated user.
 func handleListDMs(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -216,11 +208,8 @@ func handleListDMs(svc *service.Services) http.HandlerFunc {
 // handleCloseDM removes a DM channel from the authenticated user's open list.
 func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -322,19 +311,14 @@ func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMB
 // handleCreateGroupDM creates a group DM between the caller and 2..8 others.
 func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		var req createGroupDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -358,11 +342,8 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 // there is no owner, so every member holds the same authority over it.
 func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -373,9 +354,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 
 		var req renameDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -411,9 +390,8 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 // handleBlockUser blocks a user.
 func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -466,9 +444,8 @@ func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broad
 // handleUnblockUser unblocks a user.
 func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -488,9 +465,8 @@ func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 // handleListBlocks returns all blocked user IDs.
 func handleListBlocks(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
