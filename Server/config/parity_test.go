@@ -177,13 +177,14 @@ func TestParityEveryLeafRoundTrips(t *testing.T) {
 	})
 }
 
-// TestParityEmptyVoiceSection pins the invariant the swap has to preserve by
-// construction: `voice:` (null) and `voice: {}` must both leave the URL and
-// quality defaults in place. Today applyVoiceDefaults refills them afterwards;
-// after the swap nothing can lose them, because Unmarshal only overwrites keys
-// the document names.
+// TestParityEmptyVoiceSection pins the voice defaults against every shape that
+// could lose them. `voice:` (null) and `voice: {}` name no key, so the defaults
+// survive Unmarshal untouched; a key the document DOES name with an explicit
+// empty string is overwritten with "", so ensureVoiceCredentials must refill
+// it. Without that refill `livekit_url: ""` reaches NewLiveKitClient as empty
+// and disables voice.
 func TestParityEmptyVoiceSection(t *testing.T) {
-	for _, body := range []string{"voice:\n", "voice: {}\n"} {
+	for _, body := range []string{"voice:\n", "voice: {}\n", "voice:\n  livekit_url: \"\"\n  quality: \"\"\n"} {
 		cfg := loadBody(t, body)
 		if cfg.Voice.LiveKitURL != "ws://localhost:7880" || cfg.Voice.Quality != "medium" {
 			t.Errorf("Load(%q): url=%q quality=%q, want both defaults", body, cfg.Voice.LiveKitURL, cfg.Voice.Quality)

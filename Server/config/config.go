@@ -835,9 +835,10 @@ func applyBounds(cfg *Config) {
 
 // ensureVoiceCredentials generates unique random LiveKit credentials when
 // API key/secret are empty, so voice works out of the box without shipping
-// known-public defaults. The URL and quality defaults need no equivalent: they
-// are set by defaults() and Unmarshal only overwrites keys the document names,
-// so an empty `voice:` section leaves them alone.
+// known-public defaults. It also refills URL and quality: Unmarshal leaves them
+// alone when the section is merely empty, but a document that NAMES one with an
+// explicit `livekit_url: ""` overwrites the default, and an empty URL makes
+// NewLiveKitClient refuse and disables voice.
 func ensureVoiceCredentials(v *VoiceConfig) error {
 	if v.LiveKitAPIKey == "" {
 		key, err := generateRandomKey(8)
@@ -854,6 +855,12 @@ func ensureVoiceCredentials(v *VoiceConfig) error {
 		}
 		v.LiveKitAPISecret = secret
 		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
+	}
+	if v.LiveKitURL == "" {
+		v.LiveKitURL = "ws://localhost:7880"
+	}
+	if v.Quality == "" {
+		v.Quality = "medium"
 	}
 	return nil
 }
