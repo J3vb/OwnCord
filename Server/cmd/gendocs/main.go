@@ -42,6 +42,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -261,7 +262,11 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}
 	defer rt.Hub.GracefulStop()
-	handler, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil, rt)
+	// GET /admin/api/logs/stream mounts only when a log buffer is wired
+	// (admin.NewAdminAPI: `if logBuf != nil`). A running server always has
+	// one, so the index must be walked with one too, or that production
+	// route is silently missing from docs/api.md.
+	handler, cleanup := api.NewRouter(cfg, database, "gendocs", admin.NewRingBuffer(1), nil, rt)
 	defer cleanup()
 
 	routes, ok := handler.(chi.Routes)
