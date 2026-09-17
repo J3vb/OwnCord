@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -346,4 +348,69 @@ func TestSkipNeverReadsAsPassed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRefusalsAreNotThrottles pins the two classifications that decide whether
+// phase D and phase S measured the thing they are named for. Both failure modes
+// are silent in a green log: a RATE_LIMITED reply counted as a disk refusal
+// lets phase D report that fifty sends exercised a full filesystem that only
+// the rate limiter answered, and a probe that stops on any error frame lets
+// phase S report the LiveKit guard refusing when what refused was voice_join's
+// own rate limit. They are unit-tested because the server's rate limits sit in
+// front of both paths — the only way to see either without a runner is to hand
+// the classifier the frame the limiter would have sent.
+func TestRefusalsAreNotThrottles(t *testing.T) {
+	ok := wsFrame{Type: "chat_send_ok"}
+	token := wsFrame{Type: "voice_token", Payload: json.RawMessage(`{"token":"jwt"}`)}
+	rateLimited := errorFrame(errCodeRateLimited)
+	diskFull := errorFrame("INTERNAL")
+	unreadable := wsFrame{Type: "error", Payload: json.RawMessage(`{not json`)}
+
+	fullSends := []struct {
+		name  string
+		frame wsFrame
+		err   error
+		want  fullSendOutcome
+	}{
+		{"an acknowledgement is an acknowledgement", ok, nil, fullSendAcked},
+		{"a storage refusal is a refusal", diskFull, nil, fullSendRefused},
+		{"an unreadable error frame is still a refusal", unreadable, nil, fullSendRefused},
+		{"a throttle is NOT a refusal", rateLimited, nil, fullSendThrottled},
+		{"a send that never came back is silent", wsFrame{}, errors.New("deadline"), fullSendSilent},
+		{"a frame that answers something else is silent", token, nil, fullSendSilent},
+	}
+	for _, tt := range fullSends {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyFullSend(tt.frame, tt.err); got != tt.want {
+				t.Fatalf("classifyFullSend = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	probes := []struct {
+		name  string
+		frame wsFrame
+		want  bool
+	}{
+		{"the guard's own refusal stops the probe", errorFrame(errCodeVoiceError), true},
+		{"a throttle does NOT stop the probe", rateLimited, false},
+		{"a minted token does NOT stop the probe", token, false},
+		{"an unreadable error frame does NOT stop the probe", unreadable, false},
+	}
+	for _, tt := range probes {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := voiceGuardRefused(tt.frame); got != tt.want {
+				t.Fatalf("voiceGuardRefused = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+// errorFrame builds the frame buildErrorMsg puts on the wire.
+func errorFrame(code string) wsFrame {
+	payload, err := json.Marshal(map[string]string{"code": code, "message": code + " from the server"})
+	if err != nil {
+		panic(err)
+	}
+	return wsFrame{Type: "error", Payload: payload}
 }

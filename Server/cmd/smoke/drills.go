@@ -935,6 +935,56 @@ func (f wsFrame) errCode() (string, string) {
 	return payload.Code, payload.Message
 }
 
+// fullSendOutcome is which bucket one reply to the full stage's chat_send lands
+// in. The buckets are the whole assertion: phase D's verdict is that every send
+// was answered AND that at least one was refused by the full filesystem, so
+// which replies may count as that refusal decides whether the phase measured
+// the disk or measured something else.
+type fullSendOutcome int
+
+const (
+	fullSendAcked     fullSendOutcome = iota // chat_send_ok
+	fullSendRefused                          // an error frame that got past the rate limit
+	fullSendThrottled                        // RATE_LIMITED: the harness's own pacing
+	fullSendSilent                           // nothing arrived, or not an answer to this send
+)
+
+// classifyFullSend sorts a chat_send reply. The distinction that matters is
+// between a refusal and a throttle: service.sendMessagePrecheck charges the
+// per-user chat rate limit BEFORE it reads the channel, so a RATE_LIMITED reply
+// never reached SQLite and proves nothing about the disk. Counting one as a
+// refusal is how a run that only ever touched the rate limiter comes to report
+// that fifty sends exercised the full filesystem.
+func classifyFullSend(frame wsFrame, err error) fullSendOutcome {
+	if err != nil {
+		return fullSendSilent
+	}
+	if frame.Type == "chat_send_ok" {
+		return fullSendAcked
+	}
+	if frame.Type != "error" {
+		return fullSendSilent
+	}
+	if code, _ := frame.errCode(); code == errCodeRateLimited {
+		return fullSendThrottled
+	}
+	// Everything else is a refusal. That includes a frame whose payload will not
+	// parse: the rate-limiter's reply is built by serviceErrorToResult and is
+	// always well-formed, so an error this drill cannot read is definitionally
+	// not the rate limiter and came from further in than the precheck.
+	return fullSendRefused
+}
+
+// voiceGuardRefused is probeVoiceJoin's stop predicate for the post-kill probe:
+// it reports whether the reply is the LiveKit-process guard refusing. It is
+// deliberately not "any error frame", because voice_join's per-user rate limit
+// is checked before the guard is and answers RATE_LIMITED — a probe that
+// stopped on that would call a guard which mints on every attempt a pass.
+func voiceGuardRefused(f wsFrame) bool {
+	code, _ := f.errCode()
+	return code == errCodeVoiceError
+}
+
 // wsConn is one authenticated WebSocket session. Frames are read by a pump
 // goroutine into a buffered channel, because the interesting ones arrive while
 // the harness is doing something else — a server_restart lands during a restore
@@ -2269,25 +2319,33 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	}
 	fmt.Printf("%s: full — %d MiB of junk on the filesystem, which now refuses more\n", d.phase, f.total()>>20)
 	var problems []failure
-	silent, refused, acked := 0, 0, 0
+	silent, refused, acked, throttled := 0, 0, 0, 0
 	for i := range drillFullSends {
-		frame, err := s.conn.chatSend(s.text.ID, fmt.Sprintf("full %d", i))
-		if err != nil {
-			silent++
-			continue
+		if i > 0 {
+			// Paced: the chat rate limit refuses a send before the disk is
+			// touched, so a tight loop would be asking about the rate limiter.
+			time.Sleep(drillFullSendPause)
 		}
-		switch frame.Type {
-		case "chat_send_ok":
+		frame, err := s.conn.chatSend(s.text.ID, fmt.Sprintf("full %d", i))
+		switch classifyFullSend(frame, err) {
+		case fullSendAcked:
 			acked++
-		case "error":
+		case fullSendRefused:
 			refused++
+		case fullSendThrottled:
+			throttled++
 		default:
 			silent++
 		}
 	}
 	s.oks += acked
-	fmt.Printf("%s: %d sends on a full filesystem — %d acknowledged, %d refused with an error frame, %d unanswered\n",
-		d.phase, drillFullSends, acked, refused, silent)
+	fmt.Printf("%s: %d sends on a full filesystem — %d acknowledged, %d refused with an error frame, %d unanswered, %d answered %s\n",
+		d.phase, drillFullSends, acked, refused, silent, throttled, errCodeRateLimited)
+	if throttled > 0 {
+		problems = append(problems, failure{what: fmt.Sprintf(
+			"%d of %d chat_sends were answered %s: the chat rate limit refuses a send before the disk is read, so those sends measured this harness's pacing and not the full filesystem, and a verdict that counted them would assert the disk path having watched the rate limiter",
+			throttled, drillFullSends, errCodeRateLimited)})
+	}
 	if silent > 0 {
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"%d of %d chat_sends on a full filesystem were answered with nothing at all: the server must answer every send with an error frame, and an unanswered send is a client that waits forever",
@@ -2805,8 +2863,16 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	// each time: a socket that already holds a voice state would get
 	// ALREADY_JOINED whatever the SFU is doing, and a minted token from a
 	// fresh socket is real evidence of the guard being absent.
-	seen, err := probeVoiceJoin(token, voice.ID, restartWindow, pollInterval/4,
-		func(f wsFrame) bool { return f.Type == "error" })
+	//
+	// The probe stops only on the guard's OWN refusal. voice_join is capped at
+	// five attempts per user per second (ws.voiceJoinRateLimit) and that check
+	// runs before the guard (ws.voiceJoinPrecheck), so a predicate that
+	// accepted any error frame would stop on the probe's own RATE_LIMITED and
+	// report this step as a pass — having watched the rate limiter refuse
+	// instead of the guard. That is the exact reading a BROKEN guard produces:
+	// it mints on every attempt, the probe throttles itself, and the one
+	// outcome the step exists to catch is the one it would call success.
+	seen, err := probeVoiceJoin(token, voice.ID, restartWindow, voiceProbePause, voiceGuardRefused)
 	if err != nil {
 		return nil, d.annotate(err)
 	}
@@ -2826,6 +2892,11 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 			minted)}}, nil
 	}
 	code, message := last.errCode()
+	if code != errCodeVoiceError {
+		return []failure{{what: fmt.Sprintf(
+			"the SFU was killed and voice_join refused with %s (%s) rather than %s: the refusal did not come from the LiveKit-process guard, so this step measured something other than the guard and must not report a pass",
+			code, message, errCodeVoiceError)}}, nil
+	}
 	fmt.Printf("%s: with the SFU killed voice_join refused with %s: %s\n", d.phase, code, message)
 
 	// The diagnostics endpoint is administrator-gated and rate-limited to five
@@ -3102,6 +3173,29 @@ const (
 	// each of which must be answered.
 	drillFullSends = 50
 
+	// drillFullSendPause spaces the full stage's sends. MessageService's
+	// precheck allows ten chat sends per user per second
+	// (service.sendMessagePrecheck) and answers RATE_LIMITED BEFORE it reads
+	// the channel, let alone writes to a full disk, so a loop that asked fifty
+	// times in a few milliseconds would measure the drill's own pacing and
+	// report it as the filesystem refusing. 120ms is eight a second: under the
+	// cap with room for the harness's own sends in the same sliding window.
+	drillFullSendPause = 120 * time.Millisecond
+
+	// The two WS error codes phase D and phase S must tell apart BY NAME. A
+	// refusal that proves the thing under test is not the same as a refusal
+	// the drill caused itself, and a step that counts either one is asserting
+	// something it did not watch. Spelled here rather than imported because
+	// importing `ws` would drag the whole server into this harness (the same
+	// reason as markerRelPath); they mirror Server/ws/errors.go.
+	//
+	// errCodeVoiceError is what the LiveKit-process guard answers with. It is
+	// also the code for "voice is not configured on this server", which the
+	// post-kill probe cannot reach: the step completes a join first, so
+	// h.livekit is non-nil by the time the guard is what refuses.
+	errCodeRateLimited = "RATE_LIMITED"
+	errCodeVoiceError  = "VOICE_ERROR"
+
 	// drillVictim and drillNewcomer are the two accounts phase R registers
 	// through an invite: the one it erases, and the one it creates after the
 	// backup so the restore has newer data to drop.
@@ -3133,6 +3227,15 @@ const (
 	// managed SFU is down. The supervisor's first restart is after a 3 second
 	// backoff (ws.LiveKitProcess's baseDelay), so the window stays inside it.
 	restartWindow = 2500 * time.Millisecond
+
+	// voiceProbePause spaces the post-kill voice_join probe. voice_join is
+	// capped at five attempts per user per second (ws.voiceJoinRateLimit) and
+	// that check runs BEFORE the LiveKit-process guard, so a probe that asked
+	// faster than the cap would collect RATE_LIMITED frames of its own making.
+	// 300ms is 3⅓ a second, which leaves the successful join that starts the
+	// probe inside the same sliding window and still gives ~8 attempts across
+	// restartWindow — far more than the microsecond race it exists to cover.
+	voiceProbePause = 300 * time.Millisecond
 
 	// supervisorRestartBudget is how long the managed SFU's first restart is
 	// given: the 3 second backoff plus the child's own boot, with room for a
