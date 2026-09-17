@@ -11,9 +11,9 @@
 //	    detector.wasm
 //	    assets/...
 //
-// Loader walks the directory, parses every plugin.toml (wazero build) or
-// plugin.json manifest via loadManifestFromDir, and returns a slice of
-// foundPlugin records. The Registry then persists each into the store.
+// Loader walks the directory, parses every plugin.json manifest via
+// loadManifestFromDir, and returns a slice of foundPlugin records. The
+// Registry then persists each into the store.
 
 package plugin
 
@@ -32,24 +32,15 @@ type foundPlugin struct {
 }
 
 // loadManifestFromDir resolves the manifest that governs one plugin
-// directory, preferring plugin.toml (wazero build) over plugin.json — the
-// precedence scanPluginDirectory has always applied on the on-disk restart
-// path. Every caller that resolves a plugin manifest from a directory must
-// route through here, so the manifest a zip install validates is
-// byte-for-byte the one the next restart loads (OC-0318): two callers
-// disagreeing on precedence let an admin approve a narrow manifest while a
-// broader one, never reviewed, silently takes over after the next restart.
+// directory. Every caller that resolves a plugin manifest from a directory
+// must route through here, so the manifest a zip install validates is
+// byte-for-byte the one the next restart loads (OC-0318).
 //
-// Returns an error satisfying os.IsNotExist when neither manifest file is
-// present, so callers that treat "not a plugin directory" as non-fatal
+// Returns an error satisfying os.IsNotExist when plugin.json is absent, so
+// callers that treat "not a plugin directory" as non-fatal
 // (scanPluginDirectory, walking arbitrary subdirectories) can tell that
 // apart from a real parse failure.
 func loadManifestFromDir(dir string) (*Manifest, error) {
-	if m, ok, err := tryLoadPluginTOML(dir); err != nil {
-		return nil, err
-	} else if ok {
-		return m, nil
-	}
 	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
 	if err != nil {
 		return nil, err
@@ -58,7 +49,7 @@ func loadManifestFromDir(dir string) (*Manifest, error) {
 }
 
 // scanPluginDirectory walks dir non-recursively and parses a manifest
-// (plugin.toml or plugin.json, via loadManifestFromDir) from every immediate
+// (plugin.json, via loadManifestFromDir) from every immediate
 // subdirectory. A per-plugin failure (malformed manifest, missing or
 // symlinked entrypoint, a stray symlink anywhere in that plugin's tree) is
 // recorded and that one subdirectory is skipped — it does not stop the
@@ -91,8 +82,8 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		manifest, manifestErr := loadManifestFromDir(pluginDir)
 		if manifestErr != nil {
 			if os.IsNotExist(manifestErr) {
-				// Neither plugin.toml nor plugin.json present — not a plugin
-				// directory, skip silently.
+				// No plugin.json present — not a plugin directory, skip
+				// silently.
 				continue
 			}
 			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), manifestErr))
