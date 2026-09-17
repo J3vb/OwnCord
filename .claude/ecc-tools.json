@@ -99,7 +99,6 @@
   "selectedModules": ["runtime-core", "workflow-pack"],
   "modules": ["runtime-core", "workflow-pack"],
   "managedFiles": [
-    ".claude/skills/OwnCord/SKILL.md",
     ".agents/skills/OwnCord/SKILL.md",
     ".agents/skills/OwnCord/agents/openai.yaml",
     ".claude/identity.json",
@@ -112,7 +111,6 @@
   ],
   "packageFiles": {
     "runtime-core": [
-      ".claude/skills/OwnCord/SKILL.md",
       ".agents/skills/OwnCord/SKILL.md",
       ".agents/skills/OwnCord/agents/openai.yaml",
       ".claude/identity.json",
@@ -126,7 +124,6 @@
   },
   "moduleFiles": {
     "runtime-core": [
-      ".claude/skills/OwnCord/SKILL.md",
       ".agents/skills/OwnCord/SKILL.md",
       ".agents/skills/OwnCord/agents/openai.yaml",
       ".claude/identity.json",
@@ -139,11 +136,6 @@
     ]
   },
   "files": [
-    {
-      "moduleId": "runtime-core",
-      "path": ".claude/skills/OwnCord/SKILL.md",
-      "description": "Repository-specific Claude Code skill generated from git history."
-    },
     {
       "moduleId": "runtime-core",
       "path": ".agents/skills/OwnCord/SKILL.md",
@@ -193,7 +185,7 @@
   "workflows": [],
   "adapters": {
     "claudeCode": {
-      "skillPath": ".claude/skills/OwnCord/SKILL.md",
+      "skillPath": ".agents/skills/OwnCord/SKILL.md",
       "identityPath": ".claude/identity.json",
       "commandPaths": []
     },

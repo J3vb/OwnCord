@@ -62,7 +62,10 @@ if ! floor_vals=$(node -e '
   const fs = require("node:fs");
   const f = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const num = (v) => {
-    if (typeof v !== "number" || !Number.isFinite(v)) process.exit(1);
+    // Finite AND non-negative: a negative floor marks every package ok and
+    // exits 0, silently disabling the ratchet. The awk parser this replaced
+    // rejected the "-" syntax outright, so this keeps its fail-closed shape.
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) process.exit(1);
     return v;
   };
   const pkgs = Object.entries(f.packages || {}).map(([k, v]) => `${k}=${num(v)}`);
