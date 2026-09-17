@@ -649,9 +649,9 @@ func Load(cfgPath string) (*Config, error) {
 		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, readErr)
 	}
 
-	cfg, err := loadBytes(raw)
+	cfg, err := loadBytes(raw, cfgPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+		return nil, err
 	}
 
 	// Warn (never fail — a newer server must tolerate an older config, and a
@@ -713,14 +713,17 @@ func Load(cfgPath string) (*Config, error) {
 // Save's verifyLoadable gate runs this whole function, environment included:
 // the file it is about to write must survive the load path the server boots
 // with, and that path now has an environment layer in it.
-func loadBytes(raw []byte) (*Config, error) {
+func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
 	env, err := envOverrides()
 	if err != nil {
-		return nil, err
+		// The failing layer is known at this call, so attribute the error
+		// here: Load's single wrap over the whole function blamed the YAML
+		// file for a bad OWNCORD_* value and sent operators to the wrong place.
+		return nil, fmt.Errorf("loading env vars: %w", err)
 	}
 	if len(env) > 0 {
 		envYAML, err := goyaml.Marshal(env)

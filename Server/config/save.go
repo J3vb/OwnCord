@@ -84,7 +84,7 @@ func Save(path string, p Patch) error {
 
 	// Sanity gate: the buffer must survive the same parse+unmarshal path Load
 	// uses. A bug here must fail the request, never brick the server's boot.
-	if err := verifyLoadable(buf.Bytes()); err != nil {
+	if err := verifyLoadable(buf.Bytes(), path); err != nil {
 		return fmt.Errorf("refusing to write config that would not load: %w", err)
 	}
 
@@ -205,8 +205,8 @@ func setScalar(m *goyaml.Node, key, value, tag string) {
 // the same defaults-plus-file-plus-environment build, including the bounds
 // clamp and the credential fill, so a write that would only fail at the next
 // boot is refused here instead.
-func verifyLoadable(raw []byte) error {
-	_, err := loadBytes(raw)
+func verifyLoadable(raw []byte, path string) error {
+	_, err := loadBytes(raw, path)
 	return err
 }
 

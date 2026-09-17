@@ -222,10 +222,20 @@ func TestParityEnvScalars(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(tc.env, tc.val)
-			cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			cfg, err := config.Load(path)
 			if tc.err {
 				if err == nil {
 					t.Fatalf("Load() with %s=%s must fail", tc.env, tc.val)
+				}
+				// The fault is the environment's and must be reported as one:
+				// an operator told the config file is bad would not find it
+				// there. Pin both halves of that so the prefix cannot drift.
+				if !strings.Contains(err.Error(), "loading env vars: "+tc.env) {
+					t.Errorf("%s=%s: failure not attributed to the environment:\n%v", tc.env, tc.val, err)
+				}
+				if strings.Contains(err.Error(), path) {
+					t.Errorf("%s=%s: failure blamed on the config file:\n%v", tc.env, tc.val, err)
 				}
 				return
 			}

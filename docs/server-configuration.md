@@ -24,6 +24,13 @@ comments and hand-edited values it doesn't manage are preserved — and restarts
 the server automatically when a startup-only value changed. Note that
 `OWNCORD_*` environment variables still override anything the wizard writes.
 
+Before it replaces the original, the wizard runs the patched file through the
+same load pipeline a boot uses — defaults, file, `OWNCORD_*` environment, the
+bounds clamp and the credential fill — and refuses the write if that fails, so
+it can never persist a file the next boot would reject. Two consequences: a
+malformed `OWNCORD_*` value fails a save as well as a boot, and saving with an
+empty `voice` section logs the same generated-credential warnings a boot does.
+
 ## Config Key Reference
 
 ### Server (`server`)
