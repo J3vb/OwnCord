@@ -7,14 +7,13 @@
 #   bash scripts/coverage-floor.sh --floor /tmp/red.json coverage.out
 #   OWNCORD_COVERAGE_FLOOR=/tmp/red.json bash scripts/coverage-floor.sh coverage.out
 #
-# The floor-file shape is fixed, because awk parses it - jq is not guaranteed on
-# the runners - and the parser fails closed (exit 2) rather than enforcing less
-# than the file says. Four rules: every line inside "packages" is one
-# "name": <number> entry, the number unquoted; all five core packages
-# (ws, service, permissions, auth, db) are present; the "exclude" array is all
-# on ONE line, because a Prettier-wrapped array would parse as no exclusions at
-# all; package names are module-relative directories with no trailing slash
-# ("cmd", not "cmd/").
+# The floor file is JSON, so node parses it - the same choice
+# Client/scripts/coverage-floor.sh makes for the identical job. A line-oriented
+# parse cannot see the nesting and so cannot fail closed: a Prettier-wrapped
+# "exclude" array parses as no exclusions at all, and a malformed entry
+# silently enforces less than the file says. A floor file node cannot read (not
+# JSON, no numeric "aggregate", a non-numeric package floor) exits 2 before awk
+# runs, and the core-package loop below still catches one that omits a package.
 #   {"aggregate": <pct>, "exclude": ["db/dbgen", "cmd"],
 #    "packages": {"<pkg>": <pct>, ...}}
 # "exclude" prefixes are dropped before anything is counted. A percentage is
@@ -54,33 +53,40 @@ for f in "$floor" "$profile"; do
   }
 done
 
-awk '
-FNR == NR {                                       # pass 1: the floor file
-  if ($0 ~ /"packages"[ \t]*:/) {
-    inpkg = 1
-    sub(/^.*"packages"[ \t]*:[ \t]*[{]/, "")      # keep any entry on this line
+# Three lines from one node parse: the aggregate, the space-separated excludes,
+# the space-separated "pkg=pct" pairs. Node never sees the coverage profile.
+if ! floor_vals=$(node -e '
+  const fs = require("node:fs");
+  const f = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const num = (v) => {
+    if (typeof v !== "number" || !Number.isFinite(v)) process.exit(1);
+    return v;
+  };
+  const pkgs = Object.entries(f.packages || {}).map(([k, v]) => `${k}=${num(v)}`);
+  const agg = num(f.aggregate);
+  process.stdout.write([agg, (f.exclude || []).join(" "), pkgs.join(" ")].join("\n") + "\n");
+' "$floor"); then
+  echo "coverage-floor: not a usable floor file: $floor" >&2
+  exit 2
+fi
+{ read -r aggfloor; read -r excl; read -r pkgs; } <<< "$floor_vals"
+
+awk -v aggf="$aggfloor" -v exclv="$excl" -v pkgf="$pkgs" '
+BEGIN {                                           # the floor, pre-parsed by node
+  aggfloor = aggf + 0
+  if (pkgf != "") {
+    n = split(pkgf, pbuf, " ")
+    for (i = 1; i <= n; i++) {
+      eq = index(pbuf[i], "=")
+      key = substr(pbuf[i], 1, eq - 1)
+      pkgfloor[key] = substr(pbuf[i], eq + 1) + 0
+      order[++np] = key
+    }
   }
-  if ($0 ~ /"exclude"[ \t]*:/) {
-    sawexcl = 1
-    n = split($0, a, "\"")
-    for (i = 4; i <= n; i += 2) if (a[i] != "") excl[++ne] = a[i]
-    next
+  if (exclv != "") {
+    n = split(exclv, xbuf, " ")
+    for (i = 1; i <= n; i++) excl[++ne] = xbuf[i]
   }
-  entry = $0                                      # strip the block brace, comma
-  if (inpkg) sub(/[ \t]*[}].*$/, "", entry)
-  gsub(/^[ \t]+|[ \t]*,[ \t]*$|[ \t]+$/, "", entry)
-  ok = (entry ~ /^"[^"]+"[ \t]*:[ \t]*[0-9]+([.][0-9]+)?$/)
-  if (inpkg && entry != "" && !ok)
-    err = sprintf("floor file line %d is not a \"name\": <number> entry: %s", FNR, $0)
-  if (ok) {
-    key = val = entry
-    sub(/^"/, "", key); sub(/".*$/, "", key)
-    sub(/^[^:]*:[ \t]*/, "", val)
-    if (key == "aggregate") { aggfloor = val + 0; haveagg = 1 }
-    else if (inpkg) { pkgfloor[key] = val + 0; order[++np] = key }
-  }
-  if (inpkg && $0 ~ /}/) inpkg = 0                # close AFTER parsing the line
-  next
 }
 /^mode:/ { next }
 {                                                 # pass 2: the coverage profile
@@ -101,16 +107,8 @@ function check(name, c, t, fl,   tenths, under) { # figures compared in tenths
   return under
 }
 END {
-  if (err != "") {
-    print "coverage-floor: " err
-    exit 2
-  }
-  if (sawexcl && ne == 0) {
-    print "coverage-floor: \"exclude\" must be one single-line array, e.g. \"exclude\": [\"db/dbgen\", \"cmd\"]; a wrapped array parses as no exclusions"
-    exit 2
-  }
-  if (!haveagg || tot == 0) {
-    print "coverage-floor: floor file or coverage profile is empty/malformed"
+  if (tot == 0) {
+    print "coverage-floor: coverage profile is empty/malformed"
     exit 2
   }
   nc = split("ws service permissions auth db", core, " ")
@@ -131,4 +129,4 @@ END {
   }
   exit bad
 }
-' "$floor" "$profile"
+' "$profile"
