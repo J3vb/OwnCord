@@ -105,7 +105,9 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 		return b, nil
 	case reflect.Int:
 		// Base 0 so 0x10 and 0o17 work, matching what mapstructure accepted.
-		n, err := strconv.ParseInt(value, 0, 64)
+		// Parsed at the platform's int width, so an out-of-range value is
+		// rejected rather than silently truncated by the conversion below.
+		n, err := strconv.ParseInt(value, 0, strconv.IntSize)
 		if err != nil {
 			return nil, fmt.Errorf("want an integer, got %q", value)
 		}
