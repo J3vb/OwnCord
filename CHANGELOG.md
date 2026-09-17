@@ -180,6 +180,10 @@ server's internals were reorganised behind service boundaries.
   it again, as standalone binaries and as containers, and is blocked unless a
   signed-in session, an uploaded file, the configuration, the credential keys
   and the backups all survive both directions intact.
+- **Plugins are described by `plugin.json` only — the `plugin.toml` manifest is
+  gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
+  convert it to `plugin.json`. A directory carrying both could previously leave
+  the server honouring a different manifest than the one approved at install.
 
 ### Privacy & data
 
