@@ -27,32 +27,6 @@ export function hasCredentials(): boolean {
   return TEST_USER.length > 0 && TEST_PASS.length > 0;
 }
 
-/**
- * Log the native E2E environment state for diagnosing skipped tests.
- * Call once in a globalSetup or first test to understand what's available.
- */
-export function logEnvironmentState(): void {
-  const state = {
-    serverUrl: SERVER_URL,
-    hasCredentials: hasCredentials(),
-    skipServer: SKIP_SERVER,
-  };
-  console.log("[native-e2e] Environment:", JSON.stringify(state));
-  if (!hasCredentials()) {
-    console.log(
-      "[native-e2e] WARNING: Set OWNCORD_TEST_USER and OWNCORD_TEST_PASS to enable authenticated tests",
-    );
-  }
-}
-
-/**
- * Count visible elements matching a selector. Useful for deciding whether
- * a data-dependent test can run. Returns 0 if the selector isn't found.
- */
-export async function countVisible(page: Page, selector: string): Promise<number> {
-  return page.locator(selector).count();
-}
-
 // ---------------------------------------------------------------------------
 // Login helpers
 // ---------------------------------------------------------------------------
@@ -148,15 +122,6 @@ export async function ensureLoggedIn(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Click a text channel by its visible name.
- */
-export async function selectChannel(page: Page, name: string): Promise<void> {
-  const channel = page.locator(".channel-item", { hasText: name });
-  await channel.click();
-  await expect(channel).toHaveClass(/active/, { timeout: 5_000 });
-}
-
-/**
  * Open the settings overlay via the gear button.
  */
 export async function openSettings(page: Page): Promise<void> {
@@ -182,11 +147,4 @@ export async function countTextChannels(page: Page): Promise<number> {
     .locator(".channel-item")
     .filter({ has: page.locator(".ch-icon", { hasText: "#" }) })
     .count();
-}
-
-/**
- * Count voice channels visible in the sidebar.
- */
-export async function countVoiceChannels(page: Page): Promise<number> {
-  return page.locator(".channel-item.voice").count();
 }
