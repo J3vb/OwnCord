@@ -317,3 +317,44 @@ func TestParityEnvClamp(t *testing.T) {
 		t.Errorf("min_free_disk_mb = %d after an env -5, want the default 256", cfg.Server.MinFreeDiskMB)
 	}
 }
+
+// TestLoadEmptySectionKeepsDefaults pins the second delta of the swap: a
+// section named with no keys under it leaves every default in that section
+// alone. Under koanf's merge an empty document value replaced the whole
+// section with Go zero values, which is why Load used to refill voice's URL
+// and quality by hand.
+func TestLoadEmptySectionKeepsDefaults(t *testing.T) {
+	cfg := loadBody(t, "database:\nupload: {}\n")
+
+	if cfg.Database.Path != "data/chatserver.db" {
+		t.Errorf("Database.Path = %q, want the default after a bare `database:`", cfg.Database.Path)
+	}
+	if cfg.Database.Type != "sqlite" {
+		t.Errorf("Database.Type = %q, want the default sqlite", cfg.Database.Type)
+	}
+	if cfg.Upload.MaxSizeMB != 100 || cfg.Upload.StorageDir != "data/uploads" {
+		t.Errorf("Upload = %+v, want the defaults after `upload: {}`", cfg.Upload)
+	}
+}
+
+// TestLoadQuotedScalarRejected pins the swap's one narrowing: YAML types are
+// now literal, so a quoted number is a string and a string cannot fit an int
+// field. The old parser coerced it silently; refusing it, with the line and
+// the offending value, is the point of moving to yaml.v3.
+func TestLoadQuotedScalarRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  port: \"9000\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err == nil {
+		t.Fatalf("Load() accepted a quoted int (port = %d); want a refusal", cfg.Server.Port)
+	}
+	// yaml.v3 names the line and the value, not the key: "line 2: cannot
+	// unmarshal !!str `9000` into int", wrapped with the file path by Load.
+	for _, want := range []string{path, "line 2", "9000", "int"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q:\n%v", want, err)
+		}
+	}
+}

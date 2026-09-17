@@ -1,29 +1,16 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
+	goyaml "go.yaml.in/yaml/v3"
 )
 
-// TestUnknownFileKeys locks the typo guard: keys the Config struct does not
-// define are reported, and every real key — including empty-slice and
-// zero-value defaults — is not.
-func TestUnknownFileKeys(t *testing.T) {
-	k := koanf.New(".")
-	if err := k.Load(structs.Provider(defaults(), "koanf"), nil); err != nil {
-		t.Fatal(err)
-	}
-	known := make(map[string]struct{})
-	for _, key := range k.Keys() {
-		known[key] = struct{}{}
-	}
-
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+// TestUnknownKeys locks the typo guard: keys the Config struct does not
+// define are reported, and every real key — including a bare section header
+// and an empty section — is not.
+func TestUnknownKeys(t *testing.T) {
 	yamlBody := `server:
   prot: 9999
   admin_alowed_cidrs:
@@ -39,15 +26,15 @@ voice:
   # livekit_url: "ws://localhost:7880"
   # quality: "medium"
 `
-	if err := os.WriteFile(cfgPath, []byte(yamlBody), 0o600); err != nil {
+	var tree map[string]any
+	if err := goyaml.Unmarshal([]byte(yamlBody), &tree); err != nil {
 		t.Fatal(err)
 	}
 
-	unknown := unknownFileKeys(cfgPath, known)
-	slices.Sort(unknown)
+	got := unknownKeys(tree)
 
 	want := []string{"databsae.path", "server.admin_alowed_cidrs", "server.prot"}
-	if !slices.Equal(unknown, want) {
-		t.Fatalf("unknownFileKeys = %v, want %v", unknown, want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("unknownKeys = %v, want %v", got, want)
 	}
 }

@@ -12,31 +12,26 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/env"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
 	goyaml "go.yaml.in/yaml/v3"
 )
 
 // Config holds the full server configuration.
 type Config struct {
-	Server           ServerConfig           `koanf:"server"`
-	Database         DatabaseConfig         `koanf:"database"`
-	Backup           BackupConfig           `koanf:"backup"`
-	Security         SecurityConfig         `koanf:"security"`
-	TLS              TLSConfig              `koanf:"tls"`
-	Upload           UploadConfig           `koanf:"upload"`
-	Voice            VoiceConfig            `koanf:"voice"`
-	GitHub           GitHubConfig           `koanf:"github"`
-	EventPersistence EventPersistenceConfig `koanf:"event_persistence"`
-	Telemetry        TelemetryConfig        `koanf:"telemetry"`
-	Plugins          PluginsConfig          `koanf:"plugins"`
-	GIF              GIFConfig              `koanf:"gif"`
-	Logging          LoggingConfig          `koanf:"logging"`
-	Moderation       ModerationConfig       `koanf:"moderation"`
-	Push             PushConfig             `koanf:"push"`
+	Server           ServerConfig           `yaml:"server"`
+	Database         DatabaseConfig         `yaml:"database"`
+	Backup           BackupConfig           `yaml:"backup"`
+	Security         SecurityConfig         `yaml:"security"`
+	TLS              TLSConfig              `yaml:"tls"`
+	Upload           UploadConfig           `yaml:"upload"`
+	Voice            VoiceConfig            `yaml:"voice"`
+	GitHub           GitHubConfig           `yaml:"github"`
+	EventPersistence EventPersistenceConfig `yaml:"event_persistence"`
+	Telemetry        TelemetryConfig        `yaml:"telemetry"`
+	Plugins          PluginsConfig          `yaml:"plugins"`
+	GIF              GIFConfig              `yaml:"gif"`
+	Logging          LoggingConfig          `yaml:"logging"`
+	Moderation       ModerationConfig       `yaml:"moderation"`
+	Push             PushConfig             `yaml:"push"`
 }
 
 // ModerationConfig holds the report queue's retention window (B5-8, plan
@@ -47,13 +42,13 @@ type ModerationConfig struct {
 	// row itself is kept indefinitely (S5-d: the outcome is durable, the
 	// content is bounded). 0 means never prune content. Open reports
 	// (closed_at IS NULL) are never touched by this window.
-	ReportRetentionDays int `koanf:"report_retention_days"`
+	ReportRetentionDays int `yaml:"report_retention_days"`
 	// ActionRetentionDays retires warning rows this many days after
 	// acknowledged_at and timeout rows the same number of days after
 	// expires_at/lifted_at (B5-9, scorecard decision 5), unless an appeal
 	// references them. Ban, kick and removal rows stay with the account —
 	// they are not on this clock. 0 means never retire.
-	ActionRetentionDays int `koanf:"action_retention_days"`
+	ActionRetentionDays int `yaml:"action_retention_days"`
 }
 
 // LoggingConfig controls server log verbosity. Level gates both stdout and
@@ -63,7 +58,7 @@ type LoggingConfig struct {
 	// Level is the minimum level logged: "debug" | "info" | "warn" |
 	// "error". Override at runtime without editing config.yaml via the
 	// OWNCORD_LOGGING_LEVEL environment variable.
-	Level string `koanf:"level"`
+	Level string `yaml:"level"`
 }
 
 // ParseLevel maps a config log-level string to a slog.Level. It is
@@ -92,7 +87,7 @@ func ParseLevel(s string) (slog.Level, bool) {
 // server instead. An empty APIKey means the feature is OFF — the proxy
 // endpoints answer 503 GIF_DISABLED and the client hides the picker.
 type GIFConfig struct {
-	APIKey string `koanf:"api_key"`
+	APIKey string `yaml:"api_key"`
 }
 
 // PushConfig is the owner gate for Web Push subscription storage (B5-4,
@@ -105,13 +100,13 @@ type GIFConfig struct {
 type PushConfig struct {
 	// Enabled is the owner opt-in for subscription storage. Routes are
 	// always mounted; this only gates whether they do anything.
-	Enabled bool `koanf:"enabled"`
+	Enabled bool `yaml:"enabled"`
 	// SubscriptionTTLDays is the staleness window: a subscription whose
 	// last_seen_at is older than this many days is removed by the
 	// maintenance sweep. Clients keep a row alive by re-POSTing the same
 	// endpoint (an upsert that bumps last_seen_at). Default 90, bounded to
 	// [1, 3650] in boundedKeys.
-	SubscriptionTTLDays int `koanf:"subscription_ttl_days"`
+	SubscriptionTTLDays int `yaml:"subscription_ttl_days"`
 	// DispatchEnabled is the SECOND, separate owner opt-in dispatch needs on
 	// top of Enabled (plan decision 9): storage on with dispatch off is the
 	// B5-4 state, and an operator who enabled storage before dispatch
@@ -120,12 +115,12 @@ type PushConfig struct {
 	// each stored subscription's endpoint — see
 	// docs/architecture/diagnostics.md's egress table. False by default;
 	// dispatch runs only when Enabled and DispatchEnabled are both true.
-	DispatchEnabled bool `koanf:"dispatch_enabled"`
+	DispatchEnabled bool `yaml:"dispatch_enabled"`
 	// Contact is the operator contact a VAPID JWT's "sub" claim names
 	// (RFC 8292), sent as "mailto:"+Contact. Empty (the default) omits the
 	// claim entirely — some push services require a contact and will refuse
 	// a request without one, which is the operator's decision to make.
-	Contact string `koanf:"contact"`
+	Contact string `yaml:"contact"`
 }
 
 // EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
@@ -133,22 +128,22 @@ type PushConfig struct {
 type EventPersistenceConfig struct {
 	// Enabled toggles cold-storage persistence. When false the server falls
 	// back to ring-buffer-only behaviour (Phase A semantics).
-	Enabled bool `koanf:"enabled"`
+	Enabled bool `yaml:"enabled"`
 	// RetentionHours is how long persisted events are kept before pruning.
-	RetentionHours int `koanf:"retention_hours"`
+	RetentionHours int `yaml:"retention_hours"`
 	// BatchSize is the maximum number of events per persister flush.
-	BatchSize int `koanf:"batch_size"`
+	BatchSize int `yaml:"batch_size"`
 	// BatchFlushMs is the maximum delay between persister flushes.
-	BatchFlushMs int `koanf:"batch_flush_ms"`
+	BatchFlushMs int `yaml:"batch_flush_ms"`
 	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
-	PrunerIntervalMinutes int `koanf:"pruner_interval_minutes"`
+	PrunerIntervalMinutes int `yaml:"pruner_interval_minutes"`
 	// ReplayRingSize is the capacity of the in-memory reconnect replay ring.
 	// Reconnects whose gap exceeds it fall to the persisted event log.
-	ReplayRingSize int `koanf:"replay_ring_size"`
+	ReplayRingSize int `yaml:"replay_ring_size"`
 	// ReplayColdLimit caps how many persisted events a single reconnect may
 	// replay; beyond it the client gets a full resync. This is the budget
 	// that decides how long a disconnect can be bridged by replay.
-	ReplayColdLimit int `koanf:"replay_cold_limit"`
+	ReplayColdLimit int `yaml:"replay_cold_limit"`
 }
 
 // TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
@@ -156,31 +151,31 @@ type TelemetryConfig struct {
 	// Enabled toggles the OTel SDK. When false the server uses no-op
 	// tracer/meter providers and the legacy /metrics endpoint stays the
 	// only metrics surface.
-	Enabled bool `koanf:"enabled"`
+	Enabled bool `yaml:"enabled"`
 	// Exporter is "none" | "prometheus" | "otlp".
-	Exporter string `koanf:"exporter"`
+	Exporter string `yaml:"exporter"`
 	// OTLPEndpoint is the gRPC endpoint when Exporter == "otlp".
-	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	OTLPEndpoint string `yaml:"otlp_endpoint"`
 	// OTLPInsecure disables TLS for the OTLP gRPC connection. Only set
 	// true in development / private-network deployments. Defaults to false
 	// (TLS required) to avoid transmitting trace/metric data in plaintext.
-	OTLPInsecure bool `koanf:"otlp_insecure"`
+	OTLPInsecure bool `yaml:"otlp_insecure"`
 	// ServiceName is the resource service.name attribute.
-	ServiceName string `koanf:"service_name"`
+	ServiceName string `yaml:"service_name"`
 }
 
 // PluginsConfig (Phase C Step 9) controls the Wazero plugin runtime.
 type PluginsConfig struct {
 	// Enabled toggles plugin loading at startup.
-	Enabled bool `koanf:"enabled"`
+	Enabled bool `yaml:"enabled"`
 	// Directory is the on-disk directory scanned for plugin packages.
-	Directory string `koanf:"directory"`
+	Directory string `yaml:"directory"`
 	// MaxMemoryMB caps a single plugin's WASM linear memory.
-	MaxMemoryMB int `koanf:"max_memory_mb"`
+	MaxMemoryMB int `yaml:"max_memory_mb"`
 	// CPUBudgetMs caps a single plugin invocation's CPU time.
-	CPUBudgetMs int `koanf:"cpu_budget_ms"`
+	CPUBudgetMs int `yaml:"cpu_budget_ms"`
 	// HTTPAllowlist enumerates host suffixes plugins may reach via host_http.
-	HTTPAllowlist []string `koanf:"http_allowlist"`
+	HTTPAllowlist []string `yaml:"http_allowlist"`
 }
 
 // GitHubConfig holds GitHub API settings for update checking.
@@ -189,44 +184,44 @@ type PluginsConfig struct {
 // update checks fetch release assets from this repo, so it must stay
 // publicly readable even when the source repository is private.
 type GitHubConfig struct {
-	Token string `koanf:"token"`
-	Owner string `koanf:"owner"`
-	Repo  string `koanf:"repo"`
+	Token string `yaml:"token"`
+	Owner string `yaml:"owner"`
+	Repo  string `yaml:"repo"`
 }
 
 // VoiceConfig holds LiveKit server connection and voice quality settings.
 type VoiceConfig struct {
-	LiveKitAPIKey     string `koanf:"livekit_api_key"`    // LiveKit API key
-	LiveKitAPISecret  string `koanf:"livekit_api_secret"` // LiveKit API secret
-	LiveKitURL        string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
-	LiveKitBinaryPath string `koanf:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
+	LiveKitAPIKey     string `yaml:"livekit_api_key"`    // LiveKit API key
+	LiveKitAPISecret  string `yaml:"livekit_api_secret"` // LiveKit API secret
+	LiveKitURL        string `yaml:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+	LiveKitBinaryPath string `yaml:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
 	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
 	// release from the official LiveKit GitHub releases into
 	// <data_dir>/livekit/ and runs it as the companion process, when no
 	// livekit_binary is configured. Fresh installs enable this in the
 	// generated config.yaml so voice works out of the box; the compiled-in
 	// default stays false so existing configs keep their behaviour.
-	AutoDownloadLiveKit bool `koanf:"auto_download_livekit"`
+	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
 	// LiveKitVersion overrides the pinned livekit-server release version used
 	// by auto-download (e.g. "1.13.5"). Empty = the built-in pin.
-	LiveKitVersion string `koanf:"livekit_version"`
-	NodeIP         string `koanf:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
+	LiveKitVersion string `yaml:"livekit_version"`
+	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
 	// in addition to the external node_ip mapping, so clients on the local
 	// network can connect while remote clients use the public IP.
-	AdvertiseInternalIP bool   `koanf:"advertise_internal_ip"`
-	Quality             string `koanf:"quality"` // low | medium | high
+	AdvertiseInternalIP bool   `yaml:"advertise_internal_ip"`
+	Quality             string `yaml:"quality"` // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port              int      `koanf:"port"`
-	Name              string   `koanf:"name"`
-	DataDir           string   `koanf:"data_dir"`
-	AllowedOrigins    []string `koanf:"allowed_origins"`
-	TrustedProxies    []string `koanf:"trusted_proxies"`
-	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
-	WAFEnabled        bool     `koanf:"waf_enabled"` // Enable Coraza WAF (default: false)
+	Port              int      `yaml:"port"`
+	Name              string   `yaml:"name"`
+	DataDir           string   `yaml:"data_dir"`
+	AllowedOrigins    []string `yaml:"allowed_origins"`
+	TrustedProxies    []string `yaml:"trusted_proxies"`
+	AdminAllowedCIDRs []string `yaml:"admin_allowed_cidrs"`
+	WAFEnabled        bool     `yaml:"waf_enabled"` // Enable Coraza WAF (default: false)
 	// BrowserClientEnabled is the owner opt-in for hosting a browser client
 	// from this server. It is false by default and this build ships no
 	// browser assets, so enabling it hosts nothing yet — the bundle, its
@@ -235,7 +230,7 @@ type ServerConfig struct {
 	// property, and proving it before the assets exist is far cheaper than
 	// proving it after; Server/api/browser_hosting_posture_test.go is that
 	// proof.
-	BrowserClientEnabled bool `koanf:"browser_client_enabled"`
+	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
 	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
 	// block on GET /api/v1/diagnostics/connectivity (B6-6): the classified
 	// list of every address on every interface, the required forwarding
@@ -248,39 +243,39 @@ type ServerConfig struct {
 	// it. Nothing else is gated by this key — the startup banner's address
 	// qualifier and the configuration warnings always print, so a limit is
 	// still reported to every owner whether or not they ever set this.
-	ReachabilityReportEnabled bool `koanf:"reachability_report_enabled"`
+	ReachabilityReportEnabled bool `yaml:"reachability_report_enabled"`
 	// MinFreeDiskMB is the one definition of "low disk" (B5-2, plan decision
 	// 11): the reserved headroom, in MiB, below which the start-up banner
 	// logs an error, /health reports degraded and the upload path refuses
 	// with 507. Default 256. 0 disables the floor. Three call sites, one
 	// number, so they can never disagree about what "low" means.
-	MinFreeDiskMB    int `koanf:"min_free_disk_mb"`
-	WAFParanoiaLevel int `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
+	MinFreeDiskMB    int `yaml:"min_free_disk_mb"`
+	WAFParanoiaLevel int `yaml:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
 	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
 	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
 	// Defaults to "detect": chat traffic routinely contains SQL-ish/HTML-ish
 	// text the CRS false-positives on, so blocking needs tuning against real
 	// traffic first. Unknown values fall back to "detect".
-	WAFCRSMode string `koanf:"waf_crs_mode"`
+	WAFCRSMode string `yaml:"waf_crs_mode"`
 	// MaxWSConnections caps concurrently connected WebSocket clients; new
 	// upgrade requests beyond the cap are refused with 503 before the
 	// upgrade. 0 (the default) means unlimited — every connection costs
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
-	MaxWSConnections int `koanf:"max_ws_connections"`
+	MaxWSConnections int `yaml:"max_ws_connections"`
 	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
 	// exporter separately from the human admin surface, so a central
 	// Prometheus scraper can be allowlisted without widening /admin to its
 	// network. Empty (default) falls back to AdminAllowedCIDRs.
-	MetricsAllowedCIDRs []string `koanf:"metrics_allowed_cidrs"`
+	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
 	// and giving it its own key means an externally-hosted LiveKit's IP no
 	// longer has to be added to the ADMIN allowlist. Empty (default) falls
 	// back to AdminAllowedCIDRs.
-	LiveKitWebhookAllowedCIDRs []string `koanf:"livekit_webhook_allowed_cidrs"`
+	LiveKitWebhookAllowedCIDRs []string `yaml:"livekit_webhook_allowed_cidrs"`
 	// RestartMode selects how a self-restart (update apply, backup restore,
 	// setup wizard) hands the process over to its replacement once the server
 	// has fully drained:
@@ -293,7 +288,7 @@ type ServerConfig struct {
 	//     otherwise "spawn".
 	// Env override: OWNCORD_SERVER_RESTART_MODE. NSSM deployments must set
 	// this to "supervised" — NSSM 2.24 is not auto-detectable.
-	RestartMode string `koanf:"restart_mode"`
+	RestartMode string `yaml:"restart_mode"`
 }
 
 // MetricsCIDRs returns the effective allowlist for the metrics surfaces.
@@ -322,41 +317,41 @@ func (s *ServerConfig) LiveKitWebhookCIDRs() []string {
 type DatabaseConfig struct {
 	// Type selects the database backend. "sqlite" (or empty, which defaults
 	// to it) is the only supported value.
-	Type string `koanf:"type"`
+	Type string `yaml:"type"`
 
 	// Path is the SQLite database file path.
-	Path string `koanf:"path"`
+	Path string `yaml:"path"`
 
 	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
 	// automatic sizing of max(4, NumCPU). Values are clamped to [1, 64] —
 	// readers beyond the CPU count mostly buy queueing, not throughput.
-	MaxReaders int `koanf:"max_readers"`
+	MaxReaders int `yaml:"max_readers"`
 }
 
 // TLSConfig holds TLS/certificate settings.
 type TLSConfig struct {
-	Mode         string `koanf:"mode"`
-	CertFile     string `koanf:"cert_file"`
-	KeyFile      string `koanf:"key_file"`
-	Domain       string `koanf:"domain"`
-	AcmeCacheDir string `koanf:"acme_cache_dir"`
+	Mode         string `yaml:"mode"`
+	CertFile     string `yaml:"cert_file"`
+	KeyFile      string `yaml:"key_file"`
+	Domain       string `yaml:"domain"`
+	AcmeCacheDir string `yaml:"acme_cache_dir"`
 
 	// HTTPSPort is the port the HTTPS listener actually binds (cfg.Server.Port),
 	// set by the caller before LoadOrGenerate — not a config file key. ACME
 	// mode's HTTP->HTTPS redirect needs it because the HTTPS port is not
 	// necessarily 443.
-	HTTPSPort int `koanf:"-"`
+	HTTPSPort int `yaml:"-"`
 }
 
 // UploadConfig holds file upload settings.
 type UploadConfig struct {
-	MaxSizeMB  int    `koanf:"max_size_mb"`
-	StorageDir string `koanf:"storage_dir"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	StorageDir string `yaml:"storage_dir"`
 	// UserQuotaMB caps the total bytes one user may hold in upload storage —
 	// attachments, avatars and emoji alike, counted where the bytes are
 	// written (B5-2, plan decision 11). 0, the default, is unlimited, so no
 	// existing install changes behaviour on upgrade.
-	UserQuotaMB int `koanf:"user_quota_mb"`
+	UserQuotaMB int `yaml:"user_quota_mb"`
 }
 
 // UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
@@ -376,7 +371,7 @@ func (s ServerConfig) MinFreeDiskBytes() uint64 {
 // to keep backups from sharing a single point of failure with the live
 // database and uploads.
 type BackupConfig struct {
-	Dir string `koanf:"dir"`
+	Dir string `yaml:"dir"`
 }
 
 // SecurityConfig tunes security-adjacent behavior that has safe compiled-in
@@ -387,14 +382,14 @@ type SecurityConfig struct {
 	// defaults assume roughly one person per IP address; a community behind a
 	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
 	// clamped to [0.1, 100].
-	AuthRateLimitMultiplier float64 `koanf:"auth_rate_limit_multiplier"`
+	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
 	// second-factor step — run at once: the B4-4 admission budget. An
 	// over-budget attempt is refused with 429 RATE_LIMITED, runs no bcrypt
 	// and consumes no lockout attempt. 0 or unset = twice the CPU count
 	// (never below 4); clamped to [1, 4096].
-	ExpensiveAuthConcurrency int `koanf:"expensive_auth_concurrency"`
+	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }
 
 // defaults returns the default configuration.
@@ -639,41 +634,23 @@ voice:
 // defaults and environment variable overrides. If the file does not exist,
 // a default config.yaml is written and defaults are returned.
 func Load(cfgPath string) (*Config, error) {
-	k := koanf.New(".")
-
-	// Layer 1: built-in defaults via struct provider.
-	def := defaults()
-	if err := k.Load(structs.Provider(def, "koanf"), nil); err != nil {
-		return nil, fmt.Errorf("loading defaults: %w", err)
-	}
-	// The defaults layer's key set is the complete set of keys the config
-	// struct can absorb — captured NOW, before the file merges in, so it can
-	// serve as the allowlist for the unknown-key warning below. (Capturing
-	// after the file load would let the file's own typos into the allowlist.)
-	knownKeys := make(map[string]struct{}, len(k.Keys()))
-	for _, key := range k.Keys() {
-		knownKeys[key] = struct{}{}
-	}
-
-	// Layer 2: YAML file (create default if missing). The freshly written
-	// default file is loaded like any other so the first boot runs with
-	// exactly the configuration the file documents (the generated template
-	// enables options — e.g. voice.auto_download_livekit — that the
-	// compiled-in defaults deliberately leave off for pre-existing configs).
+	// The freshly written default file is loaded like any other so the first
+	// boot runs with exactly the configuration the file documents (the
+	// generated template enables options — e.g. voice.auto_download_livekit —
+	// that the compiled-in defaults deliberately leave off for pre-existing
+	// configs).
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); writeErr != nil {
 			return nil, fmt.Errorf("writing default config: %w", writeErr)
 		}
 	}
-	// Read the file and try to parse it ourselves to detect invalid YAML.
 	raw, readErr := os.ReadFile(cfgPath) //nolint:gosec // G304: path from trusted wiring
 	if readErr != nil {
 		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, readErr)
 	}
-	if parseErr := validateYAML(raw); parseErr != nil {
-		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, parseErr)
-	}
-	if err := k.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
+
+	cfg, err := loadBytes(raw)
+	if err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
 
@@ -681,39 +658,13 @@ func Load(cfgPath string) (*Config, error) {
 	// warning must not brick a working install) about file keys the config
 	// struct cannot absorb. Without this, a typo like `admin_alowed_cidrs`
 	// silently keeps the default and the operator believes they changed it.
-	for _, key := range unknownFileKeys(cfgPath, knownKeys) {
+	var tree map[string]any
+	if err := goyaml.Unmarshal(raw, &tree); err != nil {
+		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+	}
+	for _, key := range unknownKeys(tree) {
 		slog.Warn("config: unknown key ignored — value has NO effect (typo?)",
 			"key", key, "file", cfgPath)
-	}
-
-	// Layer 3: environment variable overrides.
-	// OWNCORD_SERVER_PORT -> server.port, OWNCORD_TLS_MODE -> tls.mode, etc.
-	envProvider := env.Provider("OWNCORD_", ".", func(s string) string {
-		// Strip prefix, lowercase, replace _ with . except within a key segment.
-		// OWNCORD_SERVER_PORT -> server.port
-		// OWNCORD_DATABASE_PATH -> database.path
-		// OWNCORD_UPLOAD_MAX_SIZE_MB -> upload.max_size_mb
-		s = strings.TrimPrefix(s, "OWNCORD_")
-		s = strings.ToLower(s)
-		// Split into at most 2 parts on the first underscore to get
-		// section.key. We need smarter splitting because keys can have
-		// underscores (e.g. max_size_mb, data_dir, storage_dir).
-		return envKeyToKoanf(s)
-	})
-	if err := k.Load(envProvider, nil); err != nil {
-		return nil, fmt.Errorf("loading env vars: %w", err)
-	}
-
-	var cfg Config
-	if err := k.Unmarshal("", &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshalling config: %w", err)
-	}
-	applyBounds(&cfg)
-
-	// Apply voice defaults for zero-value fields (koanf loses defaults when
-	// the YAML section is present but fields are commented out / omitted).
-	if err := applyVoiceDefaults(&cfg.Voice); err != nil {
-		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 
 	// Warn if using default dev credentials — these are public and insecure.
@@ -746,46 +697,45 @@ func Load(cfgPath string) (*Config, error) {
 			"address, not the real client; set server.trusted_proxies to the proxy hop(s)")
 	}
 
+	return cfg, nil
+}
+
+// loadBytes builds a Config from raw YAML: compiled defaults, then the file,
+// then the OWNCORD_* environment. Unmarshal overwrites only the keys a
+// document actually names, so a section that is present but empty — a bare
+// `voice:`, or one whose children are all commented out — leaves its defaults
+// in place and needs no refill pass.
+//
+// The environment layer is marshalled to YAML and unmarshalled through the
+// same path as the file, never spliced into text, so a value containing YAML
+// syntax stays exactly one scalar.
+//
+// Save's verifyLoadable gate runs this whole function, environment included:
+// the file it is about to write must survive the load path the server boots
+// with, and that path now has an environment layer in it.
+func loadBytes(raw []byte) (*Config, error) {
+	cfg := defaults()
+	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+	env, err := envOverrides()
+	if err != nil {
+		return nil, err
+	}
+	if len(env) > 0 {
+		envYAML, err := goyaml.Marshal(env)
+		if err != nil {
+			return nil, fmt.Errorf("encoding env overrides: %w", err)
+		}
+		if err := goyaml.Unmarshal(envYAML, &cfg); err != nil {
+			return nil, fmt.Errorf("applying env overrides: %w", err)
+		}
+	}
+	applyBounds(&cfg)
+	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
 	return &cfg, nil
-}
-
-// unknownFileKeys parses the config file into its own koanf instance and
-// returns every leaf key that the defaults layer (= the full set of keys the
-// Config struct defines) does not contain. knownKeys must be captured from
-// the defaults layer BEFORE the file merges into it.
-func unknownFileKeys(cfgPath string, knownKeys map[string]struct{}) []string {
-	fileK := koanf.New(".")
-	if err := fileK.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
-		return nil // the main load already surfaced any parse problem
-	}
-	var unknown []string
-	for _, key := range fileK.Keys() {
-		if _, ok := knownKeys[key]; ok {
-			continue
-		}
-		// A section header whose children are all commented out (or
-		// omitted) parses to a nil value and koanf emits it as a bare leaf
-		// key ("voice") rather than recursing into its (absent) children.
-		// That bare key is a real, known section — not a typo — as long as
-		// some known key is nested under it.
-		if isKnownSection(knownKeys, key) {
-			continue
-		}
-		unknown = append(unknown, key)
-	}
-	return unknown
-}
-
-// isKnownSection reports whether prefix names a known config section, i.e.
-// some key in knownKeys is prefix followed by ".".
-func isKnownSection(knownKeys map[string]struct{}, prefix string) bool {
-	want := prefix + "."
-	for key := range knownKeys {
-		if strings.HasPrefix(key, want) {
-			return true
-		}
-	}
-	return false
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not
@@ -880,12 +830,12 @@ func applyBounds(cfg *Config) {
 	}
 }
 
-// applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
-// This guards against the koanf merge behaviour where an empty YAML section
-// overwrites struct defaults with Go zero values.
-// When API key/secret are empty, unique random credentials are generated
-// so voice works out of the box without shipping known-public defaults.
-func applyVoiceDefaults(v *VoiceConfig) error {
+// ensureVoiceCredentials generates unique random LiveKit credentials when
+// API key/secret are empty, so voice works out of the box without shipping
+// known-public defaults. The URL and quality defaults need no equivalent: they
+// are set by defaults() and Unmarshal only overwrites keys the document names,
+// so an empty `voice:` section leaves them alone.
+func ensureVoiceCredentials(v *VoiceConfig) error {
 	if v.LiveKitAPIKey == "" {
 		key, err := generateRandomKey(8)
 		if err != nil {
@@ -902,44 +852,5 @@ func applyVoiceDefaults(v *VoiceConfig) error {
 		v.LiveKitAPISecret = secret
 		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
 	}
-	if v.LiveKitURL == "" {
-		v.LiveKitURL = "ws://localhost:7880"
-	}
-	if v.Quality == "" {
-		v.Quality = "medium"
-	}
 	return nil
-}
-
-// validateYAML checks that raw bytes are valid YAML.
-func validateYAML(raw []byte) error {
-	var v any
-	return goyaml.Unmarshal(raw, &v)
-}
-
-// envKeyToKoanf converts a lower-case env key (without OWNCORD_ prefix) to a
-// koanf dotted path. The first segment (up to the first underscore) is the
-// section; the remainder is the key (with underscores preserved).
-//
-// Examples:
-//
-//	server_port        -> server.port
-//	server_name        -> server.name
-//	server_data_dir    -> server.data_dir
-//	database_path      -> database.path
-//	tls_mode           -> tls.mode
-//	tls_cert_file      -> tls.cert_file
-//	upload_max_size_mb -> upload.max_size_mb
-func envKeyToKoanf(s string) string {
-	// event_persistence is the only multi-word section; cutting at the first
-	// underscore would produce the dead path event.persistence_* and koanf
-	// would drop the documented override silently.
-	if rest, ok := strings.CutPrefix(s, "event_persistence_"); ok {
-		return "event_persistence." + rest
-	}
-	before, after, ok := strings.Cut(s, "_")
-	if !ok {
-		return s
-	}
-	return before + "." + after
 }

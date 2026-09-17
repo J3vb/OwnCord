@@ -238,7 +238,7 @@ unlinking — is never pruned; only its content is bounded.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 67 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 67 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -319,6 +319,18 @@ Every config key can be overridden via environment variables using the prefix `O
 **Format:** `OWNCORD_<SECTION>_<KEY>` — the first `_` after the prefix maps to
 the section/key dot; the scheme covers **every** key in the file, including ones
 absent from the table below (it is a representative subset, not the full list).
+
+**Values:** a list-valued key takes a comma-separated list —
+`OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32` is two entries, each
+side trimmed. Every other key takes a single scalar of its own type, and a value
+that type cannot hold fails startup naming the variable, rather than being
+coerced or silently ignored.
+
+**YAML types are literal.** Write `port: 8443`, never `port: "8443"`: the quoted
+form is the string `8443`, which is not an integer and now fails startup with
+the file, the line and the value. The same goes for booleans —
+`"true"` is not `true`. Quote only what you mean as text, such as
+`tls.domain` or a version number.
 
 | Environment Variable                        | Config Path                         |
 | ------------------------------------------- | ----------------------------------- |
