@@ -12,7 +12,7 @@ import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { clearAttachmentCaches } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
-import { loadPref, savePref, createToggle } from "./helpers";
+import { appendToggleRows, createToggle } from "./helpers";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
@@ -36,24 +36,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  for (const item of toggles) {
-    const row = createElement("div", { class: "setting-row" });
-    const info = createElement("div", {});
-    const label = createElement("div", { class: "setting-label" }, item.label);
-    const desc = createElement("div", { class: "setting-desc" }, item.desc);
-    appendChildren(info, label, desc);
-
-    const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createToggle(isOn, {
-      signal,
-      onChange: (nowOn) => {
-        savePref(item.key, nowOn);
-      },
-    });
-
-    appendChildren(row, info, toggle);
-    section.appendChild(row);
-  }
+  appendToggleRows(section, toggles, signal);
 
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   section.appendChild(buildAutostartRow(signal));
