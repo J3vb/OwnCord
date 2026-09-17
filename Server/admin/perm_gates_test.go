@@ -313,6 +313,31 @@ func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestModerateMembersAloneIsOutsideTheAdminPerimeter pins the half of the
+// perimeter rule the test above relies on without asserting it: MODERATE_MEMBERS
+// is deliberately NOT in permissions.AdminPerimeter (permissions.go states the
+// exclusion and the permissions package locks the constant), so a role holding
+// only that bit is refused at the perimeter itself, before any per-route
+// requirePerm. GET /me is the probe because it sits behind the perimeter alone.
+// The positive control adds one perimeter bit (MUTE_MEMBERS) to the same
+// mask and must be admitted, so a perimeter that rejected everyone could not
+// pass this test either.
+func TestModerateMembersAloneIsOutsideTheAdminPerimeter(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+
+	_, modOnlyToken := createRoleUser(t, database, 16, "ModOnly", permissions.ModerateMembers, 60, "modonlyuser")
+	if w := doRequest(t, handler, http.MethodGet, "/me", modOnlyToken, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("GET /me (MODERATE_MEMBERS only) = %d, want 403 — ModerateMembers must stay outside AdminPerimeter; body: %s", w.Code, w.Body.String())
+	}
+
+	_, modPlusToken := createRoleUser(t, database, 17, "ModPlusMute", permissions.ModerateMembers|permissions.MuteMembers, 60, "modplusmuteuser")
+	if w := doRequest(t, handler, http.MethodGet, "/me", modPlusToken, nil); w.Code == http.StatusForbidden {
+		t.Fatalf("GET /me (MODERATE_MEMBERS|MUTE_MEMBERS) = 403, want admitted — MuteMembers is in AdminPerimeter, "+
+			"so the refusal above must come from the missing bit, not from a perimeter that rejects everything; body: %s", w.Body.String())
+	}
+}
+
 // ─── KICK_MEMBERS (force logout) ─────────────────────────────────────────────
 
 func TestForceLogout_RequiresKickMembers(t *testing.T) {
