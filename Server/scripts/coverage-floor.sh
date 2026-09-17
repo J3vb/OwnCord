@@ -55,6 +55,9 @@ done
 
 # Three lines from one node parse: the aggregate, the space-separated excludes,
 # the space-separated "pkg=pct" pairs. Node never sees the coverage profile.
+# The JS is single-quoted on purpose — nothing in it may be expanded by the
+# shell, which shellcheck cannot tell apart from a mistake (SC2016).
+# shellcheck disable=SC2016
 if ! floor_vals=$(node -e '
   const fs = require("node:fs");
   const f = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
