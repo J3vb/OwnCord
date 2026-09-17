@@ -5,7 +5,6 @@ This supplements the root `AGENTS.md` with a repo-local ECC baseline.
 ## Repo Skill
 
 - Repo-generated Codex skill: `.agents/skills/OwnCord/SKILL.md`
-- Claude-facing companion skill: `.claude/skills/OwnCord/SKILL.md`
 - Keep user-specific credentials and private MCPs in `~/.codex/config.toml`, not in this repo.
 
 ## MCP Baseline

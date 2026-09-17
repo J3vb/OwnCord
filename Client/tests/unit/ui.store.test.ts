@@ -3,7 +3,6 @@ import {
   uiStore,
   openSettings,
   closeSettings,
-  setTheme,
   setConnectionStatus,
   setTransientError,
   loadCollapsedCategories,
@@ -16,7 +15,6 @@ import {
 function resetStore(): void {
   uiStore.setState(() => ({
     settingsOpen: false,
-    theme: "dark" as const,
     connectionStatus: "disconnected" as const,
     transientError: null,
     updateRequiredHost: null,
@@ -32,10 +30,6 @@ describe("ui store", () => {
   });
 
   describe("initial state", () => {
-    it("has dark theme", () => {
-      expect(uiStore.getState().theme).toBe("dark");
-    });
-
     it("has settings closed", () => {
       expect(uiStore.getState().settingsOpen).toBe(false);
     });
@@ -60,19 +54,6 @@ describe("ui store", () => {
     it("closeSettings is safe when already closed", () => {
       closeSettings();
       expect(uiStore.getState().settingsOpen).toBe(false);
-    });
-  });
-
-  describe("setTheme", () => {
-    it("sets theme to light", () => {
-      setTheme("light");
-      expect(uiStore.getState().theme).toBe("light");
-    });
-
-    it("sets theme back to dark", () => {
-      setTheme("light");
-      setTheme("dark");
-      expect(uiStore.getState().theme).toBe("dark");
     });
   });
 
@@ -288,20 +269,6 @@ describe("ui store", () => {
       toggleCategory("test-cat");
       const raw = localStorage.getItem("owncord:collapsed:another-server:443");
       expect(raw).not.toBeNull();
-    });
-  });
-
-  // ── setTheme additional values ────────────────────────
-
-  describe("setTheme — all variants", () => {
-    it("sets theme to neon-glow", () => {
-      setTheme("neon-glow");
-      expect(uiStore.getState().theme).toBe("neon-glow");
-    });
-
-    it("sets theme to midnight", () => {
-      setTheme("midnight");
-      expect(uiStore.getState().theme).toBe("midnight");
     });
   });
 });

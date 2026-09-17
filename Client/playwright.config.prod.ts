@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import base from "./playwright.config";
 
 /**
  * Playwright config for testing against the PRODUCTION build.
@@ -6,20 +7,21 @@ import { defineConfig, devices } from "@playwright/test";
  * HTML/CSS/JS that Tauri bundles into the exe.
  *
  * Usage:  npm run test:e2e:prod
+ *
+ * Inherits testDir/testIgnore/timeouts/workers/projects from the base config;
+ * only the output location, the report paths, the preview port and the server
+ * command differ.
  */
 export default defineConfig({
+  ...base,
   outputDir: "test-results/prod",
-  testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**"],
-  timeout: 30_000,
-  expect: {
-    timeout: 5_000,
-  },
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  failOnFlakyTests: !!process.env.CI,
-  workers: process.env.CI ? 1 : undefined,
+  // Cleared, not merely absent: the base config's CI fail-fast, its
+  // self-terminate timeout and its globalTeardown all belong to the dev-server
+  // run. The teardown in particular kills the listener the base config started,
+  // which is not the `vite preview` server spawned below.
+  maxFailures: undefined,
+  globalTimeout: undefined,
+  globalTeardown: undefined,
   reporter: process.env.CI
     ? [
         ["html", { open: "never", outputFolder: "playwright-report/prod" }],
@@ -28,21 +30,9 @@ export default defineConfig({
     : [["list"], ["html", { open: "never", outputFolder: "playwright-report/prod" }]],
 
   use: {
+    ...base.use,
     baseURL: "http://localhost:4173",
-    actionTimeout: 10_000,
-    navigationTimeout: 15_000,
-    screenshot: "only-on-failure",
-    trace: "retain-on-failure",
-    video: "retain-on-failure",
-    contextOptions: { reducedMotion: "reduce" },
   },
-
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
 
   webServer: {
     // Spawn Vite directly rather than through npm — see the note in
