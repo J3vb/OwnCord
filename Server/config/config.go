@@ -316,7 +316,8 @@ func (s *ServerConfig) LiveKitWebhookCIDRs() []string {
 // DatabaseConfig holds database settings.
 //
 // SQLite is the only supported backend. The PostgreSQL scaffolding that once
-// motivated the Type field has been removed (see Server/main.go); the field
+// motivated the Type field has been removed (the check that rejects any other
+// value lives in Server/internal/app/database.go); the field
 // survives so an explicit "sqlite" keeps working and anything else fails
 // startup with a clear error instead of being silently ignored.
 type DatabaseConfig struct {

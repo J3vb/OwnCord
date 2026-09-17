@@ -310,9 +310,10 @@ side does not count.
 2. **Ownership is declared in the name, never in the directory.** The file name
    and the top-level `describe`/`Test` name must name the owned artifact's path.
 3. **A contract test may only live in a blocking tier.** A non-blocking job is
-   not coverage. `Admin Panel E2E` is `continue-on-error: true`
-   (`.github/workflows/ci.yml`), so it is ineligible however well it fits
-   topically — until it graduates.
+   not coverage. `Admin Panel E2E` is non-blocking — it is absent from the
+   required-contexts list in `dev`'s branch protection; nothing in
+   `.github/workflows/ci.yml` marks it soft — so it is ineligible however well
+   it fits topically, until it graduates into that list.
 4. `Client/` is one component: its TypeScript frontend and its thin Rust backend
    in `src-tauri/` are the same side of the boundary, so a `tests/unit` test that
    reads `src-tauri/tauri.conf.json` is an ordinary unit test. The same goes for a
