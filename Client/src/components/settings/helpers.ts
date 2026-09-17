@@ -2,14 +2,15 @@
  * Shared helpers and constants for settings tabs.
  */
 
-import { createElement } from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { applyThemeByName } from "@lib/themes";
+import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
 
 // Preference persistence lives in `@lib/preferences` so `lib/` modules can use
 // it without importing from the component layer. Re-exported here so the
 // settings tabs keep a single import site — and, critically, so both layers
 // share one implementation (they used to be copy-pasted and had drifted).
-export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
+export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -115,6 +116,41 @@ export function createToggle(
   );
 
   return toggle;
+}
+
+/** One pref-backed toggle row: `setting-label`/`setting-desc` beside a toggle. */
+export type ToggleItem = {
+  readonly key: string;
+  readonly label: string;
+  readonly desc: string;
+  readonly fallback: boolean;
+  /** Runs after `savePref`, inside the toggle's own click handler. */
+  readonly sideEffect?: (nowOn: boolean) => void;
+};
+
+/** Append one `setting-row` per item — the row shape every settings tab shares. */
+export function appendToggleRows(
+  section: HTMLElement,
+  items: ReadonlyArray<ToggleItem>,
+  signal: AbortSignal,
+): void {
+  for (const item of items) {
+    const row = createElement("div", { class: "setting-row" });
+    const info = createElement("div", {});
+    const label = createElement("div", { class: "setting-label" }, item.label);
+    const desc = createElement("div", { class: "setting-desc" }, item.desc);
+    appendChildren(info, label, desc);
+    const isOn = loadPref<boolean>(item.key, item.fallback);
+    const toggle = createToggle(isOn, {
+      signal,
+      onChange: (nowOn) => {
+        savePref(item.key, nowOn);
+        item.sideEffect?.(nowOn);
+      },
+    });
+    appendChildren(row, info, toggle);
+    section.appendChild(row);
+  }
 }
 
 // ---------------------------------------------------------------------------
