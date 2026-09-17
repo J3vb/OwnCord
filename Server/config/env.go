@@ -57,8 +57,9 @@ func walkLeafKeys() map[string]reflect.Kind {
 // does not define is dropped silently: the environment has no typo warning of
 // its own, and the file layer already owns that job.
 //
-// Windows environment names are case-insensitive, so the prefix match and the
-// section lookup are both done lower-cased.
+// The OWNCORD_ prefix must match exactly, as before the swap: a case-variant
+// name such as Owncord_Server_Port is silently dropped. Only the remainder is
+// lower-cased, because the config keys are lower-case.
 func envOverrides() (map[string]any, error) {
 	out := make(map[string]any)
 	for _, entry := range os.Environ() {

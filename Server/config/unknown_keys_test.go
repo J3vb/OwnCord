@@ -22,6 +22,7 @@ databsae:
   path: "oops.db"
 backup:
   dir: "elsewhere"
+upload: {}
 voice:
   # livekit_url: "ws://localhost:7880"
   # quality: "medium"
