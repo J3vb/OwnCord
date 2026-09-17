@@ -108,8 +108,9 @@ func TestUnregisterNow_ReplacedClientIsReportedAsReplaced(t *testing.T) {
 // failure on the CONNECT_VOICE check (as opposed to a genuine revocation) must
 // leave the client in voice, mirroring sweepRevokedSessions' own guard against
 // treating a transient batch-lookup error as a mass disconnect. Before the
-// fix, hasChannelPerm collapsed any GetChannelPermissions error to "denied",
-// so a read-path fault alone evicted every in-voice participant.
+// fix, the old hasChannelPerm probe (since deleted) collapsed any
+// GetChannelPermissions error to "denied", so a read-path fault alone
+// evicted every in-voice participant.
 func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T) {
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
@@ -125,9 +126,9 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 	h.clients[uid] = c
 
 	// Fault-inject exactly the permission read: harvestVoiceRoleID grants
-	// CONNECT_VOICE directly on the role, so hasChannelPermChecked must reach
-	// GetChannelPermissions (channel_overrides) before it can resolve —
-	// nobody's permissions actually changed.
+	// CONNECT_VOICE directly on the role, so the sweep's permission lookup
+	// (voiceStillAllowed) must reach GetChannelPermissions (channel_overrides)
+	// before it can resolve — nobody's permissions actually changed.
 	if _, err := database.ExecContext(ctx, `ALTER TABLE channel_overrides RENAME TO channel_overrides_offline`); err != nil {
 		t.Fatalf("rename channel_overrides: %v", err)
 	}

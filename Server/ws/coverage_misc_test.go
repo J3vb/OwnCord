@@ -488,9 +488,9 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 	}
 }
 
-// ─── hasChannelPerm with nil user (handlers.go:454) ──────────────────────────
+// ─── chat_send with nil user → FORBIDDEN ──────────────────────────
 
-func TestHasChannelPerm_NilUser_DeniesPermission(t *testing.T) {
+func TestChatSend_NilUser_DeniesPermission(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	chID := seedTestChannel(t, database, "perm-nil-user-chan")
 	send := make(chan []byte, 16)
