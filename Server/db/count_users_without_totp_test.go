@@ -16,7 +16,7 @@ import (
 // not-banned clause (apitokens.sql).
 func TestCountUsersWithoutTOTP_LapsedTempBanStillCounts(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 
 	// A user with no TOTP secret and a ban that expired an hour ago.
 	lapsedID := seedTokenUser(t, database, "lapsed-ban-no-totp", 3)
@@ -40,7 +40,7 @@ func TestCountUsersWithoutTOTP_LapsedTempBanStillCounts(t *testing.T) {
 // be blocked by someone who cannot authenticate anyway.
 func TestCountUsersWithoutTOTP_ActiveTempBanExcluded(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 
 	activeID := seedTokenUser(t, database, "active-ban-no-totp", 3)
 	activeExpires := time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05Z")

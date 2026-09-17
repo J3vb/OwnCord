@@ -16,9 +16,6 @@ SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?;
 -- name: IsGroupDM :one
 SELECT is_group FROM channels WHERE id = ? AND type = 'dm';
 
--- name: RemoveDMParticipant :exec
-DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?;
-
 -- name: SetDMChannelName :exec
 UPDATE channels SET name = ? WHERE id = ? AND type = 'dm';
 

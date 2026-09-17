@@ -85,7 +85,7 @@ func TestMemberSummary_ForViewer(t *testing.T) {
 }
 
 func TestMarkUserDisconnected_PreservesChosenStatus(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 
 	onlineID, err := database.CreateUser(ctx, "went_online", "hash", 4)
@@ -131,7 +131,7 @@ func TestMarkUserDisconnected_PreservesChosenStatus(t *testing.T) {
 }
 
 func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id, err := database.CreateUser(ctx, "statusy", "hash", 4)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
 }
 
 func TestIsAvatarFileURL(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id, err := database.CreateUser(ctx, "pfp", "hash", 4)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestEffectiveDisplayName(t *testing.T) {
 }
 
 func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id, err := database.CreateUser(ctx, "bio", "hash", 4)
 	if err != nil {

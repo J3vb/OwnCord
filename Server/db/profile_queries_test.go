@@ -8,7 +8,7 @@ import (
 // ─── UpdateUserProfile tests ─────────────────────────────────────────────────
 
 func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, err := database.CreateUser(context.Background(), "profileuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -32,7 +32,7 @@ func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 }
 
 func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "keepavatar", "hash", 4)
 
 	if err := database.UpdateUserProfile(context.Background(), id, "renamed", nil, nil, nil); err != nil {
@@ -49,7 +49,7 @@ func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 }
 
 func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	database.CreateUser(context.Background(), "existing", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "changeme", "hash", 4)
 
@@ -60,7 +60,7 @@ func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 }
 
 func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	err := database.UpdateUserProfile(context.Background(), 99999, "ghost", nil, nil, nil)
 	if err == nil {
 		t.Error("UpdateUserProfile for non-existent user should return error")
@@ -70,7 +70,7 @@ func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
 // ─── UpdateUserPassword tests ────────────────────────────────────────────────
 
 func TestUpdateUserPassword_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "pwuser", "oldhash", 4)
 
 	if err := database.UpdateUserPassword(context.Background(), id, "newhash"); err != nil {
@@ -86,7 +86,7 @@ func TestUpdateUserPassword_Success(t *testing.T) {
 // ─── ListUserSessions tests ─────────────────────────────────────────────────
 
 func TestListUserSessions_ReturnsSessions(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "sessuser", "hash", 4)
 
 	database.CreateSession(context.Background(), uid, "tok1", "Chrome", "1.2.3.4")
@@ -102,7 +102,7 @@ func TestListUserSessions_ReturnsSessions(t *testing.T) {
 }
 
 func TestListUserSessions_EmptyArray(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "nosess", "hash", 4)
 
 	sessions, err := database.ListUserSessions(context.Background(), uid)
@@ -118,7 +118,7 @@ func TestListUserSessions_EmptyArray(t *testing.T) {
 }
 
 func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid1, _ := database.CreateUser(context.Background(), "user1", "hash", 4)
 	uid2, _ := database.CreateUser(context.Background(), "user2", "hash", 4)
 
@@ -134,7 +134,7 @@ func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 // ─── DeleteUserSessions tests (B4-7, sign-out-everywhere) ────────────────────
 
 func TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	alice, _ := database.CreateUser(ctx, "alice-all", "hash", 4)
 	bob, _ := database.CreateUser(ctx, "bob-all", "hash", 4)
@@ -166,7 +166,7 @@ func TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly(t *testing.T) {
 // ─── DeleteSessionByID tests ─────────────────────────────────────────────────
 
 func TestDeleteSessionByID_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "delsess", "hash", 4)
 	sessID, _ := database.CreateSession(context.Background(), uid, "deltok", "Chrome", "1.2.3.4")
 
@@ -183,7 +183,7 @@ func TestDeleteSessionByID_Success(t *testing.T) {
 }
 
 func TestDeleteSessionByID_WrongOwner(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid1, _ := database.CreateUser(context.Background(), "owner1", "hash", 4)
 	uid2, _ := database.CreateUser(context.Background(), "owner2", "hash", 4)
 	sessID, _ := database.CreateSession(context.Background(), uid1, "ownertok", "Chrome", "1.2.3.4")
@@ -195,7 +195,7 @@ func TestDeleteSessionByID_WrongOwner(t *testing.T) {
 }
 
 func TestDeleteSessionByID_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "delnf", "hash", 4)
 
 	err := database.DeleteSessionByID(context.Background(), 99999, uid)
@@ -208,7 +208,7 @@ func TestDeleteSessionByID_NotFound(t *testing.T) {
 // unseen new login until another device lists sessions, and the device that
 // signed in never acknowledges itself.
 func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	uid, err := database.CreateUser(ctx, "seenuser", "hash", 4)
 	if err != nil {
