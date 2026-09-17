@@ -375,99 +375,11 @@ the file, the line and the value. The same goes for booleans —
 
 ## Example config.yaml
 
-```yaml
-# OwnCord Server Configuration
-server:
-  port: 8443
-  name: "OwnCord Server"
-  data_dir: "data"
-  min_free_disk_mb: 256 # reserved headroom; banner, /health and uploads share it
-  allowed_origins: [] # empty = deny all cross-origin; set to ["*"] to allow any
-  trusted_proxies: [] # e.g. ["10.0.0.0/8"] if behind a reverse proxy
-  admin_allowed_cidrs:
-    - "127.0.0.0/8"
-    - "::1/128"
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-  browser_client_enabled: false # owner opt-in; no browser assets ship yet
-
-database:
-  path: "data/chatserver.db"
-
-tls:
-  mode: "self_signed" # self_signed | acme | manual | off
-  cert_file: "data/cert.pem"
-  key_file: "data/key.pem"
-  domain: "" # required for acme mode
-  acme_cache_dir: "data/acme_certs"
-
-upload:
-  max_size_mb: 100
-  storage_dir: "data/uploads"
-  user_quota_mb: 0 # per-user total in MiB; 0 = unlimited
-
-# Web Push. dispatch_enabled is a SECOND opt-in, separate from enabled --
-# turning it on makes the server open outbound HTTPS connections to the
-# push service named in each stored subscription's endpoint.
-push:
-  enabled: false
-  subscription_ttl_days: 90 # unrefreshed rows swept after this many days
-  dispatch_enabled: false
-  contact: "" # operator contact for VAPID JWTs, sent as "mailto:<contact>"
-
-voice:
-  livekit_api_key: "your-api-key"
-  livekit_api_secret: "your-secret-at-least-32-characters-long"
-  livekit_url: "ws://localhost:7880"
-  livekit_binary: "" # path to livekit-server binary
-  node_ip: "" # public IP for remote users behind NAT
-  advertise_internal_ip: false # also advertise LAN IPs (dual-homed servers)
-  quality: "medium" # low | medium | high
-
-github:
-  token: "" # optional GitHub PAT for update check rate limits
-  owner: "J3vb" # update source repo owner
-  repo: "OwnCord" # repo holding release assets (binaries + source snapshots)
-
-# Event persistence (tiered reconnect replay)
-event_persistence:
-  enabled: true
-  retention_hours: 24
-  batch_size: 50
-  batch_flush_ms: 100
-  pruner_interval_minutes: 60
-
-# OpenTelemetry (requires build tag: -tags otel)
-telemetry:
-  enabled: false
-  exporter: "none" # none | prometheus | otlp
-  otlp_endpoint: "" # e.g. "localhost:4317" for OTLP gRPC
-  service_name: "owncord-server"
-
-# Plugin runtime (requires build tag: -tags wazero)
-plugins:
-  enabled: false
-  directory: "data/plugins"
-  max_memory_mb: 64
-  cpu_budget_ms: 100
-  http_allowlist: [] # host suffixes plugins may reach, e.g. ["api.steampowered.com"]
-
-# GIF picker (server-side Klipy proxy). Empty key = feature off.
-# Prefer OWNCORD_GIF_API_KEY over storing the key in this file.
-gif:
-  api_key: ""
-
-# Logging. "level" gates what is logged, to stdout and the admin panel's live
-# log view alike. Override without editing this file via OWNCORD_LOGGING_LEVEL.
-logging:
-  level: "info" # debug | info | warn | error
-
-# Moderation: the report queue's content retention window (B5-8). The row
-# itself is kept indefinitely; only its content is bounded.
-moderation:
-  report_retention_days: 180 # days after close; 0 = never prune content
-```
+The authoritative example is the file the server writes itself: on first start
+`Load` writes `defaultYAML` (`Server/config/config.go`) to `config.yaml` beside
+the binary, comments and all. That generated copy is the one kept in step with
+the key reference above — the hand-maintained example that used to sit here had
+already drifted from it, so it is gone.
 
 ## See Also
 
