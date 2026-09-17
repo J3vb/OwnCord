@@ -197,25 +197,41 @@ func runSetup(baseURL string) (string, error) {
 	return resp.Token, nil
 }
 
-// uploadAttachment stores the fixed payload and returns the attachment id.
-func uploadAttachment(baseURL, token string) (string, error) {
+// multipartUpload builds the fixture attachment request body and its content
+// type, separately from sending it.
+//
+// The drill phases need the same bytes as a request whose NON-2xx status is the
+// assertion (phase D expects 507 STORAGE_LOW_DISK, which request() would report
+// as a failure), and duplicating the multipart construction to get that would
+// let the two uploads drift apart — the drill would then be testing a different
+// body from the fixture.
+func multipartUpload() ([]byte, string, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	part, err := mw.CreateFormFile("file", fixtureFilename)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if _, err := part.Write(fixturePayload()); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := mw.Close(); err != nil {
+		return nil, "", err
+	}
+	return body.Bytes(), mw.FormDataContentType(), nil
+}
+
+// uploadAttachment stores the fixed payload and returns the attachment id.
+func uploadAttachment(baseURL, token string) (string, error) {
+	body, contentType, err := multipartUpload()
+	if err != nil {
 		return "", err
 	}
 	var resp struct {
 		ID string `json:"id"`
 	}
-	if err := request(http.MethodPost, baseURL+"/api/v1/uploads", token, mw.FormDataContentType(),
-		&body, http.StatusCreated, &resp); err != nil {
+	if err := request(http.MethodPost, baseURL+"/api/v1/uploads", token, contentType,
+		bytes.NewReader(body), http.StatusCreated, &resp); err != nil {
 		return "", fmt.Errorf("uploading the fixture attachment: %w", err)
 	}
 	if resp.ID == "" {

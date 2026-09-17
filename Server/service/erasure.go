@@ -47,6 +47,11 @@ type ErasureStore interface {
 	RaiseSequences(ctx context.Context, floors map[string]int64) error
 	ListUserIDs(ctx context.Context) ([]int64, error)
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
+	// FinishOwedErasureCheckpoint finishes a wal_checkpoint(TRUNCATE) an
+	// erasure could not, when one is owed (B6-11 task 5). The tick below is
+	// where the promise the erasure's own log line makes is kept: not by
+	// SQLite's autocheckpoint, which copies frames but never truncates the log.
+	FinishOwedErasureCheckpoint(ctx context.Context) (bool, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
@@ -360,6 +365,13 @@ func (s *ErasureService) finishErasure(ctx context.Context, userID int64, job *d
 
 // Resume runs every unfinished job once and reports how many are now done.
 // A job whose files still fail to go stays for the next call.
+//
+// It also pays any WAL checkpoint an erasure owes (B6-11 task 5). That debt is
+// not a job: the erasure's rows and files are gone either way, and what is
+// left is frames holding the erased bytes still sitting in the -wal because
+// the checkpoint behind the commit came back blocked. Nothing else would run
+// TRUNCATE again — SQLite's autocheckpoint is PASSIVE and never truncates the
+// log — so the erasure would leave those bytes on disk indefinitely.
 func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 	jobs, err := s.st.ListUnfinishedErasureJobs(ctx)
 	if err != nil {
@@ -376,6 +388,11 @@ func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 		}
 		done++
 	}
+	// Best effort, and after the jobs above so the frames they wrote are under
+	// the same TRUNCATE. Both outcomes are already reported where they happen
+	// and a debt that stays unpaid keeps its flag set, so the next tick tries
+	// again: a blocked checkpoint is not this tick's failure.
+	_, _ = s.st.FinishOwedErasureCheckpoint(ctx)
 	return done, firstErr
 }
 

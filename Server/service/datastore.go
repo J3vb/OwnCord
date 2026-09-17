@@ -145,6 +145,9 @@ type Store interface {
 	ListUserIDs(ctx context.Context) ([]int64, error)
 	LogAuditEntry(ctx context.Context, e db.AuditEntry) error
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
+	// FinishOwedErasureCheckpoint (B6-11 task 5): the erasure runner's tick
+	// finishes a wal_checkpoint(TRUNCATE) an erasure could not.
+	FinishOwedErasureCheckpoint(ctx context.Context) (bool, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error

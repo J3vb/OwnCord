@@ -28,6 +28,7 @@
 //
 //	go run ./cmd/smoke -upgrade -from <old-binary> <new-binary>
 //	go run ./cmd/smoke -upgrade -docker -from <old-image> <new-image>
+//	go run ./cmd/smoke -drills -data-fs <dir> <path-to-server-binary>
 package main
 
 import (
@@ -51,23 +52,29 @@ const (
 
 func main() {
 	upgrade := flag.Bool("upgrade", false, "rehearse an upgrade from -from to the positional target, then roll back out of it")
+	drills := flag.Bool("drills", false, "run the failure and recovery drills (phases R, C, D, S) instead of the boot smoke")
 	from := flag.String("from", "", "the version to upgrade FROM: a server binary, or an image reference with -docker")
 	useDocker := flag.Bool("docker", false, "rehearse containers on a named volume instead of processes in a temporary directory")
+	phases := flag.String("phases", "", "which drill phases to run — any of R, C, D, S (default: all of them)")
+	dataFS := flag.String("data-fs", "", "the size-limited filesystem phase D fills; without it phase D is skipped")
+	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids a release-path run may downgrade to ::warning::; the ids are validated against the ledger, but no drill failure carries a ledger id yet, so the flag is inert until one does")
 	flag.Usage = usage
 	flag.Parse()
 
-	// One positional argument in both modes: the binary (or image) under test.
-	// -from and -docker only mean anything to the rehearsal, so accepting them
-	// without -upgrade would silently run the plain smoke instead.
-	args := flag.Args()
-	switch {
-	case len(args) != 1:
-		usageError("want exactly one positional argument, got %d", len(args))
-	case !*upgrade && (*from != "" || *useDocker):
-		usageError("-from and -docker are only meaningful together with -upgrade")
-	case *upgrade && *from == "":
-		usageError("-upgrade needs -from <old-binary|old-image> to upgrade from")
+	// One positional argument in every mode: the binary (or image) under test.
+	// The mode's own flags only mean anything to that mode, so accepting them
+	// without it would silently run something else instead.
+	if err := (invocation{
+		args:       flag.Args(),
+		upgrade:    *upgrade,
+		drills:     *drills,
+		docker:     *useDocker,
+		from:       *from,
+		drillFlags: *phases != "" || *dataFS != "" || *findings != "",
+	}).validate(); err != nil {
+		usageError("%v", err)
 	}
+	args := flag.Args()
 
 	action := func() error { return run(args[0]) }
 	summary := "standalone smoke passed: boot, migrate, healthy, drain, restart"
@@ -75,19 +82,80 @@ func main() {
 		action = func() error { return runUpgrade(*from, args[0], *useDocker) }
 		summary = "upgrade rehearsal passed"
 	}
+	if *drills {
+		// Both of these are usage errors rather than warnings: a -phases spec
+		// that selects nothing would run no drill and exit 0, and an unknown
+		// ledger id would downgrade nothing and read like a flag that worked.
+		selected, err := parsePhases(*phases)
+		if err != nil {
+			usageError("%v", err)
+		}
+		if *useDocker && phaseLetters(selected) != "D" {
+			// The container leg is the disk-pressure half: it has no install
+			// directory on the host, no port to restart through and no child
+			// process this harness can address (D8).
+			usageError("-docker runs phase D only, got -phases %s", phaseLetters(selected))
+		}
+		k, err := knownFindings(*findings)
+		if err != nil {
+			usageError("%v", err)
+		}
+		action = func() error { return runDrills(args[0], *useDocker, selected, *dataFS, k) }
+		// runDrills prints the drills summary itself: it is the only place that
+		// knows which phases skipped, and a phase that skipped must not be
+		// reported as one that passed.
+		summary = ""
+	}
 	if err := action(); err != nil {
 		// ::error:: is the GitHub Actions annotation prefix, matching
 		// docker-smoke.sh so a failure is surfaced on the run summary.
 		fmt.Printf("::error::%v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(summary)
+	if summary != "" {
+		fmt.Println(summary)
+	}
+}
+
+// invocation is the command line as the caller typed it, checked as a whole
+// rather than flag by flag: every one of these combinations would otherwise run
+// something the caller did not ask for.
+type invocation struct {
+	args       []string
+	upgrade    bool
+	drills     bool
+	docker     bool
+	from       string
+	drillFlags bool // -phases, -data-fs or -known-findings was set
+}
+
+// validate names the first thing wrong with the invocation, or nil. Returning
+// an error rather than exiting keeps the exit code in main, beside every other
+// way the command line can be rejected.
+func (in invocation) validate() error {
+	switch {
+	case len(in.args) != 1:
+		return fmt.Errorf("want exactly one positional argument, got %d", len(in.args))
+	case in.upgrade && in.drills:
+		return fmt.Errorf("-upgrade and -drills are two different rehearsals, pick one")
+	case !in.upgrade && in.from != "":
+		return fmt.Errorf("-from is only meaningful together with -upgrade")
+	case in.upgrade && in.from == "":
+		return fmt.Errorf("-upgrade needs -from <old-binary|old-image> to upgrade from")
+	case !in.upgrade && !in.drills && in.docker:
+		return fmt.Errorf("-docker is only meaningful together with -upgrade or -drills")
+	case !in.drills && in.drillFlags:
+		return fmt.Errorf("-phases, -data-fs and -known-findings are only meaningful together with -drills")
+	}
+	return nil
 }
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: smoke <path-to-server-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -from <old-binary> <new-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -docker -from <old-image> <new-image>")
+	fmt.Fprintln(os.Stderr, `       smoke -drills [-phases RCDS] [-data-fs <dir>] [-known-findings <ids>] <path-to-server-binary>`)
+	fmt.Fprintln(os.Stderr, "       smoke -drills -docker -phases D <image>")
 	flag.PrintDefaults()
 }
 
@@ -178,6 +246,11 @@ type server struct {
 	// be called once, so it runs in one goroutine and every phase reads here.
 	waitErr chan error
 	exited  bool
+	// adopted marks a server this harness did not spawn: the replacement a
+	// self-restart left behind, which shares the log file and the install
+	// directory with the boot but has no *exec.Cmd behind it. Healthcheck
+	// polling is all it can support — see drills.go's awaitRestart.
+	adopted bool
 }
 
 // start launches the server. extraEnv is variadic so the plain smoke keeps
@@ -257,7 +330,10 @@ func (s *server) drain(phase string) error {
 // annotate wraps a phase failure with the server's log, so a CI failure carries
 // the reason rather than only the symptom.
 func (s *server) annotate(phase string, cause error) error {
-	if !s.exited {
+	// An adopted server has no cmd (it is another process's child), and the
+	// kill is only here to stop a server still writing to the log being read —
+	// which the adopted one already did or it would not be reachable here.
+	if !s.exited && s.cmd != nil {
 		_ = s.cmd.Process.Kill()
 	}
 	log, readErr := os.ReadFile(s.logPath)
