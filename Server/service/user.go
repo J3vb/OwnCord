@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -154,15 +153,10 @@ func resolveOptional(patch *string, existing *string) *string {
 // the nullable display name and about text. Returns the updated user for
 // response building.
 func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch ProfilePatch) (*db.User, error) {
-	ctx, span := telemetry.GlobalTracer("service/user").Start(ctx, "UserService.UpdateProfile",
+	ctx, done := traceCall(ctx, "service/user", "UserService.UpdateProfile",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "UpdateProfile"))
-		span.End()
-	}()
+	defer done()
 
 	// OC-0192: bound the raw bytes before either reaches cleanText
 	// (sanitizeToFixpoint) below — its cost is quadratic in input length,

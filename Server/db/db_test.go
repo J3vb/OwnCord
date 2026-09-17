@@ -27,6 +27,21 @@ func openMemory(t *testing.T) *db.DB {
 	return database
 }
 
+// newSchemaTestDB opens an in-memory database migrated from one inline schema
+// blob via fstest.MapFS, the hand-maintained-subset counterpart to
+// openMigratedMemory's real embedded migration chain.
+func newSchemaTestDB(t *testing.T, schema []byte) *db.DB {
+	t.Helper()
+	database := openMemory(t)
+	migrFS := fstest.MapFS{
+		"001_schema.sql": {Data: schema},
+	}
+	if err := db.MigrateFS(database, migrFS); err != nil {
+		t.Fatalf("MigrateFS: %v", err)
+	}
+	return database
+}
+
 func TestOpenInMemory(t *testing.T) {
 	database := openMemory(t)
 	if database == nil {

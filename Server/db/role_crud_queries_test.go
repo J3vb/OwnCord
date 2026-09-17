@@ -5,14 +5,14 @@ import (
 	"testing"
 )
 
-// These run against the real embedded migration set (newMigratedTestDB) rather
+// These run against the real embedded migration set (openMigratedMemory) rather
 // than the inline subset: migration 023 adds the case-insensitive name index
 // and the delete path touches channel_overrides, neither of which the inline
 // schema carries. The migrations seed Owner(1)/Admin(2)/Moderator(3)/Member(4,
 // default).
 
 func TestGetRoleByName_IsCaseInsensitive(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 
 	for _, name := range []string{"Member", "member", "MEMBER"} {
 		role, err := database.GetRoleByName(context.Background(), name)
@@ -33,7 +33,7 @@ func TestGetRoleByName_IsCaseInsensitive(t *testing.T) {
 }
 
 func TestRoleNameUniquenessIsEnforcedCaseInsensitively(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 
 	// Migration 023's index is what makes "moderator" and "Moderator" the same
 	// name — without it the two roles would coexist and the client's
@@ -46,7 +46,7 @@ func TestRoleNameUniquenessIsEnforcedCaseInsensitively(t *testing.T) {
 }
 
 func TestGetDefaultRole(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 
 	role, err := database.GetDefaultRole(context.Background())
 	if err != nil {
@@ -58,7 +58,7 @@ func TestGetDefaultRole(t *testing.T) {
 }
 
 func TestCreateAndUpdateRole(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	color := "#ABCDEF"
@@ -86,7 +86,7 @@ func TestCreateAndUpdateRole(t *testing.T) {
 }
 
 func TestSetRolePositions(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	if err := database.SetRolePositions(ctx, map[int64]int{2: 3, 3: 2, 4: 1}); err != nil {
@@ -108,7 +108,7 @@ func TestSetRolePositions(t *testing.T) {
 }
 
 func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	// Positions are only "unique enough": reorder normalizes them, but creating
@@ -164,7 +164,7 @@ func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
 }
 
 func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	a, err := database.CreateUser(ctx, "counta", "hash", 4)
@@ -209,7 +209,7 @@ func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
 }
 
 func TestDeleteRoleReassigning(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	role, err := database.CreateRole(ctx, "Temp", nil, 0x3, 50)

@@ -107,7 +107,8 @@ func TestWebhook_ParticipantJoined_ValidJoinAccepted(t *testing.T) {
 // TestWebhook_ParticipantJoined_TransientReadErrorDoesNotEvict locks OC-0065:
 // a GetVoiceState read failure must not be treated as proof of a rogue
 // participant. sweepStaleVoiceStates already draws this distinction via
-// hasChannelPermChecked ("a transient read failure ... is not a revocation");
+// its permission check (the since-deleted hasChannelPermChecked probe:
+// "a transient read failure ... is not a revocation");
 // the webhook path OR'd stateErr into the same branch as "no matching row",
 // so a transient DB error (SQLITE_BUSY, an I/O blip) ejected a legitimate
 // participant from the SFU mid-call.

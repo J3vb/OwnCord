@@ -28,22 +28,10 @@ type AuditStore interface {
 	PersistAudits(ctx context.Context, entries []AuditEntry) (int, error)
 }
 
-// pendingAudit is a single audit entry waiting to be flushed to the store.
-// Fields mirror LogAudit's parameters.
-type pendingAudit struct {
-	actorID      int64
-	action       string
-	targetType   string
-	targetID     int64
-	detail       string
-	subjectToken string
-	actorToken   string
-}
-
 // AuditWriter batches audit entries and writes them to an AuditStore.
 type AuditWriter struct {
 	store      AuditStore
-	queue      chan pendingAudit
+	queue      chan AuditEntry
 	batchSize  int
 	flushEvery time.Duration
 
@@ -101,7 +89,7 @@ func NewAuditWriter(s AuditStore, queueSize, batchSize int, flushEvery time.Dura
 	}
 	return &AuditWriter{
 		store:      s,
-		queue:      make(chan pendingAudit, queueSize),
+		queue:      make(chan AuditEntry, queueSize),
 		batchSize:  batchSize,
 		flushEvery: flushEvery,
 		stop:       make(chan struct{}),
@@ -133,7 +121,6 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	if w == nil {
 		return
 	}
-	actorID, action, targetType, targetID, detail := e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail
 	// run() stops reading w.queue the instant it exits, but the channel keeps
 	// its buffer and keeps accepting sends — without this check a caller that
 	// enqueues after Stop has returned (main.go closes the DB right after)
@@ -143,23 +130,23 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	case <-w.done:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: writer stopped",
-			"action", action,
-			"actor_id", actorID,
-			"target_type", targetType,
-			"target_id", targetID,
+			"action", e.Action,
+			"actor_id", e.ActorID,
+			"target_type", e.TargetType,
+			"target_id", e.TargetID,
 		)
 		return
 	default:
 	}
 	select {
-	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail, subjectToken: e.SubjectToken, actorToken: e.ActorToken}:
+	case w.queue <- e:
 	default:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: queue full",
-			"action", action,
-			"actor_id", actorID,
-			"target_type", targetType,
-			"target_id", targetID,
+			"action", e.Action,
+			"actor_id", e.ActorID,
+			"target_type", e.TargetType,
+			"target_id", e.TargetID,
 		)
 	}
 }
@@ -201,13 +188,13 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	// dropped loudly (D8) instead of silently.
 	for {
 		select {
-		case a := <-w.queue:
+		case e := <-w.queue:
 			w.dropped.Add(1)
 			slog.Error("audit log dropped: writer stopped",
-				"action", a.action,
-				"actor_id", a.actorID,
-				"target_type", a.targetType,
-				"target_id", a.targetID,
+				"action", e.Action,
+				"actor_id", e.ActorID,
+				"target_type", e.TargetType,
+				"target_id", e.TargetID,
 			)
 		default:
 			return
@@ -304,7 +291,7 @@ func (w *AuditWriter) Flush(ctx context.Context) error {
 }
 
 // drainQueued moves everything currently in the queue into batch.
-func (w *AuditWriter) drainQueued(batch []pendingAudit) []pendingAudit {
+func (w *AuditWriter) drainQueued(batch []AuditEntry) []AuditEntry {
 	for {
 		select {
 		case a := <-w.queue:
@@ -320,30 +307,16 @@ func (w *AuditWriter) run(ctx context.Context) {
 	tick := time.NewTicker(w.flushEvery)
 	defer tick.Stop()
 
-	batch := make([]pendingAudit, 0, w.batchSize)
-	// Scratch slice reused across flushes for the store's batch shape.
-	rows := make([]AuditEntry, 0, w.batchSize)
+	batch := make([]AuditEntry, 0, w.batchSize)
 	flush := func() {
 		if len(batch) == 0 {
 			return
 		}
 		w.flushes.Add(1)
-		rows = rows[:0]
-		for _, a := range batch {
-			rows = append(rows, AuditEntry{
-				ActorID:      a.actorID,
-				Action:       a.action,
-				TargetType:   a.targetType,
-				TargetID:     a.targetID,
-				Detail:       a.detail,
-				SubjectToken: a.subjectToken,
-				ActorToken:   a.actorToken,
-			})
-		}
 		// One transaction per flush instead of one autocommit write per entry.
 		// PersistAudits keeps the best-effort contract: on tx failure it
 		// retries per-row so a single bad entry doesn't drop the batch.
-		persisted, err := w.store.PersistAudits(ctx, rows)
+		persisted, err := w.store.PersistAudits(ctx, batch)
 		if persisted > 0 {
 			w.persisted.Add(uint64(persisted))
 		}
@@ -413,14 +386,8 @@ func (d *DB) SetAuditWriter(w *AuditWriter) {
 	d.auditWriter.Store(w)
 }
 
-// EnqueueAudit implements AsyncAuditor. It reports false when no writer is
-// installed so WriteAudit falls back to the synchronous path.
-func (d *DB) EnqueueAudit(actorID int64, action, targetType string, targetID int64, detail string) bool {
-	return d.EnqueueAuditEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
-}
-
-// EnqueueAuditEntry implements AsyncEntryAuditor: the whole-entry form of
-// EnqueueAudit, carrying the subject token (B4-10).
+// EnqueueAuditEntry implements AsyncEntryAuditor: WriteAudit's asynchronous
+// fast path, carrying the subject token (B4-10).
 func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	w := d.auditWriter.Load()
 	if w == nil {

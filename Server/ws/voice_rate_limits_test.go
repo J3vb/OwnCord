@@ -82,7 +82,7 @@ func TestVoiceHandlersV2_RateLimited(t *testing.T) {
 			limit:   voiceMuteRateLimit,
 			wantMsg: "too many mute toggles",
 			call: func(d VoiceDeps) Result {
-				return handleVoiceMuteV2(ctx, VoiceMuteCmd{userID: 1, muted: true}, info, d)
+				return handleVoiceMuteV2(ctx, VoiceMuteCmd{userID: 1, Muted: true}, info, d)
 			},
 		},
 		{
@@ -90,7 +90,7 @@ func TestVoiceHandlersV2_RateLimited(t *testing.T) {
 			limit:   voiceDeafenRateLimit,
 			wantMsg: "too many deafen toggles",
 			call: func(d VoiceDeps) Result {
-				return handleVoiceDeafenV2(ctx, VoiceDeafenCmd{userID: 1, deafened: true}, info, d)
+				return handleVoiceDeafenV2(ctx, VoiceDeafenCmd{userID: 1, Deafened: true}, info, d)
 			},
 		},
 		{
@@ -98,7 +98,7 @@ func TestVoiceHandlersV2_RateLimited(t *testing.T) {
 			limit:   voiceE2EERateLimit,
 			wantMsg: "too many e2ee announcements",
 			call: func(d VoiceDeps) Result {
-				return handleVoiceE2EEAnnounceV2(ctx, VoiceE2EEAnnounceCmd{userID: 1, publicKey: validB64Key}, info, d)
+				return handleVoiceE2EEAnnounceV2(ctx, VoiceE2EEAnnounceCmd{userID: 1, PublicKey: validB64Key}, info, d)
 			},
 		},
 	}

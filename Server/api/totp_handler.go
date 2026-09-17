@@ -38,19 +38,13 @@ func handleVerifyTOTP(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		partialToken, ok := auth.ExtractBearerToken(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "missing or invalid authorization header",
-			})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
 			return
 		}
 
 		var req verifyTotpRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
@@ -74,10 +68,7 @@ func handleEnableTOTP(svc AuthService) http.HandlerFunc {
 
 		var req passwordConfirmationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
@@ -113,10 +104,7 @@ func handleRegenerateRecoveryCodes(svc AuthService) http.HandlerFunc {
 
 		var req passwordConfirmationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
@@ -140,10 +128,7 @@ func handleConfirmTOTP(svc AuthService) http.HandlerFunc {
 
 		var req totpConfirmationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
@@ -169,10 +154,7 @@ func handleDisableTOTP(svc AuthService) http.HandlerFunc {
 
 		var req passwordConfirmationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 

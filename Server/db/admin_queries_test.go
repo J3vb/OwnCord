@@ -78,28 +78,10 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('motd', 'Welcome!');
 `)...)
 
-// newAdminTestDB opens an in-memory database with the admin-extended schema.
-func newAdminTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: adminTestSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
-}
-
 // ─── GetServerStats ────────────────────────────────────────────────────────────
 
 func TestGetServerStats_EmptyDB(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	stats, err := database.GetServerStats(context.Background())
 	if err != nil {
@@ -126,7 +108,7 @@ func TestGetServerStats_EmptyDB(t *testing.T) {
 }
 
 func TestGetServerStats_WithData(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, err := database.CreateUser(context.Background(), "statuser", "hash", 4)
 	if err != nil {
@@ -153,7 +135,7 @@ func TestGetServerStats_WithData(t *testing.T) {
 // ─── ListAllUsers ──────────────────────────────────────────────────────────────
 
 func TestListAllUsers_Empty(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	users, err := database.ListAllUsers(context.Background(), 50, 0)
 	if err != nil {
@@ -165,7 +147,7 @@ func TestListAllUsers_Empty(t *testing.T) {
 }
 
 func TestListAllUsers_WithRoleName(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, err := database.CreateUser(context.Background(), "alice", "hash", 4)
 	if err != nil {
@@ -189,7 +171,7 @@ func TestListAllUsers_WithRoleName(t *testing.T) {
 }
 
 func TestListAllUsers_Pagination(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	for i := range 5 {
 		_, err := database.CreateUser(context.Background(),
@@ -220,7 +202,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 }
 
 func TestListAllUsers_ZeroLimit(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	_, _ = database.CreateUser(context.Background(), "zerotest", "hash", 4)
 
 	users, err := database.ListAllUsers(context.Background(), 0, 0)
@@ -236,7 +218,7 @@ func TestListAllUsers_ZeroLimit(t *testing.T) {
 // ─── UpdateUserRole ────────────────────────────────────────────────────────────
 
 func TestUpdateUserRole(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, err := database.CreateUser(context.Background(), "roleuser", "hash", 4)
 	if err != nil {
@@ -257,7 +239,7 @@ func TestUpdateUserRole(t *testing.T) {
 }
 
 func TestUpdateUserRole_NonexistentUser(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	// UPDATE with no matching rows is not an error
 	err := database.UpdateUserRole(context.Background(), 99999, 2)
@@ -269,7 +251,7 @@ func TestUpdateUserRole_NonexistentUser(t *testing.T) {
 // ─── ForceLogoutUser ───────────────────────────────────────────────────────────
 
 func TestForceLogoutUser_DeletesSessions(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, err := database.CreateUser(context.Background(), "logoutuser", "hash", 4)
 	if err != nil {
@@ -301,7 +283,7 @@ func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 }
 
 func TestForceLogoutUser_NoSessions(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, err := database.CreateUser(context.Background(), "nosessions", "hash", 4)
 	if err != nil {
@@ -316,7 +298,7 @@ func TestForceLogoutUser_NoSessions(t *testing.T) {
 // ─── GetUserSessions ──────────────────────────────────────────────────────────
 
 func TestGetUserSessions_Empty(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, err := database.CreateUser(context.Background(), "sessionuser", "hash", 4)
 	if err != nil {
@@ -333,7 +315,7 @@ func TestGetUserSessions_Empty(t *testing.T) {
 }
 
 func TestGetUserSessions_IsolatedByUser(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid1, _ := database.CreateUser(context.Background(), "user1sess", "hash", 4)
 	uid2, _ := database.CreateUser(context.Background(), "user2sess", "hash", 4)
@@ -359,7 +341,7 @@ func TestGetUserSessions_IsolatedByUser(t *testing.T) {
 // ─── AdminCreateChannel ────────────────────────────────────────────────────────
 
 func TestAdminCreateChannel(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "announce", "text", "General", "Announcements", 1)
 	if err != nil {
@@ -394,7 +376,7 @@ func TestAdminCreateChannel(t *testing.T) {
 }
 
 func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "simple", "voice", "", "", 0)
 	if err != nil {
@@ -416,7 +398,7 @@ func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
 // ─── AdminUpdateChannel ────────────────────────────────────────────────────────
 
 func TestAdminUpdateChannel(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "old-name", "text", "", "", 0)
 	if err != nil {
@@ -472,7 +454,7 @@ func TestAdminUpdateChannel(t *testing.T) {
 // that starts from the channel's current values and flips one is the only
 // thing standing between a partial PATCH and a wiped row.
 func TestAdminUpdateChannel_ClearsNSFW(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "nsfw-ch", "text", "", "", 0)
 	if err := database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "nsfw-ch", NSFW: true}); err != nil {
@@ -495,7 +477,7 @@ func TestAdminUpdateChannel_ClearsNSFW(t *testing.T) {
 // A freshly created channel is not NSFW and carries no voice limits — the
 // migration's defaults, which every client relies on for an unflagged channel.
 func TestAdminCreateChannel_DefaultsNotNSFW(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "plain", "text", "", "", 0)
 	ch, err := database.GetChannel(context.Background(), id)
@@ -511,7 +493,7 @@ func TestAdminCreateChannel_DefaultsNotNSFW(t *testing.T) {
 }
 
 func TestAdminUpdateChannel_Unarchive(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "arch-ch", "text", "", "", 0)
 	_ = database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "arch-ch", Archived: true})
@@ -532,7 +514,7 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 // ─── AdminDeleteChannel ────────────────────────────────────────────────────────
 
 func TestAdminDeleteChannel(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "to-delete", "text", "", "", 0)
 	if err != nil {
@@ -553,7 +535,7 @@ func TestAdminDeleteChannel(t *testing.T) {
 }
 
 func TestAdminDeleteChannel_NonExistent(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	// Deleting nonexistent channel should not error
 	if err := database.AdminDeleteChannel(context.Background(), 99999); err != nil {
@@ -564,7 +546,7 @@ func TestAdminDeleteChannel_NonExistent(t *testing.T) {
 // ─── LogAudit / GetAuditLog ────────────────────────────────────────────────────
 
 func TestLogAudit_AndRetrieve(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, err := database.CreateUser(context.Background(), "auditor", "hash", 1)
 	if err != nil {
@@ -608,7 +590,7 @@ func TestLogAudit_AndRetrieve(t *testing.T) {
 }
 
 func TestGetAuditLog_Empty(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
@@ -620,7 +602,7 @@ func TestGetAuditLog_Empty(t *testing.T) {
 }
 
 func TestGetAuditLog_Pagination(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
 	for i := range 5 {
@@ -645,7 +627,7 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 }
 
 func TestGetAuditLog_NewestFirst(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, _ := database.CreateUser(context.Background(), "auditorder", "hash", 1)
 	_ = database.LogAudit(context.Background(), uid, "FIRST", "", 0, "")
@@ -666,7 +648,7 @@ func TestGetAuditLog_NewestFirst(t *testing.T) {
 // ─── GetSetting / SetSetting / GetAllSettings ──────────────────────────────────
 
 func TestGetSetting_Exists(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	val, err := database.GetSetting(context.Background(), "server_name")
 	if err != nil {
@@ -678,7 +660,7 @@ func TestGetSetting_Exists(t *testing.T) {
 }
 
 func TestGetSetting_NotFound(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, err := database.GetSetting(context.Background(), "nonexistent_key_xyz")
 	if err == nil {
@@ -687,7 +669,7 @@ func TestGetSetting_NotFound(t *testing.T) {
 }
 
 func TestSetSetting_NewKey(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	if err := database.SetSetting(context.Background(), "custom_key", "custom_val"); err != nil {
 		t.Fatalf("SetSetting() error: %v", err)
@@ -703,7 +685,7 @@ func TestSetSetting_NewKey(t *testing.T) {
 }
 
 func TestSetSetting_UpdateExisting(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	if err := database.SetSetting(context.Background(), "server_name", "My Custom Server"); err != nil {
 		t.Fatalf("SetSetting() update error: %v", err)
@@ -719,7 +701,7 @@ func TestSetSetting_UpdateExisting(t *testing.T) {
 }
 
 func TestGetAllSettings_ReturnsMap(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	settings, err := database.GetAllSettings(context.Background())
 	if err != nil {
@@ -734,7 +716,7 @@ func TestGetAllSettings_ReturnsMap(t *testing.T) {
 }
 
 func TestGetAllSettings_AfterClearing(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, _ = database.ExecContext(context.Background(), "DELETE FROM settings")
 
@@ -813,7 +795,7 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 // ─── UserCount ──────────────────────────────────────────────────────────────
 
 func TestUserCount_Empty(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	count, err := database.UserCount(context.Background())
 	if err != nil {
@@ -825,7 +807,7 @@ func TestUserCount_Empty(t *testing.T) {
 }
 
 func TestUserCount_WithUsers(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 
 	for i := range 3 {
 		_, err := database.CreateUser(context.Background(),

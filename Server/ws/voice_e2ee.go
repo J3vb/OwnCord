@@ -114,7 +114,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	pubKey := announceCmd.PublicKey()
+	pubKey := announceCmd.PublicKey
 	if pubKey == "" {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is required"}}
 	}
@@ -128,7 +128,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 	// signature (F3 TOFU) is optional — legacy clients omit it and the
 	// receiving client enforces the fail-closed posture. When present it is
 	// validated and carried verbatim: the server relays, never verifies.
-	sig := announceCmd.Signature()
+	sig := announceCmd.Signature
 	if sig != "" {
 		if len(sig) > 128 {
 			return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "signature too large"}}
@@ -175,9 +175,9 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	targetUserID := offerCmd.TargetUserID()
-	encKey := offerCmd.EncryptedKey()
-	iv := offerCmd.IV()
+	targetUserID := offerCmd.TargetUserID
+	encKey := offerCmd.EncryptedKey
+	iv := offerCmd.IV
 
 	if targetUserID <= 0 || encKey == "" || iv == "" {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "target_user_id, encrypted_key, and iv are required"}}

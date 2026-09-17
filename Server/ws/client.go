@@ -180,12 +180,6 @@ func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool
 	return true
 }
 
-// clearVoiceChID clears the voice channel ID and returns the old value.
-func (c *Client) clearVoiceChID() int64 {
-	oldChID, _, _ := c.clearVoiceState()
-	return oldChID
-}
-
 // clearVoiceState clears the client's voice state and returns the old channel
 // ID, join token, and whether that join had completed (see
 // voiceJoinCompleted) — the last is what registerNow consults before handing

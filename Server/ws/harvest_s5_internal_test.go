@@ -199,7 +199,7 @@ func TestHandleVoiceCameraV2_ChannelLookupErrorFailsClosed(t *testing.T) {
 	}
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
-	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)
+	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, Enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)
 
 	if res.Error == nil {
 		t.Error("voice_camera returned no error when the VoiceMaxVideo lookup failed — the cap check was silently skipped")

@@ -197,11 +197,6 @@ func (ps *PubSub) PublishGlobal(msg []byte) int {
 	return ps.Publish(TopicGlobal, msg, 0)
 }
 
-// PublishGlobalLow sends msg to all global subscribers at low priority.
-func (ps *PubSub) PublishGlobalLow(msg []byte) int {
-	return ps.PublishLow(TopicGlobal, msg, 0)
-}
-
 // publishWithPriority is the core publish method routing to the appropriate
 // client send method based on priority level. allow, when non-nil, drops any
 // subscriber it returns false for (PublishFiltered); nil means unfiltered.

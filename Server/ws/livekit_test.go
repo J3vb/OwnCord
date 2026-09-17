@@ -17,7 +17,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/ws"
-	"github.com/go-chi/chi/v5"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 )
@@ -1383,36 +1382,5 @@ func TestWebhookHandler_SignedRequestRejections(t *testing.T) {
 				t.Errorf("expected 401, got %d", rec.Code)
 			}
 		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// livekit_webhook.go – MountWebhookRoute tests
-// ---------------------------------------------------------------------------
-
-func TestMountWebhookRoute_RegistersRoute(t *testing.T) {
-	t.Parallel()
-
-	hub := ws.NewHubForTest()
-	handler := ws.MountWebhookRoute(hub, "key", "secret")
-
-	if handler == nil {
-		t.Fatal("MountWebhookRoute returned nil handler")
-	}
-
-	r := chi.NewRouter()
-	r.Post("/livekit/webhook", handler)
-
-	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook",
-		strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-
-	r.ServeHTTP(rec, req)
-
-	if rec.Code == http.StatusNotFound {
-		t.Error("expected route to be registered, got 404")
-	}
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 from mounted webhook handler, got %d", rec.Code)
 	}
 }

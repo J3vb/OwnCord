@@ -82,9 +82,8 @@ func handleNSFWRevoke(svc *service.Services, broadcaster DMBroadcaster) http.Han
 // nsfwRequestParams reads the authenticated caller and the {id} path
 // parameter shared by both routes.
 func nsfwRequestParams(w http.ResponseWriter, r *http.Request) (*db.User, int64, bool) {
-	user, ok := r.Context().Value(UserKey).(*db.User)
-	if !ok || user == nil {
-		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+	user, ok := requireUser(w, r)
+	if !ok {
 		return nil, 0, false
 	}
 	channelID, ok := parseIDParam(w, r, "id")
