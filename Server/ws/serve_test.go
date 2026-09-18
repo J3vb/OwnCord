@@ -15,7 +15,7 @@ import (
 // ─── schema used by serve tests ───────────────────────────────────────────────
 
 // serveTestSchema extends hubTestSchema with voice_states so that
-// collectAllVoiceStates can be exercised via buildReady.
+// readyVoiceStates can be exercised via buildReady.
 var serveTestSchema = append(hubTestSchema, []byte(`
 CREATE TABLE IF NOT EXISTS voice_states (
     user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -342,9 +342,9 @@ func TestBuildReady_ValidJSON(t *testing.T) {
 	}
 }
 
-// ─── collectAllVoiceStates ────────────────────────────────────────────────────
+// ─── readyVoiceStates ────────────────────────────────────────────────────────
 
-func TestCollectAllVoiceStates_EmptyChannels(t *testing.T) {
+func TestReadyVoiceStates_EmptyChannels(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "collect-empty-user")
 
@@ -366,7 +366,7 @@ func TestCollectAllVoiceStates_EmptyChannels(t *testing.T) {
 	}
 }
 
-func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
+func TestReadyVoiceStates_SkipsTextChannels(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "collect-text-user")
 
@@ -393,7 +393,7 @@ func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
 	}
 }
 
-func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
+func TestReadyVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 	hub, database := newServeHub(t)
 	role := ownerRole(t, database)
 
@@ -897,7 +897,7 @@ func TestBuildReady_NoVoiceChannels_EmptyVoiceStates(t *testing.T) {
 	if err := json.Unmarshal(msg, &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// collectAllVoiceStates returns []db.VoiceState{} (not nil) when no voice channels exist.
+	// readyVoiceStates returns []db.VoiceState{} (not nil) when no voice channels exist.
 	if env.Payload.VoiceStates == nil {
 		t.Error("voice_states must be a non-null JSON array even when empty")
 	}
