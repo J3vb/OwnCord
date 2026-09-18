@@ -302,17 +302,24 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // with a client_message_id, no reply and no attachments.
       const persistId = replyTo === null && attachments.length === 0 ? clientMessageId : undefined;
       /** Persist before handing text to the socket, so a process crash after
-       *  commit but before ACK can recover the same logical identity. */
-      function persistPendingText(id: string): Promise<void> {
+       *  commit but before ACK can recover the same logical identity. Resolves
+       *  false when the write did not land: callers that send regardless only
+       *  need the toast, but the offline branch has nothing else carrying the
+       *  text and must say so on the row. */
+      function persistPendingText(id: string): Promise<boolean> {
         return savePendingText(owner, {
           clientMessageId: id,
           channelId,
           content,
           createdAt: Number(id.split(":", 1)[0]),
-        }).catch(() => {
-          if (ownsSession())
-            showToast("Could not save this pending message for recovery after restart", "error");
-        });
+        }).then(
+          () => true,
+          () => {
+            if (ownsSession())
+              showToast("Could not save this pending message for recovery after restart", "error");
+            return false;
+          },
+        );
       }
       if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a
@@ -329,7 +336,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         });
         draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
         markSendFailed(cid, "OFFLINE");
-        if (persistId !== undefined) void persistPendingText(persistId);
+        if (persistId !== undefined) {
+          // Nothing will deliver this text: it was never handed to a socket, so
+          // a failed write means it is gone at restart. Distinguish that from a
+          // plain offline row, whose retry window is still open.
+          void persistPendingText(persistId).then((saved) => {
+            if (!saved && ownsSession()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
+          });
+        }
         return;
       }
       const sendNow = (): void => {

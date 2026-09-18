@@ -1522,6 +1522,26 @@ describe("messages store", () => {
       expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
     });
 
+    it("markSendFailed relabels a row that already failed", () => {
+      // The offline branch marks a row failed at once, then relabels it when
+      // the deferred persistence of that same text also fails. The first call
+      // dropped the row from pendingSends, so the second must still find it —
+      // otherwise the more specific reason never reaches the UI.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "OFFLINE");
+
+      markSendFailed("c1", "OFFLINE_NO_RECOVERY");
+
+      expect(getChannelMessages(1)[0]!.errorCode).toBe("OFFLINE_NO_RECOVERY");
+    });
+
     it("removeOptimistic drops the row (retry / dismiss)", () => {
       addOptimisticMessage({
         correlationId: "c1",

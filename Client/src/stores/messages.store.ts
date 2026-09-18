@@ -423,8 +423,19 @@ export function addOptimisticMessage(params: {
 /** Mark an optimistic row as failed so the UI can offer retry. */
 export function markSendFailed(correlationId: string, errorCode: string | null): void {
   messagesStore.setState((prev) => {
-    const channelId = prev.pendingSends.get(correlationId);
-    if (channelId === undefined) return prev;
+    // A row that already failed was dropped from pendingSends by an earlier
+    // call, so a second call must still find it: an offline send is marked
+    // failed at once, then relabeled when its deferred persistence also
+    // fails. Fall back to the same scan removeOptimistic uses.
+    let channelId = prev.pendingSends.get(correlationId);
+    if (channelId === undefined) {
+      for (const [cid, list] of prev.messagesByChannel) {
+        if (!list.some((m) => m.correlationId === correlationId)) continue;
+        channelId = cid;
+        break;
+      }
+      if (channelId === undefined) return prev;
+    }
     const existing = prev.messagesByChannel.get(channelId);
     if (existing === undefined) return prev;
     const updatedList = existing.map((m) =>
