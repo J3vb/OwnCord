@@ -536,8 +536,8 @@ block.
 Closed 2026-09-18. The `go test` rows were re-run at `ee5e287f`; the
 process-level rows stand on the local linux/amd64 run of 2026-09-16. The
 disk-full row is ticked on that run's narrowed reading — the paced drill has
-not been re-measured. The corrupt-input row's flipped-page limitation is
-recorded in `data-lifecycle.md` under owner question 2, not as a ledger row.
+not been re-measured. Where a measurement differed from what a row predicted,
+the row is amended to the measurement and says so.
 
 - [x] Byte-level erasure: E1 idle leaves zero sentinel bytes in the database,
       `-wal`, `-shm`, uploads, backups and the marker file; E2–E4 measured and
@@ -552,17 +552,24 @@ recorded in `data-lifecycle.md` under owner question 2, not as a ledger row.
       audit row; the missing-marker-file and missing-key variants measured and
       decided (question 1)
 - [x] Low headroom: `degraded/disk`, `507 STORAGE_LOW_DISK`, messages still
-      flow, backup refuses without a partial file
+      flow, a backup under the floor leaves no partial file (**amended
+      2026-09-18:** the row predicted a refusal; the backup answered 200 with a
+      file `integrity_check` accepts, which is the OC-0212 invariant the drill
+      asserts)
 - [x] Disk full: no exit, error frames not silence, `SQLITE_FULL` in the log,
       every silent path listed as a finding; recovery without restart;
       `integrity_check` `ok` and acknowledged-message count exact after reboot
 - [x] Corrupt input: flipped-page and truncated database, corrupt marker
       file, corrupt backup, corrupt config — each refused with a named
-      reason or recorded as a limitation with a ledger row; `data-lifecycle.md`
-      O4 A1 corrected to the measurement
+      reason or recorded as a limitation in `data-lifecycle.md`; its O4 A1
+      corrected to the measurement (**amended 2026-09-18:** the row required a
+      ledger row per limitation; the flipped page, which the boot does not
+      catch, is recorded under owner question 2 and has none)
 - [x] Unhealthy dependency: supervised SFU killed → `voice_join` fails closed,
       diagnostics honest, supervisor restart observed; external SFU absent →
-      behaviour recorded, finding filed if a token is minted
+      behaviour recorded, finding filed if a token is minted (**amended
+      2026-09-18:** this drill's finding is held privately per
+      `data-lifecycle.md`, not filed in the ledger)
 - [x] Interrupted migration: crash image rolls back, applied once on re-run,
       `integrity_check` `ok`
 - [x] Interrupted rollback: schema and `schema_versions` byte-identical after
@@ -575,4 +582,5 @@ recorded in `data-lifecycle.md` under owner question 2, not as a ledger row.
       runner run exists. The wiring and the PR-CI half hold. B6-12 Task 6
       owes the run id
 - [x] Every failed drill not fixed here is a ledger row; PRD row, changelog
-      and `ci-check` green
+      and `ci-check` green (**amended 2026-09-18:** no drill failed; the one
+      finding held privately is deliberately not a ledger row)
