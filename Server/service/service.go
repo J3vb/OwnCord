@@ -5,9 +5,30 @@
 package service
 
 import (
+	"context"
+	"strings"
+	"time"
+
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
+
+// traceCall starts a span for a service entry point and returns a done func
+// that records the call's duration against ServiceCallDurationSec and ends
+// the span. Both are no-ops in the default build. The metric label is the
+// span name's method segment ("BlockService.BlockUser" -> "BlockUser"), which
+// is what every call site used to pass by hand.
+func traceCall(ctx context.Context, pkg, name string, attrs ...telemetry.Attr) (context.Context, func()) {
+	ctx, span := telemetry.GlobalTracer(pkg).Start(ctx, name, attrs...)
+	start := time.Now()
+	_, method, _ := strings.Cut(name, ".")
+	return ctx, func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
+			telemetry.String("method", method))
+		span.End()
+	}
+}
 
 // Services bundles all domain services for dependency injection.
 // Handlers receive this struct instead of raw *db.DB references.

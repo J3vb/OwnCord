@@ -34,24 +34,6 @@ func isInvalidSearchQueryError(err error) bool {
 		strings.Contains(msg, "syntax error")
 }
 
-func searchRateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies []string) func(http.Handler) http.Handler {
-	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIPWithProxies(r, proxyNets)
-			if !limiter.Allow("search:"+ip, limit, window) {
-				w.Header().Set("Retry-After", strconv.Itoa(int(window.Seconds())))
-				writeJSON(w, http.StatusTooManyRequests, errorResponse{
-					Error:   "RATE_LIMITED",
-					Message: "too many requests, please slow down",
-				})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // PurgeBroadcaster is the interface needed to fan a bulk delete out over
 // WebSocket from a REST handler. Satisfied by *ws.Hub.
 type PurgeBroadcaster interface {
@@ -76,27 +58,22 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 	})
 	r.With(
 		AuthMiddleware(svc.Sessions),
-		searchRateLimitMiddleware(limiter, searchRateLimitPerMinute, time.Minute, trustedProxies),
+		RateLimitMiddleware(limiter, "search:", searchRateLimitPerMinute, time.Minute, trustedProxies),
 	).Get("/api/v1/search", handleSearch(svc))
 }
 
 // handleListChannels returns all channels the authenticated user can see.
 func handleListChannels(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		channels, err := svc.Channels.ListVisibleChannels(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("handleListChannels", "err", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error: "INTERNAL_ERROR", Message: "failed to list channels",
-			})
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
 			return
 		}
 		writeJSON(w, http.StatusOK, channels)
@@ -111,11 +88,8 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -123,9 +97,7 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 		if raw := r.URL.Query().Get("before"); raw != "" {
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v < 0 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "before must be a non-negative integer",
-				})
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a non-negative integer")
 				return
 			}
 			before = v
@@ -164,11 +136,8 @@ func handleGetMessagesAround(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -201,11 +170,8 @@ func handleGetReactionUsers(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -251,19 +217,14 @@ func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) ht
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		var req purgeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -292,17 +253,12 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		if q == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "query parameter 'q' is required",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "query parameter 'q' is required")
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -310,9 +266,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		if raw := r.URL.Query().Get("channel_id"); raw != "" {
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v <= 0 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "channel_id must be a positive integer",
-				})
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "channel_id must be a positive integer")
 				return
 			}
 			channelID = &v
@@ -326,9 +280,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		results, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, limit)
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "invalid search query",
-				})
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")
 				return
 			}
 			writeServiceError(r.Context(), w, err)
@@ -353,11 +305,8 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -387,11 +336,8 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -442,9 +388,7 @@ func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "limit must be a positive integer",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "limit must be a positive integer")
 		return 0, false
 	}
 	return min(v, maxMessageLimit), true
@@ -456,10 +400,7 @@ func parseIDParam(w http.ResponseWriter, r *http.Request, param string) (int64, 
 	raw := chi.URLParam(r, param)
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: param + " must be a positive integer",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", param+" must be a positive integer")
 		return 0, false
 	}
 	return id, true

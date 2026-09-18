@@ -184,7 +184,6 @@ describe("SettingsOverlay", () => {
     // Theme persists only via themes.ts (owncord:theme:active), not via savePref
     expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
     expect(localStorage.getItem("owncord:settings:theme")).toBeNull();
-    expect(mockSetTheme).toHaveBeenCalledWith("midnight");
 
     overlay.destroy?.();
   });

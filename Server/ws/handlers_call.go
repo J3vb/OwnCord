@@ -42,12 +42,12 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many call attempts"}}
 	}
 
-	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, ringCmd.ChannelID())
+	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, ringCmd.ChannelID)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
 
-	payload := buildCallSignal(MsgTypeCallIncoming, ringCmd.ChannelID(), info.UserID, info.Username)
+	payload := buildCallSignal(MsgTypeCallIncoming, ringCmd.ChannelID, info.UserID, info.Username)
 	events := make([]Event, 0, len(targets))
 	for _, pid := range targets {
 		events = append(events, CallSignalEvent{
@@ -76,12 +76,12 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many call actions"}}
 	}
 
-	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, declineCmd.ChannelID())
+	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, declineCmd.ChannelID)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
 
-	payload := buildCallSignal(MsgTypeCallDeclined, declineCmd.ChannelID(), info.UserID, info.Username)
+	payload := buildCallSignal(MsgTypeCallDeclined, declineCmd.ChannelID, info.UserID, info.Username)
 	events := make([]Event, 0, len(targets))
 	for _, pid := range targets {
 		events = append(events, CallSignalEvent{

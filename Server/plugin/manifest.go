@@ -46,9 +46,9 @@ var pluginCommandRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // maxManifestCommands caps how many commands one plugin may claim.
 const maxManifestCommands = 64
 
-// Manifest is the parsed plugin metadata declared in plugin.json (or
-// plugin.toml in the wazero-tagged build). The on-disk schema is intentionally
-// flat so the default JSON parser handles it without a TOML dependency.
+// Manifest is the parsed plugin metadata declared in plugin.json. The on-disk
+// schema is intentionally flat so the default JSON parser handles it without
+// any extra decode dependency.
 type Manifest struct {
 	Name        string        `json:"name"`
 	Version     string        `json:"version"`
@@ -75,8 +75,8 @@ type CommandSpec struct {
 // Resources caps the plugin's runtime budget. Zero means "use the runtime
 // default from PluginsConfig".
 type Resources struct {
-	MaxMemoryMB int `json:"max_memory_mb" toml:"max_memory_mb"`
-	CPUBudgetMs int `json:"cpu_budget_ms" toml:"cpu_budget_ms"`
+	MaxMemoryMB int `json:"max_memory_mb"`
+	CPUBudgetMs int `json:"cpu_budget_ms"`
 }
 
 // UISpec describes the optional client-side rendering surface.

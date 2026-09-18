@@ -185,7 +185,7 @@ func TestAbsenceContract_NoMailModuleRequirement(t *testing.T) {
 }
 
 func TestAbsenceContract_NoMailConfigKeyOrRoute(t *testing.T) {
-	keys := koanfKeys(reflect.TypeFor[config.Config](), "")
+	keys := configKeys(reflect.TypeFor[config.Config](), "")
 	if len(keys) < 30 {
 		t.Fatalf("collected only %d config keys; expected the full config surface (>= 30)", len(keys))
 	}

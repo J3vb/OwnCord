@@ -2,18 +2,10 @@
  * Accessibility settings tab — reduced motion, high contrast, role colors, OS motion sync, large font.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
-import { loadPref, savePref, createToggle } from "./helpers";
+import { createElement } from "@lib/dom";
+import { appendToggleRows, loadPref, type ToggleItem } from "./helpers";
 import { syncOsMotionListener } from "@lib/os-motion";
 import { applyFontSize } from "@lib/appearance";
-
-type ToggleItem = {
-  readonly key: string;
-  readonly label: string;
-  readonly desc: string;
-  readonly fallback: boolean;
-  readonly sideEffect?: (nowOn: boolean) => void;
-};
 
 const TOGGLES: ReadonlyArray<ToggleItem> = [
   {
@@ -75,27 +67,7 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
 export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
-  for (const item of TOGGLES) {
-    const row = createElement("div", { class: "setting-row" });
-    const info = createElement("div", {});
-    const label = createElement("div", { class: "setting-label" }, item.label);
-    const desc = createElement("div", { class: "setting-desc" }, item.desc);
-    appendChildren(info, label, desc);
-
-    const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createToggle(isOn, {
-      signal,
-      onChange: (nowOn) => {
-        savePref(item.key, nowOn);
-        if (item.sideEffect !== undefined) {
-          item.sideEffect(nowOn);
-        }
-      },
-    });
-
-    appendChildren(row, info, toggle);
-    section.appendChild(row);
-  }
+  appendToggleRows(section, TOGGLES, signal);
 
   return section;
 }

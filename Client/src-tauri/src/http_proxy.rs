@@ -28,7 +28,7 @@
 //   multiple proxies can run concurrently (bounded by profile count).
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
@@ -57,7 +57,7 @@ impl HttpProxyState {
     }
 
     /// Remove the `remote_host` entry, but only if it still points at `port`.
-    /// Used by `run_proxy_loop`'s accept-error exit path to deregister a dead
+    /// Used by `run_accept_loop`'s accept-error exit path to deregister a dead
     /// tunnel without racing a newer tunnel that may have already replaced it
     /// (e.g. `stop_http_proxy` + a fresh `start_http_proxy` while this loop
     /// was mid-shutdown).
@@ -73,8 +73,8 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls, copy_with_deadline, read_request_headers, resolve_remote_target,
-    validate_remote_host,
+    connect_tls, copy_with_deadline, read_request_headers, resolve_remote_target, rewrite_headers,
+    run_accept_loop, spawn_watched, validate_remote_host,
 };
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
@@ -107,22 +107,36 @@ pub async fn start_http_proxy<R: Runtime>(
         .port();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let loop_handle = tokio::spawn(run_proxy_loop(
-        app.clone(),
-        listener,
-        remote_host.clone(),
-        port,
-        shutdown_rx,
-    ));
-    // Watch the loop so a panic is logged instead of vanishing silently (which
-    // would leave JS with a stale cached port and no error).
-    tokio::spawn(async move {
-        match loop_handle.await {
-            Ok(()) => info!("[http_proxy] proxy loop exited"),
-            Err(e) if e.is_panic() => error!("[http_proxy] proxy loop panicked: {e:?}"),
-            Err(e) => warn!("[http_proxy] proxy loop join error: {e:?}"),
-        }
-    });
+    let conn_app = app.clone();
+    let conn_host = remote_host.clone();
+    let dead_host = remote_host.clone();
+    spawn_watched(
+        "http_proxy",
+        tokio::spawn(run_accept_loop(
+            listener,
+            shutdown_rx,
+            "http_proxy",
+            move |stream| {
+                let app = conn_app.clone();
+                let host = conn_host.clone();
+                async move {
+                    if let Err(e) = handle_connection(app, stream, &host).await {
+                        warn!("[http_proxy] connection to {} failed: {}", host, e);
+                    }
+                }
+            },
+            move || async move {
+                if let Some(state) = app.try_state::<HttpProxyState>() {
+                    state.remove_if_port_matches(&dead_host, port).await;
+                } else {
+                    warn!(
+                        "[http_proxy] state unmanaged; cannot deregister dead tunnel for {}",
+                        dead_host
+                    );
+                }
+            },
+        )),
+    );
 
     info!(
         "[http_proxy] tunnel started on 127.0.0.1:{} → {}",
@@ -155,103 +169,24 @@ pub async fn stop_http_proxy(
 // Proxy internals
 // ---------------------------------------------------------------------------
 
-/// Maximum consecutive accept errors before the proxy loop exits.
-const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
-
-async fn run_proxy_loop<R: Runtime>(
-    app: AppHandle<R>,
-    listener: TcpListener,
-    remote_host: String,
-    port: u16,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-) {
-    let mut consecutive_errors: u32 = 0;
-
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, addr)) => {
-                        consecutive_errors = 0;
-                        let host = remote_host.clone();
-                        let app = app.clone();
-                        debug!("[http_proxy] accepted connection from {}", addr);
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(app, stream, &host).await {
-                                warn!("[http_proxy] connection to {} failed: {}", host, e);
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        consecutive_errors += 1;
-                        error!(
-                            "[http_proxy] accept error ({}/{}): {}",
-                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS, e
-                        );
-                        if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
-                            error!(
-                                "[http_proxy] {} consecutive accept errors, stopping proxy loop",
-                                MAX_CONSECUTIVE_ACCEPT_ERRORS
-                            );
-                            // Deregister the dead tunnel BEFORE the break drops
-                            // `listener`, so a future start_http_proxy rebinds a
-                            // fresh port instead of handing back this closed one
-                            // forever. Doing it here rather than after the loop
-                            // returns matters: the listener still holds the port,
-                            // so no newer tunnel can have been handed the same
-                            // number and the port guard cannot misfire.
-                            if let Some(state) = app.try_state::<HttpProxyState>() {
-                                state.remove_if_port_matches(&remote_host, port).await;
-                            } else {
-                                warn!(
-                                    "[http_proxy] state unmanaged; cannot deregister dead tunnel for {}",
-                                    remote_host
-                                );
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            _ = &mut shutdown_rx => break,
-        }
-    }
-}
-
 /// Rewrite the first request's headers: replace Host with the real remote
 /// host and force `Connection: close` so exactly one request rides each
 /// tunnel connection (later keep-alive requests would bypass this rewrite).
 /// `raw` must end with the "\r\n\r\n" header terminator.
 fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
-    let request = String::from_utf8_lossy(raw);
-    let mut modified = String::with_capacity(raw.len() + 128);
-    let mut lines = request.split("\r\n").peekable();
-    let mut first = true;
-    while let Some(line) = lines.next() {
-        if !first {
-            modified.push_str("\r\n");
-        }
-        first = false;
-        // The terminator produces two trailing empty strings; emit them as-is.
-        if line.is_empty() && lines.peek().is_none() {
-            break;
-        }
+    let mut modified = rewrite_headers(&String::from_utf8_lossy(raw), |line| {
         let lower = line.to_ascii_lowercase();
         if lower.starts_with("host:") {
-            modified.push_str("Host: ");
-            modified.push_str(remote_host);
+            Some(format!("Host: {remote_host}"))
         } else if lower.starts_with("connection:") {
-            modified.push_str("Connection: close");
+            Some("Connection: close".to_string())
         } else {
-            modified.push_str(line);
+            None
         }
-    }
-    // `break` above consumed one empty segment; restore the full terminator.
-    if !modified.ends_with("\r\n\r\n") {
-        while !modified.ends_with("\r\n\r\n") {
-            modified.push_str("\r\n");
-        }
-    }
+    });
+    // `read_request_headers` only returns once it has seen the terminator, so
+    // it survives the line split; the `insert_at` below depends on it.
+    debug_assert!(modified.ends_with("\r\n\r\n"));
     // If the client never sent a Connection header, inject one.
     if !modified.to_ascii_lowercase().contains("\r\nconnection:") {
         let insert_at = modified.len() - 2; // before final CRLF
@@ -260,16 +195,6 @@ fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
     modified
 }
 
-/// Bracket-aware split of a `remote_host` string into (hostname, port).
-/// Defaults to port 443 (standard HTTPS) when none is specified.
-///
-/// A leading `[` consumes up to the matching `]` as the hostname, so a
-/// bracketed IPv6 literal parses correctly whether or not it carries an
-/// explicit port (`[::1]`, `[::1]:8443`). Without brackets, a single
-/// trailing colon is a `host:port` split — but a *bare* (unbracketed) IPv6
-/// literal contains more than one colon, and RFC 3986 gives it no way to
-/// carry a port without brackets, so that case is returned whole with the
-/// default port instead of being mis-split on its last colon.
 /// Handle one proxied connection:
 /// 1. Read the request headers from the loopback side
 /// 2. TLS-connect to the remote and run the TOFU check (store/emit/reject)
@@ -410,7 +335,7 @@ const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
 mod tests {
     use super::*;
 
-    // Regression: the accept-error exit path in run_proxy_loop must be able to
+    // Regression: the accept-error exit path in run_accept_loop must be able to
     // deregister its own dead entry, but must NOT clobber a newer tunnel that
     // has since replaced it under the same remote_host key.
     #[tokio::test]

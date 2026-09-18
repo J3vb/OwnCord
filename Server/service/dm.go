@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -107,16 +106,11 @@ type CreateDMResult struct {
 // CreateDM creates or retrieves a DM channel between two users.
 // Validates that neither user has blocked the other.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
-	ctx, span := telemetry.GlobalTracer("service/dm").Start(ctx, "DMService.CreateDM",
+	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
 		telemetry.Int64("recipient_id", recipientID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "CreateDM"))
-		span.End()
-	}()
+	defer done()
 
 	if recipientID <= 0 {
 		return nil, fmt.Errorf("%w: recipient_id must be positive", ErrBadRequest)
@@ -286,15 +280,10 @@ type CreateGroupDMResult struct {
 // Unlike CreateDM this always creates a new channel: the same set of people may
 // want more than one group, so there is no "the group for these users" to find.
 func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientIDs []int64, name string) (*CreateGroupDMResult, error) {
-	ctx, span := telemetry.GlobalTracer("service/dm").Start(ctx, "DMService.CreateGroupDM",
+	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateGroupDM",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "CreateGroupDM"))
-		span.End()
-	}()
+	defer done()
 
 	// De-duplicate and drop the caller: a payload naming the same person twice
 	// is a client bug, not a reason to refuse, but it must not inflate the
@@ -340,7 +329,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}
 
 	// Block-check every pair in the room, not just creator-vs-recipient:
-	// group DMs are exempt from the send-time block gate (requireDMNotBlocked
+	// group DMs are exempt from the send-time block gate (RequireDMNotBlocked
 	// skips groups entirely) on the strength of this creation-time check, so
 	// two mutually-blocked recipients must not both end up in the same group
 	// even when neither of them blocked the creator. n <= MaxGroupDMParticipants,
@@ -466,7 +455,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
 // or ok=false when they have none. Group DMs never match, mirroring the
-// block-enforcement boundary (requireDMNotBlocked exempts groups).
+// block-enforcement boundary (RequireDMNotBlocked exempts groups).
 func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
 	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
 	if err != nil {
@@ -496,9 +485,9 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	}
 	// A ring is a DM interaction like any other sink: without this check a
 	// blocked user could still make the blocker's client ring (A-2026-08-03).
-	// Group DMs are exempt inside requireDMNotBlocked, matching every other
+	// Group DMs are exempt inside RequireDMNotBlocked, matching every other
 	// sink — blocks are enforced at group creation instead.
-	if err := requireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
 		return nil, err
 	}
 

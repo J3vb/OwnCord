@@ -3,7 +3,6 @@ package permissions
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
@@ -45,7 +44,6 @@ type ChannelRef struct {
 type DB interface {
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
-	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	// HasActiveTimeout is B5-9's live, uncached lookup: Subject.TimedOut is
 	// filled from it on every Subject call, never from a cache.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
@@ -146,28 +144,4 @@ func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, ove
 		}
 	}
 	return visible
-}
-
-// RequireChannelAccess checks whether the user can access the channel with the
-// given permission. For DM channels (channelType == "dm"), it verifies
-// participant membership via IsDMParticipant. For regular channels, it checks
-// role-based permissions via HasChannelPerm.
-//
-// Returns nil on success, or a descriptive error on failure.
-func (ck *Checker) RequireChannelAccess(ctx context.Context, userID, rolePerms, roleID int64, channelType string, channelID, perm int64) error {
-	if channelType == "dm" {
-		ok, err := ck.db.IsDMParticipant(ctx, userID, channelID)
-		if err != nil {
-			return fmt.Errorf("checking DM participation: %w", err)
-		}
-		if !ok {
-			return ErrNotDMParticipant
-		}
-		return nil
-	}
-
-	if !ck.HasChannelPerm(ctx, rolePerms, roleID, userID, channelID, perm) {
-		return ErrPermissionDenied
-	}
-	return nil
 }

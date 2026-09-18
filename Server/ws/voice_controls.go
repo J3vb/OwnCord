@@ -66,7 +66,7 @@ func voiceSelfToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, on boo
 func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	muteCmd := cmd.(VoiceMuteCmd)
-	return voiceSelfToggleV2(ctx, d, info, muteCmd.Muted(), voiceSelfToggle{
+	return voiceSelfToggleV2(ctx, d, info, muteCmd.Muted, voiceSelfToggle{
 		rateKey:      "voice_mute",
 		rateLimit:    voiceMuteRateLimit,
 		rateWindow:   voiceMuteWindow,
@@ -84,7 +84,7 @@ func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps a
 func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	deafenCmd := cmd.(VoiceDeafenCmd)
-	return voiceSelfToggleV2(ctx, d, info, deafenCmd.Deafened(), voiceSelfToggle{
+	return voiceSelfToggleV2(ctx, d, info, deafenCmd.Deafened, voiceSelfToggle{
 		rateKey:      "voice_deafen",
 		rateLimit:    voiceDeafenRateLimit,
 		rateWindow:   voiceDeafenWindow,
@@ -175,7 +175,7 @@ func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enab
 func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	cameraCmd := cmd.(VoiceCameraCmd)
-	return voiceStreamToggleV2(ctx, d, info, cameraCmd.Enabled(), voiceStreamToggle{
+	return voiceStreamToggleV2(ctx, d, info, cameraCmd.Enabled, voiceStreamToggle{
 		rateKey:    "voice_camera",
 		rateLimit:  voiceCameraRateLimit,
 		rateWindow: voiceCameraWindow,
@@ -197,7 +197,7 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	ssCmd := cmd.(VoiceScreenshareCmd)
-	return voiceStreamToggleV2(ctx, d, info, ssCmd.Enabled(), voiceStreamToggle{
+	return voiceStreamToggleV2(ctx, d, info, ssCmd.Enabled, voiceStreamToggle{
 		rateKey:    "voice_screenshare",
 		rateLimit:  voiceScreenshareRateLimit,
 		rateWindow: voiceScreenshareWindow,

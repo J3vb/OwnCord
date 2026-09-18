@@ -3,31 +3,10 @@ package db_test
 import (
 	"context"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
-
-// newTestDB opens an in-memory SQLite database and runs migrations from the
-// embedded FS so tests are fully self-contained.
-func newTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	// Build a minimal migration FS with the initial schema.
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: testSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
-}
 
 // testSchema mirrors the production migration but kept inline so tests are
 // portable and don't depend on the real migrations embed.
@@ -113,7 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code);
 // ─── User tests ──────────────────────────────────────────────────────────────
 
 func TestCreateUser_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, err := database.CreateUser(context.Background(), "alice", "hash123", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -124,7 +103,7 @@ func TestCreateUser_Success(t *testing.T) {
 }
 
 func TestCreateUser_DuplicateUsername(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	if _, err := database.CreateUser(context.Background(), "bob", "hash1", 4); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
@@ -135,7 +114,7 @@ func TestCreateUser_DuplicateUsername(t *testing.T) {
 }
 
 func TestCreateUser_CaseInsensitiveDuplicate(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	if _, err := database.CreateUser(context.Background(), "Charlie", "hash1", 4); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
@@ -146,7 +125,7 @@ func TestCreateUser_CaseInsensitiveDuplicate(t *testing.T) {
 }
 
 func TestGetUserByUsername_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	_, _ = database.CreateUser(context.Background(), "dave", "hashDave", 4)
 
 	user, err := database.GetUserByUsername(context.Background(), "dave")
@@ -162,7 +141,7 @@ func TestGetUserByUsername_Found(t *testing.T) {
 }
 
 func TestGetUserByUsername_CaseInsensitive(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	_, _ = database.CreateUser(context.Background(), "Eve", "hashEve", 4)
 
 	user, err := database.GetUserByUsername(context.Background(), "EVE")
@@ -175,7 +154,7 @@ func TestGetUserByUsername_CaseInsensitive(t *testing.T) {
 }
 
 func TestGetUserByUsername_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	user, err := database.GetUserByUsername(context.Background(), "nobody")
 	if err != nil {
 		t.Fatalf("GetUserByUsername(not found): %v", err)
@@ -186,7 +165,7 @@ func TestGetUserByUsername_NotFound(t *testing.T) {
 }
 
 func TestGetUserByID_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "frank", "hashFrank", 4)
 
 	user, err := database.GetUserByID(context.Background(), id)
@@ -199,7 +178,7 @@ func TestGetUserByID_Found(t *testing.T) {
 }
 
 func TestGetUserByID_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	user, err := database.GetUserByID(context.Background(), 999)
 	if err != nil {
 		t.Fatalf("GetUserByID(not found): %v", err)
@@ -210,7 +189,7 @@ func TestGetUserByID_NotFound(t *testing.T) {
 }
 
 func TestUpdateUserStatus(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "grace", "hash", 4)
 
 	if err := database.UpdateUserStatus(context.Background(), id, "online"); err != nil {
@@ -223,7 +202,7 @@ func TestUpdateUserStatus(t *testing.T) {
 }
 
 func TestBanUser_Permanent(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "hank", "hash", 4)
 
 	if err := database.BanUser(context.Background(), id, "spam", nil); err != nil {
@@ -239,7 +218,7 @@ func TestBanUser_Permanent(t *testing.T) {
 }
 
 func TestBanUser_Temporary(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "ivan", "hash", 4)
 	expires := time.Now().Add(24 * time.Hour)
 
@@ -258,7 +237,7 @@ func TestBanUser_Temporary(t *testing.T) {
 // ─── Session tests ────────────────────────────────────────────────────────────
 
 func TestCreateSession_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "jack", "hash", 4)
 
 	id, err := database.CreateSession(context.Background(), uid, "tokenHash1", "GoTest/1.0", "127.0.0.1")
@@ -271,7 +250,7 @@ func TestCreateSession_Success(t *testing.T) {
 }
 
 func TestGetSessionByTokenHash_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "kate", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), uid, "myTokenHash", "GoTest/1.0", "127.0.0.1")
 
@@ -288,7 +267,7 @@ func TestGetSessionByTokenHash_Found(t *testing.T) {
 }
 
 func TestGetSessionByTokenHash_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	sess, err := database.GetSessionByTokenHash(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("GetSessionByTokenHash(not found): %v", err)
@@ -299,7 +278,7 @@ func TestGetSessionByTokenHash_NotFound(t *testing.T) {
 }
 
 func TestGetSessionWithBanStatus_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "zara", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), uid, "banCheckToken", "GoTest/1.0", "127.0.0.1")
 
@@ -319,7 +298,7 @@ func TestGetSessionWithBanStatus_Found(t *testing.T) {
 }
 
 func TestGetSessionWithBanStatus_BannedUser(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "banned-zara", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), uid, "bannedToken", "GoTest/1.0", "127.0.0.1")
 	if err := database.BanUser(context.Background(), uid, "rule violation", nil); err != nil {
@@ -342,7 +321,7 @@ func TestGetSessionWithBanStatus_BannedUser(t *testing.T) {
 }
 
 func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	result, err := database.GetSessionWithBanStatus(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("GetSessionWithBanStatus(not found): %v", err)
@@ -356,7 +335,7 @@ func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
 // IN (...) query; missing hashes must be absent (revoked ⇒ kick) and ban
 // state must ride along per row.
 func TestGetSessionsWithBanStatusBatch(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	okUID, _ := database.CreateUser(context.Background(), "batch-ok", "hash", 4)
 	banUID, _ := database.CreateUser(context.Background(), "batch-banned", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), okUID, "batchTokenOK", "GoTest/1.0", "127.0.0.1")
@@ -399,7 +378,7 @@ func TestGetSessionsWithBanStatusBatch(t *testing.T) {
 }
 
 func TestGetSessionsWithBanStatusBatch_Empty(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	result, err := database.GetSessionsWithBanStatusBatch(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("GetSessionsWithBanStatusBatch(nil): %v", err)
@@ -410,7 +389,7 @@ func TestGetSessionsWithBanStatusBatch_Empty(t *testing.T) {
 }
 
 func TestDeleteSession(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "leo", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), uid, "delToken", "GoTest/1.0", "127.0.0.1")
 
@@ -424,7 +403,7 @@ func TestDeleteSession(t *testing.T) {
 }
 
 func TestDeleteExpiredSessions(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "mia", "hash", 4)
 
 	// Insert an already-expired session directly via Exec.
@@ -456,7 +435,7 @@ func TestDeleteExpiredSessions(t *testing.T) {
 }
 
 func TestTouchSession(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "noah", "hash", 4)
 	_, _ = database.CreateSession(context.Background(), uid, "touchToken", "GoTest/1.0", "127.0.0.1")
 
@@ -478,7 +457,7 @@ func TestTouchSession(t *testing.T) {
 // ─── Invite tests ─────────────────────────────────────────────────────────────
 
 func TestCreateInvite_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "olivia", "hash", 4)
 
 	code, err := database.CreateInvite(context.Background(), uid, 0, nil)
@@ -491,7 +470,7 @@ func TestCreateInvite_Success(t *testing.T) {
 }
 
 func TestGetInvite_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "pedro", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 5, nil)
 
@@ -511,7 +490,7 @@ func TestGetInvite_Found(t *testing.T) {
 }
 
 func TestGetInvite_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	inv, err := database.GetInvite(context.Background(), "bogus")
 	if err != nil {
 		t.Fatalf("GetInvite(not found): %v", err)
@@ -522,7 +501,7 @@ func TestGetInvite_NotFound(t *testing.T) {
 }
 
 func TestRevokeInvite(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "uma", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
 
@@ -537,7 +516,7 @@ func TestRevokeInvite(t *testing.T) {
 }
 
 func TestCreateInvite_UnlimitedUses(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "vera", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 0, nil) // 0 = unlimited
 
@@ -552,7 +531,7 @@ func TestCreateInvite_UnlimitedUses(t *testing.T) {
 // TestUseInviteAtomic_Success verifies a valid unlimited invite is accepted and
 // its use_count incremented in one operation.
 func TestUseInviteAtomic_Success(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user1", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
 
@@ -569,7 +548,7 @@ func TestUseInviteAtomic_Success(t *testing.T) {
 // TestUseInviteAtomic_IncrementsUses verifies the count advances correctly over
 // multiple sequential calls.
 func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user2", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 5, nil)
 
@@ -588,7 +567,7 @@ func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
 // TestUseInviteAtomic_Revoked returns an error for a revoked invite without
 // modifying the database.
 func TestUseInviteAtomic_Revoked(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user3", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
 	_ = database.RevokeInvite(context.Background(), code)
@@ -606,7 +585,7 @@ func TestUseInviteAtomic_Revoked(t *testing.T) {
 
 // TestUseInviteAtomic_Expired returns an error for an expired invite.
 func TestUseInviteAtomic_Expired(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user4", "hash", 4)
 
 	past := time.Now().Add(-time.Hour)
@@ -620,7 +599,7 @@ func TestUseInviteAtomic_Expired(t *testing.T) {
 // TestUseInviteAtomic_ExceedsMaxUses returns an error when the invite has
 // reached its maximum use count.
 func TestUseInviteAtomic_ExceedsMaxUses(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user5", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)
 
@@ -634,7 +613,7 @@ func TestUseInviteAtomic_ExceedsMaxUses(t *testing.T) {
 
 // TestUseInviteAtomic_NotFound returns an error for a completely unknown code.
 func TestUseInviteAtomic_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	if err := database.UseInviteAtomic(context.Background(), "doesnotexist"); err == nil {
 		t.Error("UseInviteAtomic returned nil error for unknown code, want error")
@@ -645,7 +624,7 @@ func TestUseInviteAtomic_NotFound(t *testing.T) {
 // redeem a single-use invite.  Exactly one must succeed and exactly one must
 // fail; the use_count must end up at 1.
 func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "atomic_user6", "hash", 4)
 	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)
 
@@ -679,7 +658,7 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 // ─── UnbanUser ──────────────────────────────────────────────────────────────
 
 func TestUnbanUser_ClearsBan(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "unban_target", "hash", 4)
 
 	if err := database.BanUser(context.Background(), id, "spam", nil); err != nil {
@@ -708,7 +687,7 @@ func TestUnbanUser_ClearsBan(t *testing.T) {
 }
 
 func TestUnbanUser_NonexistentUser(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	// Unbanning nonexistent user should not error.
 	if err := database.UnbanUser(context.Background(), 99999); err != nil {
@@ -719,7 +698,7 @@ func TestUnbanUser_NonexistentUser(t *testing.T) {
 // ─── ResetAllUserStatuses ───────────────────────────────────────────────────
 
 func TestResetAllUserStatuses(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id1, _ := database.CreateUser(context.Background(), "status_u1", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "status_u2", "hash", 4)
 
@@ -745,7 +724,7 @@ func TestResetAllUserStatuses(t *testing.T) {
 }
 
 func TestResetAllUserStatuses_AlreadyOffline(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	_, _ = database.CreateUser(context.Background(), "offline_user", "hash", 4)
 
 	// Should not error when all users are already offline.
@@ -757,7 +736,7 @@ func TestResetAllUserStatuses_AlreadyOffline(t *testing.T) {
 // ─── ListMembers ────────────────────────────────────────────────────────────
 
 func TestListMembers_Empty(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	members, err := database.ListMembers(context.Background())
 	if err != nil {
@@ -769,7 +748,7 @@ func TestListMembers_Empty(t *testing.T) {
 }
 
 func TestListMembers_ExcludesBanned(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id1, _ := database.CreateUser(context.Background(), "member_visible", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "member_banned", "hash", 4)
 	_ = database.BanUser(context.Background(), id2, "test ban", nil)
@@ -798,7 +777,7 @@ func TestListMembers_ExcludesBanned(t *testing.T) {
 // user permanently absent from the member roster even though they can log in
 // and post again.
 func TestListMembers_LapsedTempBan_StillIncluded(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	_, _ = database.CreateUser(context.Background(), "member_visible", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "member_lapsed_ban", "hash", 4)
 
@@ -826,7 +805,7 @@ func TestListMembers_LapsedTempBan_StillIncluded(t *testing.T) {
 }
 
 func TestListMembers_SortedByUsername(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	_, _ = database.CreateUser(context.Background(), "zeta_user", "hash", 4)
 	_, _ = database.CreateUser(context.Background(), "alpha_user", "hash", 4)
 	_, _ = database.CreateUser(context.Background(), "mid_user", "hash", 4)
@@ -849,7 +828,7 @@ func TestListMembers_SortedByUsername(t *testing.T) {
 // ─── Identity key (F3 voice E2EE TOFU) ───────────────────────────────────────
 
 func TestUpdateUserIdentityKey_RoundTrip(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, err := database.CreateUser(context.Background(), "idkey_user", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -870,7 +849,7 @@ func TestUpdateUserIdentityKey_RoundTrip(t *testing.T) {
 }
 
 func TestUpdateUserIdentityKey_LastWriteWins(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, err := database.CreateUser(context.Background(), "idkey_rotate", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -895,7 +874,7 @@ func TestUpdateUserIdentityKey_LastWriteWins(t *testing.T) {
 }
 
 func TestListMembers_IncludesIdentityKey(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	id, err := database.CreateUser(context.Background(), "idkey_member", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

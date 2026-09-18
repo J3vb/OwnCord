@@ -104,10 +104,7 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	name, err := h.registry.InstallFromZip(r.Context(), body)
 	if err != nil {
 		slog.Error("plugin install failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INSTALL_FAILED",
-			Message: "plugin installation failed",
-		})
+		writeErr(w, http.StatusBadRequest, "INSTALL_FAILED", "plugin installation failed")
 		return
 	}
 	h.writeAudit(r, "plugin_install", h.installedID(r.Context(), name), name)

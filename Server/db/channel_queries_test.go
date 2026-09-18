@@ -7,7 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// openMigratedMemory opens an in-memory DB and runs the full migration.
+// openMigratedMemory opens an in-memory database with the *real* embedded
+// migration set applied. Tests for tables introduced by later migrations
+// (rate_lockouts in 011, user_blocks in 012, events in 014, plugins in 015)
+// use this so they exercise the schema that actually ships rather than the
+// hand-maintained inline subset newSchemaTestDB-family helpers run.
 func openMigratedMemory(t *testing.T) *db.DB {
 	t.Helper()
 	database := openMemory(t)

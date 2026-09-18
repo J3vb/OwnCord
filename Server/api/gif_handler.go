@@ -106,7 +106,7 @@ type gifResponse struct {
 func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config) {
 	r.Route("/api/v1/gif", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))
-		r.Use(rateLimitMiddlewareWithPrefix(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
+		r.Use(RateLimitMiddleware(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
 
 		r.Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))
 		r.Get("/trending", handleGIFProxy(cfg.GIF.APIKey, "/featured", false))
@@ -119,10 +119,7 @@ func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *aut
 func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if apiKey == "" {
-			writeJSON(w, http.StatusServiceUnavailable, errorResponse{
-				Error:   "GIF_DISABLED",
-				Message: "GIF search is not configured on this server",
-			})
+			writeErr(w, http.StatusServiceUnavailable, "GIF_DISABLED", "GIF search is not configured on this server")
 			return
 		}
 
@@ -133,10 +130,7 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 
 		limit, ok := parseGIFLimit(r.URL.Query().Get("limit"))
 		if !ok {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "limit must be an integer between 1 and " + strconv.Itoa(gifMaxLimit),
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "limit must be an integer between 1 and "+strconv.Itoa(gifMaxLimit))
 			return
 		}
 		params.Set("limit", strconv.Itoa(limit))
@@ -144,17 +138,11 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 		if requireQuery {
 			q := strings.TrimSpace(r.URL.Query().Get("q"))
 			if q == "" {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "INVALID_INPUT",
-					Message: "q is required",
-				})
+				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "q is required")
 				return
 			}
 			if len(q) > gifMaxQueryLen {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "INVALID_INPUT",
-					Message: "q must be at most " + strconv.Itoa(gifMaxQueryLen) + " characters",
-				})
+				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "q must be at most "+strconv.Itoa(gifMaxQueryLen)+" characters")
 				return
 			}
 			params.Set("q", q)
@@ -162,10 +150,7 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 
 		results, err := fetchGIFs(r, gifAPIBase+upstreamPath+"?"+params.Encode(), apiKey, limit)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, errorResponse{
-				Error:   "BAD_GATEWAY",
-				Message: "GIF provider is unavailable",
-			})
+			writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "GIF provider is unavailable")
 			return
 		}
 

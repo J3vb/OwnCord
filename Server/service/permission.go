@@ -126,26 +126,6 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 	return sub, nil
 }
 
-// RequireChannelAccess checks whether the user can access the channel with
-// the given permission. For DM channels it verifies participant membership.
-// For regular channels it uses cached role-based permission checks.
-func (s *PermissionService) RequireChannelAccess(ctx context.Context, userID int64, channelType string, channelID, perm int64) error {
-	if channelType == "dm" {
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return permissions.ErrNotDMParticipant
-		}
-		return nil
-	}
-	if !s.HasChannelPerm(ctx, userID, channelID, perm) {
-		return permissions.ErrPermissionDenied
-	}
-	return nil
-}
-
 // GetRoleForUser returns the user's role, using the cache when available.
 func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
 	cp, err := s.getOrPopulate(ctx, userID)

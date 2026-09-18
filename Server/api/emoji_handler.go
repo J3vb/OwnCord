@@ -103,11 +103,8 @@ func handleListEmoji(svc *service.Services) http.HandlerFunc {
 // then are the bytes read, sniffed, measured and stored.
 func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -117,9 +114,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 		}
 
 		if limiter != nil && !limiter.Allow(auth.Key("emoji_upload", user.ID), emojiUploadRateLimitPerMinute, time.Minute) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: "emoji upload rate limit exceeded, try again later",
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "emoji upload rate limit exceeded, try again later")
 			return
 		}
 
@@ -129,9 +124,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 		r.Body = http.MaxBytesReader(w, r.Body, emojiMaxBodySize)
 
 		if err := r.ParseMultipartForm(emojiMultipartMemoryLimit); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid multipart form",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 			return
 		}
 
@@ -188,9 +181,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "missing file field",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
 		return nil, "", false
 	}
 	defer file.Close() //nolint:errcheck
@@ -199,43 +190,30 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 	// and "one byte over" is caught, without buffering an unbounded body.
 	raw, err := io.ReadAll(io.LimitReader(file, maxEmojiFileBytes+1))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "failed to read uploaded file",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
 		return nil, "", false
 	}
 	if int64(len(raw)) > maxEmojiFileBytes {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: fmt.Sprintf("emoji must be at most %d KB", maxEmojiFileBytes>>10),
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("emoji must be at most %d KB", maxEmojiFileBytes>>10))
 		return nil, "", false
 	}
 
 	mimeType := http.DetectContentType(raw)
 	if !allowedEmojiMIME[mimeType] {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: "emoji must be a PNG, JPEG, GIF or WebP image",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "emoji must be a PNG, JPEG, GIF or WebP image")
 		return nil, "", false
 	}
 
 	width, height, err := imageDimensions(raw, mimeType)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "could not read image dimensions",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "could not read image dimensions")
 		return nil, "", false
 	}
 	// Re-check the sniffed dimensions rather than trusting anything the
 	// client said about the image: the cap is what keeps an "emoji" from
 	// being a full-size picture inlined into every message that names it.
 	if width <= 0 || height <= 0 || width > maxEmojiDimension || height > maxEmojiDimension {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height),
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height))
 		return nil, "", false
 	}
 
@@ -244,18 +222,13 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 
 func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster EmojiBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil || id <= 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid emoji id",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid emoji id")
 			return
 		}
 

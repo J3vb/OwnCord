@@ -10,7 +10,7 @@ import (
 // shared testSchema fixture.
 
 func TestApplySettings_AppliesEveryKey(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	if err := database.ApplySettings(context.Background(), map[string]string{
 		"server_name": "Applied",
 		"motd":        "Hello",
@@ -26,14 +26,14 @@ func TestApplySettings_AppliesEveryKey(t *testing.T) {
 }
 
 func TestApplySettings_EmptyMapIsNoOp(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	if err := database.ApplySettings(context.Background(), nil); err != nil {
 		t.Fatalf("ApplySettings(nil): %v", err)
 	}
 }
 
 func TestApplySettings_RollsBackOnFailure(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	// Sabotage the table so the in-transaction upsert fails after Begin
 	// succeeded — the rollback path must surface the error, and a later
 	// repair must find no half-applied state (the transaction is the unit).
@@ -48,7 +48,7 @@ func TestApplySettings_RollsBackOnFailure(t *testing.T) {
 }
 
 func TestApplySettings_BeginFailsOnClosedDB(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	_ = database.Close()
 	if err := database.ApplySettings(context.Background(), map[string]string{
 		"server_name": "never",

@@ -137,33 +137,21 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 	// filesystem failure; none of the three bodies carries a path.
 	if errors.Is(saveErr, service.ErrQuotaExceeded) {
 		slog.Info(what+" refused: user storage quota", "error", saveErr)
-		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
-			Error:   "STORAGE_QUOTA_EXCEEDED",
-			Message: "upload rejected: your storage quota is full",
-		})
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED", "upload rejected: your storage quota is full")
 		return
 	}
 	if errors.Is(saveErr, service.ErrLowDisk) {
 		slog.Warn(what+" refused: server storage below its reserved headroom", "error", saveErr)
-		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
-			Error:   "STORAGE_LOW_DISK",
-			Message: "upload rejected: the server is low on disk space",
-		})
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", "upload rejected: the server is low on disk space")
 		return
 	}
 	if errors.Is(saveErr, storage.ErrIO) {
 		slog.Error(what+" failed: server storage error", "error", saveErr)
-		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
-			Error:   "STORAGE_ERROR",
-			Message: "upload failed: server storage error",
-		})
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_ERROR", "upload failed: server storage error")
 		return
 	}
 	slog.Warn(what+" rejected", "error", saveErr)
-	writeJSON(w, http.StatusBadRequest, errorResponse{
-		Error:   "BAD_REQUEST",
-		Message: safeStorageErrorMessage(saveErr),
-	})
+	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", safeStorageErrorMessage(saveErr))
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
@@ -188,19 +176,13 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		if !limiter.Allow(auth.Key("upload", user.ID), uploadRateLimitPerMinute, time.Minute) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "upload rate limit exceeded, try again later",
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "upload rate limit exceeded, try again later")
 			return
 		}
 
@@ -211,10 +193,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// part is read until the bytes it could cost are admitted below.
 		mr, err := r.MultipartReader()
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "invalid multipart form",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 			return
 		}
 
@@ -274,10 +253,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
 			}
 			slog.Error("failed to create attachment record", "error", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to save attachment",
-			})
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save attachment")
 			return
 		}
 
@@ -320,16 +296,10 @@ func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 // ParseMultipartForm gave for any structural failure.
 func writeUploadPartError(w http.ResponseWriter, err error) {
 	if errors.Is(err, io.EOF) {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: "missing file field",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
 		return
 	}
-	writeJSON(w, http.StatusBadRequest, errorResponse{
-		Error:   "BAD_REQUEST",
-		Message: "invalid multipart form",
-	})
+	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 }
 
 func handleServeFile(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
@@ -432,10 +402,7 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	var sniffBuf [512]byte
 	n, readErr := io.ReadFull(file, sniffBuf[:])
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: "failed to read uploaded file",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
 		return storedUpload{}, false
 	}
 	mime := http.DetectContentType(sniffBuf[:n])
@@ -482,15 +449,9 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 		// that could distinguish it from any other refusal on this route.
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
 	case errors.Is(err, service.ErrForbidden):
-		writeJSON(w, http.StatusForbidden, errorResponse{
-			Error:   "FORBIDDEN",
-			Message: "you do not have access to this file",
-		})
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
 	default:
 		slog.Error("failed to resolve attachment", "id", fileID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{
-			Error:   "INTERNAL_ERROR",
-			Message: "internal server error",
-		})
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
 }

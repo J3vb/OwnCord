@@ -3,7 +3,7 @@
 //
 //	routes  -> docs/api.md                   every route the mounted chi tree serves
 //	schema  -> docs/schema.md                every table the migrations create
-//	config  -> docs/server-configuration.md  every koanf key, and where it is documented
+//	config  -> docs/server-configuration.md  every yaml key, and where it is documented
 //
 // Each index replaces the text between a pair of HTML-comment markers
 // (<!-- gendocs:NAME:start --> … <!-- gendocs:NAME:end -->). Everything
@@ -19,7 +19,7 @@
 // Two sources are read the way the absence-contract tests read them, because
 // no non-test seam exists: the router is rebuilt with every optional family
 // switched on and walked with chi.Walk, and the config surface comes from
-// reflection over the koanf struct tags. The schema comes from an in-memory
+// reflection over the yaml struct tags. The schema comes from an in-memory
 // database with the migrations applied — sqlc exposes no catalog, so the
 // migrated database is the catalog.
 //
@@ -42,6 +42,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -261,7 +262,11 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}
 	defer rt.Hub.GracefulStop()
-	handler, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil, rt)
+	// GET /admin/api/logs/stream mounts only when a log buffer is wired
+	// (admin.NewAdminAPI: `if logBuf != nil`). A running server always has
+	// one, so the index must be walked with one too, or that production
+	// route is silently missing from docs/api.md.
+	handler, cleanup := api.NewRouter(cfg, database, "gendocs", admin.NewRingBuffer(1), nil, rt)
 	defer cleanup()
 
 	routes, ok := handler.(chi.Routes)
@@ -483,7 +488,7 @@ func queryStrings(ctx context.Context, database *db.DB, query string, args ...an
 	return out, rows.Err()
 }
 
-// genConfig lists every dotted koanf key and the reference section that
+// genConfig lists every dotted yaml key and the reference section that
 // documents it. A key documented nowhere fails the run by name: the point of
 // the index is that the configuration surface and its reference cannot drift
 // apart silently, and a row saying "undocumented" would just record the drift.
@@ -493,7 +498,7 @@ func genConfig(w io.Writer) error {
 		return err
 	}
 	sections := docSections(string(raw))
-	keys := koanfKeys(reflect.TypeFor[config.Config](), "")
+	keys := configKeys(reflect.TypeFor[config.Config](), "")
 	slices.Sort(keys)
 
 	var missing []string
@@ -511,7 +516,7 @@ func genConfig(w io.Writer) error {
 			len(missing), configDoc, strings.Join(missing, "\n  "))
 	}
 
-	printf(w, "Generated from the `koanf` tags of `config.Config` by %s — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. %d keys.\n\n",
+	printf(w, "Generated from the `yaml` tags of `config.Config` by %s — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. %d keys.\n\n",
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Key", "Documented in"}, rows)
 	return nil
@@ -551,12 +556,12 @@ func docSections(doc string) map[string]string {
 	return out
 }
 
-// koanfKeys returns every dotted koanf key reachable from t, recursing into
-// nested structs the same way koanf unmarshals them. Copied from
+// configKeys returns every dotted yaml key reachable from t, recursing into
+// nested structs the same way yaml.v3 unmarshals them. Copied from
 // api/absence_contract_test.go, which walks the same surface for the same
 // reason: config.Config's tags are the only enumeration of the keys, and
 // config.defaults() is unexported.
-func koanfKeys(t reflect.Type, prefix string) []string {
+func configKeys(t reflect.Type, prefix string) []string {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -565,7 +570,7 @@ func koanfKeys(t reflect.Type, prefix string) []string {
 	}
 	var keys []string
 	for f := range t.Fields() {
-		tag, ok := f.Tag.Lookup("koanf")
+		tag, ok := f.Tag.Lookup("yaml")
 		if !ok || tag == "" || tag == "-" {
 			continue
 		}
@@ -578,7 +583,7 @@ func koanfKeys(t reflect.Type, prefix string) []string {
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct {
-			keys = append(keys, koanfKeys(ft, key)...)
+			keys = append(keys, configKeys(ft, key)...)
 			continue
 		}
 		keys = append(keys, key)

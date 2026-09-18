@@ -50,29 +50,31 @@ type broadcastMsg struct {
 	contentFilter func(userID int64) bool
 }
 
+// enqueue hands bm to the single hub dispatch loop, stamping it for the
+// enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
+// full the message is dropped and counted, with kind naming the dropped frame.
+func (h *Hub) enqueue(bm broadcastMsg, kind string) {
+	bm.enqueuedAt = time.Now()
+	select {
+	case h.broadcast <- bm:
+	default:
+		h.broadcastDrops.Add(1)
+		slog.Warn("hub: broadcast channel full, dropping "+kind,
+			"channel_id", bm.channelID, "msg_len", len(bm.msg))
+	}
+}
+
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
 // channelID. When channelID is 0 the message is sent to every connected client.
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
-	select {
-	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg, enqueuedAt: time.Now()}:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping message",
-			"channel_id", channelID, "msg_len", len(msg))
-	}
+	h.enqueue(broadcastMsg{channelID: channelID, msg: msg}, "message")
 }
 
 // BroadcastToAll enqueues msg for delivery to every connected client.
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
-	select {
-	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg, enqueuedAt: time.Now()}:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping global message",
-			"msg_len", len(msg))
-	}
+	h.enqueue(broadcastMsg{channelID: 0, msg: msg}, "global message")
 }
 
 // BroadcastToAllExcept enqueues msg for delivery to every connected client
@@ -89,13 +91,7 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // pub/sub, bypassing this queue, would reintroduce exactly that kind of
 // reordering from the other direction (OC-0003).
 func (h *Hub) BroadcastToAllExcept(excludeUserID int64, msg []byte) {
-	select {
-	case h.broadcast <- broadcastMsg{channelID: 0, excludeUserID: excludeUserID, msg: msg, enqueuedAt: time.Now()}:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping global message",
-			"msg_len", len(msg))
-	}
+	h.enqueue(broadcastMsg{channelID: 0, excludeUserID: excludeUserID, msg: msg}, "global message")
 }
 
 // broadcastChannelScoped enqueues msg for exactly the connected clients whose
@@ -113,19 +109,11 @@ func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg [
 // message. recipients is only read after enqueue, so sharing one slice across
 // messages is safe.
 func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients []int64, kind string) {
-	bm := broadcastMsg{
+	h.enqueue(broadcastMsg{
 		channelID:  channelID,
 		msg:        msg,
 		recipients: recipients,
-		enqueuedAt: time.Now(),
-	}
-	select {
-	case h.broadcast <- bm:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping "+kind,
-			"channel_id", channelID, "msg_len", len(msg))
-	}
+	}, kind)
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
@@ -241,10 +229,8 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 // DisconnectUser forcibly disconnects the client identified by userID.
 // No-op if the user is not currently connected.
 func (h *Hub) DisconnectUser(userID int64) {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
+	c := h.GetClient(userID)
+	if c == nil {
 		return
 	}
 	slog.Info("hub: disconnecting user", "user_id", userID)
@@ -264,10 +250,8 @@ func (h *Hub) DisconnectUser(userID int64) {
 // window is closed on the other side instead, by postRegisterSessionRecheck
 // (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
 func (h *Hub) DisconnectRevokedUser(userID int64) {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
+	c := h.GetClient(userID)
+	if c == nil {
 		return
 	}
 	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
@@ -312,10 +296,8 @@ var revokeUnreadableChannelsPreActRaceHook func(userID int64)
 // SendToUser delivers msg directly to the client identified by userID.
 // Returns true if the client was found and the message was queued.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
+	c := h.GetClient(userID)
+	if c == nil {
 		return false
 	}
 	return c.trySendMsg(msg)
@@ -323,10 +305,8 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 
 // SendToUserHigh sends a high-priority message to a specific user.
 func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
+	c := h.GetClient(userID)
+	if c == nil {
 		return false
 	}
 	c.sendHighMsg(msg)
@@ -339,10 +319,8 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 // events (e.g. DM typing indicators) that need direct-to-user routing but
 // are ephemeral and safely droppable (OC-0260).
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
+	c := h.GetClient(userID)
+	if c == nil {
 		return false
 	}
 	c.sendLowMsg(msg)

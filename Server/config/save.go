@@ -9,9 +9,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
 	goyaml "go.yaml.in/yaml/v3"
 )
 
@@ -35,8 +32,9 @@ type Patch struct {
 
 	// VoiceAPIKey/VoiceAPISecret are written ONLY when the file's
 	// corresponding value is absent or empty. This persists the
-	// runtime-generated LiveKit credentials (see applyVoiceDefaults) so voice
-	// tokens survive restarts, without ever clobbering operator-set values.
+	// runtime-generated LiveKit credentials (see ensureVoiceCredentials) so
+	// voice tokens survive restarts, without ever clobbering operator-set
+	// values.
 	VoiceAPIKey    *string
 	VoiceAPISecret *string
 }
@@ -86,7 +84,7 @@ func Save(path string, p Patch) error {
 
 	// Sanity gate: the buffer must survive the same parse+unmarshal path Load
 	// uses. A bug here must fail the request, never brick the server's boot.
-	if err := verifyLoadable(buf.Bytes()); err != nil {
+	if err := verifyLoadable(buf.Bytes(), path); err != nil {
 		return fmt.Errorf("refusing to write config that would not load: %w", err)
 	}
 
@@ -203,31 +201,13 @@ func setScalar(m *goyaml.Node, key, value, tag string) {
 	)
 }
 
-// bytesProvider adapts a raw byte slice to koanf's Provider interface so the
-// verification pass can reuse the exact YAML parser Load uses, without a
-// temp file or an extra dependency.
-type bytesProvider []byte
-
-func (b bytesProvider) ReadBytes() ([]byte, error) { return b, nil }
-
-func (b bytesProvider) Read() (map[string]any, error) {
-	return nil, errors.New("bytesProvider requires a parser")
-}
-
-// verifyLoadable checks that raw would survive Load's parse+unmarshal path.
-func verifyLoadable(raw []byte) error {
-	if err := validateYAML(raw); err != nil {
-		return err
-	}
-	k := koanf.New(".")
-	if err := k.Load(structs.Provider(defaults(), "koanf"), nil); err != nil {
-		return err
-	}
-	if err := k.Load(bytesProvider(raw), yaml.Parser()); err != nil {
-		return err
-	}
-	var cfg Config
-	return k.Unmarshal("", &cfg)
+// verifyLoadable checks that raw would survive Load's load path unchanged:
+// the same defaults-plus-file-plus-environment build, including the bounds
+// clamp and the credential fill, so a write that would only fail at the next
+// boot is refused here instead.
+func verifyLoadable(raw []byte, path string) error {
+	_, err := loadBytes(raw, path)
+	return err
 }
 
 // atomicWrite replaces path with data via temp file + rename so a crash
