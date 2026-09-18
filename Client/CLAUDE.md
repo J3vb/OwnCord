@@ -24,11 +24,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 ## Gotchas
 
 - Node's native Web Storage (Node 22+) shadows jsdom's `localStorage` and
-  `Storage`; `vitest.config.ts` starts every worker with
-  `--no-experimental-webstorage` so jsdom's are the only ones present, and
-  `tests/setup.ts` throws if the flag did not arrive (OC-0415). There is no
-  shim any more. If storage tests fail en masse, check
-  `poolOptions.forks.execArgv` before your change. CI pins Node 24.
+  `Storage`; `vitest.config.ts` appends `--no-experimental-webstorage` to
+  `process.env.NODE_OPTIONS`, which every forked worker inherits, so jsdom's
+  are the only ones present, and `tests/setup.ts` throws if the flag did not
+  arrive (OC-0415). There is no shim any more. If storage tests fail en masse,
+  check that `NODE_OPTIONS` block at the top of `vitest.config.ts` before your
+  change (`poolOptions.forks.execArgv` does not work — vitest replaces it). CI
+  pins Node 24.
 - `src/lib/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. Other modules do register their own

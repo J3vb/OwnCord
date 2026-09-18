@@ -104,10 +104,12 @@ Formatting is no longer a client gate — Prettier is configured once at the
 repository root and checked by `check:hygiene` below.
 
 `NODE_OPTIONS=--no-experimental-webstorage` used to be required on the command
-line. It is not any more: `vitest.config.ts` passes the flag to every worker
-itself (`poolOptions.forks.execArgv`), so jsdom's own `localStorage` and
-`Storage` are the only ones present, and `tests/setup.ts` throws if the flag did
-not reach the worker (OC-0415). There is no shim; an earlier in-memory shim was
+line. It is not any more: `vitest.config.ts` appends the flag to
+`process.env.NODE_OPTIONS` in vitest's parent process, and every forked worker
+inherits it (`poolOptions.forks.execArgv` does not work — vitest replaces
+execArgv with its own list). jsdom's own `localStorage` and `Storage` are then
+the only ones present, and `tests/setup.ts` throws if the flag did not reach
+the worker (OC-0415). There is no shim; an earlier in-memory shim was
 removed because it left Node's `Storage` class shadowing jsdom's and twelve
 storage tests asserting nothing. CI runs Node 24 without setting the variable
 (`ci.yml`), and the full suite was measured passing that way — 192 files / 5257

@@ -277,18 +277,19 @@ test-driven workflow and never lower a threshold to make a change fit.
 
 ### Tiers
 
-| Tier                       | Command                    | CI job                                      | Blocking |
-| -------------------------- | -------------------------- | ------------------------------------------- | -------- |
-| `Client/tests/unit`        | `npm run test:unit`        | Client Unit Tests                           | yes      |
-| `Client/tests/integration` | `npm run test:integration` | Client Unit Tests                           | yes      |
-| `Client/tests/contract`    | `npm run test:contract`    | Client Unit Tests                           | yes      |
-| `Client/tests/browser`     | `npm run test:browser`     | Client E2E (Playwright)                     | yes      |
-| `Client/tests/e2e`         | `npm run test:e2e`         | Client E2E (Playwright)                     | yes      |
-| `Client/tests/e2e` @parity | —                          | Client E2E (parity subset, blocking)        | yes      |
-| `Client/tests/e2e/native`  | `npm run test:e2e:native`  | —                                           | no       |
-| `Client/tests/e2e/admin`   | `npm run test:e2e:admin`   | Admin Panel E2E (real server, non-blocking) | **no**   |
-| `Server/**/*_test.go`      | `make test`                | Server Build & Test                         | yes      |
-| `Client/src-tauri`         | `cargo test --lib`         | Rust Unit Tests                             | yes      |
+| Tier                         | Command                      | CI job                               | Blocking |
+| ---------------------------- | ---------------------------- | ------------------------------------ | -------- |
+| `Client/tests/unit`          | `npm run test:unit`          | Client Unit Tests                    | yes      |
+| `Client/tests/integration`   | `npm run test:integration`   | Client Unit Tests                    | yes      |
+| `Client/tests/contract`      | `npm run test:contract`      | Client Unit Tests                    | yes      |
+| `Client/tests/browser`       | `npm run test:browser`       | Client E2E (Playwright)              | yes      |
+| `Client/tests/e2e`           | `npm run test:e2e`           | Client E2E (Playwright)              | yes      |
+| `Client/tests/e2e` @parity   | —                            | Client E2E (parity subset, blocking) | yes      |
+| `Client/tests/e2e/native`    | `npm run test:e2e:native`    | Client E2E (Windows native)          | yes      |
+| `Client/tests/e2e/admin`     | `npm run test:e2e:admin`     | Admin Panel E2E (real server)        | yes      |
+| `Client/tests/e2e/fullstack` | `npm run test:e2e:fullstack` | Client E2E (real server and media)   | yes      |
+| `Server/**/*_test.go`        | `make test`                  | Server Build & Test                  | yes      |
+| `Client/src-tauri`           | `cargo test --lib`           | Rust Unit Tests                      | yes      |
 
 `npm test` — not `npm run test:unit` — is what CI runs and what
 `npm run check:client` invokes, so it is the command that covers
@@ -310,10 +311,12 @@ side does not count.
 2. **Ownership is declared in the name, never in the directory.** The file name
    and the top-level `describe`/`Test` name must name the owned artifact's path.
 3. **A contract test may only live in a blocking tier.** A non-blocking job is
-   not coverage. `Admin Panel E2E` is non-blocking — it is absent from the
-   required-contexts list in `dev`'s branch protection; nothing in
-   `.github/workflows/ci.yml` marks it soft — so it is ineligible however well
-   it fits topically, until it graduates into that list.
+   not coverage. Blocking means the tier's CI job is in the required-contexts
+   list of `dev`'s branch protection, recorded in
+   `docs/plans/b0-dev-branch-protection.sh` — a hard-failing job in
+   `.github/workflows/ci.yml` that is missing from that list still gates
+   nothing. Every tier above is in it; `Admin Panel E2E (real server)`, the
+   real-media and the Windows native jobs graduated in #1563.
 4. `Client/` is one component: its TypeScript frontend and its thin Rust backend
    in `src-tauri/` are the same side of the boundary, so a `tests/unit` test that
    reads `src-tauri/tauri.conf.json` is an ordinary unit test. The same goes for a
