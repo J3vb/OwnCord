@@ -254,6 +254,12 @@ nssm set OwnCord Start SERVICE_AUTO_START
 # server spawns its own replacement, which races NSSM's relaunch.)
 nssm set OwnCord AppEnvironmentExtra OWNCORD_SERVER_RESTART_MODE=supervised
 
+# Capture the log. The server writes to stdout only, so without AppStdout/
+# AppStderr the service discards every log line. Create C:\OwnCord\logs first.
+nssm set OwnCord AppStdout "C:\OwnCord\logs\server.log"
+nssm set OwnCord AppStderr "C:\OwnCord\logs\server.log"
+nssm set OwnCord AppRotateFiles 1
+
 # Manage
 nssm start OwnCord
 nssm stop OwnCord
@@ -272,6 +278,10 @@ nssm restart OwnCord
 Task Scheduler starts the process but does not supervise it, so leave
 `server.restart_mode` on its default (`auto` resolves to `spawn` here): on a
 self-update or restore the server starts its own replacement after draining.
+
+Task Scheduler discards the process's stdout: point the action at a redirect
+(wrap it as `cmd /c chatserver.exe >> logs\server.log 2>&1`) or the log is
+gone.
 
 ## TLS Setup
 
@@ -718,6 +728,39 @@ than none:
   alone.
 
 ## Monitoring
+
+### Logs
+
+The server logs to **stdout** as `slog` text and keeps the most recent 2 000
+lines in memory for the admin panel's live view. There is no log file and no
+rotation inside the server: every record is teed to stdout and to the ring
+buffer by the logging setup in `Server/main.go`. Where the log lives is
+therefore where your supervisor puts stdout, not a server setting:
+
+| Supervisor      | Where stdout goes                                  | How to read it                                                                                        |
+| --------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| systemd (Linux) | the journald journal                               | `journalctl -u owncord -f`; retention follows journald's configuration, not the server's              |
+| Docker          | the `json-file` log driver on the host             | `docker compose logs -f owncord`; the shipped compose file caps the driver at 10 MB per file, 3 files |
+| NSSM (Windows)  | **nowhere** unless `AppStdout`/`AppStderr` are set | the file you point `AppStdout` at — see the Windows service install above                             |
+
+One key controls verbosity: `logging.level` (`debug`/`info`/`warn`/`error`,
+default `info`). `OWNCORD_LOGGING_LEVEL` overrides it without editing
+`config.yaml`.
+
+A log line is `time level msg key=value ...`, and every request-scoped
+record carries a `req_id` so a line can be tied back to the HTTP request
+that produced it.
+
+What is **never** in a log line, by construction rather than by call-site
+discipline: the LiveKit API key and secret, the GitHub token and the GIF API
+key are redacted at the logging boundary no matter how the value reaches a
+record. What **is** in it at `info`: usernames, ids and client addresses —
+so a pasted log excerpt is personal data. Treat it as such when attaching
+one to an issue; the support bundle deliberately omits raw log lines for
+this reason.
+
+The admin panel's live log view is the same stream at the same level,
+delivered over a single-use SSE ticket — see the Diagnostics section below.
 
 ### Health Endpoint
 
