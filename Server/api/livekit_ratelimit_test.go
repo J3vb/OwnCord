@@ -21,7 +21,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket(t *testing.T)
 	limiter := auth.NewRateLimiter()
 	trustedProxies := []string{"127.0.0.0/8"}
 
-	clientUpdate := rateLimitMiddlewareWithPrefix(limiter, "client_update:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
+	clientUpdate := RateLimitMiddleware(limiter, "client_update:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
 	sensitive := RateLimitMiddleware(limiter, "totp_verify:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
 
 	newReq := func(path string) *http.Request {
@@ -55,7 +55,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	trustedProxies := []string{"127.0.0.0/8"}
 
-	livekit := rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
+	livekit := RateLimitMiddleware(limiter, "livekit_proxy:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
 	defaultRoute := RateLimitMiddleware(limiter, "login:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
 
 	firstLiveKit := httptest.NewRequest(http.MethodGet, "/livekit/rtc", nil)

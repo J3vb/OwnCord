@@ -6,9 +6,9 @@
  * settings overlay (whose tabs statically import the LiveKit stack).
  */
 
-import { loadPref, applyTheme, THEMES } from "@components/settings/helpers";
+import { loadPref, applyTheme } from "@components/settings/helpers";
 import type { ThemeName } from "@components/settings/helpers";
-import { getActiveThemeName, restoreTheme } from "@lib/themes";
+import { getActiveThemeName, restoreAccent } from "@lib/themes";
 import { syncOsMotionListener } from "@lib/os-motion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */
@@ -61,24 +61,8 @@ export function applyFontSize(): void {
  * Call at app startup so the UI doesn't flash default styles.
  */
 export function applyStoredAppearance(): void {
-  const activeThemeName = getActiveThemeName();
-  if (activeThemeName in THEMES) {
-    applyTheme(activeThemeName as ThemeName);
-  } else {
-    restoreTheme();
-  }
-  try {
-    const rawAccent = localStorage.getItem("owncord:settings:accentColor");
-    if (rawAccent !== null) {
-      const accent = JSON.parse(rawAccent);
-      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
-        document.documentElement.style.setProperty("--accent", accent);
-        document.body.style.setProperty("--accent", accent);
-      }
-    }
-  } catch {
-    // Corrupted localStorage — keep the theme default accent.
-  }
+  applyTheme(getActiveThemeName() as ThemeName);
+  restoreAccent();
   applyFontSize();
   document.documentElement.classList.toggle(
     "compact-mode",

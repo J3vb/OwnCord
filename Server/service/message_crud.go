@@ -18,16 +18,11 @@ import (
 func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (*SendMessageResult, error) {
 	// Phase B Step 8 — wrap the public service entrypoint in a tracing span
 	// and a duration histogram. Both are no-ops in the default build.
-	ctx, span := telemetry.GlobalTracer("service/message").Start(ctx, "MessageService.SendMessage",
+	ctx, done := traceCall(ctx, "service/message", "MessageService.SendMessage",
 		telemetry.Int64("user_id", p.UserID),
 		telemetry.Int64("channel_id", p.ChannelID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "SendMessage"))
-		span.End()
-	}()
+	defer done()
 
 	ch, content, err := s.sendMessagePrecheck(ctx, p)
 	if err != nil {
@@ -321,10 +316,10 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 
 	// The live-delivery audience: the sender plus every other participant who
 	// trusts them (one-to-one) or every participant (group) — see
-	// dmAudience. Computed last, after the loop above has written any new
+	// DMAudience. Computed last, after the loop above has written any new
 	// trust/request rows, so a recipient this very send just staged a
 	// request for is correctly excluded.
-	if audience, aErr := s.dmAudience(bgCtx, p.ChannelID, p.UserID); aErr != nil {
+	if audience, aErr := s.DMAudience(bgCtx, p.ChannelID, p.UserID); aErr != nil {
 		slog.Error("MessageService.SendMessage DMAudience", "err", aErr, "channel_id", p.ChannelID)
 		// Fail closed toward every other participant, but still let the
 		// sender see their own message live — the same best-effort posture
@@ -404,25 +399,19 @@ func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID 
 	return &DMRequestPreview{MessageID: msg.ID, Content: msg.Content, Timestamp: msg.Timestamp}
 }
 
-// dmAudience is the live-delivery audience for a DM frame senderID's action
+// DMAudience is the live-delivery audience for a DM frame senderID's action
 // in channelID just produced: MessageRequestService.DMDeliveryAudience when
 // the gate is wired, or every participant when it is not — s.messageRequests
 // == nil means every test and any caller built via NewMessageService
 // directly instead of service.New(), which keeps their behaviour exactly as
-// it was before B5-6.
-func (s *MessageService) dmAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
+// it was before B5-6. Exported for the ws layer's typing path
+// (PresenceDeps.MessageSvc, ws/handlers_presence.go) — the one DM frame path
+// outside package service.
+func (s *MessageService) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
 	if s.messageRequests == nil {
 		return s.st.GetDMParticipantIDs(ctx, channelID)
 	}
 	return s.messageRequests.DMDeliveryAudience(ctx, channelID, senderID)
-}
-
-// DMAudience exports dmAudience for the ws layer's typing path
-// (PresenceDeps.MessageSvc, ws/handlers_presence.go) — the one DM frame path
-// outside package service. Every other DM frame path (send, edit, delete,
-// reaction) calls dmAudience directly, being in the same package.
-func (s *MessageService) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
-	return s.dmAudience(ctx, channelID, senderID)
 }
 
 // EditMessage validates and persists a message edit.
@@ -455,7 +444,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// not fall through with chanType="", which routes into the non-DM
 	// permission branch below. That branch passes on the base role mask alone
 	// (SEND_MESSAGES|READ_MESSAGES, no per-channel override exists for a DM),
-	// skipping both the DM-participant check and requireDMNotBlocked entirely.
+	// skipping both the DM-participant check and RequireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	if chErr != nil || ch == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
@@ -505,7 +494,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		// Detached from ctx for the same reason as the SendMessage post-commit
 		// lookup: the edit already committed, so an editor whose connection
 		// drops right after must not silently drop the chat_edited fan-out.
-		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
+		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
 			// Codex P2-5: leaving ParticipantIDs nil here made
@@ -682,7 +671,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		// Detached from ctx for the same reason as the send/edit paths: the
 		// soft-delete already committed, so a deleter whose connection drops
 		// right after must not silently drop the chat_deleted fan-out.
-		participantIDs, pErr := s.dmAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
+		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
 			// Codex P2-5: see EditMessage's identical comment — an empty

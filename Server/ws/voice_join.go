@@ -323,8 +323,8 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, c *Client, ch *db.Channel, c
 	// sweep sees c.getVoiceChID() still 0 while the row already exists,
 	// misclassifies the in-flight join as a ghost and deletes it — leaving
 	// the joiner live on the hub and in the SFU with no DB row. A failure
-	// further down still unwinds this via rollbackVoiceJoin's
-	// c.clearVoiceChID(), same as before.
+	// further down still unwinds this via rollbackVoiceJoin, which clears
+	// the client's voice channel association, same as before.
 	c.setVoiceState(channelID, state.JoinedAt)
 
 	return state, true
@@ -353,8 +353,8 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 // prevents SFU-level bypass when the client connects directly via direct_url
 // (BUG-128). With a PermissionService the three bits come from the per-user
 // cache; the bare-hub fallback answers them from one role fetch + one
-// overrides fetch via HasChannelPermBatch instead of three hasChannelPerm
-// round trips. Both branches fail closed: an unresolved role or override map
+// overrides fetch via HasChannelPermBatch instead of re-fetching the role
+// and overrides once per bit. Both branches fail closed: an unresolved role or override map
 // yields no publish grants (admins bypass overrides, so an override fetch
 // error cannot demote them).
 func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64) (canPublish, canVideo, canScreenShare bool) {
@@ -687,15 +687,16 @@ func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
 // the row back far enough to learn it), the row is re-read here and the
 // delete is skipped unless it still names channelID.
 func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
-	// OC-0219: use clearVoiceAndUnsubscribe (not the bare clearVoiceChID) so a
-	// join that already reached voiceJoinComplete's h.pubsub.Subscribe call
-	// drops its VoiceTopic subscription along with its in-memory voiceChID —
-	// exactly like every other path that takes a client out of voice while its
-	// WS stays up (see clearVoiceAndUnsubscribe's doc comment in
-	// voice_leave.go). Safe for the two earlier call sites too:
-	// Unsubscribe is a documented no-op when the client was never subscribed
-	// to that topic (pubsub.go), which is the case whenever this fires before
-	// voiceJoinComplete's Subscribe has run.
+	// OC-0219: the rollback must clear via clearVoiceAndUnsubscribe, not
+	// merely drop the in-memory voiceChID: a join that already reached
+	// voiceJoinComplete's h.pubsub.Subscribe call would otherwise keep its
+	// VoiceTopic subscription alive. Exactly like every other path that
+	// takes a client out of voice while its WS stays up (see
+	// clearVoiceAndUnsubscribe's doc comment in voice_leave.go). Safe for
+	// the two earlier call sites too: Unsubscribe is a documented no-op
+	// when the client was never subscribed to that topic (pubsub.go), which
+	// is the case whenever this fires before voiceJoinComplete's Subscribe
+	// has run.
 	h.clearVoiceAndUnsubscribe(c)
 	// The client's voice state is now set before token generation (BUG-088),
 	// so a concurrent join/leave in the same channel can have elected this

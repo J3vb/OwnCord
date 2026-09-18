@@ -1,18 +1,20 @@
 //! Helpers shared by the two loopback TLS proxies (`http_proxy`, `livekit_proxy`).
 //!
 //! Each proxy keeps only what is genuinely different — its state type, its
-//! header rewriting (REST wants `Connection: close`; the LiveKit signal
+//! header-rewrite policy (REST wants `Connection: close`; the LiveKit signal
 //! request wants `Origin` rewritten), and its verifier (TOFU capture vs
 //! pinned) — and pulls the rest from here. The long-lived data phase of the
 //! LiveKit tunnel deliberately keeps a plain `io::copy_bidirectional` (a WS
 //! connection may idle for hours), while the request/response HTTP tunnel
 //! wraps the same copy in [`copy_with_deadline`].
 
+use log::{debug, error, info, warn};
 use rustls::pki_types::ServerName;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::io::{self, AsyncRead, AsyncReadExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 /// Reject remote_host values that could inject headers or are not plausible
@@ -157,6 +159,98 @@ where
             "data phase timed out",
         )),
     }
+}
+
+/// Maximum consecutive accept errors before [`run_accept_loop`] exits.
+pub(crate) const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
+
+/// Watch a proxy loop so a panic is logged instead of vanishing silently
+/// (which would leave JS with a stale cached port and no error).
+pub(crate) fn spawn_watched(tag: &'static str, handle: JoinHandle<()>) {
+    tokio::spawn(async move {
+        match handle.await {
+            Ok(()) => info!("[{tag}] proxy loop exited"),
+            Err(e) if e.is_panic() => error!("[{tag}] proxy loop panicked: {e:?}"),
+            Err(e) => warn!("[{tag}] proxy loop join error: {e:?}"),
+        }
+    });
+}
+
+/// Accept loop shared by both proxies: hand each connection to `on_conn` and,
+/// once `MAX_CONSECUTIVE_ACCEPT_ERRORS` is hit, run `on_dead` before exiting.
+///
+/// `on_dead` must run HERE, while `listener` is still held, and not by the
+/// caller after this returns: the listener still owns the port, so no newer
+/// tunnel can have been handed the same number and the port guard cannot
+/// misfire.
+pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
+    listener: TcpListener,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    tag: &'static str,
+    mut on_conn: C,
+    on_dead: D,
+) where
+    C: FnMut(TcpStream) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+    D: FnOnce() -> DFut,
+    DFut: std::future::Future<Output = ()>,
+{
+    let mut consecutive_errors: u32 = 0;
+    let mut on_dead = Some(on_dead);
+
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, addr)) => {
+                        consecutive_errors = 0;
+                        debug!("[{tag}] accepted connection from {}", addr);
+                        tokio::spawn(on_conn(stream));
+                    }
+                    Err(e) => {
+                        consecutive_errors += 1;
+                        error!(
+                            "[{tag}] accept error ({}/{}): {}",
+                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS, e
+                        );
+                        if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+                            error!(
+                                "[{tag}] {} consecutive accept errors, stopping proxy loop",
+                                MAX_CONSECUTIVE_ACCEPT_ERRORS
+                            );
+                            if let Some(on_dead) = on_dead.take() {
+                                on_dead().await;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            _ = &mut shutdown_rx => break,
+        }
+    }
+}
+
+/// Rewrite the header lines of an HTTP request with `rewrite`; every line it
+/// returns `None` for is passed through byte-for-byte.
+///
+/// The plain `split("\r\n")` / re-join round-trips the trailing `\r\n\r\n`
+/// terminator exactly, so the request the remote server sees stays well-formed.
+pub(crate) fn rewrite_headers(
+    request: &str,
+    mut rewrite: impl FnMut(&str) -> Option<String>,
+) -> String {
+    let mut modified = String::with_capacity(request.len() + 128);
+    for (i, line) in request.split("\r\n").enumerate() {
+        if i > 0 {
+            modified.push_str("\r\n");
+        }
+        match rewrite(line) {
+            Some(replacement) => modified.push_str(&replacement),
+            None => modified.push_str(line),
+        }
+    }
+    modified
 }
 
 #[cfg(test)]

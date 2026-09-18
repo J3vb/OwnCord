@@ -187,15 +187,3 @@ DELETE FROM moderation_actions
  WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff)))
    AND id NOT IN (SELECT action_id FROM appeals);
-
--- name: UnlinkAppealsByDecider :exec
--- Erasure's actor-token unlink (mirrors UnlinkModerationActionsByActor): an
--- erased moderator's decisions keep their row, decision and order, but the
--- deciding id goes to 0 and the token takes its place.
-UPDATE appeals SET decided_by = 0, decided_by_token = ? WHERE decided_by = ?;
-
--- name: UnlinkAppealsByAssignee :exec
--- Same, for assignee_id: no token column of its own (mirrors reports'
--- assignee_id and moderation_actions.lifted_by), so an erased assignee's id
--- simply goes to 0.
-UPDATE appeals SET assignee_id = 0 WHERE assignee_id = ?;

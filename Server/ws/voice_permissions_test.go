@@ -215,9 +215,9 @@ func TestVoicePermissions_ModerationFailureRetainsDesiredStateForRetry(t *testin
 			failing.Store(true)
 			moderate := func() Result {
 				if deafen {
-					return handleVoiceModDeafenV2(ctx, VoiceModDeafenCmd{userID: actorID, channelID: 100, targetID: 1, deafened: true}, ClientInfo{UserID: actorID}, deps)
+					return handleVoiceModDeafenV2(ctx, VoiceModDeafenCmd{userID: actorID, ChannelID: 100, TargetID: 1, Deafened: true}, ClientInfo{UserID: actorID}, deps)
 				}
-				return handleVoiceModMuteV2(ctx, VoiceModMuteCmd{userID: actorID, channelID: 100, targetID: 1, muted: true}, ClientInfo{UserID: actorID}, deps)
+				return handleVoiceModMuteV2(ctx, VoiceModMuteCmd{userID: actorID, ChannelID: 100, TargetID: 1, Muted: true}, ClientInfo{UserID: actorID}, deps)
 			}
 			result := moderate()
 			var clientErr ClientError

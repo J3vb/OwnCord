@@ -27,7 +27,7 @@
 //   port in JS becomes stale until the next voice join resets it.
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::sync::Arc;
 use tauri::{Manager, Runtime};
 use tokio::io::{self, AsyncWriteExt};
@@ -65,7 +65,7 @@ impl LiveKitProxyState {
     }
 
     /// Clear the running-proxy state, but only if it still points at `port`.
-    /// Mirrors HttpProxyState::remove_if_port_matches; used by run_proxy_loop's
+    /// Mirrors HttpProxyState::remove_if_port_matches; used by run_accept_loop's
     /// accept-error exit path so a dead listener doesn't keep being handed
     /// back by start_livekit_proxy's reuse branch, and doesn't race a newer
     /// proxy that may have already replaced it.
@@ -103,23 +103,16 @@ use crate::tofu;
 /// Every other line is passed through byte-for-byte, including the request
 /// line and the trailing blank line that terminates the header block.
 pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String {
-    let mut modified = String::with_capacity(request.len() + 128);
-    for (i, line) in request.split("\r\n").enumerate() {
-        if i > 0 {
-            modified.push_str("\r\n");
-        }
+    rewrite_headers(request, |line| {
         let lower = line.to_lowercase();
         if lower.starts_with("host:") {
-            modified.push_str("Host: ");
-            modified.push_str(remote_host);
+            Some(format!("Host: {remote_host}"))
         } else if lower.starts_with("origin:") {
-            modified.push_str("Origin: https://");
-            modified.push_str(remote_host);
+            Some(format!("Origin: https://{remote_host}"))
         } else {
-            modified.push_str(line);
+            None
         }
-    }
-    modified
+    })
 }
 
 /// Decide whether an already-running proxy can serve a new start request:
@@ -138,7 +131,8 @@ pub(crate) fn can_reuse_proxy(
 }
 
 use crate::proxy_common::{
-    connect_tls, read_request_headers, resolve_remote_target, validate_remote_host,
+    connect_tls, read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop,
+    spawn_watched, validate_remote_host,
 };
 
 // ---------------------------------------------------------------------------
@@ -212,23 +206,36 @@ pub async fn start_livekit_proxy<R: Runtime>(
         .port();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let host = remote_host.clone();
-    let loop_handle = tokio::spawn(run_proxy_loop(
-        app.clone(),
-        listener,
-        host,
-        port,
-        fingerprint.clone(),
-        shutdown_rx,
-    ));
-    // Watch the loop so a panic is logged instead of vanishing silently.
-    tokio::spawn(async move {
-        match loop_handle.await {
-            Ok(()) => info!("[livekit_proxy] proxy loop exited"),
-            Err(e) if e.is_panic() => error!("[livekit_proxy] proxy loop panicked: {e:?}"),
-            Err(e) => warn!("[livekit_proxy] proxy loop join error: {e:?}"),
-        }
-    });
+    let conn_host = remote_host.clone();
+    let conn_fp = fingerprint.clone();
+    let dead_host = remote_host.clone();
+    spawn_watched(
+        "livekit_proxy",
+        tokio::spawn(run_accept_loop(
+            listener,
+            shutdown_rx,
+            "livekit_proxy",
+            move |stream| {
+                let host = conn_host.clone();
+                let fp = conn_fp.clone();
+                async move {
+                    if let Err(e) = handle_connection(stream, &host, &fp).await {
+                        warn!("[livekit_proxy] connection to {} failed: {}", host, e);
+                    }
+                }
+            },
+            move || async move {
+                if let Some(state) = app.try_state::<LiveKitProxyState>() {
+                    state.clear_if_port_matches(port).await;
+                } else {
+                    warn!(
+                        "[livekit_proxy] state unmanaged; cannot deregister dead proxy for {}",
+                        dead_host
+                    );
+                }
+            },
+        )),
+    );
 
     info!(
         "[livekit_proxy] proxy started on 127.0.0.1:{} → {}",
@@ -259,69 +266,6 @@ pub async fn stop_livekit_proxy(state: tauri::State<'_, LiveKitProxyState>) -> R
 // ---------------------------------------------------------------------------
 // Proxy internals
 // ---------------------------------------------------------------------------
-
-/// Maximum consecutive accept errors before the proxy loop exits.
-const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
-
-async fn run_proxy_loop<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    listener: TcpListener,
-    remote_host: String,
-    port: u16,
-    pinned_fingerprint: String,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-) {
-    let mut consecutive_errors: u32 = 0;
-
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, addr)) => {
-                        consecutive_errors = 0;
-                        let host = remote_host.clone();
-                        let fp = pinned_fingerprint.clone();
-                        debug!("[livekit_proxy] accepted connection from {}", addr);
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(stream, &host, &fp).await {
-                                warn!("[livekit_proxy] connection to {} failed: {}", host, e);
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        consecutive_errors += 1;
-                        error!(
-                            "[livekit_proxy] accept error ({}/{}): {}",
-                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS, e
-                        );
-                        if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
-                            error!(
-                                "[livekit_proxy] {} consecutive accept errors, stopping proxy loop",
-                                MAX_CONSECUTIVE_ACCEPT_ERRORS
-                            );
-                            // Deregister the dead proxy BEFORE the break drops
-                            // `listener`, so a future start_livekit_proxy
-                            // rebinds a fresh port instead of handing back
-                            // this closed one forever (the reuse branch keys
-                            // only on host+pin, not liveness). Mirrors
-                            // http_proxy.rs's identical fix.
-                            if let Some(state) = app.try_state::<LiveKitProxyState>() {
-                                state.clear_if_port_matches(port).await;
-                            } else {
-                                warn!(
-                                    "[livekit_proxy] state unmanaged; cannot deregister dead proxy for {}",
-                                    remote_host
-                                );
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            _ = &mut shutdown_rx => break,
-        }
-    }
-}
 
 /// Bound on the outbound dial and TLS handshake, matching http_proxy.rs.
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -647,7 +591,7 @@ mod tests {
 
     // ── LiveKitProxyState::clear_if_port_matches ────────────────────────────
     //
-    // B4_conn_ipc-7: run_proxy_loop's accept-error exit path drops the
+    // B4_conn_ipc-7: run_accept_loop's accept-error exit path drops the
     // listener without deregistering it, so ProxyInner.port stays set and
     // start_livekit_proxy's reuse branch (unchanged host+pin) hands the dead
     // port back forever. Mirrors http_proxy.rs's

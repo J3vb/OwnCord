@@ -18,7 +18,7 @@ import (
 // The V2 handler is a thin gate: the constructor validates channel_id and the
 // handler hands off to the hub's handleVoiceJoin routine via Result.JoinVoice.
 func TestHandleVoiceJoinV2_SignalsJoin(t *testing.T) {
-	result := handleVoiceJoinV2(context.Background(), VoiceJoinCmd{userID: 1, channelID: 7}, ClientInfo{UserID: 1}, VoiceDeps{})
+	result := handleVoiceJoinV2(context.Background(), VoiceJoinCmd{userID: 1, ChannelID: 7}, ClientInfo{UserID: 1}, VoiceDeps{})
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -45,8 +45,8 @@ func TestVoiceJoinConstructor_Errors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cmd.(VoiceJoinCmd).ChannelID() != 42 {
-		t.Errorf("ChannelID() = %d, want 42", cmd.(VoiceJoinCmd).ChannelID())
+	if cmd.(VoiceJoinCmd).ChannelID != 42 {
+		t.Errorf("ChannelID() = %d, want 42", cmd.(VoiceJoinCmd).ChannelID)
 	}
 }
 
@@ -152,14 +152,14 @@ func TestChatCommandConstructor_Errors(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cc := cmd.(ChatCommandCmd)
-	if cc.ChannelID() != 5 || cc.Command() != "/hi" || cc.ReqID() != "req-9" || len(cc.Args()) != 2 {
+	if cc.ChannelID != 5 || cc.Command != "/hi" || cc.ReqID != "req-9" || len(cc.Args()) != 2 {
 		t.Errorf("unexpected command fields: %+v", cc)
 	}
 }
 
 func TestHandleChatCommandV2_NoRegistry(t *testing.T) {
 	deps := PluginDeps{Registry: nil, MessageSvc: nil}
-	cmd := ChatCommandCmd{userID: 1, channelID: 1, command: "/hi"}
+	cmd := ChatCommandCmd{userID: 1, ChannelID: 1, Command: "/hi"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: 1}, deps)
 

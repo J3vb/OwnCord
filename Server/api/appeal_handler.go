@@ -96,9 +96,8 @@ func MountModerationAppealRoutes(r chi.Router, svc *service.Services) {
 // for the same appeal filed moments later.
 func handleFileAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		var req fileAppealRequest
@@ -118,9 +117,8 @@ func handleFileAppeal(svc *service.Services) http.HandlerFunc {
 
 func handleMyAppeals(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		rows, err := svc.Appeals.Mine(r.Context(), user.ID)
@@ -149,9 +147,8 @@ func handleMyAppeals(svc *service.Services) http.HandlerFunc {
 // other out of order. This handler carries no broadcast of its own.
 func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		publicID := chi.URLParam(r, "id")

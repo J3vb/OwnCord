@@ -87,7 +87,7 @@ func TestHandleVoiceCameraV2_DeletedChannel_RefusesEnable(t *testing.T) {
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userID, enabled: true}, ClientInfo{UserID: userID, VoiceChannelID: chID}, d)
+	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userID, Enabled: true}, ClientInfo{UserID: userID, VoiceChannelID: chID}, d)
 	if res.Error == nil {
 		t.Fatal("voice_camera enable succeeded against a deleted channel — the voice_max_video cap was bypassed entirely")
 	}

@@ -25,7 +25,7 @@ func installTestPlugin(t *testing.T, database interface {
 }
 
 func TestInstallPlugin_AndGetPlugin(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	id := installTestPlugin(t, database, "hello")
@@ -52,7 +52,7 @@ func TestInstallPlugin_AndGetPlugin(t *testing.T) {
 }
 
 func TestInstallPlugin_ReinstallUpdatesInPlace(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	first := installTestPlugin(t, database, "hello")
@@ -86,7 +86,7 @@ func TestInstallPlugin_ReinstallUpdatesInPlace(t *testing.T) {
 }
 
 func TestEnableDisablePlugin(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 
@@ -114,7 +114,7 @@ func TestEnableDisablePlugin(t *testing.T) {
 }
 
 func TestGetPluginByName(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 
@@ -133,7 +133,7 @@ func TestGetPluginByName(t *testing.T) {
 }
 
 func TestGetPlugin_Missing(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	_, err := database.GetPlugin(context.Background(), 4242)
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("GetPlugin on a missing id = %v, want sql.ErrNoRows", err)
@@ -141,7 +141,7 @@ func TestGetPlugin_Missing(t *testing.T) {
 }
 
 func TestUninstallPlugin_CascadesKV(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 
@@ -169,7 +169,7 @@ func TestUninstallPlugin_CascadesKV(t *testing.T) {
 }
 
 func TestListPlugins_OrderedByName(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	empty, err := database.ListPlugins(ctx)
@@ -200,7 +200,7 @@ func TestListPlugins_OrderedByName(t *testing.T) {
 }
 
 func TestPluginKV_SetGetDelete(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 
@@ -240,7 +240,7 @@ func TestPluginKV_SetGetDelete(t *testing.T) {
 }
 
 func TestPluginKV_NamespacesAreIsolated(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	a := installTestPlugin(t, database, "plugin-a")
 	b := installTestPlugin(t, database, "plugin-b")
@@ -275,7 +275,7 @@ func TestPluginKV_NamespacesAreIsolated(t *testing.T) {
 }
 
 func TestPluginKVScan(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 	other := installTestPlugin(t, database, "other")
@@ -327,7 +327,7 @@ func TestPluginKVScan(t *testing.T) {
 // match, where '_' and '%' are wildcards and matching is ASCII
 // case-insensitive.
 func TestPluginKVScan_IsBinaryPrefixMatch(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id := installTestPlugin(t, database, "hello")
 
