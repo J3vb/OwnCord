@@ -311,9 +311,9 @@ server's internals were reorganised behind service boundaries.
   certificate-mismatch modal, a 2FA lockout after a restore, upload refusals,
   an update that did not come back — and what to send when asking for help.
 - `docs/deployment.md`'s update-failure procedure names the audit rows the
-  updater writes, the two self-recovery shapes it has measured, the pre-checks
-  that prevent the failures, and the port-80 row for ACME moved into the
-  canonical firewall table.
+  updater writes, the two self-recovery shapes read from its verification and
+  rotation code, the pre-checks that prevent the failures, and the port-80
+  row for ACME moved into the canonical firewall table.
 
 ### Repository
 

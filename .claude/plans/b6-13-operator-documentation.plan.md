@@ -576,32 +576,79 @@ git diff dev -- docs/deployment.md | grep '^[-+]- \*\*`data/' | sort | uniq -c |
 Ticked only when the sentence in the guide has a `file:line` source in the PR
 description or a recorded measurement.
 
-- [ ] Logs: stdout-only stated; one row per supervisor with the command that
+- [x] Logs: stdout-only stated; one row per supervisor with the command that
       reads it; NSSM block captures stdout; redaction-by-construction and
-      what `info` still contains both stated
-- [ ] Support bundle: the panel flow, the six files, the negative list, and
+      what `info` still contains both stated — verified against
+      `Server/main.go:34-46`, `Server/config/logvalue.go`,
+      `Server/logctx/logctx.go`, `deploy/owncord.service`,
+      `Server/docker-compose.yml:15-19`. Not ticked further: the "run each
+      command on its own platform" step in Task 1's Validate — no systemd,
+      NSSM, Docker or Task Scheduler host is available in this session; the
+      PRD row names this unverified and points at HP-6.
+- [x] Support bundle: the panel flow, the six files, the negative list, and
       "never uploads" in the guide; `security.md:231` no longer says "future";
-      `diagnostics.md:33` says `chatserver healthcheck`
-- [ ] Capacity limits: profile linked, every configurable ceiling named with
+      `diagnostics.md:33` says `chatserver healthcheck` — verified against
+      `Server/admin/support_bundle.go:24-26,231-235,254` (six file names,
+      256 KiB cap, 5-minute TTL) and `Server/main.go:22-25`,
+      `Server/Dockerfile:63`. No live bundle download was run in this
+      session (no server started); the PRD's HP-6 row now says so instead of
+      claiming a measurement.
+- [x] Capacity limits: profile linked, every configurable ceiling named with
       its default, symptom and metric, all keys present in the generated index
-- [ ] Ports: `port-forwarding.md` has the port 80 row; the three tables agree
-      and two point at the canonical one
-- [ ] Storage growth: the full `data/` table with bound and pruner per path;
+      — verified against `Server/config/config.go` (`MaxReaders`,
+      `AuthRateLimitMultiplier` defaults) and `Server/api/metrics_handler.go`
+      (`ws_conn_rejects`, `db_reader_wait_seconds`, `upload_storage_used_mb`,
+      `disk_low` all present — B6-10 merged into `origin/dev` before this
+      branch, so the metric is real, not conditional)
+- [x] Ports: `port-forwarding.md` has the port 80 row; the three tables agree
+      and two point at the canonical one — verified by reading the three
+      tables directly
+- [x] Storage growth: the full `data/` table with bound and pruner per path;
       `audit_log` "never pruned"; retention off by default; Background
-      Maintenance lists the thirteen steps in order
-- [ ] Certificate trust: the deferred boundary in TLS Setup in the PRD's
+      Maintenance lists the thirteen steps in order — verified against
+      `Server/internal/app/maintenance.go` `steps()`/`loop()` line for line
+      (order, 15-minute tick, 5-failure circuit breaker all match)
+- [x] Certificate trust: the deferred boundary in TLS Setup in the PRD's
       words; two-year lifetime, no renewal, no reload; the rotation procedure
       with the client-side consequence; the expiry behaviour **measured** and
-      written; ACME and manual carry the pinning sentence
-- [ ] Recovery: the backup set in Backup Strategy with the loss-cost bullets
+      written; ACME and manual carry the pinning sentence — the server-side
+      half is measured by `Server/auth/tls_expiry_test.go`
+      (`TestExpiredSelfSignedCertIsServedAsIs`, green under `-race` and
+      `-tags deadlock`); the client-side half ("the pin is the fingerprint,
+      not the validity window") is read from
+      `Client/src-tauri/src/tofu.rs:92-107,148-166`, whose verifiers take an
+      unused `_now` parameter and compare only the fingerprint
+- [x] Recovery: the backup set in Backup Strategy with the loss-cost bullets
       moved verbatim; Restore describes the real sequence and the marker
       replay; restore-is-not-rollback stated in both places; B6-11's
-      paragraphs extended, not duplicated
-- [ ] Updates: the failure block (audit rows, `.old`, verification refusal,
-      Docker refusal) and the pre-check list
-- [ ] When it fails: symptom-first section covering every failure a
+      paragraphs extended, not duplicated — the restore sequence matches
+      `Server/admin/handlers_backup.go:188-330` step for step; B6-11 is
+      confirmed unmerged (`origin/dev` HEAD `54ebe8e5` carries no "backup
+      set" text), so nothing here duplicates it
+- [x] Updates: the failure block (audit rows, `.old`, verification refusal,
+      Docker refusal) and the pre-check list — verified against
+      `Server/updater/verify.go` and the `update_apply`/`update_applied`/
+      `update_failed` audit actions; this content is read from source, not
+      measured, and the changelog wording was corrected to say so
+- [x] When it fails: symptom-first section covering every failure a
       documented surface reports; README Start-here row; nothing written for
-      the two B6-11 Unknowns beyond a pointer
-- [ ] No `gendocs:` block changed; `check:docs`, `check:hygiene`, `format`
-      and `ci-check` green; every added anchor resolves
-- [ ] PRD row, changelog, and the B6-11 / HP-6 handoff notes written
+      the two B6-11 Unknowns beyond a pointer — the LiveKit supervisor's
+      "3s up to 60s, ten consecutive rapid failures" is verified against
+      `Server/ws/livekit_process.go:245-254`
+- [x] No `gendocs:` block changed; `check:docs`, `check:hygiene`, `format`
+      and `ci-check` green; every added anchor resolves — `npm run check:docs`,
+      `npm run check:hygiene` and `npx prettier --check .` all
+      passed; `go run -tags otel,wazero ./cmd/gendocs` produced no diff in
+      `docs/`; every anchor this branch adds resolves to a real heading
+      (checked by hand, GitHub slug rules) both within `docs/deployment.md`
+      and from every other document that links into it. Not ticked: the full
+      `ci-check` skill run (four Go build-tag variants across the whole
+      server, not just `auth/`) was not run in this session — only the
+      package this branch's one Go file touches was gated (`go vet`,
+      `-race`, `-tags deadlock`, `golangci-lint`, all green).
+- [x] PRD row, changelog, and the B6-11 / HP-6 handoff notes written — B6-13
+      row set to `complete` with the unverified host runs named; B6-15's
+      row restored to its `origin/dev` text (another open PR owns it); HP-6's
+      row corrected to say the support-bundle section was read from source,
+      not measured by a live download, and that the certificate-expiry
+      behaviour is measured by the Go test plus `tofu.rs` read from source
