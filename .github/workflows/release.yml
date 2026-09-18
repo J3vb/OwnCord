@@ -316,12 +316,16 @@ jobs:
       - name: Create tar.gz (Linux)
         if: runner.os == 'Linux'
         working-directory: Server
-        run: tar czf "../${{ matrix.asset }}" chatserver
+        run: tar czf "${{ matrix.asset }}" chatserver
 
-      # A scalar `path:` is one file; the SBOM ships beside its asset on the
-      # same artifact. The two paths differ per OS only because the tar step
-      # below writes the Linux asset to the repository root while the SBOM step
-      # writes into Server/ — both land in the same artifact either way.
+      # Both paths in one upload list must share a parent. `upload-artifact`
+      # takes the least common ancestor of the search paths as the artifact
+      # root and strips exactly that prefix, so mixing a root-level path with a
+      # `Server/` one keeps the `Server/` prefix *inside* the artifact: the file
+      # arrives in the same artifact but not beside its asset, and the Linux leg
+      # published at the root while its SBOM stayed under Server/. Both legs now
+      # upload two `Server/` paths — the tar is written there for that reason,
+      # not because anything downstream wants it at the repository root.
       - name: Upload Windows binary
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -337,7 +341,7 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: |
-            ${{ matrix.asset }}
+            Server/${{ matrix.asset }}
             Server/${{ matrix.asset }}.cdx.json
 
   release-client-linux-arm64:
