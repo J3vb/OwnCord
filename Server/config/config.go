@@ -348,9 +348,11 @@ type UploadConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"`
 	StorageDir string `yaml:"storage_dir"`
 	// UserQuotaMB caps the total bytes one user may hold in upload storage —
-	// attachments, avatars and emoji alike, counted where the bytes are
-	// written (B5-2, plan decision 11). 0, the default, is unlimited, so no
-	// existing install changes behaviour on upgrade.
+	// attachments and avatars, counted where the bytes are written (B5-2,
+	// plan decision 11). Custom emoji are excluded on purpose: they are
+	// bounded (MaxEmojiCount files of maxEmojiFileBytes each) and still pass
+	// the disk-headroom floor, see migration 044. 0, the default, is
+	// unlimited, so no existing install changes behaviour on upgrade.
 	UserQuotaMB int `yaml:"user_quota_mb"`
 }
 
@@ -541,7 +543,7 @@ upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
-  #                           # (attachments, avatars and emoji); 0 = unlimited
+  #                           # (attachments and avatars); 0 = unlimited
 
 # Web Push subscriptions. Disabled by default: with push.enabled false,
 # every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
