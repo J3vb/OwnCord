@@ -368,7 +368,10 @@ this work forward merely because the target directories are documented.
 7. Delete dead Rust command surfaces identified by the platform-contract map.
 
 **Hold point:** HP-7 proves desktop parity before browser implementations are
-filled in.
+filled in. _(Amended 2026-09-18, owner decision: B8 is deferred to
+post-beta, so "before browser implementations are filled in" now means
+post-beta. Steps 1–7 above, including contract tests and the desktop/web Vite
+split, remain in scope for the beta.)_
 
 ### Phase 5 — Decompose client features and hotspots
 
