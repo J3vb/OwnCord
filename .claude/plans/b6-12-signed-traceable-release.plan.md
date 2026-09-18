@@ -414,8 +414,16 @@ Server/` on both digests and, after merge to `dev`,
   changes (attestation manifests are added) but the per-platform image config
   does not — compare configs, never index digests.
 - **Validate**: locally, two `docker buildx build` runs of `Server/` with the
-  same `SOURCE_DATE_EPOCH` produce the same `--output type=docker` image id;
-  then the tag run's log line.
+  same `SOURCE_DATE_EPOCH` produce the same `--output type=docker` image id —
+  **refuted 2026-09-18.** That holds only while the second run is a cache hit.
+  Under `--no-cache` two clean builds get different config digests, because the
+  layer tar carries the mtime `go build` stamped on `/chatserver`; the binary
+  is not the variable (`sha256sum /chatserver` inside the builder stage matched
+  across two no-cache builds, and a bare repeated `go build` is byte-identical).
+  The compare still passes in the run for a real reason — `smoke-server-docker`
+  primes the exact cache scopes `release-server-docker` reads — so the
+  measurement to take is the tag run's log line, and a mismatch reads as a
+  cache miss rather than a substituted image.
 
 ### Task 5: Tell an owner how to verify, and what is signed by what
 
@@ -518,8 +526,8 @@ node --test scripts/check-release-environment.test.mjs && node scripts/check-rel
 npm run check:hygiene && npm run check:docs && npm run format
 # SBOM tool, locally
 cd Server && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 app -json -main . -output /tmp/chatserver.cdx.json && jq .metadata.tools /tmp/chatserver.cdx.json
-# reproducible config digest, locally
-SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) docker buildx build --output type=docker Server/  # twice; compare `docker images --digests`
+# reproducible config digest, locally — needs --no-cache to mean anything
+SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) docker buildx build --no-cache --output type=docker Server/  # twice; compare `docker images --digests`
 # the rehearsal
 gh run watch <release run id>
 gh attestation verify chatserver.exe --repo J3vb/OwnCord
