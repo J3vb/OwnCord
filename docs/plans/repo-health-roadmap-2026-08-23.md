@@ -822,9 +822,17 @@ service.
     OC-0332 (a bare IPv6 address breaks the updater URL), OC-0344 (the
     HTTP→HTTPS redirect assumes port 443) and OC-0339 (an empty configuration
     section is reported as unknown).
+    _(amended 2026-09-18 by B6-16: all four are `fixed` in
+    `.superpowers/findings-ledger.json` — OC-0320, OC-0344 and OC-0339 closed
+    by the 2026-09-03 post-merge review (#1530, `1edd777f`); OC-0332 closed by
+    #1532 (`39b2423f`, 2026-09-04) — a satisfied precondition, not an open
+    milestone)_
 14. _(added 2026-08-28)_ The 250/100/25 run starts from
     `Server/scripts/k6/ws-load.js`. k6 cannot drive voice; a 25-participant
     LiveKit load harness is a real gap and needs a named owner before HP-6.
+    _(amended 2026-09-18 by B6-16: closed by `Server/scripts/voice-load.sh`
+    wrapping `lk load-test`, B6-9 (#1592) — the gap was k6's, not the SFU's;
+    `prd.md`'s risk table already records this row `Closed`)_
 15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
     (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
     lands in B2-0. B6 rehearses one tag against both before HP-6.
