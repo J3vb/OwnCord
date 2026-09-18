@@ -289,14 +289,50 @@ What each mode means for the people connecting — desktop pinning, what a
 browser will need, and what the operator can read regardless of TLS — is in
 [trust-model.md](trust-model.md).
 
+**What this build does not do.** Self-signed is qualified and is the default;
+domain ACME is implemented but not exercised at release quality (it has not
+been run against expiry, rotation and restart); there is no HTTPS on a bare
+public IP, and no guided LAN/offline device-trust install. The certificate
+lifecycle — renewal state across restart, hot reload, rotation with margin —
+is not qualified. Stated plainly because it decides your TLS mode today, not
+because anything is missing at runtime; the details are in
+[What this build does not do](port-forwarding.md#what-this-build-does-not-do).
+
 ### Self-Signed (default)
 
-Auto-generated on first run. The Tauri client uses TOFU pinning to accept the cert on first connect.
+Generated on first run and valid for **two years**. Loaded as-is on every
+later start: the expiry date is never checked, the certificate is never
+renewed and never reloaded while the server runs — it is served until you
+replace the pair. The desktop client pins the leaf certificate's fingerprint
+on first connect and shows a mismatch modal if it changes; a browser client
+(B8) is out of scope of this guide.
 
 ```yaml
 tls:
   mode: "self_signed"
 ```
+
+An expired self-signed pair keeps working, measured rather than asserted
+(`Server/auth/tls_expiry_test.go`, `TestExpiredSelfSignedCertIsServedAsIs`):
+the server loads and serves a certificate whose `NotAfter` is in the past, and
+the desktop keeps connecting past expiry because the pin is the fingerprint,
+not the validity window — `Client/src-tauri/src/tofu.rs`'s verifiers decide on
+the fingerprint alone and leave the validity dates unused. **Rotate before the
+two years are up**; the server gives no warning as expiry approaches.
+
+#### Rotating the self-signed certificate
+
+There is no server-side push of a new pin — rotation is a stop, a file move,
+a start, and a message to every user:
+
+1. Stop the server.
+2. Move `data/cert.pem` and `data/key.pem` aside (do not delete them yet).
+3. Start the server: a fresh pair is generated because both files are absent.
+4. Read the new certificate's fingerprint from the start-up banner.
+5. **Every desktop client sees the certificate-mismatch modal and must accept
+   the new fingerprint.** Publish the new fingerprint out of band — a channel
+   post on another platform, a call — and have each person compare it before
+   accepting ([trust-model.md](trust-model.md)).
 
 ### Let's Encrypt (ACME)
 
@@ -306,8 +342,19 @@ Automatic certificate issuance and renewal. Requires port 80 open and a public d
 tls:
   mode: "acme"
   domain: "chat.example.com"
-  acme_cache_dir: "data/acme_certs"
+  acme_cache_dir: "data/acme_certs" # where certificates are cached
 ```
+
+The facts a stranger needs before choosing it: port 80 must be reachable from
+the internet (the HTTP-01 challenge), the configured domain must resolve to
+this server, and an IP address is rejected — there is no HTTPS on a bare
+public IP in this build
+([What this build does not do](port-forwarding.md#what-this-build-does-not-do)).
+Certificates are cached under `acme_cache_dir`. And the sentence owners do not
+expect: **the desktop client pins this certificate too** — the first-use
+prompt is the same in every `tls.mode` — so a Let's Encrypt renewal changes
+the fingerprint and triggers the mismatch modal on every desktop client
+([trust-model.md](trust-model.md)).
 
 ### Manual Certificate
 
@@ -320,6 +367,10 @@ tls:
   key_file: "path/to/key.pem"
 ```
 
+The desktop pins this certificate too, the same way. The files are loaded
+once at start-up, so replacing them takes a restart; keep the key at file
+mode `0600`.
+
 ### TLS Off
 
 Not recommended. For development or when behind a TLS-terminating reverse proxy:
@@ -328,6 +379,10 @@ Not recommended. For development or when behind a TLS-terminating reverse proxy:
 tls:
   mode: "off"
 ```
+
+Every connection is plaintext HTTP — passwords, tokens and messages are
+readable by anyone on the path;
+[trust-model.md](trust-model.md) states that plainly.
 
 ## Reverse Proxy Topology
 
@@ -1114,12 +1169,8 @@ For remote access, see the [Port Forwarding Guide](port-forwarding.md) or
 limits OwnCord cannot detect from inside your network — blocked ports, CGNAT,
 hairpin NAT and a changing public IP — and how to check each one yourself.
 
-**Not qualified in this build.** Certificate work is deferred to the release,
-so there is no HTTPS on a bare public IP (`tls.mode: acme` requires a
-hostname), no guided LAN or offline device-trust install, and no qualified
-certificate lifecycle. Domain ACME is implemented but has not been exercised
-against expiry, rotation and restart at release quality. See
-[What this build does not do](port-forwarding.md#what-this-build-does-not-do).
+The TLS limits this build's certificate modes carry are stated where you
+choose one: [TLS Setup](#tls-setup).
 
 ## Hardening Checklist
 
