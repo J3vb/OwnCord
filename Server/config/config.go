@@ -686,6 +686,19 @@ func Load(cfgPath string) (*Config, error) {
 	warnInvalidCIDRs("server.metrics_allowed_cidrs", cfg.Server.MetricsAllowedCIDRs)
 	warnInvalidCIDRs("server.livekit_webhook_allowed_cidrs", cfg.Server.LiveKitWebhookAllowedCIDRs)
 
+	// An EMPTY admin_allowed_cidrs is legal but silently switches the /admin
+	// IP perimeter off: api.AdminIPRestrict allows every address when the list
+	// is empty, so the panel answers anyone who can reach the port (its own
+	// session auth still applies). The compiled default is private networks,
+	// so only an operator who set the key to an empty sequence gets here.
+	// Warn, don't fail: a panel deliberately left open behind a VPN or an
+	// authenticating proxy is a real deployment.
+	if len(cfg.Server.AdminAllowedCIDRs) == 0 {
+		slog.Warn("config: admin_allowed_cidrs is empty — the /admin IP perimeter is disabled, " +
+			"so AdminIPRestrict admits every address; set server.admin_allowed_cidrs to the " +
+			"addresses that should reach the admin panel")
+	}
+
 	// A customized admin allowlist with no trusted_proxies is a footgun
 	// behind any reverse proxy or container network: the check then compares
 	// the PROXY'S (or bridge's) address — by construction a private one —

@@ -133,8 +133,9 @@ func (a *App) onClose(stage string, stop func(context.Context) error) {
 //     pruner) before the handle goes, so no prune is mid-query against a
 //     closing pool;
 //   - the hub's GracefulStop runs on EVERY return from Run, including an
-//     early one, because it is the only caller of LiveKitProcess.Stop and
-//     skipping it orphans the supervised livekit-server process (OC-0027).
+//     early one, because it calls StopLiveKit, the sole caller of
+//     LiveKitProcess.Stop, and skipping it orphans the supervised
+//     livekit-server process (OC-0027).
 //
 // It reports the FIRST error and runs every later step regardless: the steps
 // below a failing one are the ones that release the database handle, the

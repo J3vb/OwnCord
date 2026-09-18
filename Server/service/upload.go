@@ -129,8 +129,10 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 //     is denied rather than served to any authenticated caller (M-2).
 //   - A linked attachment in a guild channel needs READ_MESSAGES there.
 //
-// Every refusal answers with one message, so a caller cannot tell an
-// attachment it may not read from one that does not exist.
+// Refusals stay distinguishable, so a caller can tell "not yours" from "not
+// there": a missing attachment answers 404, a permission failure 403, and an
+// unacknowledged NSFW label 403 with its own NSFW_ACKNOWLEDGEMENT_REQUIRED
+// code (api/upload_handler.go).
 func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, actor *db.User, role *db.Role) error {
 	if aa == nil {
 		return fmt.Errorf("attachment not found%.0w", ErrNotFound)

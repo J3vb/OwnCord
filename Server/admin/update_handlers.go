@@ -207,7 +207,8 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 // committed=true once the verified binary is in place.
 //
 // It does NOT spawn, signal, or exit: the restart itself is the main
-// package's job, after run() has fully drained (Server/restart.go). Keeping
+// package's job, after run() has fully drained (Server/internal/app/restart.go).
+// Keeping
 // the swap free of process side effects is also what makes the success path
 // unit-testable.
 func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) bool {
