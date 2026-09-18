@@ -5,7 +5,9 @@
 # buildx run would otherwise emulate the whole Go toolchain under QEMU for the
 # arm64 leg. Nothing here is cgo (modernc.org/sqlite is pure Go), so the host
 # toolchain cross-compiles both targets natively via GOARCH below.
-FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
+# The tag is for humans; the digest is what actually builds. Dependabot's
+# `docker` block moves both together, so the tag and the digest cannot drift.
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
 
 ARG VERSION=dev
 # Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a
@@ -35,7 +37,9 @@ RUN mkdir -p /skel/app/data && chown -R 65532:65532 /skel/app
 # ─── Final stage ─────────────────────────────────────────────────────────────
 # gcr.io/distroless/static-debian12: no shell, includes CA certs (needed for
 # TLS/ACME) and timezone data. Attack surface is minimal.
-FROM gcr.io/distroless/static-debian12
+# Pinned by digest for the same reason as the builder: the tag is a label, the
+# digest is the artifact that ships. Dependabot's `docker` block moves both.
+FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
 COPY --from=builder --chown=65532:65532 /skel/app /app
 WORKDIR /app
