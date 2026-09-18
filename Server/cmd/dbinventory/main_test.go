@@ -111,6 +111,62 @@ func TestInventorySeesUseWithoutImport(t *testing.T) {
 	}
 }
 
+// TestInventoryFollowsPackageConstructor is the other half of "use, not
+// import": internal/app opens the handle through a package-level constructor
+// (`database, err := openDatabase(cfg)`), not through db.Open* directly, so
+// without the package's constructor set the local is not a *db.DB to the
+// walker and every call on it — database.Close() among them — measures as no
+// call at all. The db package's own functions are never hand-offs, whether the
+// argument is a local or a field read.
+func TestInventoryFollowsPackageConstructor(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, src string) {
+		t.Helper()
+		full := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const importDB = "import \"github.com/J3vb/OwnCord/Server/db\"\n"
+	write("db/db.go", "package db\n\ntype DB struct{}\n")
+	write("app/open.go", "package app\n"+importDB+
+		"\ntype App struct{ database *db.DB }\n\nfunc openDatabase() (*db.DB, error) { return nil, nil }\n")
+	// No import of its own: the handle arrives from the package's constructor,
+	// is stored on the field, and is closed and handed on from there.
+	write("app/start.go", "package app\nimport \"x/svc\"\n\n"+
+		"func (a *App) start() {\n\tdatabase, _ := openDatabase()\n\ta.database = database\n"+
+		"\tsvc.New(database)\n\tdatabase.Close()\n}\n")
+	// A callee in db itself is the handle's own package, not an owner —
+	// including when the argument is read straight out of the field.
+	write("app/migrate.go", "package app\n"+importDB+
+		"\nfunc (a *App) migrate() { _ = db.Migrate(a.database) }\n")
+
+	rows, err := inventory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]fileUse{}
+	for _, r := range rows {
+		got[r.rel] = r
+	}
+	start, ok := got["app/start.go"]
+	if !ok {
+		t.Fatalf("app/start.go closes and hands on the handle and must be a row; rows: %v", rows)
+	}
+	if !reflect.DeepEqual(start.methods, map[string]int{"Close": 1}) {
+		t.Errorf("app/start.go calls = %v, want Close×1", start.methods)
+	}
+	if !reflect.DeepEqual(start.hands, map[string]int{"svc.New": 1}) {
+		t.Errorf("app/start.go hands = %v, want svc.New×1", start.hands)
+	}
+	if migrate := got["app/migrate.go"]; len(migrate.hands) != 0 {
+		t.Errorf("a db-package callee is not a hand-off; got %v", migrate.hands)
+	}
+}
+
 // TestPrintTableProblemClasses drives each class printTable can report from a
 // fixture allowlist, so a regression shows up here rather than as a whole-tree
 // failure nobody can localise.

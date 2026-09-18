@@ -96,9 +96,12 @@ func inventory(root string) ([]fileUse, error) {
 		return nil, err
 	}
 
-	// Pass 1: parse everything, collect struct fields typed *db.DB per package.
+	// Pass 1: parse everything, collect per package the struct fields typed
+	// *db.DB and the package-level functions that return one — the two ways a
+	// file with no import of its own can be holding the handle.
 	parsed := map[string]*ast.File{}
 	fieldsByPkg := map[string]map[string]bool{}
+	ctorsByPkg := map[string]map[string]bool{}
 	for _, rel := range files {
 		f, err := parser.ParseFile(fset, filepath.Join(root, rel), nil, 0)
 		if err != nil {
@@ -112,24 +115,30 @@ func inventory(root string) ([]fileUse, error) {
 		dir := path.Dir(rel)
 		if fieldsByPkg[dir] == nil {
 			fieldsByPkg[dir] = map[string]bool{}
+			ctorsByPkg[dir] = map[string]bool{}
 		}
 		for name := range invariants.DBHandleFields(f, alias) {
 			fieldsByPkg[dir][name] = true
 		}
+		for name := range invariants.DBHandleCtors(f, alias) {
+			ctorsByPkg[dir][name] = true
+		}
 	}
 
 	// Pass 2: per-file uses. A file with no import is analysed anyway when its
-	// package carries the handle on a field — that is the shape B6-14 was
-	// about — and becomes a row only if it actually uses it.
+	// package carries the handle on a field or opens it through a constructor
+	// of its own — that is the shape B6-14 was about — and becomes a row only
+	// if it actually uses it.
 	var rows []fileUse
 	for _, rel := range files {
 		f := parsed[rel]
 		alias := invariants.DBHandleAlias(f)
-		fields := fieldsByPkg[path.Dir(rel)]
-		if alias == "" && len(fields) == 0 {
+		dir := path.Dir(rel)
+		fields, ctors := fieldsByPkg[dir], ctorsByPkg[dir]
+		if alias == "" && len(fields)+len(ctors) == 0 {
 			continue
 		}
-		u := analyze(f, rel, alias, dbKinds, fields)
+		u := analyze(f, rel, alias, dbKinds, fields, ctors)
 		if alias == "" && len(u.methods)+len(u.hands) == 0 {
 			continue
 		}
@@ -218,13 +227,13 @@ func declKinds(fset *token.FileSet, dir string) (map[string]kind, error) {
 	return kinds, nil
 }
 
-func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields map[string]bool) fileUse {
+func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields, dbCtors map[string]bool) fileUse {
 	u := fileUse{
 		rel: rel, imports: alias != "",
 		types: map[string]int{}, funcs: map[string]int{}, values: map[string]int{},
 		methods: map[string]int{}, hands: map[string]int{},
 	}
-	invariants.DBHandleCalls(f, invariants.DBHandleVars(f, alias, dbFields), dbFields, u.methods, u.hands)
+	invariants.DBHandleCalls(f, invariants.DBHandleVars(f, alias, dbFields, dbCtors), dbFields, u.methods, u.hands)
 	classifySelectors(f, alias, dbKinds, &u)
 	return u
 }

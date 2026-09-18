@@ -112,10 +112,12 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot", Calls: calls{"ClearAllVoiceStates": 1, "ResetAllUserStatuses": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
 	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
-	// B6-14: no import of its own — the start/stop sequence reads App.database
-	// and wires it into everything, which is a handle use the import-only gate
-	// could not see. The Hands multiset is that wiring, one entry per step.
-	"internal/app/lifecycle.go":   {Disposition: "boundary", Note: "the start and stop sequence hands App.database to every step that needs it; no calls of its own", Hands: calls{"StartRuntime": 1, "api.NewRouter": 1, "initDatabase": 1, "initPlugins": 1, "newAuditWriter": 1, "openMarkers": 1, "service.NewPushDispatcher": 1, "startEventPersister": 1, "startMaintenanceLoop": 1}},
+	// B6-14: no import of its own — the start/stop sequence opens the handle
+	// through openDatabase (the package's own constructor, not db.Open*),
+	// registers its Close and wires it into everything, all of which is handle
+	// use the import-only gate could not see. The Hands multiset is that
+	// wiring, one entry per step; the pinned Close is the close step.
+	"internal/app/lifecycle.go":   {Disposition: "boundary", Note: "the start and stop sequence hands App.database to every step that needs it, and registers the close that releases it", Calls: calls{"Close": 1}, Hands: calls{"StartRuntime": 1, "api.NewRouter": 1, "initDatabase": 1, "initPlugins": 1, "newAuditWriter": 1, "openMarkers": 1, "service.NewPushDispatcher": 1, "startEventPersister": 1, "startMaintenanceLoop": 1}},
 	"internal/app/maintenance.go": {Disposition: "boundary", Note: "periodic worker: expired sessions, backups, orphan attachments", Calls: calls{"CleanupExpiredSecondFactorState": 1, "DeleteExpiredMessageDeliveryReceipts": 1, "DeleteExpiredSessions": 1, "DeleteOrphanedAttachments": 1, "FindOrphanedVoiceMutes": 1, "RetireModerationActions": 1}, Hands: calls{"admin.MaintainBackups": 1}},
 	"internal/app/persistence.go": {Disposition: "boundary", Note: "event persister, audit writer and the boot seq seed own the handle", Calls: calls{"GetMaxEventSeq": 1, "GetSetting": 1, "SetAuditWriter": 1, "SetSetting": 1}, Hands: calls{"ws.NewEventPersister": 1, "ws.StartEventPruner": 1}},
 	"internal/app/plugins.go":     {Disposition: "boundary", Note: "passes the handle to the plugin registry as its store; no calls of its own", Hands: calls{"plugin.Config": 1}},
@@ -221,7 +223,7 @@ var rawHandleTypes = map[string]bool{"DB": true, "Tx": true, "Conn": true}
 func checkRawHandleOwner(f *ast.File, fset *token.FileSet, rel string) []Violation {
 	var out []Violation
 	alias := DBHandleAlias(f)
-	vars := DBHandleVars(f, alias, nil)
+	vars := DBHandleVars(f, alias, nil, DBHandleCtors(f, alias))
 	sqlNames, _ := importNames(f, "database/sql")
 	add := func(pos token.Pos, what string) {
 		out = append(out, Violation{

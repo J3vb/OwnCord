@@ -74,19 +74,23 @@ production file in a package that declares a `*db.DB` field, not only the
 files that import `db`, because the handle is held on `Hub.db`
 (`ws/hub.go`), `App.database` (`internal/app/app.go`) and the maintenance
 worker (`internal/app/maintenance.go`), and any file in those packages could
-call it without an import. The census that extension found — seven sites in
-five files — was: two files calling the handle with no row at all
-(`ws/hub_events.go`, `ws/moderation_queue.go`), one `adapter` row making a
-call its disposition forbids (`ws/serve_ready.go`), and two `adapter` rows
-handing the bare handle past the seam they already name
-(`ws/hub_visibility.go`, `ws/deps.go`). Four of those became seam reads;
-`ws/hub_events.go` stayed direct and became a `boundary` row, because its two
-deletes are inside the replay purge's `seqMu` critical section and routing
-them through the persistence seam would skip the delete on a server that
-persisted rows in an earlier enabled boot. Two rows no import would have
-produced were added (`ws/hub_events.go`, `internal/app/lifecycle.go`) and
-`ws/moderation_queue.go` needs none: 62 → 64 rows, `boundary` 20 → 22,
-`adapter` 42 unchanged.
+call it without an import. The hand census taken before the tool changed —
+a grep for `h.db.X` and for handle arguments — found seven sites in five
+files: two files calling the handle with no row at all (`ws/hub_events.go`,
+`ws/moderation_queue.go`), one `adapter` row making a call its disposition
+forbids (`ws/serve_ready.go`), and two `adapter` rows handing the bare handle
+past the seam they already name (`ws/hub_visibility.go`, `ws/deps.go`). Four
+of those became seam reads; `ws/hub_events.go` stayed direct and became a
+`boundary` row, because its two deletes are inside the replay purge's `seqMu`
+critical section and routing them through the persistence seam would skip the
+delete on a server that persisted rows in an earlier enabled boot. The tool's
+first run then added a **sixth** file the grep could not have found,
+`internal/app/lifecycle.go`: it names `db` nowhere, opens the handle through
+the package's own `openDatabase` constructor rather than `db.Open*`, and
+closes it and hands it to nine start steps — unlisted by use until it got its
+row. So two rows no import would have produced were added (`ws/hub_events.go`,
+`internal/app/lifecycle.go`) and `ws/moderation_queue.go` needs none:
+62 → 64 rows, `boundary` 20 → 22, `adapter` 42 unchanged.
 **Owner:** the B3 plan,
 [plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
@@ -175,21 +179,51 @@ information), like the invariants package. It records three things per file:
   or a selector whose final field is declared `*db.DB` anywhere in the same
   package (`h.db.X`, `s.deps.DB.X`). This is the persistence surface the
   dispositions are about.
-- **Hand-offs** — the places the file passes the bare handle to another
-  package: a `*db.DB` argument to `pkg.Func(…)`, or a `*db.DB` field in a
-  `pkg.Type{…}` literal. This is the composition root's wiring, and it is a
-  handle use too — the callee's parameter type is the owner it names, which
-  is why the "Handle carriers" table below reads as the other half of this
-  column. Callees inside `db` itself are excluded: that is the handle's own
-  package, not an owner.
+- **Hand-offs** — the places the file gives the bare handle away. Reading it
+  out of its carrier (`h.db`, `a.database`) and passing it on is a hand-off
+  **wherever it goes**, including to a function in the same package: the
+  handle has left the carrier, and the callee's parameter type is the owner
+  it names. A `*db.DB` local or parameter is a hand-off only across a package
+  boundary (`pkg.Func(database)`, a `*db.DB` field in a `pkg.Type{…}`
+  literal) — threading a parameter on inside one package hands it to nobody
+  the row does not already name. Callees inside `db` itself are excluded
+  either way: that is the handle's own package, not an owner. This is the
+  composition root's wiring, which is why the "Handle carriers" table below
+  reads as the other half of this column for the cross-package rows.
 
 Since B6-14 the walker analyses a file that imports nothing from `db` when
-its package declares a `*db.DB` field, because such a file can call the
-handle through that field and an import-keyed inventory would never see it:
+its package declares a `*db.DB` field **or** a function that returns one,
+because such a file can reach the handle through the field (`h.db`) or from
+the package's own opener (`database, err := openDatabase(cfg)`) and an
+import-keyed inventory would never see it:
 2 of the 64 rows use the handle without importing `db`. Each row's calls and
 hand-offs are pinned in `DBImportAllow` as exact multisets, so a new call in
 a `boundary` file is an allowlist edit and a call in an `adapter` file is a
 gate failure.
+
+### The per-file half: `db-handle-owner`
+
+The inventory is package-wide and runs as a document gate. `go test
+./invariants/` has a second, per-file half of the same question, reported by
+`db-import-boundary` under the sub-id **`db-handle-owner`** — the id an
+`//invariant:allow` comment must name to suppress it. In a file that is not
+a `boundary` row it rejects the raw-handle shapes one file can prove on its
+own:
+
+- a call to `SQLDb()` or `SQLReaderDB()` — the raw `database/sql` pools
+  behind the handle, whatever the receiver is spelled as;
+- `BeginTx()` on a value the file declares `*db.DB` — a transaction boundary
+  the file then owns;
+- a `*sql.DB`, `*sql.Tx` or `*sql.Conn` type in a file that **also** imports
+  `db`: the handle escaping into `database/sql`.
+
+That last condition is a deliberate narrowing, and the reason the check is a
+sub-id rather than a rule of its own. A file that opens its own `sql.DB` and
+never touches `Server/db` (`cmd/smoke/drills.go`) is answering a different
+question and is left alone; the shape that matters here — a handle reached
+through a package field no single file declares — has no per-file evidence
+at all, which is why the inventory's package-wide walk, not this rule, is
+what turns it into a row.
 
 A shape the walker still cannot see is a handle stored in an `any`- or
 interface-typed field and called through it: with no type information, a
@@ -266,7 +300,7 @@ handle-backed read seams.
 | `internal/app/database.go`        | `DB×2`                                                                                                                                                                            | `Migrate()` `OpenWithMaxReaders()`                                                    | `ClearAllVoiceStates` `ResetAllUserStatuses`                                                                                                                                    | —                                                                                                                                                                   | calls     | boundary    | —      | opens the handle, migrates, clears stale state at boot                                                                                                                                        |
 | `internal/app/erasure.go`         | `DB` `MarkerStore`                                                                                                                                                                | `OpenMarkerStore()`                                                                   | `CheckpointErasureWAL` `Close×2`                                                                                                                                                | `service.NewErasureService` `service.NewRetentionService`                                                                                                           | calls     | boundary    | —      | opens the deletion-marker file and replays it against the handle before anything serves (B4-10)                                                                                               |
 | `internal/app/hub.go`             | `DB`                                                                                                                                                                              | —                                                                                     | —                                                                                                                                                                               | `auth.NewPersistentRateLimiter` `service.New` `ws.DBReaders` `ws.HubOptions`                                                                                        | calls     | boundary    | —      | hands the handle to the hub and the service layer it builds                                                                                                                                   |
-| `internal/app/lifecycle.go`       | —                                                                                                                                                                                 | —                                                                                     | —                                                                                                                                                                               | `StartRuntime` `api.NewRouter` `initDatabase` `initPlugins` `newAuditWriter` `openMarkers` `service.NewPushDispatcher` `startEventPersister` `startMaintenanceLoop` | calls     | boundary    | —      | the start and stop sequence hands App.database to every step that needs it; no calls of its own                                                                                               |
+| `internal/app/lifecycle.go`       | —                                                                                                                                                                                 | —                                                                                     | `Close`                                                                                                                                                                         | `StartRuntime` `api.NewRouter` `initDatabase` `initPlugins` `newAuditWriter` `openMarkers` `service.NewPushDispatcher` `startEventPersister` `startMaintenanceLoop` | calls     | boundary    | —      | the start and stop sequence hands App.database to every step that needs it, and registers the close that releases it                                                                          |
 | `internal/app/maintenance.go`     | `DB×3`                                                                                                                                                                            | —                                                                                     | `CleanupExpiredSecondFactorState` `DeleteExpiredMessageDeliveryReceipts` `DeleteExpiredSessions` `DeleteOrphanedAttachments` `FindOrphanedVoiceMutes` `RetireModerationActions` | `admin.MaintainBackups`                                                                                                                                             | calls     | boundary    | —      | periodic worker: expired sessions, backups, orphan attachments                                                                                                                                |
 | `internal/app/persistence.go`     | `AuditWriter×2` `DB×4`                                                                                                                                                            | `ErrNotFound` `NewAuditWriter()`                                                      | `GetMaxEventSeq` `GetSetting` `SetAuditWriter` `SetSetting`                                                                                                                     | `ws.NewEventPersister` `ws.StartEventPruner`                                                                                                                        | calls     | boundary    | —      | event persister, audit writer and the boot seq seed own the handle                                                                                                                            |
 | `internal/app/plugins.go`         | `DB`                                                                                                                                                                              | —                                                                                     | —                                                                                                                                                                               | `plugin.Config`                                                                                                                                                     | calls     | boundary    | —      | passes the handle to the plugin registry as its store; no calls of its own                                                                                                                    |
@@ -355,12 +389,13 @@ same split the shape and disposition columns make.
 | `permissions.DB`        | `permissions/checker.go:44` | `ws/hub_options.go:172` (`permissions.NewChecker`, `checker.go:61`)                     | three permission-row reads, one of them B5-9's uncached timeout lookup                          |
 | `ws.HubOptions.DB`      | `ws/hub_options.go:28`      | `internal/app/hub.go:51` (`ws.NewHub`)                                                  | **not** a carrier: the bare handle, stored on `Hub.db`, which is why `ws` is walked field-first |
 
-Two of these hand-offs are invisible to the generated column, for one reason:
-without type information a method call on a value cannot be resolved to a
-package, so `hub.SetEventStore(database)` is not recorded while
+One of these hand-offs is invisible to the generated column: without type
+information a method call on a value cannot be resolved to a package, so
+`hub.SetEventStore(database)` is not recorded while
 `ws.NewEventPersister(database, …)` and `ws.StartEventPruner(…, database, …)`
-are. That is the known edge of a `go/ast`-only walker, and this table is where
-it is made good.
+are — the same wiring step, in the same file, told apart only by the callee's
+spelling. Every other row above appears in the column. That is the known edge
+of a `go/ast`-only walker, and this table is where it is made good.
 
 ## Hub lifecycle inventory
 

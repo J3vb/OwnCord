@@ -77,18 +77,68 @@ func DBHandleFields(f *ast.File, alias string) map[string]bool {
 	return out
 }
 
+// DBHandleCtors returns the names of package-level functions in the file whose
+// result list contains a *<alias>.DB: the package's own openers. A composition
+// root reaches the handle through one of these (`database, err :=
+// openDatabase(cfg)`) far more often than through db.Open* directly, and the
+// caller is usually a file that imports nothing from db at all. The caller
+// unions these across a package, like DBHandleFields, because the constructor
+// is declared in one file and called from another. Methods are left out: a
+// receiver's package cannot be known without type information.
+func DBHandleCtors(f *ast.File, alias string) map[string]bool {
+	out := map[string]bool{}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Type.Results == nil {
+			continue
+		}
+		for _, res := range fn.Type.Results.List {
+			if isDBPtr(res.Type, alias) {
+				out[fn.Name.Name] = true
+			}
+		}
+	}
+	return out
+}
+
 // DBHandleVars returns identifiers declared with type *<alias>.DB: params,
-// results, struct fields, vars, names assigned from a db.Open* call, and names
-// assigned from one of the package's *db.DB fields — `database := opts.DB`
-// carries the handle just as much as a declared parameter does, and not
-// following it there would let a file hand the handle on under a new name.
-// fields may be nil, which is what a caller with no package-wide view (the
-// per-file rule) passes.
-func DBHandleVars(f *ast.File, alias string, fields map[string]bool) map[string]bool {
+// results, struct fields, vars, and names assigned from something that carries
+// the handle — a db.Open* call, one of the package's *db.DB fields, or one of
+// the package's own constructors. `database := opts.DB` and `database, err :=
+// openDatabase(cfg)` carry the handle just as much as a declared parameter
+// does, and not following it there would let a file call or hand on the handle
+// under a new name. fields and ctors may be nil, which is what a caller with no
+// package-wide view (the per-file rule) passes.
+func DBHandleVars(f *ast.File, alias string, fields, ctors map[string]bool) map[string]bool {
 	vars := map[string]bool{}
 	add := func(names []*ast.Ident) {
 		for _, n := range names {
 			vars[n.Name] = true
+		}
+	}
+	// carries reports whether the right-hand side of a declaration or an
+	// assignment yields the handle.
+	carries := func(rhs ast.Expr) bool {
+		if openAssign(rhs, alias) {
+			return true
+		}
+		switch x := rhs.(type) {
+		case *ast.SelectorExpr:
+			return fields[x.Sel.Name]
+		case *ast.CallExpr:
+			id, ok := x.Fun.(*ast.Ident)
+			return ok && ctors[id.Name]
+		}
+		return false
+	}
+	bind := func(lhs []ast.Expr, rhs []ast.Expr) {
+		for i, r := range rhs {
+			if i >= len(lhs) || !carries(r) {
+				continue
+			}
+			if id, ok := lhs[i].(*ast.Ident); ok {
+				vars[id.Name] = true
+			}
 		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -98,26 +148,29 @@ func DBHandleVars(f *ast.File, alias string, fields map[string]bool) map[string]
 				add(x.Names)
 			}
 		case *ast.ValueSpec:
-			if x.Type != nil && isDBPtr(x.Type, alias) {
-				add(x.Names)
+			if x.Type != nil {
+				if isDBPtr(x.Type, alias) {
+					add(x.Names)
+				}
+				return true
 			}
+			// var d = h.db — no written type, same carrier.
+			bind(identExprs(x.Names), x.Values)
 		case *ast.AssignStmt:
-			for i, rhs := range x.Rhs {
-				if i >= len(x.Lhs) {
-					break
-				}
-				sel, isField := rhs.(*ast.SelectorExpr)
-				if !openAssign(rhs, alias) && !(isField && fields[sel.Sel.Name]) {
-					continue
-				}
-				if id, ok := x.Lhs[i].(*ast.Ident); ok {
-					vars[id.Name] = true
-				}
-			}
+			bind(x.Lhs, x.Rhs)
 		}
 		return true
 	})
 	return vars
+}
+
+// identExprs adapts a ValueSpec's names to the expression list bind takes.
+func identExprs(names []*ast.Ident) []ast.Expr {
+	out := make([]ast.Expr, len(names))
+	for i, n := range names {
+		out[i] = n
+	}
+	return out
 }
 
 // openAssign reports whether expr is a call to <alias>.Open*(...).
@@ -152,7 +205,24 @@ func openAssign(expr ast.Expr, alias string) bool {
 //     package, not an owner.
 func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[string]int) {
 	pkgs := importedNames(f)
-	delete(pkgs, DBHandleAlias(f))
+	dbAlias := DBHandleAlias(f)
+
+	// ownPkg reports whether a callee or a composite-literal type names the db
+	// package itself. Checked on the callee rather than on the argument,
+	// because the argument's shape is what differs (h.db is a hand-off
+	// wherever it goes, a local only across a package boundary) while the
+	// exclusion is the same for both.
+	ownPkg := func(e ast.Expr) bool {
+		if dbAlias == "" {
+			return false
+		}
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		id, ok := sel.X.(*ast.Ident)
+		return ok && id.Name == dbAlias
+	}
 
 	handed := func(arg ast.Expr, crossPkg bool) bool {
 		switch a := arg.(type) {
@@ -179,7 +249,7 @@ func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[s
 					}
 				}
 			}
-			if hands == nil {
+			if hands == nil || ownPkg(x.Fun) {
 				return true
 			}
 			name, crossPkg := calleeName(x.Fun, pkgs)
@@ -189,7 +259,7 @@ func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[s
 				}
 			}
 		case *ast.CompositeLit:
-			if hands == nil {
+			if hands == nil || ownPkg(x.Type) {
 				return true
 			}
 			name, crossPkg := qualifiedName(x.Type, pkgs)
