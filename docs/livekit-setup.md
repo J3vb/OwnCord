@@ -117,6 +117,10 @@ Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT
 | **7881**        | TCP           | LiveKit internal RTC (TURN/TCP fallback) |
 | **50000-60000** | UDP           | Media transport (RTP audio/video)        |
 
+These three rows are the ones voice needs; the complete list, including the
+chat port and the ACME port, is the canonical table in
+[deployment.md](deployment.md#firewall-and-ports).
+
 For LAN-only setups, ensure these ports are open on Windows Firewall. For remote access, forward these through your router or use [Tailscale](tailscale.md).
 
 ---

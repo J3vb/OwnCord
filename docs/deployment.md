@@ -1037,6 +1037,86 @@ contract (what may appear, and the redaction each item receives) is in the
 [support-bundle data contract](architecture/diagnostics.md#support-bundle-data-contract);
 this guide does not copy it.
 
+## When it fails
+
+Symptom first; each entry says how to tell, what it means, and what to do.
+The failure drills that measured each answer are linked from
+[data-lifecycle.md](architecture/data-lifecycle.md).
+
+### `/health` returns 503
+
+The `reason` field names the failing subsystem:
+
+- `hub` — the WebSocket dispatch loop died. The server exits nonzero on its
+  own and the supervisor relaunches it; nothing to do but confirm it came
+  back.
+- `database` — the 1-second ping failed: the disk, a lock, or a wedged
+  writer. Read the log's last `database` lines.
+- `disk` — free space is below `server.min_free_disk_mb`. Free space or move
+  `backup.dir` elsewhere; uploads refuse first, messages keep flowing, and
+  the three stages are in
+  [Health Endpoint](#health-endpoint).
+
+### The server refuses to start
+
+Three named refusals, each with the one thing to do:
+
+- A bad `config.yaml` — the start-up message names the file; fix the value it
+  names.
+- An erasure-key fingerprint that does not match the marker file — the log
+  prints both fingerprints; the matching rule is in
+  [security.md](security.md#erasure-marker-key). Put the right `erasure.key`
+  back from your archive.
+- An unsupported `database.type` — SQLite is the only one; correct the key
+  ([server-configuration.md](server-configuration.md)).
+
+### Voice joins but nobody hears anything
+
+The UDP media range (`50000-60000`) or `voice.node_ip` is wrong — the one
+failure the server cannot see, because the media never reaches it. The
+check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
+
+### Voice cannot join at all
+
+The supervised LiveKit process is down. `livekit_healthy: false` on
+`GET /api/v1/metrics`, and `GET /api/v1/livekit/health` answers
+`degraded` with the reason. The companion process restarts it with
+exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
+failures; the recovery steps are in
+[LiveKit Setup](livekit-setup.md).
+
+### Clients see a certificate mismatch
+
+You rotated or renewed the certificate, or restored a `config.yaml` whose
+`tls.mode` differs from what they pinned. They must accept the new
+fingerprint you publish out of band —
+[Rotating the self-signed certificate](#rotating-the-self-signed-certificate).
+
+### Every 2FA user is locked out after a restore
+
+`totp.key` was not in the restore set — its loss cost and the only way back
+are in [Backup Strategy](#backup-strategy).
+
+### Uploads refused with 507
+
+The error code tells you which ceiling: `STORAGE_QUOTA_EXCEEDED` is the
+per-file or per-user limit ([Capacity limits](#capacity-limits));
+`STORAGE_LOW_DISK` is the disk floor — free space (see
+[Health Endpoint](#health-endpoint)).
+
+### An update did not come back
+
+[If the update fails](#if-the-update-fails) — audit rows, the `.old`
+fallback and the Docker refusal are there.
+
+### What to send when asking for help
+
+A [support bundle](#support-bundle) — it never uploads and holds no
+messages, usernames, addresses or raw log lines. Add the last 200 lines of
+your supervisor's log by hand if the problem is in it, and say what you are
+sending: that excerpt carries usernames and client addresses, which is
+exactly why the bundle itself omits raw lines.
+
 ## Auto-Update
 
 ### Server
@@ -1073,6 +1153,31 @@ Applying an update runs in this order:
    before downloading. If the server dies between step 2 and step 4, the
    previous binary is still beside the installation path as `.old` until a
    successor reaches step 5; restoring it is a manual rename.
+
+#### If the update fails
+
+The audit log tells you which stage failed: every apply writes `update_apply`,
+then `update_applied` or `update_failed` (see
+[security.md](security.md)). Three shapes:
+
+- **The verification refused the download** — the manifest signature, the
+  manifest's version or asset binding, or the SHA256 checksum did not match.
+  The installed binary is untouched and the admin panel says why; retry, and
+  if it persists compare your version against the release page.
+- **The rotation succeeded and the server died before or during the handoff**
+  — the previous binary is still beside the installation path as `.old` until
+  a successor's step 5 removes it. If the new one never boots, put `.old`
+  back by hand (rename it over the broken binary) and start.
+- **Docker refuses the whole flow** — the panel answers `503
+CONTAINER_DEPLOYMENT` because the running binary is image content; the way
+  back is the image tag (`docker compose pull && docker compose up -d`).
+
+And the pre-checks that make the failure cases rare: take the
+[archive](#before-upgrading-take-the-archive) before the update; on systemd,
+update the unit file before applying server updates (see
+[Running as a Linux Service](#running-as-a-linux-service-systemd)); under
+NSSM, the service must be installed with `OWNCORD_SERVER_RESTART_MODE=supervised`
+(see [Running as a Windows Service](#running-as-a-windows-service)).
 
 Externally managed LiveKit is left running. Containers use image upgrades as
 described above. Installing the first release with this handoff fix may require
@@ -1155,6 +1260,11 @@ What this does and does not prove:
   warning on the binaries even when every check above passes.
 
 ## Firewall and Ports
+
+This is the canonical port table — the guides that repeat any of it
+([Port Forwarding Guide](port-forwarding.md),
+[LiveKit Setup](livekit-setup.md)) point here, and their own tables carry
+only the rows their instructions need.
 
 | Port          | Protocol | Purpose                                           |
 | ------------- | -------- | ------------------------------------------------- |

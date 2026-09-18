@@ -332,6 +332,8 @@ The Tauri desktop client implements the following security measures:
 ## Security Hardening Checklist for Operators
 
 - [ ] Enable TLS (self-signed is the default; custom certs recommended for production)
+- [ ] Capture stdout (journald, Docker log driver, NSSM `AppStdout`) so crashes leave something to send — see [deployment.md — Logs](deployment.md#logs)
+- [ ] Back up the set, not just the database — see [deployment.md — Backup Strategy](deployment.md#backup-strategy)
 - [ ] Keep registration invite-only (the default) or closed; `approval` holds new accounts until you approve them in the admin panel, `open` admits anyone
 - [ ] Set a strong admin password
 - [ ] Configure rate limits (defaults are sensible but review for your use case)
