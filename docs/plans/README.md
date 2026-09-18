@@ -40,7 +40,11 @@ _Amended 2026-09-18 (owner decision):_ B8 (browser, PWA, phone, and tablet
 support) is deferred to post-beta. The public beta ships desktop-only
 (Windows x64/ARM64, Linux x64/ARM64). See the B8 section of
 [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md) for the
-re-entry conditions.
+re-entry conditions. _(Owner direction 2026-09-18, to be confirmed at HP-9:
+B10 is also shortened to a release checklist so the beta ships after B9; the
+thirty-run count, the 14-day soak, and part of the documentation list move to
+a later beta-to-stable gate with no phase id assigned yet — see B10's opening
+block in the same roadmap.)_
 
 ## Partially implemented
 

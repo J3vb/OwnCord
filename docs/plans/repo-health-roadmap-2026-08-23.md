@@ -180,6 +180,11 @@ publishes as B7 → B9 → B10, desktop-only. Phase ids are unchanged; B8 keeps
 its position and id in this chain and reopens after B10 under the re-entry
 conditions in its section below.)_
 
+_(owner direction 2026-09-18, to be confirmed at HP-9: the beta publishes
+once B9's exit gate and B10's shortened release checklist are green — see
+B10's opening block for what that checklist keeps and what moves to a later
+beta-to-stable gate.)_
+
 ## Common entry and exit contract
 
 An item is ready for implementation only when it has:
@@ -1206,7 +1211,8 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
 No new beta feature enters after this point. Review every requirement journey
 on all applicable surfaces, triage every accessibility defect, and freeze
 strings, protocol, migrations, and user-visible behavior for the release
-candidate.
+candidate. _(owner direction 2026-09-18, to be confirmed at HP-9: HP-9 is also
+the checkpoint at which the owner confirms or revises B10's cut list.)_
 
 ### Exit gate
 
@@ -1246,6 +1252,30 @@ global state changes are serialized.
 
 ## B10 — Qualify and publish the public beta
 
+**Owner direction, 2026-09-18, to be confirmed at HP-9.** B10 becomes a
+release checklist that closes out B9, so the public beta ships when B9's
+coding is done — a public beta is itself the soak. The items below are
+preserved as written; each one's verdict is recorded here rather than in the
+item text.
+
+| Item  | Verdict             | Note                                                                                                                                                                                                                                                                                                             |
+| ----- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | keep                | Required matrix on the RC SHA.                                                                                                                                                                                                                                                                                   |
+| 2     | moved               | Thirty consecutive green integration runs move to a later beta-to-stable gate (no phase id assigned yet).                                                                                                                                                                                                        |
+| 3     | moved               | The fourteen-day RC soak moves to the same beta-to-stable gate.                                                                                                                                                                                                                                                  |
+| 4     | keep                | In-place upgrade from alpha data and rollback. B6-8's rehearsal already runs both legs in CI before anything is signed or pushed (`.github/workflows/release.yml:550-562`).                                                                                                                                      |
+| 5     | keep                | Protocol-epoch re-run; not discussed, unchanged.                                                                                                                                                                                                                                                                 |
+| 6, 7  | keep                | Already narrowed to desktop clients, server artifacts, and Docker by the 2026-09-18 B8 deferral above; what remains after that narrowing is kept.                                                                                                                                                                |
+| 8     | reduced             | Reduced to one comparison run at the RC against B6-9's already-published 250/100/25 result, instead of reproducing the full profile.                                                                                                                                                                             |
+| 9     | keep                | Zero open P0/P1, zero unresolved advisory.                                                                                                                                                                                                                                                                       |
+| 10    | keep                | Version agreement, source snapshot, licenses, SBOM, provenance, checksums, signatures, update manifests, install/update/rollback; automated by B6-12 where true (`.github/workflows/release.yml`, SBOM/provenance/checksum/signing/update-manifest steps at lines 311, 632-633, 723-733, 815-820, 823, 889-903). |
+| 11    | reduced             | Kept, reduced to setup, security, privacy, operator, and recovery documentation; moderation, accessibility, support, feedback, and contribution documentation move to the beta-to-stable gate.                                                                                                                   |
+| 12    | keep                | Safe release notes and coordinated disclosure.                                                                                                                                                                                                                                                                   |
+| 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                             |
+| 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                   |
+| 15    | keep as written     | BPR-051's non-developer comprehension read. How it is satisfied is an open owner question to settle at HP-9.                                                                                                                                                                                                     |
+| HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                  |
+
 **Objective:** prove one immutable release candidate satisfies the complete
 product, security, platform, upgrade, operations, and community contract before
 publishing it on GitHub.
@@ -1269,10 +1299,13 @@ re-verifies every BPR.
    B0/B1/HP-0/HP-1 observations from their recorded source commits with a
    dated correction. A green count check must not require rewriting history.
 2. Require 30 consecutive green integration runs, excluding only documented
-   external infrastructure cancellations.
+   external infrastructure cancellations. _(owner direction 2026-09-18, to be
+   confirmed at HP-9: moved to a later beta-to-stable gate — no phase id
+   assigned yet; see B10's opening block.)_
 3. Hold a 14-day release-candidate soak with long sessions, reconnects,
    upgrades, restarts, media, push, retention, deletion, moderation, and
-   operator review.
+   operator review. _(owner direction 2026-09-18, to be confirmed at HP-9:
+   moved to the same later beta-to-stable gate; see B10's opening block.)_
 4. Test in-place upgrade from representative 1.2.0-alpha data, attachments,
    configuration, credentials, and client settings, plus rollback within the
    declared boundary.
@@ -1293,6 +1326,9 @@ re-verifies every BPR.
    domain/public-IP/LAN/offline TLS scenarios are unchanged — they remain
    governed by the 2026-09-11 TLS deferral and the HP-6 decision.)_
 8. Reproduce the 250/100/25 reference capacity profile and compare it with B6.
+   _(owner direction 2026-09-18, to be confirmed at HP-9: reduced to one
+   comparison run at the RC against B6-9's published result; see B10's
+   opening block.)_
 9. Confirm zero open P0/P1 defect, zero unresolved advisory, and explicit
    owner/rationale/review trigger for every accepted lower risk.
 10. Verify release version agreement, source snapshot, licenses, SBOM,
@@ -1300,13 +1336,22 @@ re-verifies every BPR.
     update, rollback, and download.
 11. Verify public setup, security, privacy, operator, recovery, moderation,
     accessibility, support, feedback, and contribution documentation.
+    _(owner direction 2026-09-18, to be confirmed at HP-9: reduced to setup,
+    security, privacy, operator, and recovery documentation; moderation,
+    accessibility, support, feedback, and contribution documentation move to
+    the beta-to-stable gate; see B10's opening block.)_
 12. Prepare safe release notes and coordinated fixed-vulnerability disclosure.
     Do not publish private exploit material by default.
 13. _(added 2026-08-28)_ `ci.yml` cancels in-progress runs on every ref,
     `main` included, so item 2's thirty consecutive runs cannot be counted as
     written. Exempt `main` from `cancel-in-progress` before the count starts.
+    _(owner direction 2026-09-18, to be confirmed at HP-9: moves with item 2
+    to the beta-to-stable gate — it exists only to make item 2 countable; see
+    B10's opening block.)_
 14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
-    self-hosted instance and one Docker instance.
+    self-hosted instance and one Docker instance. _(owner direction
+    2026-09-18, to be confirmed at HP-9: moves with item 3 to the
+    beta-to-stable gate; see B10's opening block.)_
 15. _(added 2026-08-31)_ Record BPR-051's non-developer comprehension read on
     the R-08 release scorecard: a non-developer reads `docs/trust-model.md`
     §"The short answer" and their answer to "who can read my messages?" fills
@@ -1319,12 +1364,16 @@ re-verifies every BPR.
 The owner reviews one final scorecard. Publication is allowed only when every
 required artifact points to the same commit, all evidence is green, the private
 security queue is empty, and rollback is rehearsed. A known blocker means
-no-go, regardless of elapsed time.
+no-go, regardless of elapsed time. _(owner direction 2026-09-18, to be
+confirmed at HP-9: the scorecard HP-10 reviews is B10's shortened release
+checklist above.)_
 
 ### Exit gate
 
 - The exact release candidate passes all phase and requirement evidence.
-- Thirty consecutive integration runs and the 14-day soak are green.
+- Thirty consecutive integration runs and the 14-day soak are green. _(owner
+  direction 2026-09-18, to be confirmed at HP-9: moved to the beta-to-stable
+  gate; see B10's opening block.)_
 - Zero P0/P1 and zero unresolved security advisory remain.
 - All supported artifacts install, start, connect, update, roll back, and
   verify.
@@ -1340,7 +1389,9 @@ no-go, regardless of elapsed time.
 ### Required evidence
 
 - immutable release scorecard linked to the exact commit and tag;
-- integration-run history and 14-day soak log;
+- integration-run history and 14-day soak log (_owner direction 2026-09-18,
+  to be confirmed at HP-9: moved to the beta-to-stable gate; see B10's
+  opening block_);
 - complete platform/deployment/device matrix;
 - migration, rollback, restore, and deletion proof;
 - security closure attestations;
