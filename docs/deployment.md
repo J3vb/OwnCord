@@ -166,7 +166,7 @@ stopped.
 
 ### LiveKit in Docker
 
-LiveKit runs as its own container (`livekit/livekit-server:v1`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
 ---
 
@@ -872,6 +872,72 @@ The Tauri client uses NSIS installer updates:
 
 - Server exposes client update assets from GitHub Releases
 - Ed25519 signature verification before applying
+
+## Verifying a Download
+
+Checksums, signatures, provenance attestations and SBOMs are all on the release
+page, and none of them require trusting the copy of the file you are checking.
+Verification needs the [GitHub CLI](https://cli.github.com/) (`gh`); the image
+steps also need Docker. Releases published before these were added carry
+checksums and minisign signatures only.
+
+```bash
+# 1. Checksums. Download the assets and checksums.sha256 into ONE directory --
+#    gh release download <tag> -R J3vb/OwnCord puts them all there. The file
+#    lists bare filenames, so it has to be checked from that directory, and
+#    --ignore-missing skips the assets you chose not to download.
+sha256sum --check --ignore-missing checksums.sha256
+
+# 2. Provenance. This proves the file was built by this repository's release
+#    workflow at the commit the tag points to, not merely uploaded by whoever
+#    holds the release. Run it on the asset you downloaded, and again on
+#    checksums.sha256 and on the source snapshot.
+gh attestation verify chatserver-linux-amd64.tar.gz --repo J3vb/OwnCord
+gh attestation verify checksums.sha256 --repo J3vb/OwnCord
+
+# 3. The image. Resolve the tag to the digest you are actually running first:
+#    a tag is mutable and a digest is not.
+DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:latest \
+  --format '{{index .RepoDigests 0}}')
+
+# 4. Verify the attestation the release run pushed beside that digest, then
+#    read the inventory BuildKit attached to the image.
+gh attestation verify "oci://$DIGEST" --repo J3vb/OwnCord
+docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:latest \
+  --format '{{json .SBOM}}'
+
+# 5. Windows binaries additionally carry a detached minisign signature, which is
+#    what the updater itself checks before applying an update. The public key
+#    lives in the repository; both the key and the .sig are base64.
+curl -sSfL -o server_update_public_key.txt \
+  https://raw.githubusercontent.com/J3vb/OwnCord/main/Server/updater/server_update_public_key.txt
+base64 -d chatserver.exe.sig > chatserver.exe.minisig
+base64 -d server_update_public_key.txt > server_update.pub
+minisign -Vm chatserver.exe -x chatserver.exe.minisig -p server_update.pub
+```
+
+| Asset class                                         | Signature                                                    | SBOM                        | Who verifies it                                  |
+| --------------------------------------------------- | ------------------------------------------------------------ | --------------------------- | ------------------------------------------------ |
+| `chatserver.exe`, `chatserver-windows-arm64.exe`    | detached minisign signature, plus the signed update manifest | CycloneDX, one per binary   | the updater on every update; by hand with step 5 |
+| `chatserver-linux-*.tar.gz`                         | none detached — the SHA256 in the signed update manifest     | CycloneDX, one per archive  | the updater, through the manifest                |
+| Tauri client bundles (Windows, Linux x64 and arm64) | updater signature                                            | none yet                    | the client's own updater                         |
+| `ghcr.io/j3vb/owncord-server` image                 | Sigstore provenance attestation, stored in the registry      | SPDX, attached to the index | an operator, with steps 3 and 4                  |
+
+What this does and does not prove:
+
+- Attestations here are **SLSA Build L2**: a hosted runner, a signature minted
+  from the workflow's own OIDC identity, and provenance naming the workflow and
+  commit, all from the same run. It is not L3, which needs a hardened and
+  isolated build platform.
+- Provenance binds a file to a build, not to a person: it says which commit and
+  which workflow produced it, and nothing about whether that commit is
+  trustworthy. Read the commit.
+- The Tauri client bundles carry a provenance attestation but **no SBOM**; that
+  arrives with the client-bundle work in B8. The updater signature on them is
+  the check that matters today.
+- Windows Authenticode/SmartScreen code signing is still separate work (see
+  [Known Limitations](security.md#known-limitations)), so SmartScreen keeps
+  warning on the binaries even when every check above passes.
 
 ## Firewall and Ports
 
