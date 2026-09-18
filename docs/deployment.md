@@ -851,6 +851,13 @@ Applying an update runs in this order:
    launched. The backstop also waits for the managed LiveKit process to exit.
 5. The new process removes `.old`, retrying briefly while Windows finishes
    releasing the predecessor's executable file.
+6. That removal is the only recovery start-up performs. A new process does not
+   put `.old` back if the installed binary turns out to be broken, and it does
+   not delete a stale `.new` left by an interrupted download — staging refuses
+   to write through an existing `.new`, and the next update attempt removes it
+   before downloading. If the server dies between step 2 and step 4, the
+   previous binary is still beside the installation path as `.old` until a
+   successor reaches step 5; restoring it is a manual rename.
 
 Externally managed LiveKit is left running. Containers use image upgrades as
 described above. Installing the first release with this handoff fix may require

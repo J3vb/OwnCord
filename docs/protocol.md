@@ -1942,7 +1942,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (40 types)
+### Server -> Client (42 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |

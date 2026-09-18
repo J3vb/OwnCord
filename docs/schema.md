@@ -944,7 +944,7 @@ Permissions are stored as an integer bitfield (31 bits used) in
 | 27  | `0x8000000`  | `VIEW_AUDIT_LOG`   | Read the audit log (`GET /admin/api/audit-log`)                                                                                                                                   |
 | 30  | `0x40000000` | `ADMINISTRATOR`    | Bypasses ALL permission checks; gates the log stream and account erasure (`DELETE /admin/api/users/{id}`)                                                                         |
 
-Bits 2-4, 7, 13-15, 23, 28-29, 31 are reserved.
+Bits 2-4, 7-8, 13-15, 23, 28-29, 31 are reserved.
 
 ### Permission groups
 
