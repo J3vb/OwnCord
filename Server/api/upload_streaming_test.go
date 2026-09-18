@@ -357,7 +357,8 @@ func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
 	// Sized so eight racers' bytes landing exactly once (96 MiB total) fit
 	// comfortably (150 - 96 = 54 MiB, above the floor): a correct admission
 	// scheme can let all eight through. Only counting the same bytes twice
-	// (staged and landed) can drive the observed free space under the floor.
+	// at rest (staged and landed) can drive the observed free space under the
+	// floor or strand headroom once the race is over.
 	const baseFree = uint64(150 << 20)
 
 	real, err := storage.New(t.TempDir(), 50)
@@ -411,18 +412,28 @@ func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
 	wg.Wait()
 
 	// Eight racers landing 12 MiB each (96 MiB) leaves 150 - 96 = 54 MiB
-	// free, above the 50 MiB floor: a correct admission scheme, which
-	// serializes every check-and-charge under one lock and counts each
-	// byte exactly once (in flight, then landed — never both), admits all
-	// eight. Only double-counting staged and landed bytes can produce a
-	// different outcome or drive the observed free space under the floor.
-	if got := created.Load(); got != 8 {
-		t.Fatalf("created %d, refused %d; want all 8 admitted (96 MiB landed leaves 54 MiB, above the 50 MiB floor)", got, refused.Load())
-	}
-	if created.Load()+refused.Load() != 8 {
-		t.Fatalf("created %d, refused %d; want them to add to 8", created.Load(), refused.Load())
+	// free, above the 50 MiB floor, so all eight fit and usually all eight
+	// are admitted. The exact count is timing: a racer judged between
+	// another's store write (the probe sees the bytes) and its Landed (the
+	// in-flight sum stops counting them) is refused for bytes counted twice
+	// — the safe side, the same window
+	// TestReserve_HeadroomRacersNeverOverAdmitWhileBytesLand documents.
+	if created.Load() < 1 || created.Load()+refused.Load() != 8 {
+		t.Fatalf("created %d, refused %d; want at least 1 created and them to add to 8", created.Load(), refused.Load())
 	}
 	if minFreeObserved.Load() < floor {
 		t.Fatalf("the observed free space dropped to %d bytes, under the %d floor", minFreeObserved.Load(), floor)
 	}
+
+	// That window is the only double count allowed, and it closes with the
+	// race: at rest each admitted byte is counted exactly once, so exactly
+	// the headroom the landed files left must still be admitted. A byte still
+	// counted twice — a spill left in the temp dir, a reservation that never
+	// left the in-flight sum — refuses it.
+	room := int64(baseFree-floor) - int64(created.Load())*size
+	res, err := h.uploads.Reserve(context.Background(), h.userID, room)
+	if err != nil {
+		t.Fatalf("at rest with %d created, the remaining %d bytes of headroom were refused (%v); a byte is still counted twice", created.Load(), room, err)
+	}
+	res.Release(context.Background())
 }
