@@ -42,6 +42,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -202,8 +203,9 @@ func openMigrated() (*db.DB, func(), error) {
 }
 
 // genRoutes walks the production router with every optional family switched
-// on — uploads, voice, the GIF proxy and telemetry — so the table is the
-// whole tree rather than the bare-config subset. The scaffolding is a copy of
+// on — uploads, voice, the GIF proxy, the admin log ring buffer and telemetry
+// — so the table is the whole tree rather than the bare-config subset. The
+// scaffolding is a copy of
 // fullRouter in api/absence_contract_test.go plus the telemetry init main.go
 // does; test code stays in the test.
 //
@@ -261,7 +263,12 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}
 	defer rt.Hub.GracefulStop()
-	handler, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil, rt)
+	// The log ring buffer is non-nil so the admin subrouter mounts its full
+	// surface: /admin/api/logs/stream is registered only when logBuf != nil, so
+	// a nil here would leave a production route out of the index. The router is
+	// walked, never served, so a real buffer has no other effect. 2000 is the
+	// capacity main.go constructs and the capacity docs/api.md documents.
+	handler, cleanup := api.NewRouter(cfg, database, "gendocs", admin.NewRingBuffer(2000), nil, rt)
 	defer cleanup()
 
 	routes, ok := handler.(chi.Routes)
@@ -269,13 +276,13 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("api.NewRouter returned %T, want a chi.Routes so the mounted tree can be walked", handler)
 	}
 	var rows [][]string
-	admin := 0
+	adminRoutes := 0
 	walk := func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		// A real admin subroute, not the per-method `/admin/*` catch-all chi
 		// emits for the Mount itself — those appear whether or not the walk
 		// ever descended into the subrouter.
 		if strings.HasPrefix(route, "/admin/api/") && !strings.HasSuffix(route, "/*") {
-			admin++
+			adminRoutes++
 		}
 		rows = append(rows, []string{method, route})
 		return nil
@@ -286,7 +293,7 @@ func genRoutes(w io.Writer) error {
 	if len(rows) < minRoutes {
 		return fmt.Errorf("walked only %d routes; expected the full production router (>= %d)", len(rows), minRoutes)
 	}
-	if admin == 0 {
+	if adminRoutes == 0 {
 		return errors.New("walk saw no /admin/api/ routes; the mounted admin subrouter was not traversed")
 	}
 	// chi hands the methods of one pattern back in map order, so the sort is
@@ -298,7 +305,7 @@ func genRoutes(w io.Writer) error {
 		r[1] = code(r[1])
 	}
 
-	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).\n\n",
+	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the admin log ring buffer, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).\n\n",
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Method", "Path"}, rows)
 	return nil
