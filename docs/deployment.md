@@ -472,6 +472,45 @@ Measured, because both halves are easy to assume the wrong way round
   cannot name anybody, so a server that booted would be serving a database it
   cannot reconcile with its own deletion history.
 
+## Storage growth
+
+Everything the server writes lives under `server.data_dir` (default `data/`,
+default `./data` beside the binary). What each path holds, what bounds it and
+what — if anything — ever deletes it:
+
+| Path                                        | Written by                                                             | Bounded by                                                                                                         | Pruned by                                                                                                                                         |
+| ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chatserver.db` + `chatserver.db-wal`       | every feature                                                          | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes             |
+| `uploads/`                                  | attachments, avatars, emoji                                            | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick           |
+| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` safety copies | `Retention (days)` in the admin panel                                                                              | retention always keeps the newest backup; `pre_restore_*` copies age out under the same setting and are **not** distinguished from chosen backups |
+| `acme_certs/`                               | `tls.mode: acme` only                                                  | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                            |
+| `livekit/`                                  | `voice.auto_download_livekit`                                          | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                                         |
+| `plugins/`                                  | plugins loaded by `-tags wazero` builds                                | what the plugins themselves write                                                                                  | never                                                                                                                                             |
+| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                     | one TLS pair                                                                                                       | never — replacing them is the rotation procedure under [TLS Setup](#tls-setup)                                                                    |
+| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                              | three small files                                                                                                  | never — and must never be: each loss is permanent (see [Before upgrading](#before-upgrading-take-the-archive))                                    |
+| `erasure/markers.sqlite`                    | every account erasure and every swept channel                          | one row per erased account or swept channel                                                                        | never; small by construction                                                                                                                      |
+
+Four facts the table cannot carry:
+
+- **The audit log is never pruned.** No maintenance step touches it — it is
+  the tamper-evident trail, and the doc says so rather than leaving it to be
+  assumed: on a busy server `audit_log` is the slowest-growing large table,
+  and it grows for the life of the server.
+- **Message retention is off by default.** `settings.retention_days` is `0`
+  on a fresh and on an upgraded server, so message growth is unbounded until
+  an owner sets a window in the admin panel. `GET /admin/api/retention/preview`
+  (admin panel, Retention) shows exactly which messages a window would delete
+  before it runs. Pinned messages and DMs are never swept.
+- **Report content and moderation actions age out on their own:**
+  `moderation.report_retention_days` 180, `moderation.action_retention_days`
+  90 (a closed report's content, and a warning/timeout action row after
+  acknowledgement or expiry — ban, kick and removal rows are never touched).
+- **The disk floor.** Everything in the table shares one volume with the WAL.
+  The server stops accepting uploads at `server.min_free_disk_mb` and reports
+  `degraded`/`disk` on `/health`; messages keep flowing. What each stage of a
+  filling disk looks like and how to recover is under
+  [Health Endpoint](#health-endpoint); that table is not repeated here.
+
 ## Upgrade and Rollback
 
 An upgrade swaps the binary (or the image) under an install directory that
@@ -1078,11 +1117,24 @@ against expiry, rotation and restart at release quality. See
 
 ## Background Maintenance
 
-The server runs a maintenance loop every 15 minutes that:
+A maintenance loop runs every 15 minutes, thirteen steps in this order
+(later steps only see what earlier ones stranded this tick). A failing step
+is logged and the rest of the pass still runs; five consecutive failed passes
+open a circuit breaker that skips one tick and then retries:
 
-- Purges expired user sessions
-- Deletes orphaned file attachments (uploaded but never linked to a message, older than 1 hour)
-- Uses a circuit breaker (pauses after 5 consecutive failures)
+1. Expired user sessions are purged
+2. Expired message delivery receipts are deleted
+3. Expired second-factor state is cleaned up
+4. Stale push subscriptions are swept
+5. Backup maintenance runs (schedule check, retention pruning)
+6. Orphaned attachments are deleted (uploaded but never linked, older than 1 hour)
+7. The retention sweep runs (messages past the configured window, if any)
+8. Closed reports' content past `moderation.report_retention_days` is pruned
+9. Retired moderation actions past `moderation.action_retention_days` are removed
+10. Orphaned voice mutes are reconciled
+11. Pending erasure jobs resume
+12. Storage files are reconciled against the database (at most 500 files per tick)
+13. A storage recount runs — last on purpose, so it measures what the sweeps above freed
 
 ## Graceful Shutdown
 
