@@ -373,9 +373,64 @@ server {
 
 ## Backup Strategy
 
-The built-in backup covers the **database only**. Uploaded files live under
-`upload.storage_dir` and are not in it — back that directory up on the same
-schedule, or a restore comes back with every attachment missing.
+A restorable install is a set, not one file. The built-in backup endpoint
+covers the **database only**; what has to travel with it is everything the
+database _points at_ — the uploads under `upload.storage_dir`, the three key
+files and the marker file beside `data/`, and your `config.yaml`. Back
+`data/` up wholesale on the same schedule as the database, and restore is not
+rollback: putting yesterday's database back is not the same operation as
+reverting an upgrade — the costs are different and
+[Rolling back](#rolling-back) is a separate procedure.
+
+If you copy selectively anyway, these are the pieces, and what leaving each
+one out costs you:
+
+- **The backup from `POST /admin/api/backup`** — without it your only copy of
+  the database is the file-level one, and nothing verified it. The backup
+  endpoint runs `integrity_check` when it writes the file and again before it
+  is allowed to overwrite a live database, and the admin panel can put it back
+  on its own. See [Admin Backup Endpoint](#admin-backup-endpoint).
+- **`data/uploads/`** — every attachment 404s. The database rows survive, so
+  messages still show their attachments; the bytes are gone and the download
+  returns 404. The built-in backup covers the database only
+  ([Backup Strategy](#backup-strategy)); this directory is never in it.
+- **`data/totp.key`** — every 2FA user is locked out, and emergency recovery
+  codes do not help. Stored TOTP secrets are AES-256 ciphertext under this key;
+  a server that cannot find the file generates a fresh one and boots happily,
+  and every second factor on it is then undecryptable. The verify path decrypts
+  the stored secret _before_ it will look at the submitted code, so it fails
+  first and never reaches the recovery-code branch
+  (`Server/service/auth.go:673`). There is no admin endpoint and no CLI
+  subcommand that clears a user's second factor — disabling 2FA needs an
+  already-authenticated session, which is exactly what the user cannot get. The
+  only way back is to put this file back from the archive.
+- **`data/erasure.key`** — a restore cannot recognise erased accounts. A
+  deletion marker names its subject as `HMAC-SHA256(key, user id)`, so without
+  the key the markers name no one and a restore can resurrect what they guard.
+- **`data/erasure/markers.sqlite`** — worse than losing the key, because the
+  file carries two more things. It holds `sequence_floors`: without them an
+  erased account's id is handed out again, and its innocent new holder is
+  erased by the old marker. It also holds the account markers that keep the
+  first-run setup gate closed against a restore of a pre-owner backup. The
+  server refuses rather than adopting a mismatched file, so this is an outage
+  you resolve by hand, not one you can delete your way out of.
+- **`data/push_vapid.key`** — every push subscription is invalidated. Each
+  `push_subscriptions` row records the key id it was created under; under a new
+  key those rows are invisible and the maintenance sweep removes them. Every
+  device has to subscribe again, and no push is delivered until it does.
+- **`config.yaml`** — the server boots on compiled-in defaults instead: port
+  8443, self-signed TLS, and freshly generated LiveKit credentials, which
+  breaks every voice token. It does **not** rotate a self-signed certificate:
+  `self_signed` loads an existing `data/cert.pem` / `data/key.pem` and
+  generates only on confirmed absence, and those are in the archive. Clients
+  lose their pinned certificate only if the lost config said
+  `tls.mode: acme` or `manual`, because the fallback to self-signed then
+  serves a different one.
+
+None of these are in a database backup. `data/uploads/`, the three key files
+and `data/erasure/` all live under the data directory, so copying `data/`
+wholesale covers every one of them. Back them up on the same schedule as the
+database, not only before an upgrade.
 
 ### SQLite WAL Considerations
 
@@ -437,22 +492,32 @@ Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backup" -Method POST -H
 
 ### Restore
 
-Restoring replaces the live database file. A pre-restore safety backup is
-created automatically, and the restore is aborted before anything is touched if
-that copy cannot be written. The server then restarts itself. With
-`server.restart_mode` on `supervised` — which `auto` picks for systemd, NSSM and
-containers — it drains and exits cleanly and the supervisor relaunches it
-instead; the shipped `docker-compose.yml` sets `restart: unless-stopped` for
-exactly this ([Upgrading](#upgrading)).
+Restoring replaces the live database file, in this order: the server runs
+`integrity_check` on the backup file and refuses a broken one; it writes the
+`backup_restore` audit row; it takes the `pre_restore_<ts>.db` safety copy
+and aborts before anything is touched if that copy cannot be written; it
+broadcasts the restart so connected clients are told to reconnect; then it
+replaces the database and the process restarts. With `server.restart_mode` on
+`supervised` — which `auto` picks for systemd, NSSM and containers — it drains
+and exits cleanly and the supervisor relaunches it instead; the shipped
+`docker-compose.yml` sets `restart: unless-stopped` for exactly this
+([Upgrading](#upgrading)). On the first boot after a restore, every deletion
+marker recorded since the backup was taken is replayed before anything serves
+([data-lifecycle.md](architecture/data-lifecycle.md)) — which is why the
+marker file and `erasure.key` have to travel with the backup.
 
 **A restorable install is a set, not one file.** The backup endpoint's file is
 the database only. What has to travel with it is everything the database
 _points at_ — the uploads, and the three key files plus the marker file that
 live beside `data/`. **Back up `data/` wholesale on the same schedule as the
 database**, not only before an upgrade: the list of what each file costs you if
-it is missing is in the upgrade section's
-[Before upgrading: take the archive](#before-upgrading-take-the-archive), and
-it is the same list here.
+it is missing is [Backup Strategy](#backup-strategy)'s list, and it is the
+same list here. What a restore cannot bring back: the uploads (they are never
+in the backup), and everything that happened after the backup was taken —
+accounts, messages, settings and bans created since are gone. And the two
+refusals the marker file can produce at boot are described in
+[security.md](security.md#erasure-marker-key), which carries the matching rule
+in full.
 
 Measured, because both halves are easy to assume the wrong way round
 (`cmd/smoke -drills` phase R, and the B6-11 block in
@@ -585,55 +650,10 @@ confirm yours.
 
 Copy `data/` **wholesale**, not a list of names. A version you have not
 installed yet is allowed to add files to it, and a hand-written list is exactly
-what silently misses one. If you copy selectively anyway, these are the pieces,
-and what leaving each one out costs you:
-
-- **The backup from `POST /admin/api/backup`** — without it your only copy of
-  the database is the file-level one, and nothing verified it. The backup
-  endpoint runs `integrity_check` when it writes the file and again before it
-  is allowed to overwrite a live database, and the admin panel can put it back
-  on its own. See [Admin Backup Endpoint](#admin-backup-endpoint).
-- **`data/uploads/`** — every attachment 404s. The database rows survive, so
-  messages still show their attachments; the bytes are gone and the download
-  returns 404. The built-in backup covers the database only
-  ([Backup Strategy](#backup-strategy)); this directory is never in it.
-- **`data/totp.key`** — every 2FA user is locked out, and emergency recovery
-  codes do not help. Stored TOTP secrets are AES-256 ciphertext under this key;
-  a server that cannot find the file generates a fresh one and boots happily,
-  and every second factor on it is then undecryptable. The verify path decrypts
-  the stored secret _before_ it will look at the submitted code, so it fails
-  first and never reaches the recovery-code branch
-  (`Server/service/auth.go:673`). There is no admin endpoint and no CLI
-  subcommand that clears a user's second factor — disabling 2FA needs an
-  already-authenticated session, which is exactly what the user cannot get. The
-  only way back is to put this file back from the archive.
-- **`data/erasure.key`** — a restore cannot recognise erased accounts. A
-  deletion marker names its subject as `HMAC-SHA256(key, user id)`, so without
-  the key the markers name no one and a restore can resurrect what they guard.
-- **`data/erasure/markers.sqlite`** — worse than losing the key, because the
-  file carries two more things. It holds `sequence_floors`: without them an
-  erased account's id is handed out again, and its innocent new holder is
-  erased by the old marker. It also holds the account markers that keep the
-  first-run setup gate closed against a restore of a pre-owner backup. The
-  server refuses rather than adopting a mismatched file, so this is an outage
-  you resolve by hand, not one you can delete your way out of.
-- **`data/push_vapid.key`** — every push subscription is invalidated. Each
-  `push_subscriptions` row records the key id it was created under; under a new
-  key those rows are invisible and the maintenance sweep removes them. Every
-  device has to subscribe again, and no push is delivered until it does.
-- **`config.yaml`** — the server boots on compiled-in defaults instead: port
-  8443, self-signed TLS, and freshly generated LiveKit credentials, which
-  breaks every voice token. It does **not** rotate a self-signed certificate:
-  `self_signed` loads an existing `data/cert.pem` / `data/key.pem` and
-  generates only on confirmed absence, and those are in the archive. Clients
-  lose their pinned certificate only if the lost config said
-  `tls.mode: acme` or `manual`, because the fallback to self-signed then
-  serves a different one.
-
-None of these are in a database backup. `data/uploads/`, the three key files
-and `data/erasure/` all live under the data directory, so copying `data/`
-wholesale covers every one of them. Back them up on the same schedule as the
-database, not only before an upgrade.
+what silently misses one. What each file costs you if it is missing — the
+backup file, `data/uploads/`, `data/totp.key`, `data/erasure.key`,
+`data/erasure/markers.sqlite`, `data/push_vapid.key` and `config.yaml` — is
+[Backup Strategy](#backup-strategy)'s list, and it is the same list here.
 
 ### Performing the upgrade
 
