@@ -155,6 +155,79 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("refuses a send past the server's 4000 code point limit", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    const errEl = container.querySelector(".attachment-upload-error");
+    expect(errEl).not.toBeNull();
+    expect(errEl?.textContent).toContain("4000");
+
+    comp.destroy?.();
+  });
+
+  it("refuses an over-long edit through the same guard", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.startEdit(77, "x");
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+
+    comp.destroy?.();
+  });
+
+  it("accepts content of exactly 4000 code points", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4000);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).toHaveBeenCalledTimes(1);
+
+    comp.destroy?.();
+  });
+
+  it("counts astral characters as one code point, not two UTF-16 units", () => {
+    // 2001 astral code points is 4002 UTF-16 units: the server's
+    // utf8.RuneCountInString accepts it, a `.length` guard would wrongly refuse it.
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "\u{1F600}".repeat(2001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).toHaveBeenCalledTimes(1);
+
+    comp.destroy?.();
+  });
+
   it("setReplyTo shows reply bar", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
