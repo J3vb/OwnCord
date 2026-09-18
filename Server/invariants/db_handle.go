@@ -204,77 +204,105 @@ func openAssign(expr ast.Expr, alias string) bool {
 //     in the db package itself are never hand-offs — that is the handle's own
 //     package, not an owner.
 func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[string]int) {
-	pkgs := importedNames(f)
-	dbAlias := DBHandleAlias(f)
-
-	// ownPkg reports whether a callee or a composite-literal type names the db
-	// package itself. Checked on the callee rather than on the argument,
-	// because the argument's shape is what differs (h.db is a hand-off
-	// wherever it goes, a local only across a package boundary) while the
-	// exclusion is the same for both.
-	ownPkg := func(e ast.Expr) bool {
-		if dbAlias == "" {
-			return false
-		}
-		sel, ok := e.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		id, ok := sel.X.(*ast.Ident)
-		return ok && id.Name == dbAlias
+	s := dbHandleScan{
+		pkgs:    importedNames(f),
+		dbAlias: DBHandleAlias(f),
+		vars:    vars,
+		fields:  fields,
+		calls:   calls,
+		hands:   hands,
 	}
-
-	handed := func(arg ast.Expr, crossPkg bool) bool {
-		switch a := arg.(type) {
-		case *ast.SelectorExpr:
-			return fields[a.Sel.Name]
-		case *ast.Ident:
-			return crossPkg && vars[a.Name]
-		}
-		return false
-	}
-
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.CallExpr:
-			if sel, ok := x.Fun.(*ast.SelectorExpr); ok && calls != nil {
-				switch recv := sel.X.(type) {
-				case *ast.Ident:
-					if vars[recv.Name] {
-						calls[sel.Sel.Name]++
-					}
-				case *ast.SelectorExpr:
-					if fields[recv.Sel.Name] {
-						calls[sel.Sel.Name]++
-					}
-				}
-			}
-			if hands == nil || ownPkg(x.Fun) {
-				return true
-			}
-			name, crossPkg := calleeName(x.Fun, pkgs)
-			for _, arg := range x.Args {
-				if handed(arg, crossPkg) {
-					hands[name]++
-				}
-			}
+			s.callExpr(x)
 		case *ast.CompositeLit:
-			if hands == nil || ownPkg(x.Type) {
-				return true
-			}
-			name, crossPkg := qualifiedName(x.Type, pkgs)
-			for _, elt := range x.Elts {
-				kv, ok := elt.(*ast.KeyValueExpr)
-				if !ok {
-					continue
-				}
-				if handed(kv.Value, crossPkg) {
-					hands[name]++
-				}
-			}
+			s.compositeLit(x)
 		}
 		return true
 	})
+}
+
+// dbHandleScan carries one file's worth of context for DBHandleCalls, so the
+// two node shapes it recognises can be read one at a time.
+type dbHandleScan struct {
+	pkgs    map[string]bool
+	dbAlias string
+	vars    map[string]bool
+	fields  map[string]bool
+	calls   map[string]int
+	hands   map[string]int
+}
+
+// ownPkg reports whether a callee or a composite-literal type names the db
+// package itself. Checked on the callee rather than on the argument, because
+// the argument's shape is what differs (h.db is a hand-off wherever it goes, a
+// local only across a package boundary) while the exclusion is the same for
+// both.
+func (s dbHandleScan) ownPkg(e ast.Expr) bool {
+	if s.dbAlias == "" {
+		return false
+	}
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == s.dbAlias
+}
+
+// handed reports whether an argument is the bare handle leaving its carrier.
+func (s dbHandleScan) handed(arg ast.Expr, crossPkg bool) bool {
+	switch a := arg.(type) {
+	case *ast.SelectorExpr:
+		return s.fields[a.Sel.Name]
+	case *ast.Ident:
+		return crossPkg && s.vars[a.Name]
+	}
+	return false
+}
+
+// callExpr tallies a method call on the handle and any hand-off among its
+// arguments.
+func (s dbHandleScan) callExpr(x *ast.CallExpr) {
+	if sel, ok := x.Fun.(*ast.SelectorExpr); ok && s.calls != nil {
+		switch recv := sel.X.(type) {
+		case *ast.Ident:
+			if s.vars[recv.Name] {
+				s.calls[sel.Sel.Name]++
+			}
+		case *ast.SelectorExpr:
+			if s.fields[recv.Sel.Name] {
+				s.calls[sel.Sel.Name]++
+			}
+		}
+	}
+	if s.hands == nil || s.ownPkg(x.Fun) {
+		return
+	}
+	name, crossPkg := calleeName(x.Fun, s.pkgs)
+	for _, arg := range x.Args {
+		if s.handed(arg, crossPkg) {
+			s.hands[name]++
+		}
+	}
+}
+
+// compositeLit tallies a hand-off through a struct literal field.
+func (s dbHandleScan) compositeLit(x *ast.CompositeLit) {
+	if s.hands == nil || s.ownPkg(x.Type) {
+		return
+	}
+	name, crossPkg := qualifiedName(x.Type, s.pkgs)
+	for _, elt := range x.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if s.handed(kv.Value, crossPkg) {
+			s.hands[name]++
+		}
+	}
 }
 
 // calleeName renders a call's target for the Hands column and reports whether
