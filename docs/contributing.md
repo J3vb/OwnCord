@@ -201,7 +201,7 @@ links here rather than restating it.
 - `main` -- releases only. `dev` is merged to `main` for a release, and release
   tags are cut from `main`.
 
-`dev` is protected and PR-only: direct pushes are rejected, twelve status checks
+`dev` is protected and PR-only: direct pushes are rejected, fifteen status checks
 are required, `required_approving_review_count` is 0, and the rule is enforced
 on admins. So a PR is self-mergeable once CI is green, but no commit reaches
 `dev` without CI having run on it. Settings and rationale live in
@@ -252,7 +252,7 @@ and target.
 
 1. Branch from `dev`
 2. Open the PR against `dev`
-3. All twelve required checks must pass -- `dev` is protected, so a red PR cannot
+3. All fifteen required checks must pass -- `dev` is protected, so a red PR cannot
    merge
 4. Request code review
 5. Squash merge, conventional commit subject
