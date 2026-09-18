@@ -217,16 +217,19 @@ string and park it in the LRU + IndexedDB caches.
 
 ## 7. Replies, pins, search, read/unread
 
-| Feature     | Target UX                                                                                                                                                                                                                                                 |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                           |
-| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)            |
-| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                               |
-| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented only for non-active, non-own, non-replay messages (the `chat_message` handler in `wireDispatcher()`, `lib/dispatcher.ts`); focus emits `channel_focus` for server read-state |
+| Feature     | Target UX                                                                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                                 |
+| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                                  |
+| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                                                     |
+| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (the `chat_message` handler in `wireDispatcher()`, `lib/dispatcher.ts`); focus emits `channel_focus` for server read-state |
 
-**Read-state target rule:** unread counts must be suppressed during reconnect
-replay (already handled via `isReplaying()`), so catching up 500 buffered
-messages doesn't light every channel red.
+**Read-state target rule:** unread counts are **not** suppressed during
+reconnect replay — a replayed frame increments its channel exactly as a live one
+does, because catching up 500 buffered messages _did_ happen while the reader was
+away (`lib/dispatcher.ts`). The local replay classifier (`isReplayFrame`,
+`lib/dispatcher.ts`) gates only the desktop notification/sound/taskbar flash and
+the `@here` mention badge, never an unread count.
 
 **New-messages divider (✓ implemented 2026-08):** opening a channel that had
 unread messages renders a red **NEW** line above the first one. Opening the
