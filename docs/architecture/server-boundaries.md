@@ -430,21 +430,25 @@ on every return — a failed start, a serve error and a clean shutdown alike.
 | 3   | `tls`                  | —                                                                                 |
 | 4   | `database`             | `database` — `database.Close()`, registered before the migration runs             |
 | 5   | `migrate`              | —                                                                                 |
-| 6   | `telemetry`            | `telemetry` — bounded OTel shutdown                                               |
-| 7   | `plugins`              | `plugins` — `registry.Close`                                                      |
-| 8   | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`           |
-| 9   | `router`               | `router` — the rate-limiter cleanup goroutine                                     |
-| 10  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner       |
-| 11  | `audit-writer`         | `audit-writer` — drains the audit queue                                           |
-| 12  | `maintenance`          | `maintenance` — joins the maintenance loop                                        |
-| 13  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                 |
-| 14  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget  |
-| 15  | `signals`              | `signals` — unregisters the signal handler; registered last, so it runs **first** |
+| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file          |
+| 7   | `push-vapid-key`       | —                                                                                 |
+| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                               |
+| 9   | `plugins`              | `plugins` — `registry.Close`                                                      |
+| 10  | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`           |
+| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                     |
+| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner       |
+| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                           |
+| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                        |
+| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                 |
+| 16  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget  |
+| 17  | `signals`              | `signals` — unregisters the signal handler; registered last, so it runs **first** |
 
 Close order is therefore `signals`, `http`, `maintenance`, `audit-writer`,
-`event-persistence`, `router`, `hub`, `plugins`, `telemetry`, `database`,
-`background-context`. All three facts hold, and now hold **because of the
-ordering rule** rather than because of where a `defer` happened to sit:
+`event-persistence`, `router`, `hub`, `plugins`, `telemetry`,
+`erasure-markers`, `database`, `background-context`. All three facts hold, and
+now hold **because of the ordering rule** rather than because of where a
+`defer` happened to sit: `push-vapid-key` is deliberately absent — it registers
+no closer.
 
 - the audit writer and event persistence both start after the database opens,
   so both stop before `database.Close`;

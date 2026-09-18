@@ -22,6 +22,9 @@ services:
   owncord:
     image: ghcr.io/j3vb/owncord-server:latest
     restart: unless-stopped
+    # The server's own drain budget is 30s with a ≈55s worst case; Compose's
+    # default 10s would SIGKILL an ordinary `docker compose down` mid-flush.
+    stop_grace_period: 60s
     ports:
       - "8443:8443"
     environment:

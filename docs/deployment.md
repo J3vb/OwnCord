@@ -219,8 +219,10 @@ in its header comments. The important choices it encodes:
   applying server updates from the admin panel** — it also repairs the
   update handoff when updating from older OwnCord releases, whose spawned
   replacement gets reaped by the cgroup cleanup.
-- `TimeoutStopSec=35` — the server drains gracefully on SIGTERM with a 30s
-  budget; systemd waits it out before escalating.
+- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM with a 30s
+  budget and a worst case of ≈55s, so systemd waits 60s before SIGKILLing a
+  wedged teardown; the server's own 90s restart backstop covers non-systemd
+  supervisors.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
   directory must stay writable or the admin panel's self-update (which
   renames the new binary into place) breaks.
@@ -912,11 +914,23 @@ The server runs a maintenance loop every 15 minutes that:
 
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
-1. Stops accepting new connections
-2. Closes all WebSocket connections and voice rooms
-3. Drains HTTP connections with a 30-second timeout
-4. Stops the maintenance loop
-5. Closes the database
+1. Unregisters the signal handler and cancels the root context
+2. Shuts down the ACME listener, then drains in-flight HTTP handlers
+3. Stops the hub on the same 30-second budget: sends the restart notice,
+   stops the LiveKit process and closes every WebSocket connection
+4. Joins the maintenance loop, flushes the audit queue and drains event
+   persistence
+5. Stops the router's cleanup goroutine, closes the plugin runtime, shuts
+   telemetry down and releases the deletion-marker file
+6. Closes the database
+
+The drain comes **before** the WebSocket close, not after: in-flight handlers
+broadcast on their way out, and those frames have to reach a live hub and event
+persister or they vanish from the replay store across the restart. Shutdown
+does not wait on hijacked WebSocket connections, so connected clients do not
+delay the drain — they get the restart notice immediately afterwards. The order
+is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
+a hand-written teardown.
 
 ## See Also
 

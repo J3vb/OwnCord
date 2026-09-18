@@ -33,9 +33,11 @@ RestartSec=3
 # in 10s) and parks the unit as failed; raise StartLimitIntervalSec /
 # StartLimitBurst in [Unit] if you want a longer leash.
 
-# The server drains gracefully on SIGTERM with a 30s budget; give it a little
-# headroom before systemd escalates to SIGKILL.
-TimeoutStopSec=35
+# The server drains gracefully on SIGTERM with a 30s budget, and its worst
+# case is ≈55s; 60s waits that out. Past 60s systemd SIGKILLs a wedged
+# teardown — non-systemd supervisors are covered by the server's own 90s
+# restart backstop (RestartBackstopDelay).
+TimeoutStopSec=60
 
 # ── Hardening ───────────────────────────────────────────────────────────────
 NoNewPrivileges=true

@@ -65,4 +65,8 @@ ENV OWNCORD_CONTAINER=1
 # Run as non-root (distroless provides uid 65532 = "nonroot").
 USER 65532:65532
 
+# Compose's 10s default would SIGKILL a drain mid-flush. Declared on the image
+# so every runtime gets the server's own stop signal.
+STOPSIGNAL SIGTERM
+
 ENTRYPOINT ["/chatserver"]
