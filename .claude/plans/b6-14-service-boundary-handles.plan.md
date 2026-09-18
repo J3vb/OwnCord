@@ -513,27 +513,30 @@ npm run format && npm run check:docs && npm run check:hygiene
 Ticked only where the gate actually ran; evidence is the RED-proof output and
 the regenerated block in the PR.
 
-- [ ] Census recorded in the PR before Task 1: 5 files / 7 sites, listed with
+- [x] Census recorded in the PR before Task 1: 5 files / 7 sites, listed with
       file:line, and Task 1's first run reports exactly those
-- [ ] `DBImportEntry.Calls` and `.Hands` pin every `boundary` row that makes a
+- [x] `DBImportEntry.Calls` and `.Hands` pin every `boundary` row that makes a
       call or hand-off (13 + 1 new); `adapter` rows measure empty; the
       liveness test fails a row with neither an import nor a pinned call
-- [ ] The doc gate exits 1 on: a handle call in a file with no row, a call or
+- [x] The doc gate exits 1 on: a handle call in a file with no row, a call or
       hand-off in an `adapter` row, a drifted multiset — each proven RED with
       a probe and reverted
-- [ ] `db-import-boundary` reports `db-handle-owner` on a `*sql.Tx`/`*sql.DB`
+- [x] `db-import-boundary` reports `db-handle-owner` on a `*sql.Tx`/`*sql.DB`
       type or `SQLDb()`/`SQLReaderDB()`/`BeginTx()` call in a non-`boundary`
       file — proven RED with a probe and reverted
-- [ ] `ws/hub_events.go` has a `boundary` row pinning exactly
+- [x] `ws/hub_events.go` has a `boundary` row pinning exactly
       `DeleteEventsForMessages: 1, DeleteEventsForUser: 1`; the file is
       unchanged; `-race` and `-tags deadlock` on `./ws/` green; `TestHP4_*`
       green
-- [ ] `serve_ready.go`, `hub_visibility.go`, `deps.go`, `moderation_queue.go`
+- [x] `serve_ready.go`, `hub_visibility.go`, `deps.go`, `moderation_queue.go`
       call the handle nowhere; the two new seam methods are documented on
       their interfaces
-- [ ] `server-boundaries.md`: block regenerated, Handle carriers table,
+- [x] `server-boundaries.md`: block regenerated, Handle carriers table,
       measurement section states the field-walk and the remaining
       interface-field limitation, every `doc_test.go` pattern matches a
       sentence that states the count it checks
 - [ ] B6-10 told about its stale `api/router.go` row; PRD row, changelog and
-      `ci-check` green
+      `ci-check` green — **unticked**: B6-10 merged before this branch started,
+      so there was no PR to tell and the `api/router.go` row is already
+      correct here (`PingRead SQLDb SQLReaderDB`); the PRD row and changelog
+      are done, and `ci-check` is the PR's gate, not this branch's

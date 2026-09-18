@@ -67,13 +67,34 @@ seams (`ws/readers.go` — the SettingsReader pattern, per owner decision),
 five rows turn seam-named `adapter`; `readers.go` itself is a type-only
 `adapter` row; `service.RequireDMNotBlocked` narrows to its own
 three-read `DMBlockReader`. **The channel family is complete**: `channel`
-disappears from the move targets (22 → 17 `move`, 20 → 26 `adapter`).
+disappears from the move targets (22 → 17 `move`, 20 → 26 `adapter`);
+2026-09-18 (B6-14) — the first table, on
+`feat/b6-14-service-boundary-handles`: the inventory now analyses **every**
+production file in a package that declares a `*db.DB` field, not only the
+files that import `db`, because the handle is held on `Hub.db`
+(`ws/hub.go`), `App.database` (`internal/app/app.go`) and the maintenance
+worker (`internal/app/maintenance.go`), and any file in those packages could
+call it without an import. The census that extension found — seven sites in
+five files — was: two files calling the handle with no row at all
+(`ws/hub_events.go`, `ws/moderation_queue.go`), one `adapter` row making a
+call its disposition forbids (`ws/serve_ready.go`), and two `adapter` rows
+handing the bare handle past the seam they already name
+(`ws/hub_visibility.go`, `ws/deps.go`). Four of those became seam reads;
+`ws/hub_events.go` stayed direct and became a `boundary` row, because its two
+deletes are inside the replay purge's `seqMu` critical section and routing
+them through the persistence seam would skip the delete on a server that
+persisted rows in an earlier enabled boot. Two rows no import would have
+produced were added (`ws/hub_events.go`, `internal/app/lifecycle.go`) and
+`ws/moderation_queue.go` needs none: 62 → 64 rows, `boundary` 20 → 22,
+`adapter` 42 unchanged.
 **Owner:** the B3 plan,
 [plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
 paste its output between the markers below. The tool exits non-zero when a
-file imports `db` without a row, or a row names a file that no longer imports
-it — the same two failures `go test ./invariants/` reports.
+file imports `db` without a row, when a file uses the handle without a row,
+when an `adapter` row makes a call or a hand-off, when a row's pinned
+multiset no longer matches what the file measures, or when a row names a file
+that no longer imports `db` and makes no call.
 
 This is the inventory the roadmap's B3 entry gate asks for ("hotspots and
 direct database call sites have an owned inventory") and the evidence its exit
@@ -154,19 +175,34 @@ information), like the invariants package. It records three things per file:
   or a selector whose final field is declared `*db.DB` anywhere in the same
   package (`h.db.X`, `s.deps.DB.X`). This is the persistence surface the
   dispositions are about.
+- **Hand-offs** — the places the file passes the bare handle to another
+  package: a `*db.DB` argument to `pkg.Func(…)`, or a `*db.DB` field in a
+  `pkg.Type{…}` literal. This is the composition root's wiring, and it is a
+  handle use too — the callee's parameter type is the owner it names, which
+  is why the "Handle carriers" table below reads as the other half of this
+  column. Callees inside `db` itself are excluded: that is the handle's own
+  package, not an owner.
 
-A shape the walker cannot see (a `*db.DB` reaching a file through an
-interface, say) shows up as a row with an import and no recorded calls —
-which is a row worth reading. Since the channel family's part 3, the hub's
-read seams (`ws/readers.go`) are deliberately that shape: the consumer rows
-name their seam, `DBReaders` wires the handle behind them at the composition
-root, and the seam interfaces are the authoritative list of what those files
-may read. 36 of the 64 rows are type-only, 33 of them `adapter`.
-
-Since B6-14 the walker also analyses a file that imports nothing from `db`
-when its package declares a `*db.DB` field, because such a file can call the
+Since B6-14 the walker analyses a file that imports nothing from `db` when
+its package declares a `*db.DB` field, because such a file can call the
 handle through that field and an import-keyed inventory would never see it:
-2 of the 64 rows use the handle without importing `db`.
+2 of the 64 rows use the handle without importing `db`. Each row's calls and
+hand-offs are pinned in `DBImportAllow` as exact multisets, so a new call in
+a `boundary` file is an allowlist edit and a call in an `adapter` file is a
+gate failure.
+
+A shape the walker still cannot see is a handle stored in an `any`- or
+interface-typed field and called through it: with no type information, a
+selector on such a field is indistinguishable from any other method call.
+There is none in the tree today, and `Hands` is what keeps it that way —
+every place the handle leaves its carrier is recorded, so a new interface
+that could hold it would appear as a new hand-off before it could appear as
+an invisible call. The deliberate version of the same shape is the hub's
+read seams (`ws/readers.go`): the consumer rows name their seam, `DBReaders`
+wires the handle behind them at the composition root, and the seam
+interfaces are the authoritative list of what those files may read — they
+show up as a row with an import and no recorded calls, which is a row worth
+reading. 36 of the 64 rows are type-only, 33 of them `adapter`.
 
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
@@ -299,6 +335,32 @@ Reading the table:
   reconnect replay family since the second split PR — type-only, it passes
   the handle to the shared helpers still in `serve.go`); the pieces then
   join their families' rows.
+
+### Handle carriers
+
+The Hand-offs column says **where** the handle leaves a file; this table says
+**what it becomes** when it arrives. Every interface below is satisfied by
+`*db.DB` itself, so a hand-off is not a widening — it is the point at which
+the handle stops being the whole database and starts being a named, countable
+surface. The column is the generated half; this table is the judged half, the
+same split the shape and disposition columns make.
+
+| Carrier                 | Declared                    | Wired at                                                                                | Narrows to                                                                                      |
+| ----------------------- | --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `service.Store`         | `service/datastore.go:20`   | `internal/app/hub.go:46` (`service.New`)                                                | every query the domain services may make — the one carrier that is deliberately broad           |
+| `ws.HubReaders`         | `ws/readers.go:103`         | `internal/app/hub.go:56` (`ws.DBReaders`, `readers.go:121`)                             | the hub's four read seams: `Visibility`, `Ready`, `Members`, `Dispatch`                         |
+| `ws.EventStore`         | `ws/eventstore.go:14`       | `internal/app/persistence.go:41` (`SetEventStore`), `:33`, `:45` (persister and pruner) | cold-tier replay persistence only: persist, read back, count a range, prune, max seq            |
+| `plugin.PluginStore`    | `plugin/pluginstore.go:12`  | `internal/app/plugins.go:23` (`plugin.Config.Store`)                                    | the plugin registry rows and the per-plugin KV — no other table                                 |
+| `auth.LockoutPersister` | `auth/ratelimit.go:40`      | `internal/app/hub.go:40` (`auth.NewPersistentRateLimiter`, `ratelimit.go:98`)           | four lockout rows, stdlib types only, so `auth` never imports `db` back                         |
+| `permissions.DB`        | `permissions/checker.go:44` | `ws/hub_options.go:172` (`permissions.NewChecker`, `checker.go:61`)                     | three permission-row reads, one of them B5-9's uncached timeout lookup                          |
+| `ws.HubOptions.DB`      | `ws/hub_options.go:28`      | `internal/app/hub.go:51` (`ws.NewHub`)                                                  | **not** a carrier: the bare handle, stored on `Hub.db`, which is why `ws` is walked field-first |
+
+Two of these hand-offs are invisible to the generated column, for one reason:
+without type information a method call on a value cannot be resolved to a
+package, so `hub.SetEventStore(database)` is not recorded while
+`ws.NewEventPersister(database, …)` and `ws.StartEventPruner(…, database, …)`
+are. That is the known edge of a `go/ast`-only walker, and this table is where
+it is made good.
 
 ## Hub lifecycle inventory
 
