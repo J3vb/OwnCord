@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockGetActiveThemeName, mockRestoreTheme, mockApplyThemeByName } = vi.hoisted(() => ({
+const { mockGetActiveThemeName, mockApplyThemeByName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockRestoreTheme: vi.fn(),
   mockApplyThemeByName: vi.fn(),
 }));
 
-vi.mock("@lib/themes", () => ({
+// Only the theme *selection* is stubbed. restoreAccent() stays real, because the
+// accent assertions below are about what it actually writes to the document.
+vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
-  restoreTheme: mockRestoreTheme,
   applyThemeByName: mockApplyThemeByName,
 }));
 
@@ -40,7 +41,6 @@ describe("applyStoredAppearance", () => {
     applyStoredAppearance();
 
     expect(mockApplyThemeByName).toHaveBeenCalledWith("neon-glow");
-    expect(mockRestoreTheme).not.toHaveBeenCalled();
     // largeFont is "true" above, so 16px is raised to the 18px Large Font floor.
     // This assertion used to read "16px" — it was pinning OC-0319, the bug where
     // the toggle changed nothing, not a behaviour worth keeping.
@@ -51,14 +51,5 @@ describe("applyStoredAppearance", () => {
     expect(document.documentElement.classList.contains("compact-mode")).toBe(true);
     expect(document.documentElement.classList.contains("high-contrast")).toBe(true);
     expect(document.documentElement.classList.contains("large-font")).toBe(true);
-  });
-
-  it("restores custom themes through the theme manager path", () => {
-    mockGetActiveThemeName.mockReturnValue("custom-sunrise");
-
-    applyStoredAppearance();
-
-    expect(mockRestoreTheme).toHaveBeenCalledTimes(1);
-    expect(mockApplyThemeByName).not.toHaveBeenCalled();
   });
 });

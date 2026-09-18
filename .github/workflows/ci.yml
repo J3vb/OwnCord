@@ -46,6 +46,17 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: Server/go.sum
 
+      # scripts/coverage-floor.sh parses the floor file with node (the coverage
+      # profile itself is still read by the same line-oriented awk pass). This
+      # job never used node before, so the interpreter is pinned here rather than
+      # inherited from whatever the runner image happens to ship — the step it
+      # feeds is required, and a missing interpreter would surface as
+      # "not a usable floor file", which is the wrong diagnosis. Not cached: the
+      # job installs no npm dependencies.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
       - name: Build server
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
@@ -152,7 +163,7 @@ jobs:
         run: make protocol-verify
 
       # The route, table and config-key index blocks in docs/ must never drift
-      # from the mounted router, the migrated schema and config.Config's koanf
+      # from the mounted router, the migrated schema and config.Config's yaml
       # tags. Same one-leg rule as the two checks above.
       - name: Verify generated docs (make docs-verify)
         if: matrix.os == 'ubuntu-latest'

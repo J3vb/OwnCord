@@ -25,9 +25,9 @@ func TestVoiceE2EEOfferV2_HappyPath(t *testing.T) {
 	deps := offerDeps(true)
 	cmd := VoiceE2EEOfferCmd{
 		userID:       1,
-		targetUserID: 2,
-		encryptedKey: validEncKey,
-		iv:           validIV,
+		TargetUserID: 2,
+		EncryptedKey: validEncKey,
+		IV:           validIV,
 	}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 
@@ -64,7 +64,7 @@ func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
 
 	// 8-participant call: one offer to each of 7 peers, immediately.
 	for target := int64(2); target <= 8; target++ {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: target, EncryptedKey: validEncKey, IV: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
 			t.Fatalf("rotation offer to peer %d rejected: %v", target, result.Error)
 		}
@@ -73,7 +73,7 @@ func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
 	// Join/leave churn triggers back-to-back rotations — a second full burst
 	// must also pass.
 	for target := int64(2); target <= 8; target++ {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: target, EncryptedKey: validEncKey, IV: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
 			t.Fatalf("second rotation offer to peer %d rejected: %v", target, result.Error)
 		}
@@ -83,7 +83,7 @@ func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
 	// per-target budget is 5/sec, so within 4 more attempts one must trip.
 	var limited bool
 	for range 4 {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
 			limited = true
 			break
@@ -108,7 +108,7 @@ func TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState(t *testing.T) {
 	deps.Limiter = limiter
 	info := ClientInfo{UserID: 1, VoiceChannelID: 0}
 	for target := int64(1); target <= 500; target++ {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: target, EncryptedKey: validEncKey, IV: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error == nil {
 			t.Fatalf("offer from a client not in voice must be rejected (target %d)", target)
 		}
@@ -120,7 +120,7 @@ func TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState(t *testing.T) {
 	// (b) In voice but not the key holder — rejected later, still allocates nothing.
 	info = ClientInfo{UserID: 1, VoiceChannelID: 100}
 	for target := int64(1); target <= 500; target++ {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: target, EncryptedKey: validEncKey, IV: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error == nil {
 			t.Fatalf("offer from a non-key-holder must be rejected (target %d)", target)
 		}
@@ -134,7 +134,7 @@ func TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState(t *testing.T) {
 	holderDeps := offerDeps(true)
 	holderDeps.Limiter = limiter
 	for target := int64(1); target <= 500; target++ {
-		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: target, EncryptedKey: validEncKey, IV: validIV}
 		handleVoiceE2EEOfferV2(context.Background(), cmd, info, holderDeps)
 	}
 	windows, _ := limiter.Len()
@@ -146,7 +146,7 @@ func TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState(t *testing.T) {
 
 func TestVoiceE2EEOfferV2_NotInVoiceChannel(t *testing.T) {
 	deps := offerDeps(true)
-	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: validIV}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 0}
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
@@ -170,9 +170,9 @@ func TestVoiceE2EEOfferV2_EmptyFields(t *testing.T) {
 		name string
 		cmd  VoiceE2EEOfferCmd
 	}{
-		{"empty target", VoiceE2EEOfferCmd{userID: 1, targetUserID: 0, encryptedKey: validEncKey, iv: validIV}},
-		{"empty key", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: "", iv: validIV}},
-		{"empty iv", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: ""}},
+		{"empty target", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 0, EncryptedKey: validEncKey, IV: validIV}},
+		{"empty key", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: "", IV: validIV}},
+		{"empty iv", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: ""}},
 	}
 
 	for _, tt := range tests {
@@ -200,8 +200,8 @@ func TestVoiceE2EEOfferV2_OversizedFields(t *testing.T) {
 		name string
 		cmd  VoiceE2EEOfferCmd
 	}{
-		{"key too large", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: strings.Repeat("A", 1025), iv: validIV}},
-		{"iv too large", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: strings.Repeat("A", 129)}},
+		{"key too large", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: strings.Repeat("A", 1025), IV: validIV}},
+		{"iv too large", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: strings.Repeat("A", 129)}},
 	}
 
 	for _, tt := range tests {
@@ -229,8 +229,8 @@ func TestVoiceE2EEOfferV2_InvalidBase64(t *testing.T) {
 		name string
 		cmd  VoiceE2EEOfferCmd
 	}{
-		{"bad key", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: "not-base64!!!", iv: validIV}},
-		{"bad iv", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: "not-base64!!!"}},
+		{"bad key", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: "not-base64!!!", IV: validIV}},
+		{"bad iv", VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: "not-base64!!!"}},
 	}
 
 	for _, tt := range tests {
@@ -254,7 +254,7 @@ func TestVoiceE2EEOfferV2_InvalidBase64(t *testing.T) {
 
 func TestVoiceE2EEOfferV2_NotKeyHolder(t *testing.T) {
 	deps := offerDeps(false)
-	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: validIV}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
@@ -274,7 +274,7 @@ func TestVoiceE2EEOfferV2_NotKeyHolder(t *testing.T) {
 
 func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
 	deps := VoiceDeps{KeyHolder: nil}
-	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: validIV}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
@@ -294,7 +294,7 @@ func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
 
 func TestVoiceE2EEOfferV2_NoReply(t *testing.T) {
 	deps := offerDeps(true)
-	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	cmd := VoiceE2EEOfferCmd{userID: 1, TargetUserID: 2, EncryptedKey: validEncKey, IV: validIV}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)

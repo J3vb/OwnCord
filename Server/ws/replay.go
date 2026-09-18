@@ -536,6 +536,32 @@ func (h *Hub) reconnectWriteReplay(
 	return true
 }
 
+// liveVoiceEventsSinceCore is the ring-first / cold-fallback ladder the two
+// liveVoiceEventsSince* supplements share. ringRead returns the ring's answer:
+// nil means "ring miss" (fall through to the cold tier), an empty non-nil
+// slice means "caught up" and is not a miss. coldRead returns the cold-tier
+// payloads, or nil on a lookup failure or when the range exceeded the row cap
+// — both degrade to the best-effort miss those supplements document. keep
+// admits a frame by wire type and, for the per-user variant, by its payload.
+func liveVoiceEventsSinceCore(ringRead, coldRead func() [][]byte, keep func([]byte) bool) [][]byte {
+	var raw [][]byte
+	if buf := ringRead(); buf != nil {
+		raw = buf
+	} else {
+		raw = coldRead()
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	filtered := make([][]byte, 0, len(raw))
+	for _, evt := range raw {
+		if keep(evt) {
+			filtered = append(filtered, evt)
+		}
+	}
+	return filtered
+}
+
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
 // after afterSeq, bypassing the READ-gated channel filter entirely. Voice
 // membership needs only CONNECT_VOICE (voice_join.go), so a resuming
@@ -549,51 +575,52 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 		return nil
 	}
 	only := map[int64]bool{chID: true}
-	var raw [][]byte
-	if buf := h.ReplayBuffer().EventsSinceFiltered(afterSeq, only); buf != nil {
-		raw = buf
-	} else if esp := h.eventStore.Load(); esp != nil {
-		es := *esp
-		coldCap := h.maxColdReplayLimit()
-		// Fetch one row past the cap so truncation is decided by the presence
-		// of that extra row, not by len == cap: a complete window of exactly
-		// coldCap rows is not truncated and must replay in full (Codex review
-		// on #1436). A result of at most coldCap rows is therefore complete.
-		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
-		if err != nil {
-			return nil
-		}
-		if len(persisted) > coldCap {
-			// Same failure mode reconnectSelectReplay guards against above:
-			// the query is "ORDER BY seq ASC LIMIT n", so a result past the
-			// cap means the range exceeds it and any cap-sized window would
-			// have silently dropped the NEWEST rows — for a voice room, quite
-			// possibly the peer's voice_leave. Replaying a truncated window
-			// would install a join whose matching leave was discarded, which
-			// is worse than the documented best-effort miss this function
-			// already returns on a plain lookup failure. A full ready isn't
-			// available here (registerNow already ran before this supplement
-			// runs), so nil is the correct degradation.
-			slog.Warn("ws liveVoiceEventsSince: cold-tier supplement exceeds the row cap, skipping truncated window",
-				"chID", chID, "after_seq", afterSeq, "cap", coldCap)
-			return nil
-		}
-		raw = make([][]byte, 0, len(persisted))
-		for _, p := range persisted {
-			raw = append(raw, p.Payload)
-		}
-	}
-	if len(raw) == 0 {
-		return nil
-	}
-	filtered := make([][]byte, 0, len(raw))
-	for _, evt := range raw {
-		switch extractEventType(evt) {
-		case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
-			filtered = append(filtered, evt)
-		}
-	}
-	return filtered
+	return liveVoiceEventsSinceCore(
+		func() [][]byte { return h.ReplayBuffer().EventsSinceFiltered(afterSeq, only) },
+		func() [][]byte {
+			esp := h.eventStore.Load()
+			if esp == nil {
+				return nil
+			}
+			es := *esp
+			coldCap := h.maxColdReplayLimit()
+			// Fetch one row past the cap so truncation is decided by the presence
+			// of that extra row, not by len == cap: a complete window of exactly
+			// coldCap rows is not truncated and must replay in full (Codex review
+			// on #1436). A result of at most coldCap rows is therefore complete.
+			persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+			if err != nil {
+				return nil
+			}
+			if len(persisted) > coldCap {
+				// Same failure mode reconnectSelectReplay guards against above:
+				// the query is "ORDER BY seq ASC LIMIT n", so a result past the
+				// cap means the range exceeds it and any cap-sized window would
+				// have silently dropped the NEWEST rows — for a voice room, quite
+				// possibly the peer's voice_leave. Replaying a truncated window
+				// would install a join whose matching leave was discarded, which
+				// is worse than the documented best-effort miss this function
+				// already returns on a plain lookup failure. A full ready isn't
+				// available here (registerNow already ran before this supplement
+				// runs), so nil is the correct degradation.
+				slog.Warn("ws liveVoiceEventsSince: cold-tier supplement exceeds the row cap, skipping truncated window",
+					"chID", chID, "after_seq", afterSeq, "cap", coldCap)
+				return nil
+			}
+			raw := make([][]byte, 0, len(persisted))
+			for _, p := range persisted {
+				raw = append(raw, p.Payload)
+			}
+			return raw
+		},
+		func(evt []byte) bool {
+			switch extractEventType(evt) {
+			case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
+				return true
+			}
+			return false
+		},
+	)
 }
 
 // liveVoiceEventsSinceForUser returns voice_state/voice_leave events at or
@@ -614,47 +641,46 @@ func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, 
 	if userID == 0 {
 		return nil
 	}
-	var raw [][]byte
-	if buf := h.ReplayBuffer().EventsSince(afterSeq); buf != nil {
-		raw = buf
-	} else if esp := h.eventStore.Load(); esp != nil {
-		es := *esp
-		coldCap := h.maxColdReplayLimit()
-		// Fetch one row past the cap so truncation is decided by the presence
-		// of that extra row, not by len == cap (see liveVoiceEventsSince).
-		// Unlike that function this cannot scope the query to one channel —
-		// not knowing the channel is the whole reason this fallback exists —
-		// so the cap is shared with every event of every type in the range; a
-		// busy server can exhaust it before a voice frame is even reached, in
-		// which case this degrades to nil exactly like any other best-effort
-		// miss, never to a truncated window presented as complete.
-		persisted, err := es.GetEventsSince(ctx, int64(afterSeq), coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
-		if err != nil {
-			return nil
-		}
-		if len(persisted) > coldCap {
-			slog.Warn("ws liveVoiceEventsSinceForUser: cold-tier supplement exceeds the row cap, skipping truncated window",
-				"user_id", userID, "after_seq", afterSeq, "cap", coldCap)
-			return nil
-		}
-		raw = make([][]byte, 0, len(persisted))
-		for _, p := range persisted {
-			raw = append(raw, p.Payload)
-		}
-	}
-	if len(raw) == 0 {
-		return nil
-	}
-	filtered := make([][]byte, 0, len(raw))
-	for _, evt := range raw {
-		switch extractEventType(evt) {
-		case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
-			if eventNamesUser(evt, userID) {
-				filtered = append(filtered, evt)
+	return liveVoiceEventsSinceCore(
+		func() [][]byte { return h.ReplayBuffer().EventsSince(afterSeq) },
+		func() [][]byte {
+			esp := h.eventStore.Load()
+			if esp == nil {
+				return nil
 			}
-		}
-	}
-	return filtered
+			es := *esp
+			coldCap := h.maxColdReplayLimit()
+			// Fetch one row past the cap so truncation is decided by the presence
+			// of that extra row, not by len == cap (see liveVoiceEventsSince).
+			// Unlike that function this cannot scope the query to one channel —
+			// not knowing the channel is the whole reason this fallback exists —
+			// so the cap is shared with every event of every type in the range; a
+			// busy server can exhaust it before a voice frame is even reached, in
+			// which case this degrades to nil exactly like any other best-effort
+			// miss, never to a truncated window presented as complete.
+			persisted, err := es.GetEventsSince(ctx, int64(afterSeq), coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+			if err != nil {
+				return nil
+			}
+			if len(persisted) > coldCap {
+				slog.Warn("ws liveVoiceEventsSinceForUser: cold-tier supplement exceeds the row cap, skipping truncated window",
+					"user_id", userID, "after_seq", afterSeq, "cap", coldCap)
+				return nil
+			}
+			raw := make([][]byte, 0, len(persisted))
+			for _, p := range persisted {
+				raw = append(raw, p.Payload)
+			}
+			return raw
+		},
+		func(evt []byte) bool {
+			switch extractEventType(evt) {
+			case MsgTypeVoiceState, MsgTypeVoiceLeaveBC:
+				return eventNamesUser(evt, userID)
+			}
+			return false
+		},
+	)
 }
 
 // maxColdReplayLimit returns the effective persisted-replay cap. The budget

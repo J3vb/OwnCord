@@ -1625,12 +1625,7 @@ async function renderAudit(){
   const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean).concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
 
   // Client-side filter on fetched page.
-  const filtered=state.auditCache.filter(e=>{
-    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
-    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
-      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
-    return true;
-  });
+  const filtered=auditFiltered();
 
   let html='<div class="page-title">Audit Log</div><div class="page-desc">Action history — '+state.auditCache.length+' entries on this page</div>';
 
@@ -1660,6 +1655,18 @@ async function renderAudit(){
   return html;
 }
 
+// Audit-filter predicate: action dropdown plus the free-text search, applied to
+// the fetched page. Shared by renderAudit, refilterAudit, copyAuditLog and
+// exportAuditCSV so the four stay in step.
+function auditFiltered(){
+  return state.auditCache.filter(e=>{
+    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
+    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
+      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
+    return true;
+  });
+}
+
 function renderAuditRow(e){
   return'<tr><td style="font-size:12px;color:var(--text-faint);white-space:nowrap">'+esc(e.created_at)+'</td>'
     +'<td><strong>'+esc(e.actor_name||e.actor_id)+'</strong></td>'
@@ -1670,34 +1677,19 @@ function renderAuditRow(e){
 
 function refilterAudit(){
   const tbody=document.getElementById('auditTbody');if(!tbody)return;
-  const filtered=state.auditCache.filter(e=>{
-    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
-    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
-      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
-    return true;
-  });
+  const filtered=auditFiltered();
   if(!filtered.length)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No matching entries</td></tr>';
   else tbody.innerHTML=filtered.map(renderAuditRow).join('');
 }
 
 function copyAuditLog(){
-  const filtered=state.auditCache.filter(e=>{
-    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
-    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
-      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
-    return true;
-  });
+  const filtered=auditFiltered();
   const lines=filtered.map(e=>(e.created_at||'')+'\t'+(e.actor_name||e.actor_id)+'\t'+(e.action||'')+'\t'+(e.target_type||'')+(e.target_id?' #'+e.target_id:'')+'\t'+(e.detail||''));
   navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
 }
 
 function exportAuditCSV(){
-  const filtered=state.auditCache.filter(e=>{
-    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
-    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
-      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
-    return true;
-  });
+  const filtered=auditFiltered();
   const csvQ=v=>'"'+String(v||'').replace(/"/g,'""')+'"';
   let csv='Time,Actor,Action,Target,Detail\n';
   filtered.forEach(e=>{csv+=csvQ(e.created_at)+','+csvQ(e.actor_name||e.actor_id)+','+csvQ(e.action)+','+csvQ((e.target_type||'')+(e.target_id?' #'+e.target_id:''))+','+csvQ(e.detail)+'\n'});

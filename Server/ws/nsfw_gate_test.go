@@ -248,7 +248,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	f.hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: f.labelledID, payload: payload}})
+	f.hub.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: f.labelledID, payload: payload}})
 
 	msgsBob := drainChan(sendBob, 150*time.Millisecond)
 	for _, m := range msgsBob {
@@ -604,7 +604,7 @@ func TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient(t *testing.T) {
 		"type":    MsgTypeChatMessage,
 		"payload": map[string]any{"channel_id": chID, "content": "should never arrive"},
 	})
-	hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: chID, payload: payload}})
+	hub.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: chID, payload: payload}})
 	if err := hub.awaitDispatch(ctx); err != nil {
 		t.Fatalf("awaitDispatch: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestNSFW_PluginSinkGetsNoLabelledContent(t *testing.T) {
 		"type":    MsgTypeChatMessage,
 		"payload": map[string]any{"channel_id": f.labelledID, "content": "labelled live"},
 	})
-	f.hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: f.labelledID, payload: labelledPayload}})
+	f.hub.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: f.labelledID, payload: labelledPayload}})
 	if err := f.hub.awaitDispatch(ctx); err != nil {
 		t.Fatalf("awaitDispatch: %v", err)
 	}
@@ -782,7 +782,7 @@ func TestNSFW_PluginSinkGetsNoLabelledContent(t *testing.T) {
 		"type":    MsgTypeChatMessage,
 		"payload": map[string]any{"channel_id": f.controlID, "content": "control live"},
 	})
-	f.hub.EmitEvents(ctx, []Event{MessageSentChannelEvent{channelID: f.controlID, payload: controlPayload}})
+	f.hub.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: f.controlID, payload: controlPayload}})
 	if err := f.hub.awaitDispatch(ctx); err != nil {
 		t.Fatalf("awaitDispatch: %v", err)
 	}

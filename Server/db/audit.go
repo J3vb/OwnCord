@@ -13,18 +13,6 @@ type Auditor interface {
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
 }
 
-// AsyncAuditor is the optional asynchronous fast path for WriteAudit. An
-// Auditor that also implements it — in practice *DB, once main.go installs
-// an AuditWriter via SetAuditWriter — can take the entry off the request
-// path. EnqueueAudit reports true when it took responsibility for the entry
-// (the background writer may still drop it under load, but never silently —
-// see AuditWriter.Enqueue), and false when no writer is installed, in which
-// case WriteAudit performs the synchronous best-effort write below. The
-// token CLI and tests never install a writer, so they stay synchronous.
-type AsyncAuditor interface {
-	EnqueueAudit(actorID int64, action, targetType string, targetID int64, detail string) bool
-}
-
 // WriteAudit records an audit entry best-effort.
 //
 // Per the D8 policy decision (docs/plans/audit-2026-07-19-decisions.md), audit
@@ -35,7 +23,7 @@ type AsyncAuditor interface {
 // it can carry request-specific or sensitive text and the structured fields
 // already identify what was attempted.
 func WriteAudit(ctx context.Context, a Auditor, actorID int64, action, targetType string, targetID int64, detail string) {
-	if aa, ok := a.(AsyncAuditor); ok && aa.EnqueueAudit(actorID, action, targetType, targetID, detail) {
+	if aa, ok := a.(AsyncEntryAuditor); ok && aa.EnqueueAuditEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail}) {
 		return
 	}
 	if err := a.LogAudit(ctx, actorID, action, targetType, targetID, detail); err != nil {
@@ -55,7 +43,16 @@ type EntryAuditor interface {
 	LogAuditEntry(ctx context.Context, e AuditEntry) error
 }
 
-// AsyncEntryAuditor is AsyncAuditor's whole-entry form.
+// AsyncEntryAuditor is the optional asynchronous fast path for WriteAudit.
+// An Auditor that also implements it — in practice *DB, once main.go installs
+// an AuditWriter via SetAuditWriter — can take the entry off the request
+// path. It reports true when it took responsibility for the entry (the
+// background writer may still drop it under load, but never silently — see
+// AuditWriter.Enqueue), and false when no writer is installed, in which case
+// WriteAudit performs the synchronous best-effort write. The token CLI and
+// tests never install a writer, so they stay synchronous. The assertion sees
+// the dynamic type, so a *DB held behind the service Store still takes this
+// path.
 type AsyncEntryAuditor interface {
 	EnqueueAuditEntry(e AuditEntry) bool
 }

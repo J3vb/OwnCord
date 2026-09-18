@@ -476,7 +476,7 @@ inspected so it cannot pass by looking at nothing:
 - `TestAbsenceContract_NoFederationDirectoryOrListingWireTypes` — every
   WebSocket message type in `protocol/schema.json`, both directions.
 - `TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys` — every
-  `koanf` key of `config.Config`, with one allowlisted on-disk path
+  `yaml` key of `config.Config`, with one allowlisted on-disk path
   (`plugins.directory`).
 
 What they prove is bounded and stated: they pin **vocabulary at the three

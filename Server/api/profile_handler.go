@@ -232,9 +232,7 @@ var allowedAvatarMIME = map[string]bool{
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "INVALID_INPUT", Message: "malformed request body",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 		return req, false
 	}
 
@@ -245,9 +243,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// before it runs. This is a cheap byte-length pre-check — *4 still
 	// admits any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "INVALID_INPUT", Message: "username is too long",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
 		return req, false
 	}
 
@@ -260,15 +256,11 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// already canonicalizes the same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "INVALID_INPUT", Message: "username is required",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is required")
 		return req, false
 	}
 	if err := auth.ValidateUsername(req.Username); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "INVALID_INPUT", Message: err.Error(),
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}
 
@@ -278,9 +270,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// username, an oversized avatar was previously only caught *after*
 	// sanitizing, by validateAvatarURL's maxAvatarURLLen check.
 	if req.Avatar != nil && len(*req.Avatar) > maxAvatarURLLen*4 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "INVALID_INPUT", Message: "avatar URL is too long",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "avatar URL is too long")
 		return req, false
 	}
 
@@ -293,9 +283,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 		if err := validateAvatarURL(trimmed); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: err.Error(),
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
 		req.Avatar = &trimmed
@@ -318,16 +306,12 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// output is stable, so that re-sanitize is a no-op here).
 	if req.DisplayName != nil {
 		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "display_name is too long",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is too long")
 			return req, false
 		}
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.DisplayName))
 		if err := validateDisplayName(trimmed); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: err.Error(),
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
 		req.DisplayName = &trimmed
@@ -338,9 +322,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	if req.IdentityPublicKey != nil {
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
 		if err := validateIdentityKey(trimmed); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: err.Error(),
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
 		req.IdentityPublicKey = &trimmed
@@ -350,11 +332,8 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 
 func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -420,35 +399,26 @@ func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 // handleChangePassword processes PUT /api/v1/users/me/password.
 func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
 		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: "too many failed attempts, try again later",
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many failed attempts, try again later")
 			return
 		}
 
 		var req changePasswordRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
 		if req.OldPassword == "" || req.NewPassword == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "old_password and new_password are required",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "old_password and new_password are required")
 			return
 		}
 
@@ -458,50 +428,38 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
 		if !admitted {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: service.ErrAuthBusy.Error(),
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
 			return
 		}
 		if !matched {
 			if !limiter.Allow(failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, service.PwConfirmLockoutDuration)
 			}
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error: "FORBIDDEN", Message: "incorrect password",
-			})
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "incorrect password")
 			return
 		}
 		limiter.Reset(r.Context(), failKey)
 
 		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "new password must be different from old password",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "new password must be different from old password")
 			return
 		}
 
 		// Validate new password strength.
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: err.Error(),
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return
 		}
 
 		// Hash new password — bcrypt at full cost, so through the budget too.
 		hash, admitted, err := limiter.Admission().HashPassword(req.NewPassword)
 		if !admitted {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: service.ErrAuthBusy.Error(),
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
 			return
 		}
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error: "INTERNAL_ERROR", Message: "failed to process password change",
-			})
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to process password change")
 			return
 		}
 
@@ -536,11 +494,8 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 // handleListSessions processes GET /api/v1/users/me/sessions.
 func handleListSessions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -588,11 +543,8 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 // handleRevokeSession processes DELETE /api/v1/users/me/sessions/{id}.
 func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -624,11 +576,8 @@ type revokeAllSessionsResponse struct {
 // is every live WebSocket the account holds.
 func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
@@ -636,9 +585,7 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 		// Per account, not per IP: the principal is authenticated, and the
 		// no-op case (an API token with nothing to revoke) is the one to cap.
 		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: "too many sign-out-everywhere requests, try again later",
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many sign-out-everywhere requests, try again later")
 			return
 		}
 
@@ -680,18 +627,13 @@ func handleUploadAvatar(
 	broadcaster ProfileBroadcaster,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		if limiter != nil && !limiter.Allow(auth.Key("avatar_upload", user.ID), avatarUploadRateLimitPerMinute, time.Minute) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error: "RATE_LIMITED", Message: "avatar upload rate limit exceeded, try again later",
-			})
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "avatar upload rate limit exceeded, try again later")
 			return
 		}
 
@@ -700,17 +642,13 @@ func handleUploadAvatar(
 		// body into heap, so the handler states its own limit.
 		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid multipart form",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 			return
 		}
 
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "missing file field",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
 			return
 		}
 		defer file.Close() //nolint:errcheck
@@ -800,9 +738,7 @@ func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *servi
 			slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
 		}
 		slog.Error("failed to create avatar attachment record", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{
-			Error: "INTERNAL_ERROR", Message: "failed to save avatar",
-		})
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save avatar")
 		return "", 0, false
 	}
 	return fileID, written, true
@@ -818,33 +754,24 @@ func avatarUploadReadImage(w http.ResponseWriter, file io.Reader) (raw []byte, m
 	// byte over" is caught, without buffering an unbounded body.
 	raw, err := io.ReadAll(io.LimitReader(file, maxAvatarFileBytes+1))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "failed to read uploaded file",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
 		return nil, "", 0, 0, false
 	}
 	if int64(len(raw)) > maxAvatarFileBytes {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10),
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10))
 		return nil, "", 0, 0, false
 	}
 
 	// Never trust the client's Content-Type — sniff the bytes.
 	mimeType = http.DetectContentType(raw)
 	if !allowedAvatarMIME[mimeType] {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "avatar must be a PNG, JPEG or WebP image",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "avatar must be a PNG, JPEG or WebP image")
 		return nil, "", 0, 0, false
 	}
 
 	width, height, err = imageDimensions(raw, mimeType)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error: "BAD_REQUEST", Message: "could not read image dimensions",
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "could not read image dimensions")
 		return nil, "", 0, 0, false
 	}
 	// Measured from the sniffed image, not from anything the client said.
@@ -853,10 +780,7 @@ func avatarUploadReadImage(w http.ResponseWriter, file io.Reader) (raw []byte, m
 	// to change nothing a CSS circle mask does not already do), it just
 	// refuses a picture too big to be an avatar.
 	if width <= 0 || height <= 0 || width > maxAvatarDimension || height > maxAvatarDimension {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "BAD_REQUEST",
-			Message: fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height),
-		})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height))
 		return nil, "", 0, 0, false
 	}
 

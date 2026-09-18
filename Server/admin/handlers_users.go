@@ -41,7 +41,7 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 
 		safe := make([]adminUserResponse, len(page))
 		for i := range page {
-			safe[i] = toAdminUserResponse(page[i])
+			safe[i] = toAdminUserResponse(&page[i].User, page[i].RoleName)
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}
@@ -280,7 +280,7 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
 			return
 		}
-		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(updated, roleName))
+		writeJSON(w, http.StatusOK, toAdminUserResponse(updated, roleName))
 	}
 }
 

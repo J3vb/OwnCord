@@ -991,7 +991,7 @@ func TestAbsenceContract_NoPushRelay(t *testing.T) {
 	relayPattern := regexp.MustCompile(`(?i)relay`)
 	pushType := reflect.TypeFor[config.PushConfig]()
 	for field := range pushType.Fields() {
-		tag, ok := field.Tag.Lookup("koanf")
+		tag, ok := field.Tag.Lookup("yaml")
 		if !ok || tag == "" || tag == "-" {
 			continue
 		}

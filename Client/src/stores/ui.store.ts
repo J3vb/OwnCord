@@ -1,5 +1,5 @@
 /**
- * UI store — holds transient UI state: sidebar, modals, theme, collapsed categories.
+ * UI store — holds transient UI state: sidebar, modals, collapsed categories.
  * Immutable state updates only.
  */
 
@@ -7,7 +7,6 @@ import { createStore } from "@lib/store";
 
 export interface UiState {
   readonly settingsOpen: boolean;
-  readonly theme: "dark" | "neon-glow" | "midnight" | "light";
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   /**
@@ -23,7 +22,6 @@ export interface UiState {
 
 const INITIAL_STATE: UiState = {
   settingsOpen: false,
-  theme: "neon-glow",
   connectionStatus: "disconnected",
   transientError: null,
   updateRequiredHost: null,
@@ -47,14 +45,6 @@ export function closeSettings(): void {
   uiStore.setState((prev) => ({
     ...prev,
     settingsOpen: false,
-  }));
-}
-
-/** Set the UI theme. */
-export function setTheme(theme: "dark" | "neon-glow" | "midnight" | "light"): void {
-  uiStore.setState((prev) => ({
-    ...prev,
-    theme,
   }));
 }
 

@@ -234,7 +234,7 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if err != nil || !ok {
 			return fmt.Errorf("%w: access denied", ErrNotFound)
 		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+		if blkErr := RequireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
 			return blkErr
 		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
