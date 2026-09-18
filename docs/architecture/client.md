@@ -1,6 +1,7 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the native-CI
+paragraph, re-measured at `a3a0a49b`, 2026-09-18.
 
 Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
 no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a

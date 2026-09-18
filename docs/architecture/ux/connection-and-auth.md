@@ -1,6 +1,7 @@
 # Connection & Authentication — target UX
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the reconnect
+table's `replay resync` row, re-measured at `a3a0a49b`, 2026-09-18.
 Part of the [Client UX Specification](README.md). Shared vocabulary, feedback
 primitives, and the error matrix live in the [README](README.md) and are not
 repeated here.

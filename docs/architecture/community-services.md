@@ -7,8 +7,9 @@ outbound-content boundary exists now (`Server/safefetch`, PR #1541, `dev`
 rather than owing it; the two stale egress-inventory cells this document
 recorded were corrected by that step. **Amended 2026-09-08 (reliability):**
 S1-d and S1-e describe message retry receipts and the restore cutoff introduced
-with migration 051. Other historical status statements retain their
-`cbebd37c` baseline.
+with migration 051. **Amended 2026-09-18 (docs drift):** the S1-b
+trust-deletion row was re-measured at `dev` @ `a3a0a49b`. Other historical
+status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

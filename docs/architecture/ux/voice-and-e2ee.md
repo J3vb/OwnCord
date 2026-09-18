@@ -1,6 +1,7 @@
 # Voice, Video & E2EE — target UX
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the mute/deafen and
+`streamPreview` rows, re-measured at `a3a0a49b`, 2026-09-18.
 Part of the [Client UX Specification](README.md). The signaling/crypto mechanics
 are mapped structurally in [../voice-e2ee.md](../voice-e2ee.md); this document
 specifies the **user-facing** states and reactions.
