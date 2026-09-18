@@ -827,15 +827,35 @@ export function wireDispatcher(
         // The around endpoint 404s for a deleted message or one in another
         // channel, so a rejection here is only worth a log line.
         if (payload.deduplicated === true && channelId !== undefined && api?.getMessagesAround) {
-          api
-            .getMessagesAround(channelId, payload.message_id)
-            .then((resp) => {
-              const row = resp.messages.find((m) => m.id === payload.message_id);
-              if (row) applyServerMessage(row);
-            })
-            .catch((err) =>
-              log.warn("Failed to reconcile a deduplicated send", { error: String(err) }),
-            );
+          const getMessagesAround = api.getMessagesAround;
+          const localRow = () =>
+            messagesStore
+              .getState()
+              .messagesByChannel.get(channelId)
+              ?.find((m) => m.id === payload.message_id);
+          // The REST read is a snapshot; a chat_edited, chat_deleted or
+          // reaction_update can land while it is in flight, and replacing the
+          // row with the older snapshot would undo it (a deleted message is a
+          // tombstone here, so it would come back). Store updates replace the
+          // row object, so a changed reference means a newer frame won: read
+          // again rather than apply. Three reads, then the frames stand.
+          const reconcile = (readsLeft: number): void => {
+            const before = localRow();
+            getMessagesAround(channelId, payload.message_id)
+              .then((resp) => {
+                const row = resp.messages.find((m) => m.id === payload.message_id);
+                if (!row) return;
+                if (localRow() !== before) {
+                  if (readsLeft > 1) reconcile(readsLeft - 1);
+                  return;
+                }
+                applyServerMessage(row);
+              })
+              .catch((err) =>
+                log.warn("Failed to reconcile a deduplicated send", { error: String(err) }),
+              );
+          };
+          reconcile(3);
         }
       }
     }),

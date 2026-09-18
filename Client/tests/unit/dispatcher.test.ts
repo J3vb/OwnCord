@@ -1305,6 +1305,58 @@ describe("WS Dispatcher", () => {
     });
   });
 
+  it("does not let a stale reconcile overwrite a frame that landed while it was in flight", async () => {
+    cleanup();
+    const staleRow = {
+      id: 501,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "read before the delete",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    let release: (resp: unknown) => void = () => {};
+    const getMessagesAround = vi
+      .fn()
+      // The first read took its snapshot before the delete; it resolves late.
+      .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)))
+      // The retry is what the server answers for a message that is now gone.
+      .mockRejectedValueOnce(new Error("404"));
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-race",
+      clientMessageId: "race-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "local draft text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    markSendFailed("corr-race", "UNCONFIRMED");
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 501, timestamp: "2026-03-15T10:00:00Z", deduplicated: true },
+      "corr-race",
+    );
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(1));
+
+    mock.dispatch("chat_deleted", { message_id: 501, channel_id: 1 });
+    release({ messages: [staleRow], has_more_before: false, has_more_after: false });
+
+    // It noticed the row moved and asked again rather than applying the snapshot.
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(2));
+    expect(getChannelMessages(1)[0]).toMatchObject({ id: 501, deleted: true });
+  });
+
   it("does not refetch history for an ordinary send ack", async () => {
     cleanup();
     const getMessagesAround = vi.fn().mockResolvedValue({
