@@ -256,7 +256,8 @@ type UpsertPushSubscriptionParams struct {
 // One row per (user, endpoint): re-subscribing the same endpoint refreshes
 // its credential and its last_seen_at rather than creating a second row,
 // which is how a client keeps a subscription alive without a dispatch
-// failure to prompt it (there is none yet -- B5-11).
+// failure to prompt it (B5-11 dispatch is off by default -- see migration
+// 045).
 func (q *Queries) UpsertPushSubscription(ctx context.Context, arg UpsertPushSubscriptionParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, upsertPushSubscription,
 		arg.UserID,
