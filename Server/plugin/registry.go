@@ -76,8 +76,9 @@ type Instance struct {
 	module any //nolint:unused // assigned by wazero-tagged build
 
 	// compiled is the wazero CompiledModule behind module. Retained so
-	// teardown can close it — the shared runtime otherwise keeps every
-	// compile from every re-activation cycle until process exit.
+	// teardown can close it, and so a module closed by a CPU-budget overrun
+	// or a trap re-instantiates from it instead of compiling again; it can
+	// therefore be non-nil while module is nil.
 	compiled any //nolint:unused // assigned by wazero-tagged build
 }
 
