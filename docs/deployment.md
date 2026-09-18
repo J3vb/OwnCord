@@ -727,6 +727,37 @@ than none:
   The standalone leg is the one that proves an upgrade leaves `config.yaml`
   alone.
 
+## Capacity limits
+
+The qualified profile is **250 registered users, 100 simultaneous connections
+and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
+[The profile](capacity.md#the-profile) and
+[Reference hardware](capacity.md#reference-hardware) in
+[Capacity](capacity.md), where it is reproduced rather than owned. The keys
+below are the ceilings an owner configures; each carries its default, what an
+outgrowing community sees, and the metric in `GET /api/v1/metrics` that says
+which one is near:
+
+- `server.max_ws_connections` (default `0` = unlimited) → further WebSocket
+  upgrades are refused with 503 before the upgrade completes, until
+  connections free up → `ws_conn_rejects` (nonzero means you hit it).
+- `database.max_readers` (default `0` = automatic, `max(4, CPU count)`,
+  clamped to 1–64) → read queries queue behind the pool →
+  `db_reader_wait_seconds` growing.
+- `upload.max_size_mb` (default `100`) and `upload.user_quota_mb` (default
+  `0` = unlimited) → an upload past either is refused with
+  `507 STORAGE_QUOTA_EXCEEDED` → `upload_storage_used_mb` for where the
+  number is.
+- `server.min_free_disk_mb` (default `256`) → uploads are refused with
+  `507 STORAGE_LOW_DISK` and `/health` reports `degraded`/`disk` → `disk_low`
+  on metrics.
+- `security.auth_rate_limit_multiplier` (default `1.0`) → auth requests
+  refused with `429 RATE_LIMITED`; raise it for a community behind one shared
+  NAT (office, school) — the defaults assume roughly one person per IP.
+
+The reading of these and the other growth signals is covered once, under
+[Metrics Endpoint](#metrics-endpoint); that list is the one to alert on.
+
 ## Monitoring
 
 ### Logs
@@ -864,6 +895,33 @@ descriptions):
 ### Diagnostics
 
 `GET /api/v1/diagnostics/connectivity` -- connectivity diagnostics for troubleshooting.
+
+### Support bundle
+
+When you need help, the admin panel writes a support bundle you can attach to
+a report. The flow, in the operator's words: admin panel → **Diagnostics** →
+**Create support bundle preview** → review the item list, byte sizes and
+SHA-256 hashes → **Confirm download**. Previewing or discarding downloads
+nothing.
+
+The ZIP holds six fixed files: `build.json` (application/Go version, OS and
+architecture), `configuration.json` (an explicit scalar allowlist from the
+running startup configuration), `database.json` (applied migration names,
+table names and row counts), `health.json` (a database, memory and hub
+snapshot), `events.json` (at most 200 recent log records, mapped to fixed
+event codes) and `manifest.json` (sizes, hashes and the omission report).
+What it deliberately does not hold: no message content, no attachments or
+avatars, no backups, no raw log lines, and no names, paths, addresses, URLs
+or credentials — the configuration item structurally omits every one of
+those, and table counts are counts, never rows.
+
+Nothing uploads: the bundle is a local download, and sharing that file
+remains your decision. Confirming a download writes a `support_bundle_create`
+audit row carrying the item list, never contents. Only a logged-in
+`ADMINISTRATOR` session can make one — API tokens are refused. The data
+contract (what may appear, and the redaction each item receives) is in the
+[support-bundle data contract](architecture/diagnostics.md#support-bundle-data-contract);
+this guide does not copy it.
 
 ## Auto-Update
 

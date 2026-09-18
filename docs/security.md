@@ -228,8 +228,10 @@ network path the server has is an action an admin or user took, a feature
 an operator switched on by configuration, or a connection to this machine
 itself. The inventory, the `egress-sites` invariant that enforces it, the
 runtime capture that proves the compiled defaults open nothing beyond
-loopback, and the data contract a future support bundle must satisfy are in
-[docs/architecture/diagnostics.md](architecture/diagnostics.md).
+loopback, and the data contract the support bundle follows are in
+[docs/architecture/diagnostics.md](architecture/diagnostics.md). How an
+administrator makes one — and what it holds — is the Deployment Guide's
+[Support bundle](deployment.md#support-bundle) section.
 
 ## Audit Logging
 
