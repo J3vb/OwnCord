@@ -3132,6 +3132,27 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("mic mute stops the capture track, not just the publication", () => {
+    // Muting has to stop the OS capture rather than only mute the LiveKit
+    // publication, or the microphone stays open and the OS in-use indicator
+    // stays lit for as long as the client is muted. LiveKit honours
+    // stopMicTrackOnMute only through TrackPublishDefaults, so the Room has to
+    // carry it in publishDefaults; a top-level RoomOptions key is silently
+    // ignored, which would leave the capture running and nothing failing.
+    it("builds the Room with publishDefaults.stopMicTrackOnMute", async () => {
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { stopMicTrackOnMute?: boolean };
+      };
+      expect(lastOptions.publishDefaults.stopMicTrackOnMute).toBe(true);
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {

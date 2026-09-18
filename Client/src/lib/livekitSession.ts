@@ -451,6 +451,14 @@ export class LiveKitSession {
           maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
           maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
         },
+        // Mute must stop the OS capture, not merely mute the publication:
+        // otherwise the microphone stays open and the OS in-use indicator
+        // stays lit for as long as the client is muted. LiveKit honours this
+        // key only through TrackPublishDefaults — a top-level RoomOptions key
+        // is silently ignored — and reading it off publishDefaults is what
+        // makes it reach every publish path, including the deviceManager ones
+        // that call setMicrophoneEnabled with no options at all.
+        stopMicTrackOnMute: true,
         ...audioOptions,
       },
       // End-to-end encryption: SFrame-based E2EE using a server-distributed
@@ -1377,7 +1385,12 @@ export class LiveKitSession {
       this.pendingMicrophoneRoom = null;
       // Tear down pipeline first so it doesn't hold refs to the track
       this._audioPipeline.teardownAudioPipeline();
-      // Disable the mic through the SDK (an existing publication may remain).
+      // Disable the mic through the SDK. With stopMicTrackOnMute in the
+      // Room's publishDefaults this stops the underlying capture track, so
+      // the OS microphone in-use indicator goes out. The LiveKit publication
+      // itself is NOT removed — it survives muted, and unmute re-acquires the
+      // device (LocalAudioTrack.unmute -> restart). Only a screen-share track
+      // actually unpublishes on end.
       await room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic disabled (muted)");
     } else {
