@@ -7,9 +7,11 @@
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
+import { parseTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";
+import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import type { ApiClient } from "@lib/api";
@@ -40,6 +42,18 @@ export interface SidebarMemberSectionResult {
   readonly memberListComponent: MountableComponent;
   /** Clean up event listeners and abort controller. */
   readonly destroy: () => void;
+}
+
+/** Whether a ban is still in force. The server never clears `banned` when a
+ *  temporary ban runs out: the account is active again the moment
+ *  `ban_expires` passes (auth.IsEffectivelyBanned), so the flag alone would
+ *  list served bans forever. An expiry that does not parse keeps the ban in
+ *  force, as it does on the server. */
+function isBanInForce(user: AdminUser): boolean {
+  if (!user.banned) return false;
+  if (!user.ban_expires) return true;
+  const expires = parseTimestamp(user.ban_expires).getTime();
+  return Number.isNaN(expires) || expires > Date.now();
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +201,7 @@ export function createSidebarMemberSection(
   /** Refetch, or give up quietly: this list is an affordance for moderators,
    *  and a toast on every mount would be noise for the majority of members,
    *  who never see the section at all. */
-  async function refreshBanned(): Promise<void> {
+  async function fetchBanned(): Promise<void> {
     // Read the role live, like MemberList's menu gates do: a role change
     // arrives as a store update, and this section is not remounted for it.
     if (!roleHasPermission(authStore.getState().user?.role ?? "", Permission.BAN_MEMBERS)) {
@@ -196,19 +210,56 @@ export function createSidebarMemberSection(
       return;
     }
     try {
-      bannedUsers = (await api.adminListUsers()).filter((user) => user.banned);
+      bannedUsers = (await api.adminListUsers()).filter(isBanInForce);
     } catch {
       return;
     }
     renderBanned();
   }
 
+  // One walk of the user list at a time. A burst of roster changes would
+  // otherwise start a fetch each, and an older response landing last would win;
+  // a change that arrives mid-walk buys exactly one more walk after it.
+  let refreshing = false;
+  let refreshQueued = false;
+  async function refreshBanned(): Promise<void> {
+    if (refreshing) {
+      refreshQueued = true;
+      return;
+    }
+    refreshing = true;
+    try {
+      do {
+        refreshQueued = false;
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: one walk at a time
+        await fetchBanned();
+      } while (refreshQueued);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // Another moderator's ban or unban reaches this client only as a roster
+  // change: member_ban drops the row and the unban's member_join restores it.
+  // roleRevision moves on exactly those (and on role and profile changes, never
+  // on presence or typing), and it is monotonic, so a ban and a join batched
+  // into one notification still register.
+  // ponytail: every roster change re-walks the user list for a moderator; a
+  // banned-only server query is the upgrade if that ever costs something.
+  unsubs.push(
+    membersStore.subscribeSelector(
+      (state) => state.roleRevision,
+      () => void refreshBanned(),
+    ),
+  );
+
   async function unbanMember(userId: number, username: string): Promise<void> {
     try {
       await api.adminUnbanMember(userId);
       getToast()?.show(`Unbanned ${username}`, "success");
-      // No roster update needed: the server's member_unban broadcast puts them
-      // back. This list is the one thing that does not hear it.
+      // No roster update needed: the server's member_join broadcast puts them
+      // back, and that roster change refreshes this list too. Refresh anyway —
+      // the REST call can succeed while the socket is down.
       await refreshBanned();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to unban member";

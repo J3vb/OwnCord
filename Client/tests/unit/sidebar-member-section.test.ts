@@ -25,7 +25,7 @@ import {
   type SidebarMemberSectionOptions,
 } from "../../src/pages/main-page/SidebarMemberSection";
 import { authStore } from "../../src/stores/auth.store";
-import { membersStore } from "../../src/stores/members.store";
+import { addMember, membersStore, removeMember } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import { Permission, type UserStatus } from "../../src/lib/types";
@@ -776,6 +776,61 @@ describe("SidebarMemberSection", () => {
       expect(listUsers).toHaveBeenCalledTimes(2);
 
       section.destroy();
+    });
+
+    it("leaves out a temporary ban that has run out, the way the server does", async () => {
+      // The server never clears `banned` when a temporary ban expires: a ban is
+      // in force only while `ban_expires` is absent or in the future
+      // (auth.IsEffectivelyBanned), and an unparseable expiry keeps it in force.
+      grantBanPermission();
+      const opts = defaultOpts();
+      (opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+        bannedUser(3, "permanent"),
+        { ...bannedUser(4, "served"), ban_expires: "2020-01-01T00:00:00Z" },
+        { ...bannedUser(5, "serving"), ban_expires: "2999-01-01T00:00:00Z" },
+        { ...bannedUser(6, "garbled"), ban_expires: "not a date" },
+      ]);
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+
+      await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(3));
+      const names = [...container.querySelectorAll(".banned-name")].map((el) => el.textContent);
+      expect(names).toEqual(["permanent", "serving", "garbled"]);
+
+      section.destroy();
+    });
+
+    it("refetches when another moderator's ban or unban changes the roster", async () => {
+      grantBanPermission();
+      const opts = defaultOpts();
+      const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
+      listUsers.mockResolvedValue([]);
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+      await vi.waitFor(() => expect(listUsers).toHaveBeenCalledTimes(1));
+
+      // member_ban from elsewhere: the dispatcher drops the roster row.
+      listUsers.mockResolvedValue([bannedUser(3, "spammer")]);
+      removeMember(3);
+      await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(1));
+
+      // The unban arrives as a member_join: the row is back, the ban is gone.
+      listUsers.mockResolvedValue([]);
+      addMember({ user: { id: 3, username: "spammer", avatar: null, role: "member" } });
+      await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(0));
+
+      // Presence and typing churn must not page the whole user list.
+      const calls = listUsers.mock.calls.length;
+      membersStore.setState((prev) => ({ ...prev, typingUsers: new Map([[1, new Set([2])]]) }));
+      await Promise.resolve();
+      expect(listUsers).toHaveBeenCalledTimes(calls);
+
+      section.destroy();
+      removeMember(3);
+      await Promise.resolve();
+      expect(listUsers).toHaveBeenCalledTimes(calls);
     });
 
     it("stays out of the way without BAN_MEMBERS, and never asks the admin API", () => {
