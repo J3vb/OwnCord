@@ -82,6 +82,33 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  # Compose images (Server/docker-compose.yml). GitHub treats compose as a
+  # separate ecosystem from `docker`, so the pinned base-image digests above and
+  # the LiveKit tag below are bumped by two different blocks — both are needed,
+  # and neither subsumes the other.
+  # Server/docker-compose.otel.yml's `:latest` sidecars (jaegertracing, prometheus)
+  # are deliberately left alone: they are dev-only tracing services that never
+  # ship, so a floating tag there is intended.
+  - package-ecosystem: docker-compose
+    directory: /Server
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - docker
+    open-pull-requests-limit: 5
+    groups:
+      docker-compose-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
   # Tauri client npm dependencies
   - package-ecosystem: npm
     directory: /Client
@@ -184,6 +211,31 @@ updates:
       # Patch updates within 0.16.x still flow through.
       - dependency-name: "rfd"
         update-types: ["version-update:semver-minor"]
+
+  # Tauri Rust toolchain pin (Client/src-tauri/rust-toolchain.toml). Separate
+  # from the `cargo` block above: that one reviews crate versions, this one
+  # reviews the rustc channel. The file is what rustup reads when cargo runs
+  # under Client/src-tauri, so a bump here moves the compiler every Rust job
+  # uses — a signal to read the release notes, not a standalone merge.
+  - package-ecosystem: rust-toolchain
+    directory: /Client/src-tauri
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - rust
+    open-pull-requests-limit: 5
+    groups:
+      rust-toolchain-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions
   - package-ecosystem: github-actions

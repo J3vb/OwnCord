@@ -60,7 +60,7 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 ### Option A: Prebuilt binaries
 
-1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, and a full source snapshot per release).
+1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, SBOMs, a signed provenance attestation and a full source snapshot per release).
 2. Run the server binary:
    - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
    - Linux: `./chatserver`, from the `amd64` or `arm64` archive

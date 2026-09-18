@@ -25,7 +25,11 @@ const RELEASE_WORKFLOW = ".github/workflows/release.yml";
 
 // A job block publishes something if its body does either of these. Extend
 // this list, not a job-name list, when a new publish action shows up.
-const PUBLISH_MARKERS = [/^\s*push:\s*true\s*$/m, /gh release create/];
+const PUBLISH_MARKERS = [
+  /^\s*push:\s*true\s*$/m,
+  /^\s*push-to-registry:\s*true\s*$/m,
+  /gh release create/,
+];
 
 // `environment: release`, scalar or mapping form — a later `url:` under the
 // mapping form must not trip a false failure, so this only requires the name.

@@ -66,7 +66,10 @@ services:
       - owncord-net
 
   livekit:
-    image: livekit/livekit-server:v1
+    # Must move together with DefaultLiveKitVersion in Server/ws/livekit_download.go:
+    # this file is what an operator runs without the server's own pin, so a
+    # version skew here is invisible until voice fails.
+    image: livekit/livekit-server:v1.13.5
     restart: unless-stopped
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml

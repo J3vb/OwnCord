@@ -315,6 +315,10 @@ server's internals were reorganised behind service boundaries.
   process and inside the container image, corrupt operator input, and the SFU
   drill against a checksum-verified LiveKit release. A drill that cannot run
   reports `skipped`; none of them can report a pass they did not measure.
+- Releases now carry a signed provenance attestation for every asset, an SBOM
+  for each server asset, and an attestation on the container image. None of it
+  requires trusting the download page — [Verifying a
+  Download](docs/deployment.md#verifying-a-download) has the commands.
 
 ## v1.2.0-alpha.4
 

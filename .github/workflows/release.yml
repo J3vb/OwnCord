@@ -302,24 +302,43 @@ jobs:
           [ -f "./${{ matrix.asset }}" ] && BIN="./${{ matrix.asset }}"
           go run ./cmd/smoke "$BIN"
 
+      # Module inventory of the binary that just passed the smoke. Pinned the
+      # way govulncheck is in ci.yml and checked by the Go checksum database,
+      # so no scanner action or download is involved.
+      #
+      # `app` mode lists only the modules reachable from main, so the document
+      # describes the shipped binary rather than the whole module graph.
+      - name: Generate SBOM (CycloneDX, modules compiled into this binary)
+        shell: bash
+        working-directory: Server
+        run: go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 app -json -main . -output "${{ matrix.asset }}.cdx.json"
+
       - name: Create tar.gz (Linux)
         if: runner.os == 'Linux'
         working-directory: Server
         run: tar czf "../${{ matrix.asset }}" chatserver
 
+      # A scalar `path:` is one file; the SBOM ships beside its asset on the
+      # same artifact. The two paths differ per OS only because the tar step
+      # below writes the Linux asset to the repository root while the SBOM step
+      # writes into Server/ — both land in the same artifact either way.
       - name: Upload Windows binary
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
-          path: Server/${{ matrix.asset }}
+          path: |
+            Server/${{ matrix.asset }}
+            Server/${{ matrix.asset }}.cdx.json
 
       - name: Upload Linux archive
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            Server/${{ matrix.asset }}.cdx.json
 
   release-client-linux-arm64:
     name: Build Tauri (Linux ARM64)
@@ -438,6 +457,13 @@ jobs:
             arch: amd64
           - os: ubuntu-22.04-arm
             arch: arm64
+    # Matrix job outputs are last-writer-wins and `outputs:` keys cannot be
+    # derived from `matrix.*`, so the keys are static and each leg below writes
+    # only its own — a skipped step's output is empty, so exactly one leg
+    # writes each key.
+    outputs:
+      imageid-amd64: ${{ steps.id-amd64.outputs.imageid }}
+      imageid-arm64: ${{ steps.id-arm64.outputs.imageid }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -452,13 +478,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # The commit time, not the wall clock. With it BuildKit stamps the same
+      # `created` on the image config here and in release-server-docker, which
+      # is what makes the two config digests comparable at push time.
+      - name: Pin the image build timestamp to the commit
+        id: epoch
+        shell: bash
+        run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
       # Built locally and loaded, never pushed: a pushed :latest that dies on
       # boot deploys itself to every `docker compose pull` upgrade.
       #
       # Per-architecture cache scope: both legs run concurrently, and a shared
       # scope would have them overwrite each other's manifest.
       - name: Build image (local, for smoke test)
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.epoch.outputs.epoch }}
         with:
           context: Server/
           platforms: linux/${{ matrix.arch }}
@@ -474,6 +511,18 @@ jobs:
       # config) that no pre-merge check had ever run.
       - name: Lifecycle-smoke Docker image
         run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
+
+      # The config digest of the image this leg just smoked, read only after the
+      # smoke passed. release-server-docker compares it against the digest it
+      # pushed, so "the image the owner pulls" is provably the one that booted
+      # on native hardware.
+      - id: id-amd64
+        if: matrix.arch == 'amd64'
+        run: echo "imageid=${{ steps.build.outputs.imageid }}" >> "$GITHUB_OUTPUT"
+
+      - id: id-arm64
+        if: matrix.arch == 'arm64'
+        run: echo "imageid=${{ steps.build.outputs.imageid }}" >> "$GITHUB_OUTPUT"
 
   # B6-8. An upgrade is the path every existing install takes to this release,
   # and a failed one is the path back out — neither is exercised by any job
@@ -516,6 +565,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Sigstore signing. `id-token` mints the OIDC token the attestation is
+      # bound to and `attestations` writes the record; actions/attest-build-
+      # provenance needs both.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -551,12 +605,28 @@ jobs:
       #
       # The Dockerfile cross-compiles from $BUILDPLATFORM, so the arm64 leg
       # costs a Go cross-compile here, not a QEMU-emulated toolchain.
+      # Same commit time the smoke jobs used, so the per-platform image configs
+      # this job pushes are byte-identical to the ones they smoked.
+      - name: Pin the image build timestamp to the commit
+        id: epoch
+        shell: bash
+        run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.epoch.outputs.epoch }}
         with:
           context: Server/
           platforms: linux/amd64,linux/arm64
           push: true
+          # SPDX SBOM and a max-mode provenance document, attached to the index
+          # as extra manifests. Set here and not on the smoke builds above:
+          # attestations require the OCI exporter, and those use the docker
+          # exporter (`load: true`).
+          sbom: true
+          provenance: mode=max
           build-args: VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -586,6 +656,78 @@ jobs:
             esac
           done
 
+      # The digest an owner pulls has to be the one that booted on native
+      # hardware, and this is the only step that can say so.
+      #
+      # Config digests, never index digests: `sbom`/`provenance` above add
+      # attestation manifests to the index, so the index digest necessarily
+      # differs from anything a smoke job could have produced, while each
+      # platform's own image config is unaffected by them.
+      #
+      # Equality here is a property of the CACHE, not of a bit-for-bit rebuild,
+      # and that is worth knowing before reading a red run. Measured locally
+      # with `--no-cache`: two clean builds of this same source at the same
+      # SOURCE_DATE_EPOCH get DIFFERENT config digests, because the layer tar
+      # carries the mtime `go build` stamped on /chatserver. The binary itself
+      # is not the variable — `sha256sum /chatserver` inside the builder stage
+      # matched across two no-cache builds. This job passes because the smoke
+      # legs prime exactly the scopes read below, so the push reuses those
+      # layers verbatim; a mismatch therefore means the cache missed (evicted,
+      # or a scope renamed) and the image was rebuilt, not that a different
+      # image was published.
+      #
+      # `jq` is preinstalled on ubuntu-latest and already relied on by `publish`.
+      - name: Prove the smoked image configs are the pushed image configs
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          SMOKED_AMD64: ${{ needs.smoke-server-docker.outputs.imageid-amd64 }}
+          SMOKED_ARM64: ${{ needs.smoke-server-docker.outputs.imageid-arm64 }}
+        run: |
+          set -euo pipefail
+          tag=$(echo "$TAGS" | head -n 1)
+          for arch in amd64 arm64; do
+            if [ "$arch" = "amd64" ]; then smoked="$SMOKED_AMD64"; else smoked="$SMOKED_ARM64"; fi
+            if [ -z "$smoked" ]; then
+              echo "::error::smoke-server-docker reported no image config for linux/$arch"
+              exit 1
+            fi
+            image=$(docker buildx imagetools inspect "$tag" \
+              --format "{{range .Manifest.Manifests}}{{if and (eq .Platform.OS \"linux\") (eq .Platform.Architecture \"$arch\")}}{{.Digest}}{{end}}{{end}}")
+            if [ -z "$image" ]; then
+              echo "::error::pushed manifest $tag carries no linux/$arch image"
+              exit 1
+            fi
+            pushed=$(docker buildx imagetools inspect "$tag@$image" --raw | jq -r '.config.digest')
+            if [ "$smoked" != "$pushed" ]; then
+              echo "::error::linux/$arch was smoked as image config $smoked but pushed as $pushed — check whether the gha cache scope server-$arch was hit before suspecting a genuinely different image (see the comment above this step)"
+              exit 1
+            fi
+            echo "linux/$arch: smoked == pushed ($pushed)"
+          done
+
+      # `subject-name` must be lower-case for GHCR, and github.repository_owner
+      # is `J3vb`. The same normalisation docker-compose.yml already bakes in
+      # as ghcr.io/j3vb/owncord-server.
+      - name: Lower-case the image owner (GHCR rejects `J3vb`)
+        id: owner
+        shell: bash
+        run: echo "lower=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      # Records the image in the public Sigstore log, and pushes the
+      # attestation into the registry beside it, so a third party can verify
+      # the digest they pull was built by this workflow at this commit.
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify the image attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh attestation verify "oci://ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server@${{ steps.build.outputs.digest }}" --repo "$GITHUB_REPOSITORY"
+
   publish:
     name: Publish GitHub Release
     needs:
@@ -603,6 +745,10 @@ jobs:
     environment: release
     permissions:
       contents: write
+      # Sigstore signing, as in release-server-docker: `id-token` for the OIDC
+      # token, `attestations` to write the record.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -726,6 +872,61 @@ jobs:
           for f in windows/chatserver*.exe windows/server-update-manifest.json; do
             base64 -d "$f.sig" > "$RUNNER_TEMP/asset.minisig"
             minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
+          done
+
+      # Subjects are globs over the staging directories rather than an
+      # enumerated list, for the same reason the update manifest is built from
+      # the files on disk: an asset added to the build matrix must not become
+      # publishable unattested. The globs deliberately include the `.sig` files
+      # and the update manifest, which binds the minisign signatures themselves
+      # to this run. The attestation names the workflow and run, not the job —
+      # accurate at the run level, which is what SLSA's GitHub build type
+      # records, and what makes this Build L2 rather than L3.
+      - name: Attest build provenance (every asset, the checksums, the source snapshot)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            windows/*
+            linux/*
+            checksums.sha256
+            owncord-src-*.tar.gz
+
+      # Server assets only — roadmap workstream 6 hands the signed Tauri client
+      # bundles to B8, and a Rust+npm SBOM is a different tool. The action takes
+      # a single `sbom-path`, so this is one step per asset/SBOM pair rather
+      # than one globbed pair.
+      - name: Attest SBOM (chatserver.exe)
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: windows/chatserver.exe
+          sbom-path: windows/chatserver.exe.cdx.json
+
+      - name: Attest SBOM (chatserver-windows-arm64.exe)
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: windows/chatserver-windows-arm64.exe
+          sbom-path: windows/chatserver-windows-arm64.exe.cdx.json
+
+      - name: Attest SBOM (chatserver-linux-amd64.tar.gz)
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: linux/chatserver-linux-amd64.tar.gz
+          sbom-path: linux/chatserver-linux-amd64.tar.gz.cdx.json
+
+      - name: Attest SBOM (chatserver-linux-arm64.tar.gz)
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: linux/chatserver-linux-arm64.tar.gz
+          sbom-path: linux/chatserver-linux-arm64.tar.gz.cdx.json
+
+      # Fail closed before publishing: an attestation that does not verify is
+      # worse than none, because the docs tell an owner to check it.
+      - name: Verify attestations against this repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in windows/* linux/* checksums.sha256 owncord-src-*.tar.gz; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"
           done
 
       # The release body is the curated section for THIS tag, never the whole

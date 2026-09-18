@@ -38,6 +38,26 @@ test("an unguarded push: true job is caught by name", () => {
   assert.equal(missingScalar[0].name, "release-server-docker");
 });
 
+// Task 3 of B6-12: `push-to-registry: true` publishes an attestation into the
+// public registry for the image the job just pushed, so a job carrying only
+// that marker publishes something and must be gated exactly as `push: true` is.
+test("an unguarded push-to-registry: true job is caught by name", () => {
+  const unguardedRegistryPush = workflow(
+    [
+      "  release-server-docker:",
+      "    needs: verify-versions",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/attest-build-provenance@v4",
+      "        with:",
+      "          push-to-registry: true",
+    ].join("\n"),
+  );
+  const missing = auditReleaseEnvironment(unguardedRegistryPush);
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].name, "release-server-docker");
+});
+
 test("an unguarded gh release create job is caught", () => {
   const unguardedGhRelease = workflow(
     [
