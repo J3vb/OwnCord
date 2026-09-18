@@ -160,7 +160,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingWireTypes(t *testing.T) {
 }
 
 // TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys walks the
-// koanf tags of config.Config and fails on any dotted key matching the
+// yaml tags of config.Config and fails on any dotted key matching the
 // pattern. A feature that needs a peer list, a directory URL or a discovery
 // toggle has to surface here, so this is the third boundary.
 func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) {
@@ -171,7 +171,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) 
 		"plugins.directory": "the on-disk plugin directory (Server/config/config.go PluginsConfig.Directory)",
 	}
 
-	keys := koanfKeys(reflect.TypeFor[config.Config](), "")
+	keys := configKeys(reflect.TypeFor[config.Config](), "")
 	if len(keys) < 30 {
 		t.Fatalf("collected only %d config keys; expected the full config surface (>= 30)", len(keys))
 	}
@@ -196,9 +196,9 @@ func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) 
 	}
 }
 
-// koanfKeys returns every dotted koanf key reachable from t, recursing into
-// nested structs the same way koanf unmarshals them.
-func koanfKeys(t reflect.Type, prefix string) []string {
+// configKeys returns every dotted yaml key reachable from t, recursing into
+// nested structs the same way yaml.v3 unmarshals them.
+func configKeys(t reflect.Type, prefix string) []string {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -207,7 +207,7 @@ func koanfKeys(t reflect.Type, prefix string) []string {
 	}
 	var keys []string
 	for f := range t.Fields() {
-		tag, ok := f.Tag.Lookup("koanf")
+		tag, ok := f.Tag.Lookup("yaml")
 		if !ok || tag == "" || tag == "-" {
 			continue
 		}
@@ -220,7 +220,7 @@ func koanfKeys(t reflect.Type, prefix string) []string {
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct {
-			keys = append(keys, koanfKeys(ft, key)...)
+			keys = append(keys, configKeys(ft, key)...)
 			continue
 		}
 		keys = append(keys, key)

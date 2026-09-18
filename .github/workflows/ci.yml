@@ -163,7 +163,7 @@ jobs:
         run: make protocol-verify
 
       # The route, table and config-key index blocks in docs/ must never drift
-      # from the mounted router, the migrated schema and config.Config's koanf
+      # from the mounted router, the migrated schema and config.Config's yaml
       # tags. Same one-leg rule as the two checks above.
       - name: Verify generated docs (make docs-verify)
         if: matrix.os == 'ubuntu-latest'
