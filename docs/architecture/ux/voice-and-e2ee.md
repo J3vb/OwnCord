@@ -1,6 +1,7 @@
 # Voice, Video & E2EE — target UX
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the mute/deafen and
+`streamPreview` rows, re-measured at `a3a0a49b`, 2026-09-18.
 Part of the [Client UX Specification](README.md). The signaling/crypto mechanics
 are mapped structurally in [../voice-e2ee.md](../voice-e2ee.md); this document
 specifies the **user-facing** states and reactions.
@@ -92,12 +93,18 @@ stateDiagram-v2
 
 All four are optimistic with rollback; each also emits a WS control message.
 
-| Control         | Local state                                                                                                                                           | WS message                    | Rollback                  |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
-| **Mute**        | `localMuted` (`setLocalMuted`) — fully unpublishes the mic track                                                                                      | `voice_mute{muted}`           | n/a (local-authoritative) |
-| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume) | `voice_deafen` + `voice_mute` | implies mute              |
-| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                            | `voice_camera{enabled}`       | revert on failure + toast |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                      | `voice_screenshare{enabled}`  | revert + toast            |
+| Control         | Local state                                                                                                                                                                                                                                                                                                                  | WS message                    | Rollback                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
+| **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `lib/livekitSession.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative) |
+| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                        | `voice_deafen` + `voice_mute` | implies mute              |
+| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                   | `voice_camera{enabled}`       | revert on failure + toast |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                             | `voice_screenshare{enabled}`  | revert + toast            |
+
+`stopMicTrackOnMute` carries the SDK's own documented tradeoff: with a Bluetooth
+headset connected, stopping and re-acquiring the capture track makes the device
+switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
+the OS capture rather than only mute the publication, so the profile switch is
+the accepted cost.
 
 | Control state  | Presentation                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------ |
@@ -186,8 +193,11 @@ trust action entirely (a blind accept is refused).
   voice-activity gating ahead of publish.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining.
-- **Stream preview:** `lib/streamPreview.ts` renders the pre-share preview in
-  the screen-share picker.
+- **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview
+  of a **remote** participant's camera or screenshare in the voice channel
+  sidebar (300 ms debounce, attached from `components/ChannelSidebar.ts`). There
+  is no pre-share preview of your own stream anywhere — that step is the OS
+  `getDisplayMedia` picker dialog.
 
 ## 9. DM calls (ring)
 

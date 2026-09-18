@@ -23,8 +23,9 @@ import (
 )
 
 // TestRun_ServeErrorReturn_StopsHubDispatchGoroutine pins OC-0027:
-// hub.GracefulStop() (the only caller of LiveKitProcess.Stop(), and what
-// closes the hub's dispatch goroutine) is a plain statement reached only on
+// hub.GracefulStop() (which calls StopLiveKit, the sole caller of
+// LiveKitProcess.Stop(), and what closes the hub's dispatch goroutine) is a
+// plain statement reached only on
 // the graceful-shutdown path. The serve-error branch — `case err :=
 // <-serveErr: ... return fmt.Errorf(...)` — returns from Run before ever
 // reaching it, so the hub's `go hub.Run()` dispatch goroutine (started by

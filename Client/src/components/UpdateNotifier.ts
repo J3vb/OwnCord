@@ -39,16 +39,47 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (dismissed || installState.status !== "idle") return;
 
     const result = await checkForUpdate(serverUrl);
-    if (
-      dismissed ||
-      installState.status !== "idle" ||
-      !result.available ||
-      result.version === null
-    ) {
+    if (dismissed || installState.status !== "idle") return;
+
+    if (result.manual_upgrade) {
+      showManualUpgradeBanner();
       return;
     }
 
+    if (!result.available || result.version === null) return;
+
     showBanner(result.version, result.body ?? "");
+  }
+
+  /**
+   * A package install (see `manual_upgrade` in `@lib/updater`): the server
+   * serves no updater artifact for it, so the check can never report an
+   * available update however far behind the client is. Answering that with
+   * silence would be a claim — "you are up to date" — the user cannot check.
+   */
+  function showManualUpgradeBanner(): void {
+    if (container === null || banner !== null) return;
+
+    banner = createElement("div", { class: "update-banner" });
+
+    const text = createElement(
+      "span",
+      { class: "update-banner-text" },
+      "This install cannot update itself. Ask your server administrator for the new version.",
+    );
+
+    const dismissBtn = createElement(
+      "button",
+      { class: "update-banner-btn update-banner-later" },
+      "Dismiss",
+    );
+    dismissBtn.addEventListener("click", () => {
+      dismissed = true;
+      removeBanner();
+    });
+
+    appendChildren(banner, text, dismissBtn);
+    container.prepend(banner);
   }
 
   function showBanner(version: string, _notes: string): void {

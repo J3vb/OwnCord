@@ -43,6 +43,11 @@ type EntryAuditor interface {
 	LogAuditEntry(ctx context.Context, e AuditEntry) error
 }
 
+// The production auditor must keep satisfying it: WriteAuditEntry's assertion
+// falls back to the token-less write when it stops matching, which would drop
+// an erasure's subject token with nothing failing to say so.
+var _ EntryAuditor = (*DB)(nil)
+
 // AsyncEntryAuditor is the optional asynchronous fast path for WriteAudit.
 // An Auditor that also implements it — in practice *DB, once main.go installs
 // an AuditWriter via SetAuditWriter — can take the entry off the request
@@ -56,6 +61,11 @@ type EntryAuditor interface {
 type AsyncEntryAuditor interface {
 	EnqueueAuditEntry(e AuditEntry) bool
 }
+
+// The production auditor must keep satisfying it: the assertion at each call
+// site is what selects the fast path, so a lost method would move every audit
+// write back onto the request path and only a benchmark would notice.
+var _ AsyncEntryAuditor = (*DB)(nil)
 
 // WriteAuditEntry is WriteAudit for an entry that carries a subject token
 // (B4-10): an erasure's own rows name the subject by token, never by id.

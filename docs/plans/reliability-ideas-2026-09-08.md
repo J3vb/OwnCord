@@ -1,9 +1,9 @@
 # Reliability and support ideas
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
-the first four. RI-01 through RI-04 are implemented on the branch below and
-under validation; RI-05 through RI-08 are backlog ideas. Platform validation
-and remaining limits are recorded below.
+the first four. RI-01 through RI-04 are implemented and merged into `dev` in
+PR #1573 (commit `3221fe9e`); RI-05 through RI-08 remain backlog ideas. The
+validation record and remaining limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
 
@@ -14,16 +14,16 @@ remains B6/B10. Implementing one item does not close those phases.
 
 ## Priority and ownership
 
-| ID    | Idea                                           | Value                                                               | Status      | Roadmap alignment                                |
-| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ----------- | ------------------------------------------------ |
-| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | In progress | B7 client lifecycle; B9 account/server switching |
-| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | In progress | B6/B9; existing BG-15 contract                   |
-| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | In progress | B6 connectivity; B9 diagnostics                  |
-| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | In progress | Protocol/persistence contracts; B9 messaging     |
-| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Backlog     | B6 capacity; B7 reconnect behavior               |
-| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog     | B9 administration                                |
-| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog     | B6 operations; B9 administration                 |
-| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Backlog     | B9; existing BPR-054 retention controls          |
+| ID    | Idea                                           | Value                                                               | Status  | Roadmap alignment                                |
+| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ------- | ------------------------------------------------ |
+| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | Merged  | B7 client lifecycle; B9 account/server switching |
+| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | Merged  | B6/B9; existing BG-15 contract                   |
+| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged  | B6 connectivity; B9 diagnostics                  |
+| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged  | Protocol/persistence contracts; B9 messaging     |
+| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Backlog | B6 capacity; B7 reconnect behavior               |
+| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog | B9 administration                                |
+| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog | B6 operations; B9 administration                 |
+| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Backlog | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
 
@@ -181,9 +181,10 @@ remain useful parts of this workflow.
 
 ## Delivery evidence
 
-The first batch is implemented on `feat/reliability-foundations`, targeting
-`dev`. The first four rows remain in progress until the pending validation
-below is resolved. This does not close a broader roadmap phase.
+The first batch is implemented and merged into `dev` in
+[PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
+RI-05 through RI-08 remain backlog ideas. This does not close a broader roadmap
+phase.
 
 Verified in the Linux development environment:
 
@@ -271,7 +272,7 @@ controls fail. Two native-collector tests ensure unexpected cleanup errors
 still fail CI. Patch application, version drift, and removal criteria are
 documented in [the patch notes](../../Client/patches/README.md).
 
-Still being validated:
+Open at the time of writing:
 
 - The latest native voice assertion and real HTTP cancellation probe need
   Windows validation. The probe cancels during delayed headers and body
@@ -293,6 +294,5 @@ remains a separate extension of the existing privacy contract. Pending-send
 recovery limits are described above and in
 [credential-storage.md](../credential-storage.md).
 
-Implementation is tracked in [PR #1573](https://github.com/J3vb/OwnCord/pull/1573)
-against `dev`. The platform checks above remain required before the work is
-ready to merge.
+Implementation is merged into `dev` in
+[PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).

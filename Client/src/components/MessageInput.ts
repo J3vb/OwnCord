@@ -157,6 +157,11 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matches server limit
 // the queue client-side so we never upload an attachment doomed to be
 // orphaned by a send that can never succeed.
 const MAX_ATTACHMENTS = 10;
+// Server/service/message.go's maxMessageLen refuses content past 4000 code
+// points (utf8.RuneCountInString). Mirror it here so an over-long send fails
+// visibly instead of producing an optimistic row whose retry fails identically.
+// Counted in code points, not UTF-16 units -- see the guard in handleSend.
+const MAX_MESSAGE_LEN = 4000;
 const ALLOWED_TYPES = [
   "image/",
   "video/",
@@ -504,6 +509,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // an edit whose text was cleared -- that would tear down edit mode for a
     // send the host refuses anyway.
     if (content.length === 0 && (state.editing !== null || !hasAttachments)) return;
+
+    // The spread counts code points, which is what the server counts. A
+    // `.length` check here would count UTF-16 units and refuse ~2000 astral
+    // emoji the server accepts. Checked before the debounce stamp below so a
+    // refused send does not suppress the next one.
+    if ([...content].length > MAX_MESSAGE_LEN) {
+      showUploadError(`Messages are limited to ${MAX_MESSAGE_LEN} characters`);
+      return;
+    }
 
     // Block send while uploads are still in flight
     if (pendingUploadCount > 0) {

@@ -1,6 +1,7 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the native-CI
+paragraph, re-measured at `a3a0a49b`, 2026-09-18.
 
 Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
 no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
@@ -118,7 +119,10 @@ yet scheduled.
 224 test files (~83k LOC — about 2× the source): Vitest unit + integration
 (70% coverage gate, blocking in CI), Playwright E2E (web suite in CI —
 non-blocking full run plus a blocking `@parity` subset — and a native Tauri
-suite that is deliberately not wired to CI), Stryker mutation testing
+suite that **is** wired to CI: the `client-native` job on `windows-latest`, a
+75-minute budget, on pull requests to `main` and `dev`, which builds the app,
+runs the `native-core` Playwright project, then the signed-NSIS
+install/relaunch script), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
 strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.

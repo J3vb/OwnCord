@@ -17,13 +17,15 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
 
 /** True when a mute/deafen/server-mute/push-to-talk gate means the mic must
  *  stay off regardless of a caller's own request to (re-)enable it.
- *  livekit-client's setMicrophoneEnabled(true) is a bare track.unmute() when
- *  a muted-but-published track survives a toggle (only ScreenShare actually
- *  unpublishes) — no LocalTrackPublished/TrackUnmuted event fires for
- *  anything downstream to catch and correct, so every re-enable path has to
- *  check this itself instead of relying on one. Exported so LiveKitSession's
- *  own re-enable paths (setDeafened's unmute branch, retryMicPermission)
- *  share the same gate instead of each re-deriving it. */
+ *  Re-enabling never re-publishes: setMicrophoneEnabled(true) on an existing
+ *  publication is a track.unmute() (only ScreenShare actually unpublishes),
+ *  and with the Room's stopMicTrackOnMute that same call re-acquires the
+ *  device the mute stopped rather than resuming a live one. Either way no
+ *  LocalTrackPublished/TrackUnmuted event fires for anything downstream to
+ *  catch and correct, so every re-enable path has to check this itself
+ *  instead of relying on one. Exported so LiveKitSession's own re-enable
+ *  paths (setDeafened's unmute branch, retryMicPermission) share the same
+ *  gate instead of each re-deriving it. */
 export function isMicPolicyGated(): boolean {
   const s = voiceStore.getState();
   return (

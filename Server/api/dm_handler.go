@@ -147,8 +147,8 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// the caller only touches the caller's own dm_open_state row, which
 		// the caller obviously already knows about.
 		// RecipientOpened is false when the recipient does not yet trust the
-		// caller (B5-6): their side was closed back down after
-		// GetOrCreateDMChannel's unconditional both-sides open, so no
+		// caller (B5-6): GetOrCreateDMChannelGated decides the recipient's
+		// side inside its own transaction and opens only the caller's, so no
 		// dm_channel_open goes out — the request frame from the first
 		// message is their only signal until they accept.
 		if result.Created && result.RecipientOpened {

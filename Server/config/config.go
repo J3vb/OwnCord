@@ -349,9 +349,11 @@ type UploadConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"`
 	StorageDir string `yaml:"storage_dir"`
 	// UserQuotaMB caps the total bytes one user may hold in upload storage —
-	// attachments, avatars and emoji alike, counted where the bytes are
-	// written (B5-2, plan decision 11). 0, the default, is unlimited, so no
-	// existing install changes behaviour on upgrade.
+	// attachments and avatars, counted where the bytes are written (B5-2,
+	// plan decision 11). Custom emoji are excluded on purpose: they are
+	// bounded (MaxEmojiCount files of maxEmojiFileBytes each) and still pass
+	// the disk-headroom floor, see migration 044. 0, the default, is
+	// unlimited, so no existing install changes behaviour on upgrade.
 	UserQuotaMB int `yaml:"user_quota_mb"`
 }
 
@@ -542,7 +544,7 @@ upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
-  #                           # (attachments, avatars and emoji); 0 = unlimited
+  #                           # (attachments and avatars); 0 = unlimited
 
 # Web Push subscriptions. Disabled by default: with push.enabled false,
 # every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
@@ -684,6 +686,19 @@ func Load(cfgPath string) (*Config, error) {
 	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
 	warnInvalidCIDRs("server.metrics_allowed_cidrs", cfg.Server.MetricsAllowedCIDRs)
 	warnInvalidCIDRs("server.livekit_webhook_allowed_cidrs", cfg.Server.LiveKitWebhookAllowedCIDRs)
+
+	// An EMPTY admin_allowed_cidrs is legal but silently switches the /admin
+	// IP perimeter off: api.AdminIPRestrict allows every address when the list
+	// is empty, so the panel answers anyone who can reach the port (its own
+	// session auth still applies). The compiled default is private networks,
+	// so only an operator who set the key to an empty sequence gets here.
+	// Warn, don't fail: a panel deliberately left open behind a VPN or an
+	// authenticating proxy is a real deployment.
+	if len(cfg.Server.AdminAllowedCIDRs) == 0 {
+		slog.Warn("config: admin_allowed_cidrs is empty — the /admin IP perimeter is disabled, " +
+			"so AdminIPRestrict admits every address; set server.admin_allowed_cidrs to the " +
+			"addresses that should reach the admin panel")
+	}
 
 	// A customized admin allowlist with no trusted_proxies is a footgun
 	// behind any reverse proxy or container network: the check then compares

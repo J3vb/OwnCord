@@ -64,8 +64,9 @@ func bootTestApp(t *testing.T, port, failStage string) *App {
 // property of the composite close, and the one OC-0027 is about: when a
 // stage that starts AFTER the router fails, the hub is already running and
 // its dispatch goroutine owns the companion livekit-server process.
-// hub.GracefulStop is the only caller of LiveKitProcess.Stop, so a teardown
-// that skips it orphans a real process. Before B3-3 this held only because
+// hub.GracefulStop calls StopLiveKit, the sole caller of
+// LiveKitProcess.Stop, so a teardown that skips it orphans a real process.
+// Before B3-3 this held only because
 // `defer hub.GracefulStop()` sat above every early return in run(); now it
 // is a closer, and this is what proves the closer actually runs.
 func TestAppRun_LateStageFailure_StopsTheHubAndClosesTheDatabase(t *testing.T) {

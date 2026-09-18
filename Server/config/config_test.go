@@ -1,9 +1,12 @@
 package config_test
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -820,5 +823,85 @@ func TestLoadReachabilityReportDisabledByDefault(t *testing.T) {
 		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "reachability_report_enabled:") {
 			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
 		}
+	}
+}
+
+// recordingHandler collects the message text of every record emitted through
+// it, so a test can assert on what an operator would have been warned about.
+type recordingHandler struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, r.Message)
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// warned reports whether any collected message mentions substr.
+func (h *recordingHandler) warned(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.messages {
+		if strings.Contains(m, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// adminPerimeterWarning is a distinctive phrase from the empty-allowlist
+// warning. Asserting on the message rather than on the key name is what keeps
+// the test off warnOnServerConfig's neighbouring warning, which also fires for
+// this config (an emptied list is "customized") and names the same key — in an
+// attribute, so a key-name assertion would match either one and pass for the
+// wrong reason.
+const adminPerimeterWarning = "the /admin IP perimeter is disabled"
+
+// TestLoadWarnsOnEmptyAdminCIDRs pins the warning that fires when
+// server.admin_allowed_cidrs is empty.
+//
+// An empty list is legal YAML but is not the compiled default (private
+// networks), and api.AdminIPRestrict admits every address when the list is
+// empty — so an operator who empty-lists the key has switched the /admin IP
+// perimeter off with nothing to say so. The second half of the test is the
+// mirror case: the shipped default must stay silent, or the warning is noise
+// on every install and an operator learns to ignore it.
+func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
+	rec := &recordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Defaults first: nothing was configured open, so there is nothing to warn
+	// about. This is also the assertion that would catch the check being
+	// written the other way round (warning on the default instead of on empty).
+	if _, err := config.Load(filepath.Join(t.TempDir(), "config.yaml")); err != nil {
+		t.Fatalf("Load() with defaults returned error: %v", err)
+	}
+	if rec.warned(adminPerimeterWarning) {
+		t.Error("Load() warned about the /admin IP perimeter on a fresh install; the compiled default is private networks")
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("server:\n  admin_allowed_cidrs: []\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if len(cfg.Server.AdminAllowedCIDRs) != 0 {
+		t.Fatalf("config.yaml did not clear the allowlist: got %v", cfg.Server.AdminAllowedCIDRs)
+	}
+	if !rec.warned(adminPerimeterWarning) {
+		t.Error("Load() did not warn that an empty server.admin_allowed_cidrs disables the /admin IP perimeter")
 	}
 }

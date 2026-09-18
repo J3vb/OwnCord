@@ -13,7 +13,6 @@ import {
   renderMessageContent,
   getUserRole,
   roleColorVar,
-  GROUP_THRESHOLD_MS,
   setServerHost,
 } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
@@ -296,6 +295,27 @@ describe("renderers", () => {
       expect(el.classList.contains("failed")).toBe(true);
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "Connection problem — delivery not confirmed",
+      );
+
+      ac.abort();
+    });
+
+    it("says an unsaved offline message is lost at restart, not merely unconfirmed", () => {
+      // The row is failed and never handed to a socket: retrying is the only
+      // way to get the text out, so the reason must not read like the ordinary
+      // offline case where the saved copy still recovers it.
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c3",
+        id: 0,
+        errorCode: "OFFLINE_NO_RECOVERY",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "Could not save this message — retry now or it is lost on restart",
       );
 
       ac.abort();
@@ -600,8 +620,7 @@ describe("renderers", () => {
         container.appendChild(el);
 
         // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
-        // which produces a div.msg-image inside the message element
-        const imageEmbeds = container.querySelectorAll(".msg-image");
+        // which produces a div.msg-image inside the message element.
         // There may be multiple .msg-image (attachments share the class),
         // but at least one must exist and have an <img src="...ext">
         const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);

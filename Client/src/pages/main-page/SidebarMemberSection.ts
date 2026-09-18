@@ -7,9 +7,13 @@
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
+import { parseTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";
+import { membersStore } from "@stores/members.store";
+import { roleHasPermission } from "@lib/permissions";
+import { Permission, type AdminUser } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 
@@ -38,6 +42,18 @@ export interface SidebarMemberSectionResult {
   readonly memberListComponent: MountableComponent;
   /** Clean up event listeners and abort controller. */
   readonly destroy: () => void;
+}
+
+/** Whether a ban is still in force. The server never clears `banned` when a
+ *  temporary ban runs out: the account is active again the moment
+ *  `ban_expires` passes (auth.IsEffectivelyBanned), so the flag alone would
+ *  list served bans forever. An expiry that does not parse keeps the ban in
+ *  force, as it does on the server. */
+function isBanInForce(user: AdminUser): boolean {
+  if (!user.banned) return false;
+  if (!user.ban_expires) return true;
+  const expires = parseTimestamp(user.ban_expires).getTime();
+  return Number.isNaN(expires) || expires > Date.now();
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +163,110 @@ export function createSidebarMemberSection(
     applyMembersCollapsed();
   });
 
+  // --- Banned members ---
+  // A banned user leaves the roster outright (dispatcher's MEMBER_BAN removes
+  // them), so the context menu that issued the ban is the only place they ever
+  // appeared — and it is gone with the row. This list, fed by the admin users
+  // page, is what makes a ban reversible from the desktop client.
+  const bannedSection = createElement("div", {
+    class: "sidebar-banned-section",
+    "data-testid": "sidebar-banned",
+  });
+  let bannedUsers: readonly AdminUser[] = [];
+
+  function renderBanned(): void {
+    bannedSection.replaceChildren();
+    if (bannedUsers.length === 0) {
+      bannedSection.style.display = "none";
+      return;
+    }
+    bannedSection.style.display = "";
+    bannedSection.appendChild(createElement("div", { class: "banned-header" }, "BANNED"));
+    for (const user of bannedUsers) {
+      const row = createElement("div", { class: "banned-row" });
+      row.appendChild(createElement("span", { class: "banned-name" }, user.username));
+      const unbanBtn = createElement(
+        "button",
+        { class: "banned-unban-btn", "data-testid": "unban-member" },
+        "Unban",
+      );
+      unbanBtn.addEventListener("click", () => {
+        void unbanMember(user.id, user.username);
+      });
+      row.appendChild(unbanBtn);
+      bannedSection.appendChild(row);
+    }
+  }
+
+  /** Refetch, or give up quietly: this list is an affordance for moderators,
+   *  and a toast on every mount would be noise for the majority of members,
+   *  who never see the section at all. */
+  async function fetchBanned(): Promise<void> {
+    // Read the role live, like MemberList's menu gates do: a role change
+    // arrives as a store update, and this section is not remounted for it.
+    if (!roleHasPermission(authStore.getState().user?.role ?? "", Permission.BAN_MEMBERS)) {
+      bannedUsers = [];
+      renderBanned();
+      return;
+    }
+    try {
+      bannedUsers = (await api.adminListUsers()).filter(isBanInForce);
+    } catch {
+      return;
+    }
+    renderBanned();
+  }
+
+  // One walk of the user list at a time. A burst of roster changes would
+  // otherwise start a fetch each, and an older response landing last would win;
+  // a change that arrives mid-walk buys exactly one more walk after it.
+  let refreshing = false;
+  let refreshQueued = false;
+  async function refreshBanned(): Promise<void> {
+    if (refreshing) {
+      refreshQueued = true;
+      return;
+    }
+    refreshing = true;
+    try {
+      do {
+        refreshQueued = false;
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: one walk at a time
+        await fetchBanned();
+      } while (refreshQueued);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // Another moderator's ban or unban reaches this client only as a roster
+  // change: member_ban drops the row and the unban's member_join restores it.
+  // roleRevision moves on exactly those (and on role and profile changes, never
+  // on presence or typing), and it is monotonic, so a ban and a join batched
+  // into one notification still register.
+  // ponytail: every roster change re-walks the user list for a moderator; a
+  // banned-only server query is the upgrade if that ever costs something.
+  unsubs.push(
+    membersStore.subscribeSelector(
+      (state) => state.roleRevision,
+      () => void refreshBanned(),
+    ),
+  );
+
+  async function unbanMember(userId: number, username: string): Promise<void> {
+    try {
+      await api.adminUnbanMember(userId);
+      getToast()?.show(`Unbanned ${username}`, "success");
+      // No roster update needed: the server's member_join broadcast puts them
+      // back, and that roster change refreshes this list too. Refresh anyway —
+      // the REST call can succeed while the socket is down.
+      await refreshBanned();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to unban member";
+      getToast()?.show(msg, "error");
+    }
+  }
+
   // --- Member list component ---
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
@@ -169,6 +289,9 @@ export function createSidebarMemberSection(
           durationHours > 0 ? `Banned ${username} for ${durationHours}h` : `Banned ${username}`,
           "success",
         );
+        // The row is about to vanish from the roster; the ban has to appear
+        // somewhere or it cannot be undone from here.
+        await refreshBanned();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to ban member";
         getToast()?.show(msg, "error");
@@ -206,7 +329,11 @@ export function createSidebarMemberSection(
     },
   });
   memberList.mount(memberContent);
+  // Appended after MemberList's own root: its re-renders replace only the
+  // inside of that root, so this sibling survives every roster change.
+  memberContent.appendChild(bannedSection);
   memberListContainer.appendChild(memberContent);
+  void refreshBanned();
 
   return {
     element: memberListContainer,

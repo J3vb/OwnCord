@@ -423,8 +423,19 @@ export function addOptimisticMessage(params: {
 /** Mark an optimistic row as failed so the UI can offer retry. */
 export function markSendFailed(correlationId: string, errorCode: string | null): void {
   messagesStore.setState((prev) => {
-    const channelId = prev.pendingSends.get(correlationId);
-    if (channelId === undefined) return prev;
+    // A row that already failed was dropped from pendingSends by an earlier
+    // call, so a second call must still find it: an offline send is marked
+    // failed at once, then relabeled when its deferred persistence also
+    // fails. Fall back to the same scan removeOptimistic uses.
+    let channelId = prev.pendingSends.get(correlationId);
+    if (channelId === undefined) {
+      for (const [cid, list] of prev.messagesByChannel) {
+        if (!list.some((m) => m.correlationId === correlationId)) continue;
+        channelId = cid;
+        break;
+      }
+      if (channelId === undefined) return prev;
+    }
     const existing = prev.messagesByChannel.get(channelId);
     if (existing === undefined) return prev;
     const updatedList = existing.map((m) =>
@@ -930,6 +941,65 @@ export function confirmSend(
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, updatedList);
     return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
+  });
+}
+
+/**
+ * The channel a tracked send belongs to, resolved the way confirmSend resolves
+ * it: the pendingSends registry first, then any not-yet-sent row carrying the
+ * correlation id or the logical client id.
+ *
+ * Callers must resolve BEFORE confirmSend: that call deletes the registry entry
+ * and flips the row to "sent", destroying both identities this lookup needs.
+ * The predicate is duplicated from confirmSend on purpose -- sharing it would
+ * mean rewriting a store function this change has no other reason to touch.
+ */
+export function channelIdForSend(
+  correlationId: string,
+  clientMessageId?: string,
+): number | undefined {
+  const state = messagesStore.getState();
+  const registered = state.pendingSends.get(correlationId);
+  if (registered !== undefined) return registered;
+  for (const [channelId, rows] of state.messagesByChannel) {
+    if (
+      rows.some(
+        (m) =>
+          m.status !== "sent" &&
+          (m.correlationId === correlationId ||
+            (clientMessageId !== undefined && m.clientMessageId === clientMessageId)),
+      )
+    ) {
+      return channelId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Reconcile one already-loaded row with its authoritative server copy, matched
+ * by real id, in place.
+ *
+ * A deduplicated send ack carries no content, and because the server treats the
+ * message as already delivered, no chat_message broadcast follows to reconcile
+ * the row — so it keeps whatever the retry sent, which is stale if the message
+ * was edited elsewhere. The window either holds the row or does not: this
+ * replaces in place and can neither append nor evict, which is what makes it
+ * safe to hand it a single row out of a wider history window.
+ */
+export function applyServerMessage(response: MessageResponse): void {
+  messagesStore.setState((prev) => {
+    const existing = prev.messagesByChannel.get(response.channel_id);
+    if (existing === undefined) return prev;
+    const incoming = messageResponseToMessage(response);
+    const index = existing.findIndex((m) => m.id !== 0 && m.id === incoming.id);
+    if (index === -1) return prev;
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(
+      response.channel_id,
+      existing.map((m, i) => (i === index ? incoming : m)),
+    );
+    return { ...prev, messagesByChannel: updatedMessages };
   });
 }
 

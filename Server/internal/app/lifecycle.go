@@ -250,8 +250,9 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // wiring into ws.HubOptions, so an incomplete hub fails this start step
 // instead of panicking later.
 //
-// Its close step is GracefulStopContext, the only caller of
-// LiveKitProcess.Stop and what closes the dispatch goroutine. gracefulOnce
+// Its close step is GracefulStopContext, which calls StopLiveKit, the sole
+// caller of LiveKitProcess.Stop, and what closes the dispatch goroutine.
+// gracefulOnce
 // makes it idempotent alongside the stop the http step performs on the normal
 // path, so it is reached on every return from Run and a supervised
 // livekit-server process is never orphaned (OC-0027).

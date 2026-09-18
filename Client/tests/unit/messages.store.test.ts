@@ -25,6 +25,8 @@ import {
   invalidateLoadedMessageWindows,
   invalidateChannelMessageWindow,
   setAroundMessages,
+  channelIdForSend,
+  applyServerMessage,
 } from "../../src/stores/messages.store";
 import type {
   ChatMessagePayload,
@@ -763,6 +765,73 @@ describe("messages store", () => {
       // State still changes (new Map created), but pending size is 0
       expect(after.pendingSends.size).toBe(0);
     });
+
+    it("channelIdForSend resolves from the registry, then from an unsent row", () => {
+      const logicalId = "scan-logical";
+      addOptimisticMessage({
+        correlationId: "scan-attempt",
+        clientMessageId: logicalId,
+        channelId: 1,
+        user: TEST_USER,
+        content: "local draft text",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("scan-attempt", "UNCONFIRMED");
+      expect(channelIdForSend("scan-attempt", logicalId)).toBe(1);
+
+      // The sweep that expires pendingSends leaves the row behind; the logical
+      // identity is then the only route back to the channel.
+      messagesStore.setState((prev) => {
+        const pending = new Map(prev.pendingSends);
+        pending.delete("scan-attempt");
+        return { ...prev, pendingSends: pending };
+      });
+      expect(channelIdForSend("scan-attempt", logicalId)).toBe(1);
+      expect(channelIdForSend("scan-attempt")).toBe(1);
+      expect(channelIdForSend("nobody", "no-such-client-id")).toBeUndefined();
+    });
+
+    it("reconciles a locally-stamped row with the server row after a deduplicated ack", () => {
+      const logicalId = "dedup-logical";
+      addOptimisticMessage({
+        correlationId: "retry-attempt",
+        clientMessageId: logicalId,
+        channelId: 1,
+        user: TEST_USER,
+        content: "local draft text",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("retry-attempt", "UNCONFIRMED");
+      confirmSend("retry-attempt", 100, "2026-03-15T10:00:00Z", logicalId);
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]).toMatchObject({ id: 100, status: "sent" });
+      // No broadcast follows a deduplicated ack, so the row still holds the
+      // text this device sent -- stale if the message was edited elsewhere.
+      expect(getChannelMessages(1)[0]).toMatchObject({ content: "local draft text" });
+
+      applyServerMessage(
+        makeMessageResponse({
+          id: 100,
+          content: "edited on the server",
+          edited_at: "2026-03-15T10:05:00Z",
+        }),
+      );
+
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]).toMatchObject({
+        id: 100,
+        status: "sent",
+        content: "edited on the server",
+        editedAt: "2026-03-15T10:05:00Z",
+      });
+    });
+
+    it("applyServerMessage never appends a row the window does not hold", () => {
+      applyServerMessage(makeMessageResponse({ id: 4242, channel_id: 1 }));
+      expect(getChannelMessages(1)).toHaveLength(0);
+    });
   });
 
   // 8. getChannelMessages returns empty for unknown channel
@@ -1451,6 +1520,26 @@ describe("messages store", () => {
       expect(msg.status).toBe("failed");
       expect(msg.errorCode).toBe("SLOW_MODE");
       expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+    });
+
+    it("markSendFailed relabels a row that already failed", () => {
+      // The offline branch marks a row failed at once, then relabels it when
+      // the deferred persistence of that same text also fails. The first call
+      // dropped the row from pendingSends, so the second must still find it —
+      // otherwise the more specific reason never reaches the UI.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "OFFLINE");
+
+      markSendFailed("c1", "OFFLINE_NO_RECOVERY");
+
+      expect(getChannelMessages(1)[0]!.errorCode).toBe("OFFLINE_NO_RECOVERY");
     });
 
     it("removeOptimistic drops the row (retry / dismiss)", () => {

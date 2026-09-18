@@ -1,6 +1,7 @@
 # Connection & Authentication — target UX
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the reconnect
+table's `replay resync` row, re-measured at `a3a0a49b`, 2026-09-18.
 Part of the [Client UX Specification](README.md). Shared vocabulary, feedback
 primitives, and the error matrix live in the [README](README.md) and are not
 repeated here.
@@ -169,13 +170,13 @@ stateDiagram-v2
     Restarting --> Reconnecting: server drops us
 ```
 
-| Phase                | Target reaction                                                                                                                                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reconnecting`       | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved                       |
-| replay resync        | Silent when the ring buffer covers `last_seq`; deduped so no double-render (the replay-dedup block inside `handleMessage()`, `lib/ws.ts`); unread suppressed during replay (the `chat_message` handler's `!ws.isReplaying()` guard in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| full resync          | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action                                                                                                                             |
-| `server_restart`     | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                |
-| fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                       |
+| Phase                | Target reaction                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reconnecting`       | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved                                                                                                                                                                                 |
+| replay resync        | Silent when the ring buffer covers `last_seq`; replayed frames increment unread counts like live ones — the burst is exactly the messages missed while away (`lib/dispatcher.ts`). There is no replay-dedup block in `handleMessage()` and no unread suppression during replay: the local replay classifier (`isReplayFrame`, `lib/dispatcher.ts`) gates only the desktop notification/sound/taskbar flash and the `@here` mention badge |
+| full resync          | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action                                                                                                                                                                                                                                                                                       |
+| `server_restart`     | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                                                                                                                                                                          |
+| fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Target rule:** reconnection is invisible on the happy path and honest on the
 sad path. The user should never wonder whether the app is live — the banner and

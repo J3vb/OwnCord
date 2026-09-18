@@ -199,7 +199,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	}
 	bundles := newSupportBundles(service.NewDiagnosticsService(database), version, setupOpts.RunningCfg, logBuf, hub)
 
-	// Setup endpoints — unauthenticated, only functional when no users exist.
+	// Setup endpoints — unauthenticated. The gate is the durable
+	// settings.setup_completed flag (migration 043), read inside the
+	// transaction that creates the first owner; the user count is only a
+	// pre-migration backstop, so erasing every account does not reopen setup.
 	setupLimiter := auth.NewRateLimiter()
 	if setupLimiterHook != nil {
 		setupLimiterHook(setupLimiter)

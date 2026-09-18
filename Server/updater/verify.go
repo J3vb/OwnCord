@@ -49,13 +49,23 @@ type releaseManifestAsset struct {
 }
 
 // checksumEntryNamesForGOOS returns sha256sum line suffixes to look up in
-// checksums.sha256 (matches GitHub Actions release layout).
-func checksumEntryNamesForGOOS(goos string) []string {
-	switch goos {
-	case "windows":
-		return []string{"windows/chatserver.exe", "chatserver.exe"}
-	case "linux":
-		return []string{"linux/chatserver-linux-amd64.tar.gz", "chatserver-linux-amd64.tar.gz"}
+// checksums.sha256 (matches GitHub Actions release layout) for one target.
+// The pairs are matched whole — never by architecture or OS alone — so adding
+// an asset can never widen an unrelated one. The first entry of a pair is the
+// "dir/name" form older releases used; the second is the bare filename the
+// release workflow's in-directory `sha256sum -- *` emits, and must therefore
+// stay equal to serverDownloadAssetName's result for the same target: the
+// hash looked up has to be the hash of the file actually downloaded.
+func checksumEntryNamesForGOOS(goos, goarch string) []string {
+	switch {
+	case goos == "windows" && goarch == "amd64":
+		return []string{"windows/chatserver.exe", windowsServerBinary}
+	case goos == "windows" && goarch == "arm64":
+		return []string{"windows/chatserver-windows-arm64.exe", windowsServerArm64Binary}
+	case goos == "linux" && goarch == "amd64":
+		return []string{"linux/chatserver-linux-amd64.tar.gz", linuxServerArchive}
+	case goos == "linux" && goarch == "arm64":
+		return []string{"linux/chatserver-linux-arm64.tar.gz", linuxServerArm64Archive}
 	default:
 		return nil
 	}

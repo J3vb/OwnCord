@@ -90,7 +90,7 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err != nil {
 		return "", err
 	}
-	names := checksumEntryNamesForGOOS(runtime.GOOS)
+	names := checksumEntryNamesForGOOS(runtime.GOOS, runtime.GOARCH)
 	if len(names) == 0 {
 		names = []string{assetFilename}
 	}

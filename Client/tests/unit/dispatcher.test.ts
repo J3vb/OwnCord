@@ -1252,6 +1252,146 @@ describe("WS Dispatcher", () => {
     expect(messagesStore.getState().pendingSends.has("corr-123")).toBe(false);
   });
 
+  it("fetches the authoritative row after a deduplicated send ack", async () => {
+    cleanup();
+    const getMessagesAround = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          id: 501,
+          channel_id: 1,
+          user: { id: 1, username: "alex", avatar: null },
+          content: "edited on the server",
+          reply_to: null,
+          attachments: [],
+          reactions: [],
+          pinned: false,
+          edited_at: "2026-03-15T10:05:00Z",
+          deleted: false,
+          timestamp: "2026-03-15T10:00:00Z",
+        },
+      ],
+      has_more_before: false,
+      has_more_after: false,
+    });
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-dedup",
+      clientMessageId: "dedup-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "local draft text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    markSendFailed("corr-dedup", "UNCONFIRMED");
+
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 501, timestamp: "2026-03-15T10:00:00Z", deduplicated: true },
+      "corr-dedup",
+    );
+
+    await vi.waitFor(() => {
+      expect(getMessagesAround).toHaveBeenCalledWith(1, 501);
+    });
+    expect(getChannelMessages(1)[0]).toMatchObject({
+      id: 501,
+      content: "edited on the server",
+      status: "sent",
+    });
+  });
+
+  it("does not let a stale reconcile overwrite a frame that landed while it was in flight", async () => {
+    cleanup();
+    const staleRow = {
+      id: 501,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "read before the delete",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    let release: (resp: unknown) => void = () => {};
+    const getMessagesAround = vi
+      .fn()
+      // The first read took its snapshot before the delete; it resolves late.
+      .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)))
+      // The retry is what the server answers for a message that is now gone.
+      .mockRejectedValueOnce(new Error("404"));
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-race",
+      clientMessageId: "race-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "local draft text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    markSendFailed("corr-race", "UNCONFIRMED");
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 501, timestamp: "2026-03-15T10:00:00Z", deduplicated: true },
+      "corr-race",
+    );
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(1));
+
+    mock.dispatch("chat_deleted", { message_id: 501, channel_id: 1 });
+    release({ messages: [staleRow], has_more_before: false, has_more_after: false });
+
+    // It noticed the row moved and asked again rather than applying the snapshot.
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(2));
+    expect(getChannelMessages(1)[0]).toMatchObject({ id: 501, deleted: true });
+  });
+
+  it("does not refetch history for an ordinary send ack", async () => {
+    cleanup();
+    const getMessagesAround = vi.fn().mockResolvedValue({
+      messages: [],
+      has_more_before: false,
+      has_more_after: false,
+    });
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-plain",
+      clientMessageId: "plain-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hello",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 502, timestamp: "2026-03-15T10:00:00Z" },
+      "corr-plain",
+    );
+
+    // Settle the ack's own work before asserting the absence of a fetch.
+    await vi.waitFor(() => {
+      expect(messagesStore.getState().pendingSends.has("corr-plain")).toBe(false);
+    });
+    expect(getMessagesAround).not.toHaveBeenCalled();
+  });
+
   it("wires member_ban to remove member from members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);

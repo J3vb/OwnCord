@@ -176,7 +176,7 @@ func (s *MessageRequestService) firstContact(ctx context.Context, senderID, reci
 // senderID's action in channelID just produced (a chat message, edit,
 // delete, reaction, or typing indicator): senderID themselves, plus every
 // other participant who trusts senderID for a one-to-one DM, or every
-// participant for a group DM (B5-6 decision 6 — group DMs are untouched).
+// participant for a group DM (B5-6 decision 4 — group DMs are untouched).
 // An untrusted recipient of a pending/ignored/deleted/blocked request is
 // never in the returned set; their only frame from this channel is
 // dm_request.

@@ -243,7 +243,13 @@ vi.mock("@stores/blocks.store", () => ({
 // ---------------------------------------------------------------------------
 
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
-import { activatePendingMessages, deactivatePendingMessages } from "@lib/pendingMessages";
+import {
+  activatePendingMessages,
+  deactivatePendingMessages,
+  newClientMessageId,
+  PENDING_MESSAGE_MAX_COUNT,
+  savePendingText,
+} from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import {
@@ -734,6 +740,45 @@ describe("createChannelController", () => {
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
       expect(mockAddOptimistic).toHaveBeenCalled();
       expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
+    });
+
+    it("marks an offline send unrecoverable when the recovery outbox cannot take it", async () => {
+      // An offline send is never handed to a socket, so the saved copy IS the
+      // message: if the write fails there is nothing left after a restart. A
+      // full outbox (64 drafts) is how that write fails in practice, and the
+      // row must not keep claiming an ordinary offline retry is enough.
+      const owner = { host: "chat.example", userId: 1 };
+      activatePendingMessages(owner, { id: 1, username: "tester", avatar: null }, true);
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
+      for (let i = 0; i < PENDING_MESSAGE_MAX_COUNT; i++) {
+        const filler = newClientMessageId();
+        await savePendingText(owner, {
+          clientMessageId: filler,
+          channelId: 99,
+          content: `filler ${i}`,
+          createdAt: Number(filler.split(":", 1)[0]),
+        });
+      }
+      setConnectionStatus("disconnected");
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("lost text", null, []);
+
+      expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
+      await vi.waitFor(() =>
+        expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE_NO_RECOVERY"),
+      );
+      // The relabel targets the row this send created, not the filler drafts.
+      const correlationId = mockAddOptimistic.mock.calls[0]![0].correlationId;
+      expect(mockMarkSendFailed).toHaveBeenCalledWith(correlationId, "OFFLINE_NO_RECOVERY");
+      expect(opts.showToast).toHaveBeenCalledWith(
+        expect.stringContaining("Could not save this pending message"),
+        "error",
+      );
+      expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
+      ctrl.destroyChannel();
     });
 
     it("composer disable reason distinguishes reconnecting from disconnected", () => {

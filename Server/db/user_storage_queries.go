@@ -9,11 +9,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// The per-user upload byte counter (migration 044, B5-2). The rows in
-// attachments and emoji are the truth; this table is the cached aggregate
-// the upload path admits against, charged before every store write and
-// recounted on the maintenance tick. See service.UploadService.Reserve for
-// the ordering that keeps it safe under concurrency and restart.
+// The per-user upload byte counter (migration 044, B5-2). The attachments
+// rows — avatars included, they are attachments — are the truth; this table is
+// the cached aggregate the upload path admits against, charged before every
+// store write and recounted on the maintenance tick. Emoji are a deliberate,
+// bounded exclusion and not part of this counter: see migration 044. See
+// service.UploadService.Reserve for the ordering that keeps it safe under
+// concurrency and restart.
 
 // ChargeUserStorage adds bytes to userID's counter if the result stays within
 // quota, creating the counter row on first use. It reports whether the charge
@@ -69,7 +71,8 @@ func (d *DB) ListUserStorageIDs(ctx context.Context) ([]int64, error) {
 }
 
 // RecountUserStorage sets userID's counter to the truth: the sum of the
-// attachments (avatars included) and emoji rows that name the user. One
+// attachments rows that name the user, avatars included. Emoji are not part
+// of this counter, so the SQL it wraps sums the attachments table alone. One
 // statement per user, so a sweep interrupted between users leaves every
 // finished user exact.
 func (d *DB) RecountUserStorage(ctx context.Context, userID int64) error {

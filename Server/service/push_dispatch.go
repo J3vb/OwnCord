@@ -447,9 +447,11 @@ func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID
 // recipient came online, the channel was labelled nsfw (or their
 // acknowledgement of an already-labelled channel was revoked -- eligibleFor's
 // CanReadContent call covers both), the recipient lost CanViewChannel, or --
-// for a one-to-one DM -- the recipient no longer trusts the author (they
-// blocked them, or ignored/deleted the pending request between attempts: see
-// trustsAuthor). Called before every attempt, first and retry alike, so a
+// for a one-to-one DM -- the recipient no longer trusts the author: they
+// ignored or deleted the pending request between attempts, which is the half
+// trustsAuthor re-checks (its IsTrustedSender lookup; the blocked half of the
+// audience is applied once, up front, by coalesceAudience's blockers map).
+// Called before every attempt, first and retry alike, so a
 // revoke mid-dispatch drops the remaining retries rather than delivering one
 // anyway.
 func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID, userID int64) bool {

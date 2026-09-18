@@ -2,7 +2,7 @@
 
 **Kind:** target-state map. **Status:** design record only — the seam described
 here **does not exist in the code yet**.
-**Measured against:** `dev` @ `eb873fe7`, 2026-08-27.
+**Measured against:** `dev` @ `a3a0a49b`, 2026-09-18.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
 OwnCord is a Tauri desktop app whose frontend talks to native APIs directly.
@@ -45,13 +45,18 @@ Measured with `git grep`, not estimated:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 20    |
-| Distinct `invoke` command names called from `Client/src/`  | 26    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 30    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 21    |
+| Distinct `invoke` command names called from `Client/src/`  | 29    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 34    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
 | Files under `Client/src/platform/`                         | 0     |
+
+The handler count covers both attribute spellings — 21 `#[tauri::command]` plus
+13 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
+brackets undercounts to 21. One of the 34, `open_devtools`, sits behind
+`#[cfg(feature = "devtools")]`, so a default build registers 33.
 
 Reproduce:
 
@@ -149,7 +154,7 @@ convention already used in the
 
 ## Source of truth
 
-- `Client/src/lib/`, `Client/src/components/` — the 20 files listed above
+- `Client/src/lib/`, `Client/src/components/` — the 21 files listed above
 - `Client/src-tauri/src/lib.rs` — the `generate_handler!` registration list
 - [`docs/audit-2026-08-23-repository-layout.md`](../audit-2026-08-23-repository-layout.md) — `RL-02`, and the target tree
 - [`docs/plans/beta-requirements-traceability-2026-08-23.md`](../plans/beta-requirements-traceability-2026-08-23.md) — `BPR-025`
@@ -157,4 +162,7 @@ convention already used in the
 
 Per this directory's maintenance rule: a PR that adds a new `@tauri-apps` import
 to `Client/src/`, or a new `#[tauri::command]`, updates the counts and the
-cluster table here in the same change.
+cluster table here in the same change. That rule is now enforced rather than
+promised — `Client/tests/unit/platform-contracts-counts.test.ts` re-derives all
+three counts from the tree and fails when the table above disagrees, so a
+forgotten update is red in CI instead of drifting.

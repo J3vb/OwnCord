@@ -3063,8 +3063,10 @@ Cheap to state, an hour each to rediscover.
 - **The recurring `windows-latest` `ws` failure under `-race` is a Go runtime
   fault**, not a flaky test. A red Lint step with zero linters run is
   `golangci-lint`'s network schema fetch, not your code.
-- **Squash-merge divergence:** if `dev` phantom-diverges, reset and force-push
-  rather than resolving invented conflicts; a merge commit, not a squash, is
+- **Squash-merge divergence:** a `dev` that looks diverged from `main` is the
+  squash-merge display artifact, not a real conflict to resolve. `dev` branch
+  protection rejects force-pushes for every actor, so reset-and-force-push
+  cannot land: reconcile through a PR, where a merge commit, not a squash, is
   what reconciles a hand-retargeted branch.
 - **Do not add findings-ledger rows for plan or register bookkeeping** — the
   ledger is for hunt findings. B5-12 edits the register and the roadmap, not

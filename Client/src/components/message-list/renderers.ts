@@ -26,7 +26,6 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 // -- available directly from the split modules) -------------------------------
 
 export {
-  GROUP_THRESHOLD_MS,
   formatTime,
   formatFullDate,
   formatMessageTimestamp,
@@ -163,6 +162,8 @@ function sendErrorReason(code: string | null): string {
       return "You don't have permission to post here";
     case "OFFLINE":
       return "Disconnected — delivery not confirmed";
+    case "OFFLINE_NO_RECOVERY":
+      return "Could not save this message — retry now or it is lost on restart";
     case "NETWORK":
       return "Connection problem — delivery not confirmed";
     case "UNCONFIRMED":

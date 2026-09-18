@@ -2908,9 +2908,10 @@ Authorization is two-layered:
    `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
    users are rejected here even while their session is still valid.
 2. **Per-route bit.** Route groups then require the specific permission below.
-   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on role
-   _position_ (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
-   substitutes for being the owner.
+   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on the
+   Owner role itself (`permissions.IsOwner`: role id 1 **or** role position
+   `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
+   being the owner.
 
 | Route                                                                                                           | Requires                                                                                     |
 | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -2920,15 +2921,17 @@ Authorization is two-layered:
 | `PATCH /admin/api/users/{id}`                                                                                   | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
 | `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
 | `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role position (`>= 100`), not a bit — B4-6                                             |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`)                     | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
 | `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (position 100)                                                                    |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -2961,7 +2964,8 @@ Every route still re-checks its bit server-side.
 
 ### GET /admin/api/setup/status
 
-Reports whether initial setup is needed (no users exist yet).
+Reports whether initial setup is needed (the durable `settings.setup_completed`
+flag is unset and no account exists).
 
 **Auth:** None (public). After the first user exists, the response reveals
 nothing about the configuration.
@@ -2993,8 +2997,10 @@ present only while `needs_setup` is `true`.
 ### POST /admin/api/setup
 
 Create the first (Owner) account, optionally applying first-run wizard
-configuration. Only functional while no users exist; afterwards it returns an
-error.
+configuration. Only functional while the durable `settings.setup_completed`
+flag (migration 043) is unset — the flag is set in the same transaction as the
+first owner and never cleared by the server, so erasing every account does not
+reopen the wizard; afterwards the endpoint returns an error.
 
 **Auth:** None (public)
 **Rate limit:** 5 requests/minute per IP
@@ -3182,7 +3188,7 @@ Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
 
-**Auth:** Owner role (position `>= 100`); `ADMINISTRATOR` does not substitute
+**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`); `ADMINISTRATOR` does not substitute
 
 #### Request
 

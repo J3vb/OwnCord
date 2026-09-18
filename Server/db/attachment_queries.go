@@ -113,7 +113,7 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 // handleServeFile's avatar branch (gated on ChannelID == nil) reachable: once
 // message_id is set that branch is dead and the file falls under the
 // message's channel ACL / soft-delete state instead, permanently splitting
-// from what users.avatar still names (OC-0216). This single UPDATE is the
+// from what users.avatar still names. This single UPDATE is the
 // atomic attachment-IDOR guard for message sends: ownership is enforced in
 // the same statement that links, so there is no check-then-link race.
 // Returns the number of rows updated.

@@ -31,7 +31,7 @@ func (h *Hub) Unregister(c *Client) {
 // while holding h.seqMu, the same lock deliverBroadcast holds for its entire
 // critical section (seq allocation, replay-buffer push, and publish) — that
 // serializes the two entirely, rather than merely narrowing the window. See
-// serve.go's handleReconnect, which re-reads the replay tail and calls
+// replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
@@ -133,7 +133,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// buffer, the resuming client's replay snapshot was taken even earlier,
 	// and the client tracks only max(seq), so the next frame silently
 	// advances past the hole. Only a caller holding h.seqMu closes that
-	// window; see this function's doc comment and serve.go's handleReconnect.
+	// window; see this function's doc comment and replay.go's handleReconnect.
 	//
 	// What the ordering does buy is the smallest possible gap for the callers
 	// that cannot hold seqMu — the fresh-connect path, whose buildReady

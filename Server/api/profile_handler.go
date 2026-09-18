@@ -124,6 +124,12 @@ type SessionDisconnector interface {
 	DisconnectRevokedUser(userID int64)
 }
 
+// The production hub must keep satisfying it: the assertion at the call site
+// silently skips the disconnect when it stops matching, so a renamed method
+// would leave revoked devices connected until the sweep — the bug PR #1500
+// fixed — with nothing failing to say so.
+var _ SessionDisconnector = (*ws.Hub)(nil)
+
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
 // per account. A session principal revokes itself with the first call; an
 // API-token principal keeps its credential, so the cap is what keeps repeated
