@@ -753,9 +753,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * Lift a ban. The mirror of `adminBanMember`: the server broadcasts
-     * `member_unban`, which every client turns back into a roster entry, so
-     * nothing needs refreshing locally.
+     * Lift a ban. The mirror of `adminBanMember`: the server broadcasts a
+     * `member_join` for the unbanned user, which every client turns back into a
+     * roster entry, so the roster needs no refreshing locally.
      */
     adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
       return adminRequest<void>("PATCH", `/users/${userId}`, { banned: false }, signal);
@@ -765,11 +765,31 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * The admin user page, which carries the ban state the roster cannot: a
      * banned member is removed from the roster entirely (MEMBER_BAN), so this
      * is the only way back to them. The server pages it (limit caps at 500,
-     * default 50), so the caller asks for one page and filters.
+     * ordered by ascending id), so this walks every page: one page alone would
+     * hide a ban on any account past the first 500.
      */
-    adminListUsers(limit = 500, signal?: AbortSignal): Promise<AdminUser[]> {
-      const params = new URLSearchParams({ limit: String(limit) });
-      return adminRequest<AdminUser[]>("GET", `/users?${params.toString()}`, undefined, signal);
+    async adminListUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+      const pageSize = 500;
+      const users: AdminUser[] = [];
+      // ponytail: 200 pages (100k accounts) is a stop for a server that never
+      // returns a short page, not a product limit; a banned-only server query
+      // is the upgrade if the walk ever gets slow.
+      for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+        const params = new URLSearchParams({
+          limit: String(pageSize),
+          offset: String(pageIndex * pageSize),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
+        const page = await adminRequest<AdminUser[]>(
+          "GET",
+          `/users?${params.toString()}`,
+          undefined,
+          signal,
+        );
+        users.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return users;
     },
   };
 }

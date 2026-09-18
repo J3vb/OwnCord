@@ -1105,6 +1105,22 @@ describe("API Client", () => {
       expect(body).toEqual({ banned: false });
     });
 
+    it("adminListUsers pages until a short page, so a user past the first 500 is reachable", async () => {
+      const page = (from: number, count: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: from + i, username: `u${from + i}` }));
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(page(1, 500)))
+        .mockResolvedValueOnce(jsonResponse(page(501, 2)));
+
+      const users = await api.adminListUsers();
+
+      expect(users).toHaveLength(502);
+      expect(users[501]?.id).toBe(502);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(fetchCallUrl(0)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=0");
+      expect(fetchCallUrl(1)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=500");
+    });
+
     it("adminChangeRole calls PATCH /admin/api/users/{id} with role_id", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminChangeRole(42, 3);
