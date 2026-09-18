@@ -1,19 +1,23 @@
 // Command dbinventory lists every production Go file above the domain layer
-// that imports the db package, and what it uses it for: db.* types, db.*
-// package functions and sentinels, and method calls on a *db.DB value.
+// that uses the db package, and what it uses it for: db.* types, db.* package
+// functions and sentinels, method calls on a *db.DB value, and the places the
+// bare handle is passed on to somebody else.
 //
 // It is the measurement behind docs/architecture/server-boundaries.md (B3-0)
 // and prints a Markdown table so the document can be regenerated:
 //
 //	cd Server && go run ./cmd/dbinventory
 //
-// The analysis is syntactic (go/parser + go/ast, no type information), like
-// Server/invariants: a *db.DB method call is recognised when the receiver is
-// an identifier declared with type *db.DB in the same file (parameter, result,
-// var, or a name assigned from db.Open*), or a selector whose final field is
-// declared *db.DB anywhere in the same package (h.db.X, s.deps.DB.X). That
-// covers every shape in the tree today; a new shape shows up as a file with
-// an import and no recorded use, which is itself a row worth reading.
+// The analysis is syntactic (go/parser + go/ast, no type information) and
+// lives in Server/invariants so the guard and this command measure the same
+// thing: see DBHandleVars, DBHandleFields and DBHandleCalls.
+//
+// Use, not import (B6-14). The handle is stored on a struct field — Hub.db,
+// App.database — so any file in those packages can call it without importing
+// db at all, and until B6-14 the walk skipped every such file and the
+// inventory said nothing about them. A file in a package that declares a
+// *db.DB field is now analysed whatever it imports, and becomes a row as soon
+// as it calls the handle or hands it on.
 package main
 
 import (
@@ -35,8 +39,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/invariants"
 )
 
-const dbImportPath = "github.com/J3vb/OwnCord/Server/db"
-
 // layerDirs are the top-level packages that may import db freely and are
 // therefore not inventoried. Matched on the root-relative path, so a nested
 // directory that happens to share a name (api/service/) is still inventoried
@@ -56,10 +58,12 @@ const (
 
 type fileUse struct {
 	rel     string
+	imports bool // the file imports db itself, rather than reaching a package field
 	types   map[string]int
 	funcs   map[string]int
 	values  map[string]int
 	methods map[string]int
+	hands   map[string]int
 }
 
 func main() {
@@ -71,7 +75,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if printTable(os.Stdout, rows) > 0 {
+	if printTable(os.Stdout, rows, invariants.DBImportAllow) > 0 {
 		os.Exit(1)
 	}
 }
@@ -101,7 +105,7 @@ func inventory(root string) ([]fileUse, error) {
 			return nil, err
 		}
 		parsed[rel] = f
-		alias := dbAlias(f)
+		alias := invariants.DBHandleAlias(f)
 		if alias == "" {
 			continue
 		}
@@ -109,20 +113,27 @@ func inventory(root string) ([]fileUse, error) {
 		if fieldsByPkg[dir] == nil {
 			fieldsByPkg[dir] = map[string]bool{}
 		}
-		for name := range dbDBFields(f, alias) {
+		for name := range invariants.DBHandleFields(f, alias) {
 			fieldsByPkg[dir][name] = true
 		}
 	}
 
-	// Pass 2: per-file uses.
+	// Pass 2: per-file uses. A file with no import is analysed anyway when its
+	// package carries the handle on a field — that is the shape B6-14 was
+	// about — and becomes a row only if it actually uses it.
 	var rows []fileUse
 	for _, rel := range files {
 		f := parsed[rel]
-		alias := dbAlias(f)
-		if alias == "" {
+		alias := invariants.DBHandleAlias(f)
+		fields := fieldsByPkg[path.Dir(rel)]
+		if alias == "" && len(fields) == 0 {
 			continue
 		}
-		rows = append(rows, analyze(f, rel, alias, dbKinds, fieldsByPkg[path.Dir(rel)]))
+		u := analyze(f, rel, alias, dbKinds, fields)
+		if alias == "" && len(u.methods)+len(u.hands) == 0 {
+			continue
+		}
+		rows = append(rows, u)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].rel < rows[j].rel })
 	return rows, nil
@@ -207,59 +218,13 @@ func declKinds(fset *token.FileSet, dir string) (map[string]kind, error) {
 	return kinds, nil
 }
 
-// dbAlias returns the local name the file imports the db package under, or
-// "" if it does not import it.
-func dbAlias(f *ast.File) string {
-	for _, imp := range f.Imports {
-		if strings.Trim(imp.Path.Value, `"`) != dbImportPath {
-			continue
-		}
-		if imp.Name != nil {
-			return imp.Name.Name
-		}
-		return "db"
-	}
-	return ""
-}
-
-// isDBPtr reports whether expr is *<alias>.DB.
-func isDBPtr(expr ast.Expr, alias string) bool {
-	star, ok := expr.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := star.X.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	x, ok := sel.X.(*ast.Ident)
-	return ok && x.Name == alias && sel.Sel.Name == "DB"
-}
-
-// dbDBFields returns the names of struct fields typed *db.DB in the file.
-func dbDBFields(f *ast.File, alias string) map[string]bool {
-	out := map[string]bool{}
-	ast.Inspect(f, func(n ast.Node) bool {
-		st, ok := n.(*ast.StructType)
-		if !ok {
-			return true
-		}
-		for _, fld := range st.Fields.List {
-			if isDBPtr(fld.Type, alias) {
-				for _, name := range fld.Names {
-					out[name.Name] = true
-				}
-			}
-		}
-		return true
-	})
-	return out
-}
-
 func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields map[string]bool) fileUse {
-	u := fileUse{rel: rel, types: map[string]int{}, funcs: map[string]int{}, values: map[string]int{}, methods: map[string]int{}}
-	dbVars := collectDBVars(f, alias)
-	countMethodCalls(f, dbVars, dbFields, u.methods)
+	u := fileUse{
+		rel: rel, imports: alias != "",
+		types: map[string]int{}, funcs: map[string]int{}, values: map[string]int{},
+		methods: map[string]int{}, hands: map[string]int{},
+	}
+	invariants.DBHandleCalls(f, invariants.DBHandleVars(f, alias, dbFields), dbFields, u.methods, u.hands)
 	classifySelectors(f, alias, dbKinds, &u)
 	return u
 }
@@ -277,77 +242,13 @@ func pkgSelector(expr ast.Expr, alias string) (string, bool) {
 	return sel.Sel.Name, true
 }
 
-// collectDBVars returns identifiers declared with type *db.DB: params,
-// results, struct fields, vars, and names assigned from a db.Open* call.
-func collectDBVars(f *ast.File, alias string) map[string]bool {
-	dbVars := map[string]bool{}
-	add := func(names []*ast.Ident) {
-		for _, n := range names {
-			dbVars[n.Name] = true
-		}
-	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.Field:
-			if isDBPtr(x.Type, alias) {
-				add(x.Names)
-			}
-		case *ast.ValueSpec:
-			if x.Type != nil && isDBPtr(x.Type, alias) {
-				add(x.Names)
-			}
-		case *ast.AssignStmt:
-			for i, rhs := range x.Rhs {
-				if openAssign(rhs, alias) && i < len(x.Lhs) {
-					if id, ok := x.Lhs[i].(*ast.Ident); ok {
-						dbVars[id.Name] = true
-					}
-				}
-			}
-		}
-		return true
-	})
-	return dbVars
-}
-
-// openAssign reports whether expr is a call to <alias>.Open*(...).
-func openAssign(expr ast.Expr, alias string) bool {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	name, ok := pkgSelector(call.Fun, alias)
-	return ok && strings.HasPrefix(name, "Open")
-}
-
-// countMethodCalls tallies calls whose receiver is a *db.DB identifier or a
-// selector ending in a *db.DB struct field.
-func countMethodCalls(f *ast.File, dbVars, dbFields map[string]bool, methods map[string]int) {
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		switch x := sel.X.(type) {
-		case *ast.Ident:
-			if dbVars[x.Name] {
-				methods[sel.Sel.Name]++
-			}
-		case *ast.SelectorExpr:
-			if dbFields[x.Sel.Name] {
-				methods[sel.Sel.Name]++
-			}
-		}
-		return true
-	})
-}
-
 // classifySelectors buckets every <alias>.X selector by what db declares X as.
+// A file with no alias names no db.X selector at all, which is exactly what an
+// empty alias yields.
 func classifySelectors(f *ast.File, alias string, dbKinds map[string]kind, u *fileUse) {
+	if alias == "" {
+		return
+	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		expr, ok := n.(ast.Expr)
 		if !ok {
@@ -397,27 +298,51 @@ func sum(m map[string]int) int {
 
 // printTable renders the Markdown block between the dbinventory markers in
 // docs/architecture/server-boundaries.md and returns the number of problems
-// found (unlisted importers, stale allowlist rows) -- nonzero means the
-// command exits 1.
-func printTable(w io.Writer, rows []fileUse) int {
+// found -- nonzero means the command exits 1, and
+// TestServerBoundariesDocIsCurrent fails before it compares anything.
+//
+// The classes, and what each one means:
+//
+//   - UNLISTED: the file imports db and has no row (B3-0's original).
+//   - UNLISTED BY USE: the file imports nothing but reaches the handle through
+//     a package field, and has no row. This is the shape B6-14 found: a call
+//     the guard could not see because there was no import to see it by.
+//   - ADAPTER ROW USES THE HANDLE: an adapter, move or remove row that
+//     measures a call or a hand-off. Its disposition says it makes none.
+//   - CALLS DRIFTED / HANDS DRIFTED: a boundary row whose pinned multiset is
+//     not what the tree measures, in either direction. Raising a count is an
+//     edit to DBImportAllow, never a side effect of editing the file.
+//   - STALE: a row whose file no longer uses db at all.
+//
+// allow is a parameter rather than invariants.DBImportAllow directly so the
+// unit tests can drive each class from a fixture instead of the live tree.
+func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImportEntry) int {
 	byPkg := map[string]int{}
 	byDisposition := map[string]int{}
 	byFamily := map[string]int{}
-	typeOnly, unlisted := 0, 0
-	_, _ = fmt.Fprintln(w, "| File | `db.*` types | `db.*` funcs and sentinels | `*db.DB` method calls | Shape | Disposition | Family | Why |")
-	_, _ = fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- |")
+	typeOnly, noImport, unlisted, problems := 0, 0, 0, 0
+	var flagged []string
+	_, _ = fmt.Fprintln(w, "| File | `db.*` types | `db.*` funcs and sentinels | `*db.DB` method calls | Hand-offs | Shape | Disposition | Family | Why |")
+	_, _ = fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	for _, r := range rows {
 		byPkg[path.Dir(r.rel)]++
 		shape := "calls"
-		if sum(r.funcs)+sum(r.values)+sum(r.methods) == 0 {
+		if sum(r.funcs)+sum(r.values)+sum(r.methods)+sum(r.hands) == 0 {
 			shape = "type-only"
 			typeOnly++
 		}
-		entry, listed := invariants.DBImportAllow[r.rel]
+		if !r.imports {
+			noImport++
+		}
+		entry, listed := allow[r.rel]
 		if !listed {
 			unlisted++
 			entry = invariants.DBImportEntry{Disposition: "**UNLISTED**", Note: "fails db-import-boundary"}
+			if !r.imports {
+				entry.Note = "uses the handle through a package field and has no row"
+			}
 		}
+		flagged = append(flagged, classify(r, entry, listed)...)
 		byDisposition[entry.Disposition]++
 		if entry.Family != "" {
 			byFamily[entry.Family]++
@@ -426,24 +351,59 @@ func printTable(w io.Writer, rows []fileUse) int {
 		if family == "" {
 			family = "—"
 		}
-		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s | %s | %s | %s |\n",
-			r.rel, joined(r.types), mergeFV(r), joined(r.methods), shape, entry.Disposition, family, entry.Note)
+		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			r.rel, joined(r.types), mergeFV(r), joined(r.methods), joined(r.hands),
+			shape, entry.Disposition, family, entry.Note)
 	}
-	_, _ = fmt.Fprintf(w, "\n%d files import `db` outside `db/` and `service/` (%s); %d are type-only; %d unlisted.\n",
-		len(rows), countList(byPkg), typeOnly, unlisted)
+	_, _ = fmt.Fprintf(w, "\n%d files use `db` outside `db/` and `service/` (%s); %d import it, "+
+		"%d use the handle without importing it; %d are type-only; %d unlisted.\n",
+		len(rows), countList(byPkg), len(rows)-noImport, noImport, typeOnly, unlisted)
 	_, _ = fmt.Fprintf(w, "Dispositions: %s. Move targets: %s.\n", countList(byDisposition), countList(byFamily))
-	stale := 0
+
 	present := map[string]bool{}
 	for _, r := range rows {
 		present[r.rel] = true
 	}
-	for rel := range invariants.DBImportAllow {
+	for _, rel := range slices.Sorted(maps.Keys(allow)) {
 		if !present[rel] {
-			stale++
-			_, _ = fmt.Fprintf(w, "STALE allowlist row (file no longer imports db): `%s`\n", rel)
+			flagged = append(flagged, fmt.Sprintf("STALE allowlist row (file no longer uses db): `%s`", rel))
 		}
 	}
-	return unlisted + stale
+	for _, line := range flagged {
+		problems++
+		_, _ = fmt.Fprintln(w, line)
+	}
+	return problems
+}
+
+// classify compares one measured row against the entry that claims it, and
+// returns a line per problem found -- naming the file, the measured multiset
+// and the pinned one, because "drifted" without both is not actionable.
+func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
+	if !listed {
+		if r.imports {
+			return []string{fmt.Sprintf("UNLISTED importer (no allowlist row): `%s`", r.rel)}
+		}
+		return []string{fmt.Sprintf("UNLISTED BY USE (no import, no allowlist row): `%s` calls %s, hands off %s",
+			r.rel, joined(r.methods), joined(r.hands))}
+	}
+	if entry.Disposition != invariants.DispositionBoundary {
+		if sum(r.methods)+sum(r.hands) == 0 {
+			return nil
+		}
+		return []string{fmt.Sprintf("ADAPTER ROW USES THE HANDLE: `%s` is `%s`, which makes no handle use, "+
+			"but calls %s and hands off %s", r.rel, entry.Disposition, joined(r.methods), joined(r.hands))}
+	}
+	var out []string
+	if !maps.Equal(entry.Calls, r.methods) {
+		out = append(out, fmt.Sprintf("CALLS DRIFTED: `%s` calls %s; the row pins %s",
+			r.rel, joined(r.methods), joined(entry.Calls)))
+	}
+	if !maps.Equal(entry.Hands, r.hands) {
+		out = append(out, fmt.Sprintf("HANDS DRIFTED: `%s` hands off %s; the row pins %s",
+			r.rel, joined(r.hands), joined(entry.Hands)))
+	}
+	return out
 }
 
 // countList renders a count map as "a 1, b 2", keys sorted.
