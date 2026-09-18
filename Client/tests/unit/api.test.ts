@@ -1095,6 +1095,16 @@ describe("API Client", () => {
       expect(body).toEqual({ banned: true, ban_reason: "" });
     });
 
+    it("adminUnbanMember calls PATCH /admin/api/users/{id} with banned:false", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.adminUnbanMember(42);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42");
+      expect(fetchCallOpts().method).toBe("PATCH");
+      const body = JSON.parse(fetchCallOpts().body as string);
+      // Only the flag: the ban reason is dropped with the ban itself.
+      expect(body).toEqual({ banned: false });
+    });
+
     it("adminChangeRole calls PATCH /admin/api/users/{id} with role_id", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminChangeRole(42, 3);

@@ -8,6 +8,7 @@ import { isValidHost } from "./hostValidation";
 import { SessionScope } from "./sessionScope";
 import type {
   AuthResponse,
+  AdminUser,
   RegisterResponse,
   HealthResponse,
   MessagesResponse,
@@ -749,6 +750,26 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         },
         signal,
       );
+    },
+
+    /**
+     * Lift a ban. The mirror of `adminBanMember`: the server broadcasts
+     * `member_unban`, which every client turns back into a roster entry, so
+     * nothing needs refreshing locally.
+     */
+    adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
+      return adminRequest<void>("PATCH", `/users/${userId}`, { banned: false }, signal);
+    },
+
+    /**
+     * The admin user page, which carries the ban state the roster cannot: a
+     * banned member is removed from the roster entirely (MEMBER_BAN), so this
+     * is the only way back to them. The server pages it (limit caps at 500,
+     * default 50), so the caller asks for one page and filters.
+     */
+    adminListUsers(limit = 500, signal?: AbortSignal): Promise<AdminUser[]> {
+      const params = new URLSearchParams({ limit: String(limit) });
+      return adminRequest<AdminUser[]>("GET", `/users?${params.toString()}`, undefined, signal);
     },
   };
 }

@@ -28,8 +28,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
-import type { Member } from "../../src/stores/members.store";
-import type { UserStatus } from "../../src/lib/types";
+import { Permission, type UserStatus } from "../../src/lib/types";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -70,21 +69,28 @@ function resetStores(): void {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeMember(overrides: Partial<Member> & { id: number; username: string }): Member {
-  return {
-    avatar: null,
-    role: "member",
-    status: "online" as UserStatus,
-    ...overrides,
-  };
+/** Give the signed-in role the bit the moderation surface gates on. */
+function grantBanPermission(): void {
+  setRoles(
+    channelsStore
+      .getState()
+      .roles.map((role) =>
+        role.name === "admin" ? { ...role, permissions: Permission.BAN_MEMBERS } : role,
+      ),
+  );
 }
 
-function setTestMembers(members: Member[]): void {
-  const map = new Map<number, Member>();
-  for (const m of members) {
-    map.set(m.id, m);
-  }
-  membersStore.setState((prev) => ({ ...prev, members: map }));
+/** One row of the admin users page, as the client's `AdminUser` sees it. */
+function bannedUser(id: number, username: string) {
+  return {
+    id,
+    username,
+    banned: true,
+    role_id: 4,
+    role_name: "member",
+    status: "offline" as UserStatus,
+    created_at: "2026-01-01T00:00:00Z",
+  };
 }
 
 function defaultOpts(): SidebarMemberSectionOptions {
@@ -93,6 +99,8 @@ function defaultOpts(): SidebarMemberSectionOptions {
       adminKickMember: vi.fn().mockResolvedValue(undefined),
       adminBanMember: vi.fn().mockResolvedValue(undefined),
       adminChangeRole: vi.fn().mockResolvedValue(undefined),
+      adminListUsers: vi.fn().mockResolvedValue([]),
+      adminUnbanMember: vi.fn().mockResolvedValue(undefined),
     } as unknown as SidebarMemberSectionOptions["api"],
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };
@@ -725,6 +733,93 @@ describe("SidebarMemberSection", () => {
 
       // Should not have saved anything since abort was called
       expect(localStorage.getItem(LS_KEY_HEIGHT)).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Banned members
+  //
+  // A ban removes the member from the roster, so the context menu that issued
+  // it is gone with the row. Without this list the desktop client can ban but
+  // never unban.
+  // -------------------------------------------------------------------------
+
+  describe("banned members", () => {
+    it("lists banned members and lifts the ban from the row", async () => {
+      grantBanPermission();
+      const mockShow = vi.fn();
+      const opts = defaultOpts();
+      const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
+      const unban = opts.api.adminUnbanMember as unknown as ReturnType<typeof vi.fn>;
+      Object.assign(opts, { getToast: vi.fn().mockReturnValue({ show: mockShow }) });
+      listUsers.mockResolvedValue([
+        bannedUser(3, "spammer"),
+        // The list is the whole user page, so the filter is the point: an
+        // unbanned user must not get an Unban row.
+        { ...bannedUser(4, "fine"), banned: false },
+      ]);
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+
+      await vi.waitFor(() =>
+        expect(container.querySelector("[data-testid='unban-member']")).not.toBeNull(),
+      );
+      expect(container.querySelectorAll(".banned-row")).toHaveLength(1);
+      expect(container.querySelector(".banned-name")?.textContent).toBe("spammer");
+
+      (container.querySelector("[data-testid='unban-member']") as HTMLButtonElement).click();
+
+      await vi.waitFor(() => expect(unban).toHaveBeenCalledWith(3));
+      expect(mockShow).toHaveBeenCalledWith("Unbanned spammer", "success");
+      // The refetch is what drops the row now the ban is lifted.
+      expect(listUsers).toHaveBeenCalledTimes(2);
+
+      section.destroy();
+    });
+
+    it("stays out of the way without BAN_MEMBERS, and never asks the admin API", () => {
+      const opts = defaultOpts();
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+
+      expect(opts.api.adminListUsers).not.toHaveBeenCalled();
+      expect(container.querySelector("[data-testid='unban-member']")).toBeNull();
+      // Hidden rather than rendered empty: an unpermitted moderator should not
+      // see a BANNED heading at all.
+      expect(
+        (container.querySelector("[data-testid='sidebar-banned']") as HTMLElement).style.display,
+      ).toBe("none");
+
+      section.destroy();
+    });
+
+    it("reports a failed unban instead of dropping the row silently", async () => {
+      grantBanPermission();
+      const mockShow = vi.fn();
+      const opts = defaultOpts();
+      Object.assign(opts, { getToast: vi.fn().mockReturnValue({ show: mockShow }) });
+      (opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+        bannedUser(3, "spammer"),
+      ]);
+      (opts.api.adminUnbanMember as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error("Unban denied"),
+      );
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+      await vi.waitFor(() =>
+        expect(container.querySelector("[data-testid='unban-member']")).not.toBeNull(),
+      );
+
+      (container.querySelector("[data-testid='unban-member']") as HTMLButtonElement).click();
+
+      await vi.waitFor(() => expect(mockShow).toHaveBeenCalledWith("Unban denied", "error"));
+      // Still listed: the ban is still in force.
+      expect(container.querySelectorAll(".banned-row")).toHaveLength(1);
+
+      section.destroy();
     });
   });
 });

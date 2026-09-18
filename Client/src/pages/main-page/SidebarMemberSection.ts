@@ -10,6 +10,8 @@ import { createMemberList } from "@components/MemberList";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";
+import { roleHasPermission } from "@lib/permissions";
+import { Permission, type AdminUser } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 
@@ -147,6 +149,73 @@ export function createSidebarMemberSection(
     applyMembersCollapsed();
   });
 
+  // --- Banned members ---
+  // A banned user leaves the roster outright (dispatcher's MEMBER_BAN removes
+  // them), so the context menu that issued the ban is the only place they ever
+  // appeared — and it is gone with the row. This list, fed by the admin users
+  // page, is what makes a ban reversible from the desktop client.
+  const bannedSection = createElement("div", {
+    class: "sidebar-banned-section",
+    "data-testid": "sidebar-banned",
+  });
+  let bannedUsers: readonly AdminUser[] = [];
+
+  function renderBanned(): void {
+    bannedSection.replaceChildren();
+    if (bannedUsers.length === 0) {
+      bannedSection.style.display = "none";
+      return;
+    }
+    bannedSection.style.display = "";
+    bannedSection.appendChild(createElement("div", { class: "banned-header" }, "BANNED"));
+    for (const user of bannedUsers) {
+      const row = createElement("div", { class: "banned-row" });
+      row.appendChild(createElement("span", { class: "banned-name" }, user.username));
+      const unbanBtn = createElement(
+        "button",
+        { class: "banned-unban-btn", "data-testid": "unban-member" },
+        "Unban",
+      );
+      unbanBtn.addEventListener("click", () => {
+        void unbanMember(user.id, user.username);
+      });
+      row.appendChild(unbanBtn);
+      bannedSection.appendChild(row);
+    }
+  }
+
+  /** Refetch, or give up quietly: this list is an affordance for moderators,
+   *  and a toast on every mount would be noise for the majority of members,
+   *  who never see the section at all. */
+  async function refreshBanned(): Promise<void> {
+    // Read the role live, like MemberList's menu gates do: a role change
+    // arrives as a store update, and this section is not remounted for it.
+    if (!roleHasPermission(authStore.getState().user?.role ?? "", Permission.BAN_MEMBERS)) {
+      bannedUsers = [];
+      renderBanned();
+      return;
+    }
+    try {
+      bannedUsers = (await api.adminListUsers()).filter((user) => user.banned);
+    } catch {
+      return;
+    }
+    renderBanned();
+  }
+
+  async function unbanMember(userId: number, username: string): Promise<void> {
+    try {
+      await api.adminUnbanMember(userId);
+      getToast()?.show(`Unbanned ${username}`, "success");
+      // No roster update needed: the server's member_unban broadcast puts them
+      // back. This list is the one thing that does not hear it.
+      await refreshBanned();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to unban member";
+      getToast()?.show(msg, "error");
+    }
+  }
+
   // --- Member list component ---
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
@@ -169,6 +238,9 @@ export function createSidebarMemberSection(
           durationHours > 0 ? `Banned ${username} for ${durationHours}h` : `Banned ${username}`,
           "success",
         );
+        // The row is about to vanish from the roster; the ban has to appear
+        // somewhere or it cannot be undone from here.
+        await refreshBanned();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to ban member";
         getToast()?.show(msg, "error");
@@ -206,7 +278,11 @@ export function createSidebarMemberSection(
     },
   });
   memberList.mount(memberContent);
+  // Appended after MemberList's own root: its re-renders replace only the
+  // inside of that root, so this sibling survives every roster change.
+  memberContent.appendChild(bannedSection);
   memberListContainer.appendChild(memberContent);
+  void refreshBanned();
 
   return {
     element: memberListContainer,

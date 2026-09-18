@@ -963,6 +963,26 @@ export interface MemberResponse {
   readonly custom_status?: string | null;
 }
 
+/**
+ * One user row from the admin API (`GET /admin/api/users`), the shape
+ * `toAdminUserResponse` writes (Server/admin/types.go). Distinct from
+ * `MemberResponse`: this one carries the ban state the moderation surface
+ * needs, and the list is paged server-side.
+ */
+export interface AdminUser {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar?: string | null;
+  readonly role_id: number;
+  readonly role_name: string;
+  readonly status: UserStatus;
+  readonly created_at: string;
+  readonly last_seen?: string;
+  readonly banned: boolean;
+  readonly ban_reason?: string;
+  readonly ban_expires?: string;
+}
+
 /** Search result item. */
 export interface SearchResultItem {
   readonly message_id: number;
