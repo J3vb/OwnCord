@@ -13,10 +13,11 @@
 // patched a prototype nothing in the suite ever calls. Four failed outright;
 // the rest passed while asserting nothing at all (OC-0415).
 //
-// The fix is upstream of this file — vitest.config.ts starts the worker
-// processes with `--no-experimental-webstorage`, so Node installs no Web
-// Storage and jsdom's own `localStorage`, `sessionStorage` and `Storage` are
-// the only ones present, on every Node version. (`--localstorage-file` is the
+// The fix is upstream of this file — vitest.config.ts appends
+// `--no-experimental-webstorage` to `process.env.NODE_OPTIONS` before the pool
+// starts, and every forked worker inherits it, so Node installs no Web Storage
+// and jsdom's own `localStorage`, `sessionStorage` and `Storage` are the only
+// ones present, on every Node version. (`--localstorage-file` is the
 // wrong lever: it is file-backed and would be shared by vitest's parallel
 // workers, leaking state between test files.)
 //
@@ -26,7 +27,7 @@ if (typeof globalThis.localStorage === "undefined") {
   throw new Error(
     "tests/setup.ts: localStorage is missing. Node's Web Storage is shadowing " +
       "jsdom's and the --no-experimental-webstorage flag did not reach this " +
-      "worker — check poolOptions.forks.execArgv in vitest.config.ts (OC-0415).",
+      "worker — check the NODE_OPTIONS block at the top of vitest.config.ts (OC-0415).",
   );
 }
 if (Object.getPrototypeOf(globalThis.localStorage) !== Storage.prototype) {
@@ -34,7 +35,7 @@ if (Object.getPrototypeOf(globalThis.localStorage) !== Storage.prototype) {
     "tests/setup.ts: localStorage is not an instance of the global Storage. " +
       "Node's Storage class is shadowing jsdom's, so every " +
       "vi.spyOn(Storage.prototype, ...) in this suite would silently intercept " +
-      "nothing — check poolOptions.forks.execArgv in vitest.config.ts (OC-0415).",
+      "nothing — check the NODE_OPTIONS block at the top of vitest.config.ts (OC-0415).",
   );
 }
 
