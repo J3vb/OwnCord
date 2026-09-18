@@ -173,6 +173,11 @@ type voiceChannelDisconnector interface {
 	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool
 }
 
+// The production moderator must keep satisfying it: a type assertion that
+// silently stops matching would fall back to the unscoped DisconnectFromVoice
+// this extension exists to avoid, with nothing failing to say so.
+var _ voiceChannelDisconnector = (*Hub)(nil)
+
 // voiceServerMuteLocker is the manual voice_mod_mute command's route onto
 // the same per-user lock the timeout voice half uses (round 4, Codex review
 // Part B). Widening VoiceModerator itself lives in deps.go; until then
@@ -182,6 +187,11 @@ type voiceChannelDisconnector interface {
 type voiceServerMuteLocker interface {
 	SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error)
 }
+
+// The production moderator must keep satisfying it: a type assertion that
+// silently stops matching would fall back to the pre-round-4 unlocked write
+// for a manual mute, with nothing failing to say so.
+var _ voiceServerMuteLocker = (*Hub)(nil)
 
 // disconnectFromVoiceIn evicts targetID from channelID, reporting false when
 // the target has no connection on this node or has already left that channel.
@@ -206,6 +216,11 @@ func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, ch
 type voicePendingModFlagsSetter interface {
 	SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool
 }
+
+// The production moderator must keep satisfying it: a type assertion that
+// silently stops matching would drop the stashed mute/deafen flags on a
+// server-driven move, with nothing failing to say so.
+var _ voicePendingModFlagsSetter = (*Hub)(nil)
 
 // stashPendingModFlags is a best-effort no-op when mod does not support the
 // optional extension or the target has no connection on this node — the

@@ -351,7 +351,7 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 	// PR #1500), and recovery is precisely the takeover case it matters
 	// most for (OC-0394).
 	if revoked > 0 {
-		if d, ok := s.broadcaster.(sessionDisconnector); ok {
+		if d, ok := s.broadcaster.(SessionDisconnector); ok {
 			d.DisconnectRevokedUser(user.ID)
 		}
 	}

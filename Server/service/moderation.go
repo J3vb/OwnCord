@@ -835,7 +835,7 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 	// OC-0394). Kick is the one action whose entire purpose is immediate
 	// ejection, so it must not be left on the sweep alone (OC-0431). A
 	// notifier that doesn't implement this (tests, nil) is a silent no-op.
-	if d, ok := s.notifier.(sessionDisconnector); ok {
+	if d, ok := s.notifier.(SessionDisconnector); ok {
 		d.DisconnectRevokedUser(targetID)
 	}
 

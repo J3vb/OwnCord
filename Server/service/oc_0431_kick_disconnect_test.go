@@ -8,7 +8,7 @@ import (
 )
 
 // fakeKickDisconnectNotifier is a ModActionNotifier that also implements
-// sessionDisconnector, like *ws.Hub does — forceLogout (OC-0431) must
+// SessionDisconnector, like *ws.Hub does — forceLogout (OC-0431) must
 // type-assert s.notifier to this shape and disconnect the target's live
 // socket immediately, the same way recovery.go's redemption path and
 // profile_handler.go's sign-out-everywhere path already do.

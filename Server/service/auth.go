@@ -25,11 +25,12 @@ type AuthBroadcaster interface {
 	BroadcastMemberBan(userID int64)
 }
 
-// sessionDisconnector is the hub's half of dropping a live socket once its
-// session is gone — api.SessionDisconnector's counterpart inside the service
-// layer, satisfied by *ws.Hub. A broadcaster that does not implement it
+// SessionDisconnector is the hub's half of dropping a live socket once its
+// session is gone — the service layer's counterpart to api.SessionDisconnector,
+// satisfied by *ws.Hub. It is exported so the admin package can pin *ws.Hub to
+// it (service cannot import ws). A broadcaster that does not implement it
 // (tests, a nil hub) simply skips the disconnect.
-type sessionDisconnector interface {
+type SessionDisconnector interface {
 	DisconnectRevokedUser(userID int64)
 }
 
