@@ -4,6 +4,7 @@ use std::sync::{
     Arc,
 };
 use std::time::Duration;
+use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -55,6 +56,9 @@ pub struct UpdateCheckResult {
     pub available: bool,
     pub version: Option<String>,
     pub body: Option<String>,
+    /// True when this install kind cannot update itself at all, so
+    /// `available: false` must not be read as "you are up to date".
+    pub manual_upgrade: bool,
 }
 
 /// Download progress, emitted to the webview as `update-progress` so the banner
@@ -186,6 +190,21 @@ fn validate_server_url(server_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether an install packaged this way can ever update itself from an OwnCord
+/// server.
+///
+/// The release publishes signed updater artifacts for the appimage and nsis
+/// targets only, and the server answers every other target with 204
+/// (`Server/updater/assets.go`, `TestClientUpdate_DebTargetNoContent`). A .deb
+/// or .rpm client therefore gets `None` from `check()` whether or not it is
+/// behind — indistinguishable from an up-to-date one. `bundle_type()` is the
+/// type the bundler patched into this binary, i.e. how it was packaged, which
+/// is what decides whether any updater artifact exists for it. An unpatched or
+/// tarball binary reports no type and stays silent rather than guessing.
+fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
+    matches!(bundle, Some(BundleType::Deb | BundleType::Rpm))
+}
+
 /// Check for a client update using the given server URL to build the endpoint
 /// dynamically. This is required because OwnCord is self-hosted and the
 /// server address varies per user.
@@ -206,11 +225,13 @@ pub async fn check_client_update(
             available: true,
             version: Some(u.version.clone()),
             body: Some(u.body.clone().unwrap_or_default()),
+            manual_upgrade: false,
         }),
         None => Ok(UpdateCheckResult {
             available: false,
             version: None,
             body: None,
+            manual_upgrade: cannot_self_update(bundle_type().as_ref()),
         }),
     }
 }
@@ -342,6 +363,30 @@ mod tests {
             build_update_endpoint("https://chat.example.com:8443", "0.0.0"),
             "https://chat.example.com:8443/api/v1/client-update/{{target}}-{{arch}}-{{bundle_type}}/0.0.0"
         );
+    }
+
+    #[test]
+    fn package_installs_report_they_cannot_self_update() {
+        // Only these two mean "the server has no updater artifact for you"
+        // rather than "you are current".
+        assert!(cannot_self_update(Some(&BundleType::Deb)));
+        assert!(cannot_self_update(Some(&BundleType::Rpm)));
+
+        // Everything else — including the two targets the release does
+        // publish — must stay quiet, or the banner becomes noise on every
+        // install that has simply nothing new to fetch.
+        for bundle in [
+            Some(BundleType::AppImage),
+            Some(BundleType::Nsis),
+            Some(BundleType::Msi),
+            Some(BundleType::App),
+            None,
+        ] {
+            assert!(
+                !cannot_self_update(bundle.as_ref()),
+                "{bundle:?} must not ask for a manual upgrade"
+            );
+        }
     }
 
     #[test]

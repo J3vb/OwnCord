@@ -12,6 +12,10 @@ export interface UpdateCheckResult {
   readonly available: boolean;
   readonly version: string | null;
   readonly body: string | null;
+  /** This install cannot update itself at all — see `cannot_self_update` in
+   *  `src-tauri/src/update_commands.rs`. `available: false` then says nothing
+   *  about whether a newer version exists. */
+  readonly manual_upgrade: boolean;
 }
 
 /** Download progress reported by the Rust updater during install. */
@@ -73,7 +77,7 @@ export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResu
     return result;
   } catch (err) {
     log.error("Update check failed", { error: String(err) });
-    return { available: false, version: null, body: null };
+    return { available: false, version: null, body: null, manual_upgrade: false };
   }
 }
 

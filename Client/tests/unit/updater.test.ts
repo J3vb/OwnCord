@@ -41,12 +41,18 @@ beforeEach(async () => {
 
 describe("checkForUpdate", () => {
   it("returns the backend result when an update is available", async () => {
-    invoke.mockResolvedValue({ available: true, version: "1.2.3", body: "notes" });
+    invoke.mockResolvedValue({
+      available: true,
+      version: "1.2.3",
+      body: "notes",
+      manual_upgrade: false,
+    });
 
     await expect(checkForUpdate("https://s.example")).resolves.toEqual({
       available: true,
       version: "1.2.3",
       body: "notes",
+      manual_upgrade: false,
     });
     expect(invoke).toHaveBeenCalledWith("check_client_update", {
       serverUrl: "https://s.example",
@@ -54,12 +60,18 @@ describe("checkForUpdate", () => {
   });
 
   it("returns the backend result when no update is available", async () => {
-    invoke.mockResolvedValue({ available: false, version: null, body: null });
+    invoke.mockResolvedValue({
+      available: false,
+      version: null,
+      body: null,
+      manual_upgrade: false,
+    });
 
     await expect(checkForUpdate("https://s.example")).resolves.toEqual({
       available: false,
       version: null,
       body: null,
+      manual_upgrade: false,
     });
   });
 
@@ -67,11 +79,14 @@ describe("checkForUpdate", () => {
     invoke.mockRejectedValue(new Error("server unreachable"));
 
     // An unreachable or older server must not break the client — it just means
-    // there is no update to offer.
+    // there is no update to offer. The failure also says nothing about whether
+    // this install could update itself, so the fallback must not claim it
+    // cannot.
     await expect(checkForUpdate("https://s.example")).resolves.toEqual({
       available: false,
       version: null,
       body: null,
+      manual_upgrade: false,
     });
   });
 });
