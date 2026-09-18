@@ -103,7 +103,10 @@ const CHECK_SERVER = [
   step("go", ["build", "-tags", "otel,wazero", "./..."], "Server"),
   step("go", ["vet", "./..."], "Server"),
   step("go", ["test", "-race", "./..."], "Server"),
-  step("go", ["test", "-tags", "deadlock", "-count=1", "./ws/"], "Server"),
+  // The whole tree, as ci.yml runs it. This step said `./ws/` ("where lock
+  // order varies") until a branch that touched no Server/admin file went red
+  // on the CI deadlock leg on an admin test the narrower command never ran.
+  step("go", ["test", "-tags", "deadlock", "-count=1", "./..."], "Server"),
   // -count=1 is load-bearing: TestServerBoundariesDocIsCurrent compares a
   // document that lives outside the Server module, so Go's test cache does not
   // record it as an input and `go test -race ./...` above answers a doc-only

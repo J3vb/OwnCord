@@ -1,13 +1,12 @@
 # owncord-introspect (MCP dev tool)
 
 A small [MCP](https://modelcontextprotocol.io) server that lets Claude Code introspect a **locally
-running** OwnCord instance. Three tools:
+running** OwnCord instance. Two tools:
 
 | Tool          | What it does                                                                       |
 | ------------- | ---------------------------------------------------------------------------------- |
 | `api_request` | Read-write passthrough to any OwnCord REST endpoint (`/api/v1/*`, `/admin/api/*`). |
 | `server_logs` | The server's in-memory ring-buffer logs (admin SSE ticket→stream).                 |
-| `client_logs` | Tails the desktop client's on-disk log file.                                       |
 
 ## Quickstart
 

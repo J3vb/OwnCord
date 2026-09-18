@@ -175,7 +175,7 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
-		switch blkErr := requireDMNotBlocked(ctx, st, userID, ch.ID); {
+		switch blkErr := RequireDMNotBlocked(ctx, st, userID, ch.ID); {
 		case errors.Is(blkErr, ErrBlocked):
 			sub.DMBlocked = true
 		case blkErr != nil:
@@ -291,22 +291,16 @@ type DMBlockReader interface {
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
 }
 
-// RequireDMNotBlocked is the exported form of requireDMNotBlocked so callers
-// outside the service package (voice join/token-refresh, ws/voice_join.go)
-// can share this single block-check implementation — same group-DM exemption,
-// same "lookup failure is not a block" posture — instead of reimplementing it
-// against the raw DB. st only needs to be a DMBlockReader; *db.DB and Store
-// both satisfy it.
-func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
-	return requireDMNotBlocked(ctx, st, userID, channelID)
-}
-
-// requireDMNotBlocked reports ErrBlocked when userID and the other participant
+// RequireDMNotBlocked reports ErrBlocked when userID and the other participant
 // of DM channelID have blocked each other in either direction.
 //
 // It is the single block-check implementation, called from every DM
 // interaction sink — send, edit, react, pin, typing and call rings
-// (DMService.RingTargets). Enforcing it on the
+// (DMService.RingTargets) — and, outside this package, from voice
+// join/token-refresh (ws/voice_join.go): st only needs to be a DMBlockReader,
+// and both *db.DB and Store satisfy it.
+//
+// Enforcing it on the
 // send path alone left a blocked user an open channel to the blocker: editing
 // an already-sent message fans MessageEditedDMEvent out to every participant,
 // so arbitrary new text still reached the person who blocked them, and
@@ -327,7 +321,7 @@ func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelI
 // them reading different conversations under the same name. Blocks are instead
 // enforced when the group is *created* (DMService.CreateGroupDM), where the
 // question "may these two be in a room together" still has one answer.
-func requireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
+func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {
 		return nil

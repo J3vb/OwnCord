@@ -22,20 +22,20 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	sendCmd := cmd.(ChatSendCmd)
 
 	result, err := d.MessageSvc.SendMessage(ctx, service.SendMessageParams{
-		ClientMessageID: sendCmd.ClientMessageID(),
-		ChannelID:       sendCmd.ChannelID(),
+		ClientMessageID: sendCmd.ClientMessageID,
+		ChannelID:       sendCmd.ChannelID,
 		UserID:          info.UserID,
 		Username:        info.Username,
 		Avatar:          info.Avatar,
 		RoleName:        info.RoleName,
-		Content:         sendCmd.Content(),
-		ReplyTo:         sendCmd.ReplyTo(),
+		Content:         sendCmd.Content,
+		ReplyTo:         sendCmd.ReplyTo,
 		AttachmentIDs:   sendCmd.Attachments(),
 	})
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
-	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID(), result.Duplicate)
+	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID, result.Duplicate)
 	if result.Duplicate {
 		return Result{Reply: reply}
 	}
@@ -53,9 +53,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	broadcast := buildChatMessage(chatMessageArgs{
-		ClientMessageID:  sendCmd.ClientMessageID(),
+		ClientMessageID:  sendCmd.ClientMessageID,
 		MsgID:            result.MessageID,
-		ChannelID:        sendCmd.ChannelID(),
+		ChannelID:        sendCmd.ChannelID,
 		UserID:           info.UserID,
 		Username:         info.Username,
 		Avatar:           info.Avatar,
@@ -63,7 +63,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		RoleName:         info.RoleName,
 		Content:          result.Content,
 		Timestamp:        result.Timestamp,
-		ReplyTo:          sendCmd.ReplyTo(),
+		ReplyTo:          sendCmd.ReplyTo,
 		Attachments:      attData,
 		Mentions:         result.Mentions,
 		MentionsEveryone: result.MentionsEveryone,
@@ -73,7 +73,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	if !result.IsDM {
 		return Result{
 			Reply:  reply,
-			Events: []Event{MessageSentChannelEvent{channelID: sendCmd.ChannelID(), payload: broadcast}},
+			Events: []Event{channelEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, payload: broadcast}},
 		}
 	}
 
@@ -91,9 +91,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			var openPayload []byte
 			if len(result.DMParticipants) > 0 {
 				openPayload = buildDMChannelOpen(
-					db.NewDMChannelInfo(sendCmd.ChannelID(), chName, result.DMIsGroup, result.DMParticipants, pid))
+					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMParticipants, pid))
 			} else {
-				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID(), result.SenderUser, pid)
+				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid)
 			}
 			if openPayload == nil {
 				continue
@@ -119,8 +119,8 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	events = append(events, dmEventOrFallback(
-		MessageSentDMEvent{channelID: sendCmd.ChannelID(), participantIDs: result.ParticipantIDs, payload: broadcast},
-		MessageSentChannelEvent{channelID: sendCmd.ChannelID(), payload: broadcast},
+		dmEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, participantIDs: result.ParticipantIDs, payload: broadcast},
+		channelEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, payload: broadcast},
 		result.ParticipantIDs))
 
 	return Result{Reply: reply, Events: events}
@@ -131,7 +131,7 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	d := deps.(ChatDeps)
 	editCmd := cmd.(ChatEditCmd)
 
-	result, err := d.MessageSvc.EditMessage(ctx, info.UserID, editCmd.MessageID(), editCmd.Content())
+	result, err := d.MessageSvc.EditMessage(ctx, info.UserID, editCmd.MessageID, editCmd.Content)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
@@ -140,11 +140,12 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		result.Mentions, result.MentionsEveryone, result.MentionsHere)
 	if result.IsDM {
 		return Result{Events: []Event{dmEventOrFallback(
-			MessageEditedDMEvent{channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},
-			MessageEditedChannelEvent{channelID: result.ChannelID, payload: editedPayload},
+			dmEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},
+			channelEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, payload: editedPayload},
 			result.ParticipantIDs)}}
 	}
-	return Result{Events: []Event{MessageEditedChannelEvent{
+	return Result{Events: []Event{channelEvt{
+		evType:    MsgTypeChatEdited,
 		channelID: result.ChannelID,
 		payload:   editedPayload,
 	}}}
@@ -155,7 +156,7 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	d := deps.(ChatDeps)
 	deleteCmd := cmd.(ChatDeleteCmd)
 
-	result, err := d.MessageSvc.DeleteMessage(ctx, info.UserID, deleteCmd.MessageID())
+	result, err := d.MessageSvc.DeleteMessage(ctx, info.UserID, deleteCmd.MessageID)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
@@ -163,11 +164,12 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	deletedPayload := buildChatDeleted(result.MessageID, result.ChannelID)
 	if result.IsDM {
 		return Result{Events: []Event{dmEventOrFallback(
-			MessageDeletedDMEvent{channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: deletedPayload},
-			MessageDeletedChannelEvent{channelID: result.ChannelID, payload: deletedPayload},
+			dmEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: deletedPayload},
+			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: deletedPayload},
 			result.ParticipantIDs)}}
 	}
-	return Result{Events: []Event{MessageDeletedChannelEvent{
+	return Result{Events: []Event{channelEvt{
+		evType:    MsgTypeChatDeleted,
 		channelID: result.ChannelID,
 		payload:   deletedPayload,
 	}}}

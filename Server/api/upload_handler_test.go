@@ -1485,9 +1485,9 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 
 // OC-0112: the admin bypass in handleServeFile must not cover the DM
 // participant check. Every sibling DM read gate (requireChannelRead,
-// PermissionService.RequireChannelAccess, checkSendPermission) denies a
-// non-participant Administrator just like anyone else — the file route must
-// match, not open every private DM to anyone holding the admin bit.
+// checkSendPermission) denies a non-participant Administrator just like
+// anyone else — the file route must match, not open every private DM to
+// anyone holding the admin bit.
 func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)

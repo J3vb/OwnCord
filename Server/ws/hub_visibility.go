@@ -380,10 +380,8 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	if h.db == nil {
 		return
 	}
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok || c.user == nil {
+	c := h.GetClient(userID)
+	if c == nil || c.user == nil {
 		return
 	}
 

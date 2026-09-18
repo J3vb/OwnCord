@@ -31,16 +31,10 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 // DM channels are excluded (they are accessed via DMService).
 func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) ([]db.Channel, error) {
 	// Phase B Step 8 — span the public service entrypoint.
-	ctx, span := telemetry.GlobalTracer("service/channel").Start(ctx,
-		"ChannelService.ListVisibleChannels",
+	ctx, done := traceCall(ctx, "service/channel", "ChannelService.ListVisibleChannels",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "ListVisibleChannels"))
-		span.End()
-	}()
+	defer done()
 	all, err := s.st.ListChannels(ctx)
 	if err != nil {
 		slog.Error("ChannelService.ListVisibleChannels", "err", err)

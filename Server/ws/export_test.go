@@ -46,11 +46,6 @@ func GetLastActivityForTest(c *Client) time.Time {
 	return c.getLastActivity()
 }
 
-// ClearVoiceChIDForTest exposes Client.clearVoiceChID for external tests.
-func ClearVoiceChIDForTest(c *Client) int64 {
-	return c.clearVoiceChID()
-}
-
 // SetVoiceChIDForTest sets the voice channel ID atomically, clearing the join
 // token when leaving (chID 0) — the same contract production keeps via
 // setVoiceState. Test-only: production has no set-channel-without-token path.
@@ -461,11 +456,6 @@ func (h *Hub) HandleWebhookParticipantJoinedEventForTest(event *livekit.WebhookE
 // MustFullResyncForTest exposes mustFullResync for external tests.
 func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 	return h.mustFullResync(lastSeq)
-}
-
-// HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
-func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
-	return h.hasChannelPerm(context.Background(), c, channelID, perm)
 }
 
 // BroadcastVoiceEventForTest exposes Hub.broadcastVoiceEvent for external

@@ -405,18 +405,22 @@ func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.Report
 // oracle through the handler's own order of operations. Call this before
 // resolveReportIDParam, not after.
 func (s *ReportService) RequireModerate(ctx context.Context, actorID int64) error {
-	return s.requireModerate(ctx, actorID)
+	return requireModerate(ctx, s.perms, actorID)
 }
 
 // requireModerate loads actorID's role and checks the canonical predicate
-// (permissions.CanModerate). Runs before any report lookup, so an actor
-// without the bit sees Forbidden regardless of whether the report id
-// exists. No longer returns the role itself (unparam, golangci-lint review):
-// every force-reassign path now reads the acting principal's position fresh
+// (permissions.CanModerate). Runs before any report or appeal lookup, so an
+// actor without the bit sees Forbidden regardless of whether the id exists.
+// No longer returns the role itself (unparam, golangci-lint review): every
+// force-reassign path now reads the acting principal's position fresh
 // inside its own write transaction (forceReassignGuarded) rather than
 // trusting a role read here, so nothing downstream needs it anymore.
-func (s *ReportService) requireModerate(ctx context.Context, actorID int64) error {
-	role, err := s.perms.GetRoleForUser(ctx, actorID)
+//
+// Package-level rather than a method (K47): ReportService and AppealService
+// need the identical check, and one predicate per security property beats
+// two copies that can drift.
+func requireModerate(ctx context.Context, perms *PermissionService, actorID int64) error {
+	role, err := perms.GetRoleForUser(ctx, actorID)
 	if err != nil || role == nil {
 		return fmt.Errorf("%w: failed to load role", ErrForbidden)
 	}
@@ -443,26 +447,20 @@ func guardConfidentiality(actorID int64, report *db.Report) error {
 // appeal of their own action).
 var ErrSelfReview = fmt.Errorf("%w: cannot act on your own report", ErrForbidden)
 
-// guardSelfReview refuses a moderator acting on their own filed report —
+// GuardSelfReviewFor refuses a moderator acting on their own filed report —
 // unlike guardConfidentiality, this is Forbidden, not NotFound: a reporter
 // already knows their own report exists (it is in their Mine() view), so
 // there is no existence oracle to protect against here, only the conflict
-// of interest.
-func guardSelfReview(actorID int64, report *db.Report) error {
+// of interest. Exported for a caller outside this package that already holds
+// a *db.Report from another entry point (the queue's act route, from Get,
+// P2-6 Codex review) and must apply the same refusal before dispatching an
+// action: Get allows a reporter to read their own filing, but acting on it
+// is the identical conflict of interest Assign/Note/Close already refuse.
+func GuardSelfReviewFor(actorID int64, report *db.Report) error {
 	if report.ReporterID != 0 && report.ReporterID == actorID {
 		return ErrSelfReview
 	}
 	return nil
-}
-
-// GuardSelfReviewFor exports guardSelfReview for a caller outside this
-// package that already holds a *db.Report from another entry point (the
-// queue's act route, from Get, P2-6 Codex review) and must apply the same
-// self-review refusal before dispatching an action: Get allows a reporter to
-// read their own filing, but acting on it is the identical conflict of
-// interest Assign/Note/Close already refuse.
-func GuardSelfReviewFor(actorID int64, report *db.Report) error {
-	return guardSelfReview(actorID, report)
 }
 
 // VisibleReportPublicID resolves reportID's public id for viewerID, applying
@@ -492,7 +490,7 @@ func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, rep
 // match — the confidentiality rule applies to the listing too, not only to
 // GET by id.
 func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) ([]db.ReportQueueRow, error) {
-	if err := s.requireModerate(ctx, actorID); err != nil {
+	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
 	}
 	switch state {
@@ -530,11 +528,11 @@ type ReportDetail struct {
 // SUBJECT, so the two are indistinguishable even if the subject holds the
 // bit. A moderator who is the report's REPORTER may read it (it is their own
 // filing, already visible via Mine()) but never its internal notes: Notes
-// is always empty for them, and they may not act on it (guardSelfReview,
+// is always empty for them, and they may not act on it (GuardSelfReviewFor,
 // Assign/Note/Close). report_events is exposed here and nowhere else — the
 // same bit-plus-confidentiality gate this method already runs, no new one.
 func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*ReportDetail, error) {
-	if err := s.requireModerate(ctx, actorID); err != nil {
+	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
 	}
 	report, err := s.st.GetReport(ctx, reportID)
@@ -574,7 +572,7 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 // open/assigned, a moderator erased between requirePerm and the write, and
 // (force only) failing to outrank, all as 409 except the last, which is 403.
 func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, force bool) error {
-	if err := s.requireModerate(ctx, actorID); err != nil {
+	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
 	}
 	report, err := s.st.GetReport(ctx, reportID)
@@ -584,7 +582,7 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 	if err := guardConfidentiality(actorID, report); err != nil {
 		return err
 	}
-	if err := guardSelfReview(actorID, report); err != nil {
+	if err := GuardSelfReviewFor(actorID, report); err != nil {
 		return err
 	}
 	observed := report.AssigneeID
@@ -617,10 +615,10 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 }
 
 // Note adds an internal note, visible to bit-22 holders only — never to
-// either party (the reporter cannot read it either — guardSelfReview — and
+// either party (the reporter cannot read it either — GuardSelfReviewFor — and
 // the subject cannot see the report at all), the name is the contract.
 func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body string) error {
-	if err := s.requireModerate(ctx, actorID); err != nil {
+	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
 	}
 	if body == "" || len([]rune(body)) > maxNoteRunes {
@@ -636,7 +634,7 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 	if err := guardConfidentiality(actorID, report); err != nil {
 		return err
 	}
-	if err := guardSelfReview(actorID, report); err != nil {
+	if err := GuardSelfReviewFor(actorID, report); err != nil {
 		return err
 	}
 	ok, err := s.st.InsertReportNote(ctx, reportID, actorID, body)
@@ -659,7 +657,7 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 // mod_queue frame. Guarded to open/assigned states; a report already closed
 // by a concurrent call answers Conflict, never a second success.
 func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outcome string) (string, error) {
-	if err := s.requireModerate(ctx, actorID); err != nil {
+	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return "", err
 	}
 	if !validOutcomes[outcome] {
@@ -672,7 +670,7 @@ func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outc
 	if err := guardConfidentiality(actorID, report); err != nil {
 		return "", err
 	}
-	if err := guardSelfReview(actorID, report); err != nil {
+	if err := GuardSelfReviewFor(actorID, report); err != nil {
 		return "", err
 	}
 	state := outcomeState[outcome]

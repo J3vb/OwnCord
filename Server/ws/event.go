@@ -1,6 +1,10 @@
 package ws
 
-import "github.com/J3vb/OwnCord/Server/db"
+import (
+	"slices"
+
+	"github.com/J3vb/OwnCord/Server/db"
+)
 
 // ClientError represents an error to send back to the requesting client.
 // It implements the error interface so it can be used as Result.Error.
@@ -141,83 +145,36 @@ type VoiceChannelGuardedEvent interface {
 
 // ── Concrete event structs ──────────────────────────────────────────────────
 
-// MessageSentChannelEvent is a chat message broadcast to a non-DM channel.
-type MessageSentChannelEvent struct {
+// channelEvt is a sequenced, replayable event scoped to one channel: a chat
+// message, edit, delete, reaction update or plugin broadcast in a non-DM
+// channel. evType carries the outbound wire type — the same "type as a field"
+// shape CallSignalEvent below already uses, and every kind reaches
+// EmitEvents' ChannelEvent branch identically.
+type channelEvt struct {
+	evType    string
 	channelID int64
 	payload   []byte
 }
 
-func (e MessageSentChannelEvent) EventType() string { return MsgTypeChatMessage }
-func (e MessageSentChannelEvent) ChannelID() int64  { return e.channelID }
-func (e MessageSentChannelEvent) Payload() []byte   { return e.payload }
+func (e channelEvt) EventType() string { return e.evType }
+func (e channelEvt) ChannelID() int64  { return e.channelID }
+func (e channelEvt) Payload() []byte   { return e.payload }
 
-// MessageSentDMEvent is a chat message broadcast to a DM channel's participants.
-type MessageSentDMEvent struct {
+// dmEvt is channelEvt's DM counterpart: the same frame addressed to a DM
+// channel's participants instead of its topic subscribers. It satisfies
+// SequencedDMEvent AND ChannelEvent, which is why EmitEvents must check
+// SequencedDMEvent first.
+type dmEvt struct {
+	evType         string
 	channelID      int64
 	participantIDs []int64
 	payload        []byte
 }
 
-func (e MessageSentDMEvent) EventType() string { return MsgTypeChatMessage }
-func (e MessageSentDMEvent) ChannelID() int64  { return e.channelID }
-func (e MessageSentDMEvent) ParticipantIDs() []int64 {
-	dst := make([]int64, len(e.participantIDs))
-	copy(dst, e.participantIDs)
-	return dst
-}
-func (e MessageSentDMEvent) Payload() []byte { return e.payload }
-
-// MessageEditedChannelEvent is a chat_edited broadcast to a non-DM channel.
-type MessageEditedChannelEvent struct {
-	channelID int64
-	payload   []byte
-}
-
-func (e MessageEditedChannelEvent) EventType() string { return MsgTypeChatEdited }
-func (e MessageEditedChannelEvent) ChannelID() int64  { return e.channelID }
-func (e MessageEditedChannelEvent) Payload() []byte   { return e.payload }
-
-// MessageEditedDMEvent is a chat_edited broadcast to DM participants.
-type MessageEditedDMEvent struct {
-	channelID      int64
-	participantIDs []int64
-	payload        []byte
-}
-
-func (e MessageEditedDMEvent) EventType() string { return MsgTypeChatEdited }
-func (e MessageEditedDMEvent) ChannelID() int64  { return e.channelID }
-func (e MessageEditedDMEvent) ParticipantIDs() []int64 {
-	dst := make([]int64, len(e.participantIDs))
-	copy(dst, e.participantIDs)
-	return dst
-}
-func (e MessageEditedDMEvent) Payload() []byte { return e.payload }
-
-// MessageDeletedChannelEvent is a chat_deleted broadcast to a non-DM channel.
-type MessageDeletedChannelEvent struct {
-	channelID int64
-	payload   []byte
-}
-
-func (e MessageDeletedChannelEvent) EventType() string { return MsgTypeChatDeleted }
-func (e MessageDeletedChannelEvent) ChannelID() int64  { return e.channelID }
-func (e MessageDeletedChannelEvent) Payload() []byte   { return e.payload }
-
-// MessageDeletedDMEvent is a chat_deleted broadcast to DM participants.
-type MessageDeletedDMEvent struct {
-	channelID      int64
-	participantIDs []int64
-	payload        []byte
-}
-
-func (e MessageDeletedDMEvent) EventType() string { return MsgTypeChatDeleted }
-func (e MessageDeletedDMEvent) ChannelID() int64  { return e.channelID }
-func (e MessageDeletedDMEvent) ParticipantIDs() []int64 {
-	dst := make([]int64, len(e.participantIDs))
-	copy(dst, e.participantIDs)
-	return dst
-}
-func (e MessageDeletedDMEvent) Payload() []byte { return e.payload }
+func (e dmEvt) EventType() string       { return e.evType }
+func (e dmEvt) ChannelID() int64        { return e.channelID }
+func (e dmEvt) ParticipantIDs() []int64 { return slices.Clone(e.participantIDs) }
+func (e dmEvt) Payload() []byte         { return e.payload }
 
 // TypingChannelEvent is a typing indicator broadcast to a channel, excluding sender.
 type TypingChannelEvent struct {
@@ -322,32 +279,6 @@ func presenceEvents(userID int64, status string, customStatus *string) []Event {
 	}
 }
 
-// ReactionChannelEvent is a reaction update broadcast to a non-DM channel.
-type ReactionChannelEvent struct {
-	channelID int64
-	payload   []byte
-}
-
-func (e ReactionChannelEvent) EventType() string { return MsgTypeReactionUpdate }
-func (e ReactionChannelEvent) ChannelID() int64  { return e.channelID }
-func (e ReactionChannelEvent) Payload() []byte   { return e.payload }
-
-// ReactionDMEvent is a reaction update broadcast to DM participants.
-type ReactionDMEvent struct {
-	channelID      int64
-	participantIDs []int64
-	payload        []byte
-}
-
-func (e ReactionDMEvent) EventType() string { return MsgTypeReactionUpdate }
-func (e ReactionDMEvent) ChannelID() int64  { return e.channelID }
-func (e ReactionDMEvent) ParticipantIDs() []int64 {
-	dst := make([]int64, len(e.participantIDs))
-	copy(dst, e.participantIDs)
-	return dst
-}
-func (e ReactionDMEvent) Payload() []byte { return e.payload }
-
 // VoiceStateEvent is a voice state update fanned out to the clients whose role
 // may READ the voice channel it describes. Satisfies VoiceVisibilityEvent.
 type VoiceStateEvent struct {
@@ -360,39 +291,6 @@ func (e VoiceStateEvent) EventType() string       { return MsgTypeVoiceState }
 func (e VoiceStateEvent) VisibleChannelID() int64 { return e.voiceChannelID }
 func (e VoiceStateEvent) UserID() int64           { return e.userID }
 func (e VoiceStateEvent) Payload() []byte         { return e.payload }
-
-// PluginBroadcastEvent is a plugin slash-command result broadcast to a channel
-// (sequenced, replayable). Emitted by the chat_command handler after the
-// invoking user's post permission is verified.
-type PluginBroadcastEvent struct {
-	channelID int64
-	payload   []byte
-}
-
-func (e PluginBroadcastEvent) EventType() string { return MsgTypePluginBroadcast }
-func (e PluginBroadcastEvent) ChannelID() int64  { return e.channelID }
-func (e PluginBroadcastEvent) Payload() []byte   { return e.payload }
-
-// PluginBroadcastDMEvent is PluginBroadcastEvent's DM sibling (B5-6, Codex
-// P1-2): a plugin command invoked inside a DM must reach the sender-aware
-// DM audience (participantIDs), never the plain per-channel-topic fan-out
-// PluginBroadcastEvent uses — an untrusted recipient can be subscribed to a
-// DM channel's topic (channel_focus is participant-gated, not trust-gated)
-// even though they are excluded from every other DM frame from that channel.
-type PluginBroadcastDMEvent struct {
-	channelID      int64
-	participantIDs []int64
-	payload        []byte
-}
-
-func (e PluginBroadcastDMEvent) EventType() string { return MsgTypePluginBroadcast }
-func (e PluginBroadcastDMEvent) ChannelID() int64  { return e.channelID }
-func (e PluginBroadcastDMEvent) ParticipantIDs() []int64 {
-	dst := make([]int64, len(e.participantIDs))
-	copy(dst, e.participantIDs)
-	return dst
-}
-func (e PluginBroadcastDMEvent) Payload() []byte { return e.payload }
 
 // VoiceE2EEAnnounceEvent relays an ECDH public key to other voice channel participants.
 type VoiceE2EEAnnounceEvent struct {

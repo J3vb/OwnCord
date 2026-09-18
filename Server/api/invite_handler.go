@@ -48,28 +48,20 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 		var req createInviteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			if err != io.EOF {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "malformed JSON body",
-				})
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "malformed JSON body")
 				return
 			}
 			req = createInviteRequest{}
 		}
 
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		// H-4: Cap invite expiration to 30 days.
 		if req.ExpiresInHours > service.MaxInviteExpiryHours() {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()),
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()))
 			return
 		}
 
@@ -102,11 +94,8 @@ func handleListInvites(svc *service.Services) http.HandlerFunc {
 // handleRevokeInvite processes DELETE /api/v1/invites/:code.
 func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 		code := chi.URLParam(r, "code")

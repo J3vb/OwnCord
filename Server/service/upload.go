@@ -117,8 +117,8 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 //
 //   - DM participation is required of everyone, administrators included. This
 //     matches every other DM read gate in the codebase (requireChannelRead,
-//     PermissionService.RequireChannelAccess, checkSendPermission), none of
-//     which have an admin bypass, and it is checked ahead of the admin branch
+//     checkSendPermission), none of which have an admin bypass, and it is
+//     checked ahead of the admin branch
 //     so that branch cannot skip it.
 //   - An administrator may read anything else.
 //   - An unlinked attachment is private to its uploader, except while some

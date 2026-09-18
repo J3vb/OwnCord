@@ -73,17 +73,9 @@ func TestEventTypes(t *testing.T) {
 		event    Event
 		wantType string
 	}{
-		{"MessageSentChannelEvent", MessageSentChannelEvent{}, MsgTypeChatMessage},
-		{"MessageSentDMEvent", MessageSentDMEvent{}, MsgTypeChatMessage},
-		{"MessageEditedChannelEvent", MessageEditedChannelEvent{}, MsgTypeChatEdited},
-		{"MessageEditedDMEvent", MessageEditedDMEvent{}, MsgTypeChatEdited},
-		{"MessageDeletedChannelEvent", MessageDeletedChannelEvent{}, MsgTypeChatDeleted},
-		{"MessageDeletedDMEvent", MessageDeletedDMEvent{}, MsgTypeChatDeleted},
 		{"TypingChannelEvent", TypingChannelEvent{}, MsgTypeTyping},
 		{"TypingDMEvent", TypingDMEvent{}, MsgTypeTyping},
 		{"PresenceEvent", PresenceEvent{}, MsgTypePresence},
-		{"ReactionChannelEvent", ReactionChannelEvent{}, MsgTypeReactionUpdate},
-		{"ReactionDMEvent", ReactionDMEvent{}, MsgTypeReactionUpdate},
 		{"VoiceStateEvent", VoiceStateEvent{}, MsgTypeVoiceState},
 		{"VoiceE2EEAnnounceEvent", VoiceE2EEAnnounceEvent{}, MsgTypeVoiceE2EEAnnounceBC},
 		{"VoiceE2EEOfferGuardedEvent", VoiceE2EEOfferGuardedEvent{}, MsgTypeVoiceE2EEOfferRelay},
@@ -101,25 +93,13 @@ func TestEventTypes(t *testing.T) {
 // ── Routing interface tests ─────────────────────────────────────────────────
 
 func TestChannelEventInterface(t *testing.T) {
-	events := []struct {
-		name  string
-		event ChannelEvent
-		chID  int64
-	}{
-		{"MessageSentChannelEvent", MessageSentChannelEvent{channelID: 10, payload: []byte("p")}, 10},
-		{"MessageEditedChannelEvent", MessageEditedChannelEvent{channelID: 20, payload: []byte("q")}, 20},
-		{"MessageDeletedChannelEvent", MessageDeletedChannelEvent{channelID: 30, payload: []byte("r")}, 30},
-		{"ReactionChannelEvent", ReactionChannelEvent{channelID: 40, payload: []byte("s")}, 40},
+	evt := channelEvt{evType: MsgTypeChatMessage, channelID: 10, payload: []byte("p")}
+	var iface ChannelEvent = evt
+	if iface.ChannelID() != 10 {
+		t.Errorf("ChannelID() = %d, want 10", iface.ChannelID())
 	}
-	for _, tt := range events {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.event.ChannelID() != tt.chID {
-				t.Errorf("ChannelID() = %d, want %d", tt.event.ChannelID(), tt.chID)
-			}
-			if tt.event.Payload() == nil {
-				t.Error("Payload() should not be nil")
-			}
-		})
+	if iface.Payload() == nil {
+		t.Error("Payload() should not be nil")
 	}
 }
 
@@ -138,41 +118,23 @@ func TestExcludeSenderEventInterface(t *testing.T) {
 }
 
 func TestSequencedDMEventInterface(t *testing.T) {
-	events := []struct {
-		name  string
-		event SequencedDMEvent
-		chID  int64
-		pIDs  []int64
-	}{
-		{"MessageSentDMEvent", MessageSentDMEvent{channelID: 100, participantIDs: []int64{1, 2}, payload: []byte("m")}, 100, []int64{1, 2}},
-		{"MessageEditedDMEvent", MessageEditedDMEvent{channelID: 101, participantIDs: []int64{3, 4}, payload: []byte("e")}, 101, []int64{3, 4}},
-		{"MessageDeletedDMEvent", MessageDeletedDMEvent{channelID: 102, participantIDs: []int64{5, 6}, payload: []byte("d")}, 102, []int64{5, 6}},
-		{"ReactionDMEvent", ReactionDMEvent{channelID: 103, participantIDs: []int64{7, 8}, payload: []byte("r")}, 103, []int64{7, 8}},
+	evt := dmEvt{evType: MsgTypeChatMessage, channelID: 100, participantIDs: []int64{1, 2}, payload: []byte("m")}
+	var iface SequencedDMEvent = evt
+	if iface.ChannelID() != 100 {
+		t.Errorf("ChannelID() = %d, want 100", iface.ChannelID())
 	}
-	for _, tt := range events {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.event.ChannelID() != tt.chID {
-				t.Errorf("ChannelID() = %d, want %d", tt.event.ChannelID(), tt.chID)
-			}
-			got := tt.event.ParticipantIDs()
-			if len(got) != len(tt.pIDs) {
-				t.Fatalf("ParticipantIDs() len = %d, want %d", len(got), len(tt.pIDs))
-			}
-			for i, id := range tt.pIDs {
-				if got[i] != id {
-					t.Errorf("ParticipantIDs()[%d] = %d, want %d", i, got[i], id)
-				}
-			}
-			if tt.event.Payload() == nil {
-				t.Error("Payload() should not be nil")
-			}
-		})
+	got := iface.ParticipantIDs()
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Errorf("ParticipantIDs() = %v, want [1 2]", got)
+	}
+	if iface.Payload() == nil {
+		t.Error("Payload() should not be nil")
 	}
 }
 
 func TestSequencedDMEventDefensiveCopy(t *testing.T) {
 	orig := []int64{1, 2, 3}
-	evt := MessageSentDMEvent{participantIDs: orig}
+	evt := dmEvt{participantIDs: orig}
 	got := evt.ParticipantIDs()
 	got[0] = 999
 	if evt.participantIDs[0] == 999 {
@@ -249,22 +211,16 @@ func TestVoiceChannelGuardedEventInterface(t *testing.T) {
 // ── SequencedDMEvent checked before ChannelEvent ────────────────────────────
 
 func TestDMEventsImplementBothInterfaces(t *testing.T) {
-	// SequencedDMEvent types also satisfy ChannelEvent (they have ChannelID + Payload).
-	// This test documents that EmitEvents must check SequencedDMEvent first.
-	dmEvents := []Event{
-		MessageSentDMEvent{channelID: 1, participantIDs: []int64{1, 2}, payload: []byte("x")},
-		MessageEditedDMEvent{channelID: 2, participantIDs: []int64{3, 4}, payload: []byte("y")},
-		MessageDeletedDMEvent{channelID: 3, participantIDs: []int64{5, 6}, payload: []byte("z")},
-		ReactionDMEvent{channelID: 4, participantIDs: []int64{7, 8}, payload: []byte("w")},
+	// dmEvt satisfies SequencedDMEvent AND ChannelEvent (it has ChannelID +
+	// Payload). This test documents that EmitEvents must check SequencedDMEvent
+	// first.
+	evt := Event(dmEvt{evType: MsgTypeChatMessage, channelID: 1, participantIDs: []int64{1, 2}, payload: []byte("x")})
+	// Must satisfy SequencedDMEvent.
+	if _, ok := evt.(SequencedDMEvent); !ok {
+		t.Errorf("%T does not implement SequencedDMEvent", evt)
 	}
-	for _, evt := range dmEvents {
-		// Must satisfy SequencedDMEvent.
-		if _, ok := evt.(SequencedDMEvent); !ok {
-			t.Errorf("%T does not implement SequencedDMEvent", evt)
-		}
-		// Must also satisfy ChannelEvent (since they have ChannelID + Payload).
-		if _, ok := evt.(ChannelEvent); !ok {
-			t.Errorf("%T does not implement ChannelEvent", evt)
-		}
+	// Must also satisfy ChannelEvent (since it has ChannelID + Payload).
+	if _, ok := evt.(ChannelEvent); !ok {
+		t.Errorf("%T does not implement ChannelEvent", evt)
 	}
 }

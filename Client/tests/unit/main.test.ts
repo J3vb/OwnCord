@@ -5,7 +5,7 @@
  * test below the e2e level; covered by tests/e2e." This file creates one:
  * every direct dependency of main.ts that is not needed to observe the two
  * behaviors below is stubbed out (mirroring the pattern main-page.test.ts
- * uses for MainPage.ts), while ws.ts, authStore, router.ts, safe-render.ts,
+ * uses for MainPage.ts), while ws.ts, authStore, safe-render.ts,
  * and ConnectedOverlay.ts run for real — so the actual
  * event-ordering bug (OC-0063) is exercised, not simulated, and the tray
  * listener (OC-0037) is driven through the same Tauri event mock ws.ts's own
@@ -42,7 +42,6 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("@lib/themes", () => ({ restoreTheme: vi.fn() }));
 vi.mock("@lib/ptt", () => ({ initPtt: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),

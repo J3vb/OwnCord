@@ -327,7 +327,7 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-noperm")
 
 	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 9999, send) // no user set → hasChannelPerm returns false
+	c := ws.NewTestClient(hub, 9999, send) // no user row → zero permissions.Subject, CanJoinVoice denies
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 

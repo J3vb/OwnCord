@@ -5,7 +5,6 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
-import { setTheme } from "@stores/ui.store";
 import { getActiveThemeName, restoreTheme } from "@lib/themes";
 import {
   applyFontSize,
@@ -48,7 +47,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     const activateTheme = (): void => {
       applyTheme(name);
-      setTheme(name);
       for (const child of themeRow.children) {
         child.classList.remove("active");
         child.setAttribute("aria-checked", "false");

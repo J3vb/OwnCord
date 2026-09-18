@@ -800,28 +800,49 @@ export function buildTauriMockScript(opts: {
 // Public API — mock injection
 // ---------------------------------------------------------------------------
 
-export async function mockTauriConnect(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+/** Route literals the presets below share. `buildTauriMockScript` only reads
+ *  its options (spread + `JSON.stringify`), so one copy per route is safe. */
+const ROUTE_HEALTH = {
+  pattern: "/api/v1/health",
+  status: 200,
+  body: { status: "ok", version: "1.0.0" },
+};
+const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
+const ROUTE_LOGIN_2FA = {
+  pattern: "/api/v1/auth/login",
+  status: 200,
+  body: MOCK_LOGIN_2FA_RESPONSE,
+};
+const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
+const ROUTE_MESSAGES_RICH = { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH };
+const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
+const ROUTE_INVITES = { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES };
 
-export async function mockTauriConnectWith2FA(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+/** The category/member ready state most presets share. */
+const READY_MULTI_ROLE = {
+  channels: MOCK_CHANNELS_WITH_CATEGORIES,
+  members: MOCK_MEMBERS_MULTI_ROLE,
+};
+const READY_VOICE = { ...READY_MULTI_ROLE, voice_states: MOCK_VOICE_STATE };
+
+/** A nullary preset: `mock(opts)` returns the `(page) => inject` helper the
+ *  suites import. `voiceWsHandlers()` and `voiceJoinFailureHandler()` return
+ *  fresh literals, so calling them once here changes nothing. */
+const mock =
+  (opts: Parameters<typeof buildTauriMockScript>[0]) =>
+  async (page: Page): Promise<void> => {
+    await page.addInitScript(buildTauriMockScript(opts));
+  };
+
+export const mockTauriConnect = mock({
+  httpRoutes: [ROUTE_HEALTH],
+  simulateWsFlow: false,
+});
+
+export const mockTauriConnectWith2FA = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN_2FA],
+  simulateWsFlow: false,
+});
 
 export async function mockTauriFullSession(
   page: Page,
@@ -829,12 +850,7 @@ export async function mockTauriFullSession(
 ): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      ],
+      httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES, ROUTE_PINS],
       simulateWsFlow: true,
       deferReady: options.deferReady,
     }),
@@ -848,161 +864,86 @@ export async function mockTauriFullSession(
  * the client refuses to auto-login on its own account rather than relying on
  * the credential delete having already won a race.
  */
-export async function mockTauriFullSessionWithAutoConnect(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      storedCredential: { username: "testuser", token: "stored-token" },
-      storedSettings: {
-        "owncord:profiles": {
-          schemaVersion: 1,
-          profiles: [
-            {
-              id: "p1",
-              name: "Local",
-              host: "localhost:8443",
-              username: "testuser",
-              autoConnect: true,
-              rememberPassword: true,
-              color: "#5865f2",
-              lastConnected: null,
-            },
-          ],
-        },
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithMessages(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-      ],
-      simulateWsFlow: true,
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithVoice(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      wsHandlers: voiceWsHandlers(),
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-        voice_states: MOCK_VOICE_STATE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithVoiceFailure(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      wsHandlers: [voiceJoinFailureHandler()],
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-        voice_states: MOCK_VOICE_STATE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithEcho(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      echoChatSend: true,
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithMessagesAndEcho(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-      ],
-      simulateWsFlow: true,
-      echoChatSend: true,
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithFailingMessages(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+export const mockTauriFullSessionWithAutoConnect = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES, ROUTE_PINS],
+  simulateWsFlow: true,
+  storedCredential: { username: "testuser", token: "stored-token" },
+  storedSettings: {
+    "owncord:profiles": {
+      schemaVersion: 1,
+      profiles: [
         {
-          pattern: "/messages",
-          status: 500,
-          body: { error: "INTERNAL_ERROR", message: "Failed to load messages" },
+          id: "p1",
+          name: "Local",
+          host: "localhost:8443",
+          username: "testuser",
+          autoConnect: true,
+          rememberPassword: true,
+          color: "#5865f2",
+          lastConnected: null,
         },
       ],
-      simulateWsFlow: true,
-    }),
-  );
-}
+    },
+  },
+});
 
-export async function mockTauriLoginError(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        {
-          pattern: "/api/v1/auth/login",
-          status: 401,
-          body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" },
-        },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+export const mockTauriFullSessionWithMessages = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_RICH, ROUTE_PINS, ROUTE_INVITES],
+  simulateWsFlow: true,
+  readyOverrides: READY_MULTI_ROLE,
+});
+
+export const mockTauriFullSessionWithVoice = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: voiceWsHandlers(),
+  readyOverrides: READY_VOICE,
+});
+
+export const mockTauriFullSessionWithVoiceFailure = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: [voiceJoinFailureHandler()],
+  readyOverrides: READY_VOICE,
+});
+
+export const mockTauriFullSessionWithEcho = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  echoChatSend: true,
+});
+
+export const mockTauriFullSessionWithMessagesAndEcho = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_RICH, ROUTE_PINS, ROUTE_INVITES],
+  simulateWsFlow: true,
+  echoChatSend: true,
+  readyOverrides: READY_MULTI_ROLE,
+});
+
+export const mockTauriFullSessionWithFailingMessages = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
+    {
+      pattern: "/messages",
+      status: 500,
+      body: { error: "INTERNAL_ERROR", message: "Failed to load messages" },
+    },
+  ],
+  simulateWsFlow: true,
+});
+
+export const mockTauriLoginError = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    {
+      pattern: "/api/v1/auth/login",
+      status: 401,
+      body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" },
+    },
+  ],
+  simulateWsFlow: false,
+});
 
 // ---------------------------------------------------------------------------
 // Public API — page actions

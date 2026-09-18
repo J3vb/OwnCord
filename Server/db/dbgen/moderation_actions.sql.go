@@ -385,32 +385,3 @@ func (q *Queries) TimeoutActionIsActiveForTarget(ctx context.Context, arg Timeou
 	err := row.Scan(&active)
 	return active, err
 }
-
-const unlinkModerationActionsByActor = `-- name: UnlinkModerationActionsByActor :exec
-UPDATE moderation_actions SET actor_id = 0, actor_token = ? WHERE actor_id = ?
-`
-
-type UnlinkModerationActionsByActorParams struct {
-	ActorToken *string `json:"actorToken"`
-	ActorID    int64   `json:"actorId"`
-}
-
-// Erasure's actor-token unlink (mirrors erasureUnlinkReports): an erased
-// moderator's actions keep their row, action, time and order, but the
-// actor id goes to 0 and the token takes its place.
-func (q *Queries) UnlinkModerationActionsByActor(ctx context.Context, arg UnlinkModerationActionsByActorParams) error {
-	_, err := q.db.ExecContext(ctx, unlinkModerationActionsByActor, arg.ActorToken, arg.ActorID)
-	return err
-}
-
-const unlinkModerationActionsByLifter = `-- name: UnlinkModerationActionsByLifter :exec
-UPDATE moderation_actions SET lifted_by = 0 WHERE lifted_by = ?
-`
-
-// Same, for the lifted_by column: no token column of its own (mirrors the
-// reports assignee_id and audit_log's other bare actor columns), so an
-// erased lifter's id simply goes to 0.
-func (q *Queries) UnlinkModerationActionsByLifter(ctx context.Context, liftedBy int64) error {
-	_, err := q.db.ExecContext(ctx, unlinkModerationActionsByLifter, liftedBy)
-	return err
-}

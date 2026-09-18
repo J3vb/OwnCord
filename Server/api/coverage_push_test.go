@@ -1148,7 +1148,7 @@ func TestSearch_NegativeChannelID_Push(t *testing.T) {
 	}
 }
 
-// ─── searchRateLimitMiddleware: coverage via multiple rapid requests ─────────
+// ─── RateLimitMiddleware "search:" bucket: coverage via multiple rapid requests ─
 
 func TestSearch_RateLimit(t *testing.T) {
 	database := newChannelTestDB(t)
