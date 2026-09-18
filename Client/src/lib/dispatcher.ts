@@ -25,6 +25,8 @@ import {
   rollbackReaction,
   confirmSend,
   markSendFailed,
+  channelIdForSend,
+  applyServerMessage,
   messagesStore,
   setMessages,
   invalidateLoadedMessageWindows,
@@ -224,7 +226,12 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
 export function wireDispatcher(
   ws: WsClient,
   api?: Pick<ApiClient, "listBlocks"> &
-    Partial<Pick<ApiClient, "updateProfile" | "getConfig" | "listEmoji" | "getMessages">>,
+    Partial<
+      Pick<
+        ApiClient,
+        "updateProfile" | "getConfig" | "listEmoji" | "getMessages" | "getMessagesAround"
+      >
+    >,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
 
@@ -809,7 +816,27 @@ export function wireDispatcher(
     ws.on(S.CHAT_SEND_OK, (payload, id) => {
       acknowledgePendingMessage(payload.client_message_id);
       if (id) {
+        // Resolve the channel before confirmSend: that call drops the
+        // pendingSends entry and flips the row to "sent", destroying both
+        // identities this lookup needs.
+        const channelId = channelIdForSend(id, payload.client_message_id);
         confirmSend(id, payload.message_id, payload.timestamp, payload.client_message_id);
+        // A deduplicated ack means the server already had the message, so no
+        // chat_message broadcast follows to reconcile the row. The local copy
+        // can be stale -- fetch the authoritative row and replace it in place.
+        // The around endpoint 404s for a deleted message or one in another
+        // channel, so a rejection here is only worth a log line.
+        if (payload.deduplicated === true && channelId !== undefined && api?.getMessagesAround) {
+          api
+            .getMessagesAround(channelId, payload.message_id)
+            .then((resp) => {
+              const row = resp.messages.find((m) => m.id === payload.message_id);
+              if (row) applyServerMessage(row);
+            })
+            .catch((err) =>
+              log.warn("Failed to reconcile a deduplicated send", { error: String(err) }),
+            );
+        }
       }
     }),
   );
