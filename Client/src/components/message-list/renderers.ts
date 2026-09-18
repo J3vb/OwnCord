@@ -26,7 +26,6 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 // -- available directly from the split modules) -------------------------------
 
 export {
-  GROUP_THRESHOLD_MS,
   formatTime,
   formatFullDate,
   formatMessageTimestamp,
