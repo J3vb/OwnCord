@@ -41,47 +41,7 @@ func (rb *EventRingBuffer) Push(seq uint64, channelID int64, data []byte) {
 // EventsSince returns all events with seq > afterSeq, in order.
 // Returns nil if afterSeq is too old (no longer in the buffer).
 func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
-	rb.mu.RLock()
-	defer rb.mu.RUnlock()
-
-	if rb.count == 0 {
-		return nil
-	}
-
-	// Find the oldest entry in the buffer.
-	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
-	oldestSeq := rb.entries[oldestIdx].seq
-
-	// If the requested seq is at or older than our oldest, we can't guarantee
-	// full coverage — return nil to trigger a full ready payload.
-	if afterSeq <= oldestSeq {
-		return nil
-	}
-
-	// Likewise if the client claims events newer than anything we ever held:
-	// its counter and ours disagree (a restart can reseed seq below a client's
-	// remembered lastSeq), so an empty slice here would be read as "caught up"
-	// and freeze that client. afterSeq == newestSeq is the legitimate caught-up
-	// case and still returns an empty replay.
-	if afterSeq > rb.newestSeqLocked() {
-		return nil
-	}
-
-	result := make([][]byte, 0)
-	for i := 0; i < rb.count; i++ {
-		idx := (oldestIdx + i) % rb.size
-		e := rb.entries[idx]
-		if e.seq <= afterSeq {
-			continue
-		}
-		if e.data == nil {
-			// A slot RemoveWhere cleared: the client would ack past a frame
-			// it never saw. Replay cannot cover the range — full ready.
-			return nil
-		}
-		result = append(result, e.data)
-	}
-	return result
+	return rb.eventsSince(afterSeq, nil, nil, true)
 }
 
 // RemoveWhere drops the data of every buffered event drop reports true for
@@ -128,6 +88,19 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 // metadata distinction (voice-only replay, most reconnect paths before an
 // NSFW channel is involved).
 func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedChannelIDs, readableChannelIDs map[int64]bool) [][]byte {
+	return rb.eventsSince(afterSeq, allowedChannelIDs, readableChannelIDs, false)
+}
+
+// eventsSince is the one ring walk behind EventsSince and
+// EventsSinceFilteredContent. unfiltered admits every buffered frame; the
+// filtered path includes channelID 0 (a global broadcast) unconditionally and
+// a channel-scoped frame only when allowed admits it and it is either not
+// content-bearing or readable admits its channel. There is deliberately no
+// nil-means-everything sentinel on the maps: computeAllowedChannels only ever
+// returns a made map and is fail-closed, so a nil map must deny, not admit —
+// otherwise a future nil-map bug on the replay path would read as a
+// cross-channel replay leak.
+func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[int64]bool, unfiltered bool) [][]byte {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
 
@@ -135,15 +108,21 @@ func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedCh
 		return nil
 	}
 
+	// Find the oldest entry in the buffer.
 	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
 	oldestSeq := rb.entries[oldestIdx].seq
 
+	// If the requested seq is at or older than our oldest, we can't guarantee
+	// full coverage — return nil to trigger a full ready payload.
 	if afterSeq <= oldestSeq {
 		return nil
 	}
 
-	// See EventsSince: a client ahead of everything we ever buffered must get a
-	// full ready, not a silent "caught up".
+	// Likewise if the client claims events newer than anything we ever held:
+	// its counter and ours disagree (a restart can reseed seq below a client's
+	// remembered lastSeq), so an empty slice here would be read as "caught up"
+	// and freeze that client. afterSeq == newestSeq is the legitimate caught-up
+	// case and still returns an empty replay.
 	if afterSeq > rb.newestSeqLocked() {
 		return nil
 	}
@@ -152,19 +131,17 @@ func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedCh
 	for i := 0; i < rb.count; i++ {
 		idx := (oldestIdx + i) % rb.size
 		e := rb.entries[idx]
-		if e.seq > afterSeq {
-			if e.data == nil {
-				// See EventsSince: a cleared slot in the range forces a
-				// full ready rather than a replay with a hole.
-				return nil
-			}
-			// channelID 0 = global broadcast, always include.
-			// channelID > 0 = channel-scoped, include only if allowed AND
-			// (not content-bearing, or the channel is also readable).
-			if e.channelID == 0 || (allowedChannelIDs[e.channelID] &&
-				(!contentBearingKinds[extractEventType(e.data)] || readableChannelIDs[e.channelID])) {
-				result = append(result, e.data)
-			}
+		if e.seq <= afterSeq {
+			continue
+		}
+		if e.data == nil {
+			// A slot RemoveWhere cleared: the client would ack past a frame
+			// it never saw. Replay cannot cover the range — full ready.
+			return nil
+		}
+		if unfiltered || e.channelID == 0 || (allowed[e.channelID] &&
+			(!contentBearingKinds[extractEventType(e.data)] || readable[e.channelID])) {
+			result = append(result, e.data)
 		}
 	}
 	return result

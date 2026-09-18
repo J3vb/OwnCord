@@ -100,26 +100,9 @@ type adminMeResponse struct {
 	IsOwner bool `json:"is_owner"`
 }
 
-// toAdminUserResponse converts a db.UserWithRole to the safe response shape.
-func toAdminUserResponse(u db.UserWithRole) adminUserResponse {
-	return adminUserResponse{
-		ID:         u.ID,
-		Username:   u.Username,
-		Avatar:     u.Avatar,
-		RoleID:     u.RoleID,
-		RoleName:   u.RoleName,
-		Status:     u.Status,
-		CreatedAt:  u.CreatedAt,
-		LastSeen:   u.LastSeen,
-		Banned:     u.Banned,
-		BanReason:  u.BanReason,
-		BanExpires: u.BanExpires,
-	}
-}
-
-// toAdminUserResponseFromUser converts a plain db.User to the safe response
-// shape, resolving the role name via the database.
-func toAdminUserResponseFromUser(u *db.User, roleName string) adminUserResponse {
+// toAdminUserResponse converts a db.User and its resolved role name to the
+// safe response shape.
+func toAdminUserResponse(u *db.User, roleName string) adminUserResponse {
 	return adminUserResponse{
 		ID:         u.ID,
 		Username:   u.Username,

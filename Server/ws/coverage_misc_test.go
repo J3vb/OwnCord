@@ -488,9 +488,9 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 	}
 }
 
-// ─── hasChannelPerm with nil user (handlers.go:454) ──────────────────────────
+// ─── chat_send with nil user → FORBIDDEN ──────────────────────────
 
-func TestHasChannelPerm_NilUser_DeniesPermission(t *testing.T) {
+func TestChatSend_NilUser_DeniesPermission(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	chID := seedTestChannel(t, database, "perm-nil-user-chan")
 	send := make(chan []byte, 16)
@@ -653,50 +653,6 @@ func TestGetLastActivity_MultipleTouch(t *testing.T) {
 
 	if !second.After(first) {
 		t.Fatalf("second touch (%v) should be after first (%v)", second, first)
-	}
-}
-
-// ─── clearVoiceChID (client.go:203) ─────────────────────────────────────────
-
-func TestClearVoiceChID_ReturnsOldValueAndClearsToZero(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	ws.SetVoiceChIDForTest(c, 42)
-	old := ws.ClearVoiceChIDForTest(c)
-	if old != 42 {
-		t.Fatalf("clearVoiceChID returned %d, want 42", old)
-	}
-	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
-		t.Fatalf("voiceChID after clear = %d, want 0", got)
-	}
-}
-
-func TestClearVoiceChID_ReturnsZeroWhenNotInVoice(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	old := ws.ClearVoiceChIDForTest(c)
-	if old != 0 {
-		t.Fatalf("clearVoiceChID returned %d, want 0", old)
-	}
-}
-
-func TestClearVoiceChID_DoubleClearReturnsZero(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	ws.SetVoiceChIDForTest(c, 99)
-	first := ws.ClearVoiceChIDForTest(c)
-	second := ws.ClearVoiceChIDForTest(c)
-	if first != 99 {
-		t.Fatalf("first clear = %d, want 99", first)
-	}
-	if second != 0 {
-		t.Fatalf("second clear = %d, want 0", second)
 	}
 }
 

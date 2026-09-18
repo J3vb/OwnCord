@@ -30,17 +30,6 @@ func (q *Queries) CompleteErasureJob(ctx context.Context, arg CompleteErasureJob
 	return err
 }
 
-const countUnfinishedErasureJobs = `-- name: CountUnfinishedErasureJobs :one
-SELECT COUNT(*) FROM erasure_jobs WHERE state <> 'done'
-`
-
-func (q *Queries) CountUnfinishedErasureJobs(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countUnfinishedErasureJobs)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getErasureJob = `-- name: GetErasureJob :one
 SELECT id, user_id, state, files, files_removed, attempts, last_error, finished_at, replay_purged
 FROM erasure_jobs

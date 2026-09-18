@@ -24,7 +24,7 @@ const pending = new Map<string, Promise<string>>();
  *
  * Always invokes start_http_proxy — never caches the resolved origin here.
  * Only the Rust side knows whether its listener is still alive: after 5
- * consecutive accept errors run_proxy_loop deregisters itself so the next
+ * consecutive accept errors run_accept_loop deregisters itself so the next
  * start_http_proxy rebinds a fresh port (http_proxy.rs). A JS-side cache
  * would keep pointing every REST call at that dead tunnel until app restart.
  * The Rust reuse branch dedups an unchanged host cheaply, so the repeat

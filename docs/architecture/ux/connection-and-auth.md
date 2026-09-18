@@ -12,8 +12,9 @@ register-by-invite → the connected handshake → reconnect → cert-TOFU trust
 
 ## 1. Boot & page model
 
-The app is a two-page state machine (`lib/router.ts`: `connect | main`). The
-router only tracks the page; `main.ts:renderPage` mounts/destroys the page DOM.
+The app is a two-page state machine (`src/main.ts`: `activePage` +
+`navigate()`, `connect | main`). `navigate()` only switches the page;
+`main.ts:renderPage` mounts/destroys the page DOM.
 
 ```mermaid
 stateDiagram-v2
@@ -247,7 +248,7 @@ locks it.
 
 ## Source of truth
 
-`src/lib/router.ts`, `src/main.ts`, `src/pages/ConnectPage.ts`,
+`src/main.ts`, `src/pages/ConnectPage.ts`,
 `src/pages/connect-page/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
 `src/lib/httpProxy.ts`, `src/components/ConnectedOverlay.ts`,
 `src/components/ServerBanner.ts`, `src/components/CertMismatchModal.ts`,

@@ -99,7 +99,7 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
 
-	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: true}
+	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: true}
 	info := ClientInfo{UserID: actorID}
 	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
@@ -183,7 +183,7 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 
 	// deafened: false -- an UNDEAFEN, the opposite direction from the sibling
 	// test above.
-	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: false}
+	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: false}
 	info := ClientInfo{UserID: actorID}
 	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 

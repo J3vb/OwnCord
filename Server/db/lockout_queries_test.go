@@ -13,7 +13,7 @@ import (
 // the window it was meant to close.
 
 func TestUpsertLockout_RoundTrip(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	expiry := time.Now().UTC().Add(15 * time.Minute).Truncate(time.Second)
@@ -37,7 +37,7 @@ func TestUpsertLockout_RoundTrip(t *testing.T) {
 }
 
 func TestUpsertLockout_ReplacesExistingKey(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	first := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
@@ -64,7 +64,7 @@ func TestUpsertLockout_ReplacesExistingKey(t *testing.T) {
 }
 
 func TestLoadActiveLockouts_ExcludesExpired(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	past := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
@@ -87,7 +87,7 @@ func TestLoadActiveLockouts_ExcludesExpired(t *testing.T) {
 }
 
 func TestCleanupExpiredLockouts(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
@@ -125,14 +125,14 @@ func TestCleanupExpiredLockouts(t *testing.T) {
 }
 
 func TestCleanupExpiredLockouts_EmptyTable(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	if err := database.CleanupExpiredLockouts(context.Background()); err != nil {
 		t.Errorf("CleanupExpiredLockouts on an empty table: %v", err)
 	}
 }
 
 func TestDeleteLockout(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
@@ -157,7 +157,7 @@ func TestDeleteLockout(t *testing.T) {
 }
 
 func TestDeleteLockout_UnknownKeyIsNoOp(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	if err := database.DeleteLockout(context.Background(), "never-locked"); err != nil {
 		t.Errorf("DeleteLockout on an unknown key: %v", err)
 	}

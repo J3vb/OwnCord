@@ -150,10 +150,7 @@ type registrationPendingResponse struct {
 func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerRequest, bool) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "malformed request body",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 		return req, false
 	}
 
@@ -167,10 +164,7 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	// username — mirroring sanitizeContent's raw-length bound in
 	// service/message.go and loginReadRequest's username bound below.
 	if len(req.Username) > maxLoginUsernameLen*4 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "username is too long",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
 		return req, false
 	}
 
@@ -186,28 +180,19 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	// Whether an invite is needed depends on the registration mode (B4-1),
 	// which the service decides; only the credentials are required here.
 	if req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "username and password are required",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username and password are required")
 		return req, false
 	}
 
 	// Validate username format (length, no control/invisible chars).
 	if err := auth.ValidateUsername(req.Username); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: err.Error(),
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}
 
 	// Validate password strength before anything else.
 	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: err.Error(),
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}
 	return req, true
@@ -241,10 +226,7 @@ func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
 func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, bool) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "malformed request body",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 		return req, false
 	}
 
@@ -253,10 +235,7 @@ func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, boo
 	// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
 
 	if req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "username and password are required",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username and password are required")
 		return req, false
 	}
 
@@ -269,10 +248,7 @@ func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, boo
 	// hours). Mirrors the same 32-rune cap auth.ValidateUsername enforces at
 	// registration.
 	if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
-		writeJSON(w, http.StatusBadRequest, errorResponse{
-			Error:   "INVALID_INPUT",
-			Message: "username is too long",
-		})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
 		return req, false
 	}
 	return req, true
@@ -324,10 +300,7 @@ func handleDeleteAccount(svc AuthService) http.HandlerFunc {
 
 		var req deleteAccountRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
 			return
 		}
 
@@ -359,10 +332,7 @@ func authResponse(res *service.AuthResult) authSuccessResponse {
 // writeNotAuthenticated is the refusal for a route mounted behind
 // AuthMiddleware that still finds no usable principal on the request.
 func writeNotAuthenticated(w http.ResponseWriter) {
-	writeJSON(w, http.StatusUnauthorized, errorResponse{
-		Error:   "UNAUTHORIZED",
-		Message: "not authenticated",
-	})
+	writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 }
 
 // writeAuthError encodes a service.Err* refusal from the auth slice. Each

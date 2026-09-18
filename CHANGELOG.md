@@ -180,6 +180,20 @@ server's internals were reorganised behind service boundaries.
   it again, as standalone binaries and as containers, and is blocked unless a
   signed-in session, an uploaded file, the configuration, the credential keys
   and the backups all survive both directions intact.
+- **Plugins are described by `plugin.json` only — the `plugin.toml` manifest is
+  gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
+  convert it to `plugin.json`. A directory carrying both could previously leave
+  the server honouring a different manifest than the one approved at install.
+
+### Configuration
+
+- **A quoted number or boolean in `config.yaml` is now rejected at startup**,
+  naming the line it sits on. `port: 8443` is a number; `port: "8443"` is a
+  string and is no longer accepted.
+- **List-valued `OWNCORD_*` overrides are comma-separated.** `OWNCORD_FOO=a,b`
+  sets two entries, not one. A configuration file is unaffected.
+- **A section left empty keeps its defaults.** `voice:` with nothing beneath it
+  no longer discards everything that section would otherwise have supplied.
 
 ### Privacy & data
 

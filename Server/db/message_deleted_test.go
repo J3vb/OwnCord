@@ -14,7 +14,7 @@ import (
 // its own ACL, so found=false must never look like deleted=true.
 
 func TestIsMessageDeleted_ReportsTheFlagAndTheRow(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	if _, err := database.ExecContext(ctx,
@@ -55,7 +55,7 @@ func TestIsMessageDeleted_ReportsTheFlagAndTheRow(t *testing.T) {
 }
 
 func TestIsMessageDeleted_SurfacesAQueryFailure(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	// Without the table the read cannot answer; that must be an error rather

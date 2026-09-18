@@ -121,15 +121,3 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
 DELETE FROM moderation_actions
  WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));
-
--- name: UnlinkModerationActionsByActor :exec
--- Erasure's actor-token unlink (mirrors erasureUnlinkReports): an erased
--- moderator's actions keep their row, action, time and order, but the
--- actor id goes to 0 and the token takes its place.
-UPDATE moderation_actions SET actor_id = 0, actor_token = ? WHERE actor_id = ?;
-
--- name: UnlinkModerationActionsByLifter :exec
--- Same, for the lifted_by column: no token column of its own (mirrors the
--- reports assignee_id and audit_log's other bare actor columns), so an
--- erased lifter's id simply goes to 0.
-UPDATE moderation_actions SET lifted_by = 0 WHERE lifted_by = ?;

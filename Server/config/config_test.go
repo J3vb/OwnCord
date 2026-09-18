@@ -536,7 +536,7 @@ func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 func TestLoadRestartMode(t *testing.T) {
 	// server.restart_mode drives the self-restart handoff (see main.go's
 	// resolveRestartMode): default "auto", overridable via YAML and via
-	// OWNCORD_SERVER_RESTART_MODE — the env case pins envKeyToKoanf's
+	// OWNCORD_SERVER_RESTART_MODE — the env case pins envKeyToPath's
 	// server_restart_mode -> server.restart_mode mapping.
 	t.Run("default", func(t *testing.T) {
 		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))

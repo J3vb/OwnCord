@@ -569,35 +569,6 @@ func (q *Queries) RetireRetiredCandidatesExcludingAppealed(ctx context.Context, 
 	return result.RowsAffected()
 }
 
-const unlinkAppealsByAssignee = `-- name: UnlinkAppealsByAssignee :exec
-UPDATE appeals SET assignee_id = 0 WHERE assignee_id = ?
-`
-
-// Same, for assignee_id: no token column of its own (mirrors reports'
-// assignee_id and moderation_actions.lifted_by), so an erased assignee's id
-// simply goes to 0.
-func (q *Queries) UnlinkAppealsByAssignee(ctx context.Context, assigneeID int64) error {
-	_, err := q.db.ExecContext(ctx, unlinkAppealsByAssignee, assigneeID)
-	return err
-}
-
-const unlinkAppealsByDecider = `-- name: UnlinkAppealsByDecider :exec
-UPDATE appeals SET decided_by = 0, decided_by_token = ? WHERE decided_by = ?
-`
-
-type UnlinkAppealsByDeciderParams struct {
-	DecidedByToken *string `json:"decidedByToken"`
-	DecidedBy      int64   `json:"decidedBy"`
-}
-
-// Erasure's actor-token unlink (mirrors UnlinkModerationActionsByActor): an
-// erased moderator's decisions keep their row, decision and order, but the
-// deciding id goes to 0 and the token takes its place.
-func (q *Queries) UnlinkAppealsByDecider(ctx context.Context, arg UnlinkAppealsByDeciderParams) error {
-	_, err := q.db.ExecContext(ctx, unlinkAppealsByDecider, arg.DecidedByToken, arg.DecidedBy)
-	return err
-}
-
 const withdrawAppeal = `-- name: WithdrawAppeal :execrows
 UPDATE appeals
    SET state = 'withdrawn'

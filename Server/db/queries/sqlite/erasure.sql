@@ -43,6 +43,3 @@ SET state = 'done',
     updated_at = datetime('now'),
     finished_at = datetime('now')
 WHERE id = ?;
-
--- name: CountUnfinishedErasureJobs :one
-SELECT COUNT(*) FROM erasure_jobs WHERE state <> 'done';

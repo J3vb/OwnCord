@@ -7,8 +7,8 @@ no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
 hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
 microtask-batched notifications, selector subscriptions). Components are
 factory functions returning `{ element, mount, destroy }` built with the
-`@lib/dom` helpers; a 2-page state machine (`src/lib/router.ts`) switches
-between the Connect and Main pages.
+`@lib/dom` helpers; a 2-page state machine inline in `src/main.ts`
+(`activePage` + `navigate()`) switches between the Connect and Main pages.
 
 > `docs/client-architecture.md` is a 15-line redirect stub kept for old links;
 > this document is the client architecture reference. The abandoned SolidJS

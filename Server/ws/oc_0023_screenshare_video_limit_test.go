@@ -90,12 +90,12 @@ func TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull(t *testing.T) {
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
+	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userA, Enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if camRes.Error != nil {
 		t.Fatalf("user A camera enable under an empty cap should succeed, got error: %+v", camRes.Error)
 	}
 
-	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userB, enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
+	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userB, Enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
 	if ssRes.Error == nil {
 		t.Fatal("voice_screenshare succeeded with the channel's single video slot already held by a camera publisher — VIDEO_LIMIT was never checked")
 	}
@@ -134,12 +134,12 @@ func TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(t *testing.T) {
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
+	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userA, Enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if ssRes.Error != nil {
 		t.Fatalf("user A screenshare enable under an empty cap should succeed, got error: %+v", ssRes.Error)
 	}
 
-	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userB, enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
+	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userB, Enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
 	if camRes.Error == nil {
 		t.Fatal("voice_camera succeeded with the channel's single video slot already held by a screenshare publisher — the slot-count query ignores screenshare rows")
 	}

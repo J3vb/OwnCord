@@ -3,7 +3,7 @@
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
-import { loadPref, savePref, createToggle } from "./helpers";
+import { appendToggleRows } from "./helpers";
 import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -38,24 +38,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  for (const item of toggles) {
-    const row = createElement("div", { class: "setting-row" });
-    const info = createElement("div", {});
-    const label = createElement("div", { class: "setting-label" }, item.label);
-    const desc = createElement("div", { class: "setting-desc" }, item.desc);
-    appendChildren(info, label, desc);
-
-    const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createToggle(isOn, {
-      signal,
-      onChange: (nowOn) => {
-        savePref(item.key, nowOn);
-      },
-    });
-
-    appendChildren(row, info, toggle);
-    section.appendChild(row);
-  }
+  appendToggleRows(section, toggles, signal);
 
   section.appendChild(buildMutedChannelsSection(signal));
   return section;

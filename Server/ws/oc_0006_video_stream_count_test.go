@@ -91,19 +91,19 @@ func TestEnableVideoSlot_SameUserDoubleStreamCountsTwoSlots(t *testing.T) {
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: alice, enabled: true}, ClientInfo{UserID: alice, VoiceChannelID: chID}, d)
+	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: alice, Enabled: true}, ClientInfo{UserID: alice, VoiceChannelID: chID}, d)
 	if ssRes.Error != nil {
 		t.Fatalf("alice screenshare enable (1st stream, cap 2) should succeed, got error: %+v", ssRes.Error)
 	}
 
-	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: alice, enabled: true}, ClientInfo{UserID: alice, VoiceChannelID: chID}, d)
+	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: alice, Enabled: true}, ClientInfo{UserID: alice, VoiceChannelID: chID}, d)
 	if camRes.Error != nil {
 		t.Fatalf("alice camera enable (2nd stream, cap 2) should succeed, got error: %+v", camRes.Error)
 	}
 
 	// Cap is now saturated: Alice alone is publishing 2 of the 2 allowed
 	// streams. Bob's camera enable is a 3rd stream and must be refused.
-	bobCamRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: bob, enabled: true}, ClientInfo{UserID: bob, VoiceChannelID: chID}, d)
+	bobCamRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: bob, Enabled: true}, ClientInfo{UserID: bob, VoiceChannelID: chID}, d)
 	if bobCamRes.Error == nil {
 		t.Fatal("bob's camera enable succeeded as the channel's 3rd live video stream against a cap of 2 -- the same-user double-publish (camera+screenshare on one row) was undercounted as a single slot")
 	}

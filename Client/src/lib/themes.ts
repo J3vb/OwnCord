@@ -72,15 +72,12 @@ export function getActiveThemeName(): string {
 }
 
 /**
- * Restores the previously persisted theme and accent color on application startup.
- * Call once from the app entry point.
+ * Restore the user's accent color override (saved by AppearanceTab).
+ *
+ * Must run after the theme is applied so it wins over the theme's --accent
+ * value via inline style specificity.
  */
-export function restoreTheme(): void {
-  applyThemeByName(getActiveThemeName());
-
-  // Restore the user's accent color override (saved by AppearanceTab).
-  // The accent must be applied after the theme so it wins over the theme's
-  // --accent value via inline style specificity.
+export function restoreAccent(): void {
   try {
     const raw = localStorage.getItem("owncord:settings:accentColor");
     if (raw !== null) {
@@ -93,4 +90,13 @@ export function restoreTheme(): void {
   } catch {
     // Corrupted localStorage — ignore, theme default will apply.
   }
+}
+
+/**
+ * Restores the previously persisted theme and accent color.
+ * Used by the Appearance tab when there is no explicit theme selected.
+ */
+export function restoreTheme(): void {
+  applyThemeByName(getActiveThemeName());
+  restoreAccent();
 }

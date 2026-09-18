@@ -7,7 +7,6 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createRouter } from "@lib/router";
 import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
@@ -19,7 +18,6 @@ import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.st
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
-import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
@@ -108,9 +106,6 @@ installGlobalErrorHandlers();
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
-// Restore saved theme (body class) before first render
-restoreTheme();
-
 // Start push-to-talk listener (Rust-side polling, non-consuming)
 void initPtt();
 
@@ -119,8 +114,18 @@ if (!appEl) {
   throw new Error("Missing #app element");
 }
 
+// The active page. `currentPage` further down holds the mounted page
+// *component*, so the page id needs its own name.
+let activePage: "connect" | "main" = "connect";
+
+/** Switch pages, re-rendering only when the page actually changed. */
+function navigate(page: "connect" | "main"): void {
+  if (page === activePage) return;
+  activePage = page;
+  void renderPage(page);
+}
+
 // Create core services
-const router = createRouter("connect");
 // REST traffic is tunneled through the Rust HTTP TOFU proxy (src/lib/httpProxy.ts
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
@@ -239,7 +244,12 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
             lastConnectToken &&
             evt.host === normalizeHostForCertCompare(lastConnectHost)
           ) {
-            reconnectAfterCertAccept(ws, router, lastConnectHost, lastConnectToken);
+            reconnectAfterCertAccept(
+              ws,
+              { getCurrentPage: () => activePage, navigate },
+              lastConnectHost,
+              lastConnectToken,
+            );
           }
         } catch (err) {
           log.error("Failed to accept cert fingerprint", err);
@@ -255,7 +265,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
       if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
         ws.disconnect();
         clearAuth();
-        router.navigate("connect");
+        navigate("connect");
       }
     },
   });
@@ -495,7 +505,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           if (!owner.isCurrent()) return;
           connectedOverlay?.destroy();
           connectedOverlay = null;
-          router.navigate("main");
+          navigate("main");
         },
       });
       const ownedOverlay = connectedOverlay;
@@ -940,11 +950,6 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   }
 }
 
-// Listen for navigation changes
-router.onNavigate((pageId) => {
-  void renderPage(pageId);
-});
-
 // Handle logout / disconnect
 authStore.subscribeSelector(
   (s) => s.isAuthenticated,
@@ -961,7 +966,7 @@ authStore.subscribeSelector(
     // its only other teardown paths are its own onReady timer (never armed
     // without `ready`), the next wirePostAuth, onAutoLoginCancel, and the
     // invite deep-link handler, none of which this path takes (OC-0157).
-    if (!isAuthenticated && (router.getCurrentPage() === "main" || lastConnectHost !== "")) {
+    if (!isAuthenticated && (activePage === "main" || lastConnectHost !== "")) {
       // Leave voice channel before disconnecting so other clients see it
       // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
       // than the live voiceStore: clearAuth applies state (including this
@@ -1000,7 +1005,7 @@ authStore.subscribeSelector(
         // restart, so it deliberately does not set this.
         sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
-      router.navigate("connect");
+      navigate("connect");
     }
   },
 );
@@ -1020,7 +1025,7 @@ window.addEventListener("beforeunload", () => {
 
 // Initial render (fire-and-forget — the initial page is "connect", whose
 // render branch is synchronous)
-void renderPage(router.getCurrentPage());
+void renderPage(activePage);
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
@@ -1030,7 +1035,7 @@ void initWindowState();
 // form — it can't complete a join by itself.
 function handleInviteDeepLink(code: string, host?: string): void {
   pendingInviteLink = { code, host };
-  if (router.getCurrentPage() === "main") {
+  if (activePage === "main") {
     // Let the logout path do the teardown instead of navigating behind a
     // live session: clearAuth() fires while the router is still on "main",
     // so the authStore subscriber above runs its full teardown (voice leave,
@@ -1044,10 +1049,10 @@ function handleInviteDeepLink(code: string, host?: string): void {
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready countdown hasn't called router.navigate("main") yet, so
+    // overlay's ready countdown hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
-    // down once the router IS "main", so it won't fire for this window
-    // either: left alone, the overlay's timer fires router.navigate("main")
+    // down once the active page IS "main", so it won't fire for this window
+    // either: left alone, the overlay's timer fires navigate("main")
     // regardless, mounting MainPage on top of whatever this handler does to
     // authStore below. Tear the in-flight session down directly, the same
     // way onAutoLoginCancel does, before applying the invite below.
@@ -1064,7 +1069,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
       clearAuth();
     }
   }
-  router.navigate("connect");
+  navigate("connect");
   // If the connect page was already mounted, navigate() may not re-render it —
   // apply directly. Otherwise the connect render branch consumes the pending link.
   if (pendingInviteLink !== null && applyInviteToConnectPage !== null) {

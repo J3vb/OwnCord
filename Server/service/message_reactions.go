@@ -149,7 +149,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 	// lookup failure must not fall through to the non-DM permission branch
 	// below. That branch passes on the base role mask alone
 	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and requireDMNotBlocked entirely.
+	// skipping both IsDMParticipant and RequireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
@@ -186,7 +186,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		// used to) risked a reaction persisted with no participant list to
 		// broadcast it to, which reactionV2Handler would then fan out to
 		// nobody while reporting success to the caller.
-		ids, pErr := s.dmAudience(ctx, channelID, userID)
+		ids, pErr := s.DMAudience(ctx, channelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.handleReaction DMAudience", "err", pErr, "channel_id", channelID)
 			return nil, false, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)

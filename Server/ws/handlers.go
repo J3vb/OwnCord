@@ -311,30 +311,6 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 	c.mu.Unlock()
 }
 
-// hasChannelPerm reports whether the client's role has all the given permission bits.
-// Delegates to the unified permissions.Checker.
-//
-// F5: resolve the user's CURRENT role via GetRoleForUser(c.userID) rather than the
-// role snapshotted onto c.user at connect time. A mid-session role reassignment
-// (e.g. stripping CONNECT_VOICE) must take effect immediately for the live
-// connection — including the SPEAK/VIDEO grants baked into a freshly minted
-// LiveKit token — instead of persisting until the user reconnects. This mirrors
-// the V2 handlers, which already resolve the live role (deps.go).
-//
-// Deliberately NOT routed through the cached PermissionService: the only
-// production caller is sweepStaleVoiceStates, the last-line revocation backstop
-// that evicts live voice participants. Reading the DB live keeps that backstop
-// authoritative even for a permission change that somehow bypassed the
-// invalidation hooks, and the sweep runs once a minute for only the clients
-// currently in voice, so the uncached cost is negligible.
-func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64) bool {
-	role, err := h.readers.Dispatch.GetRoleForUser(ctx, c.userID)
-	if err != nil || role == nil {
-		return false
-	}
-	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, c.userID, channelID, perm)
-}
-
 // broadcastExcludeLow sends a message at low priority to all clients in the
 // sender's channel EXCEPT the sender. Messages sent via this function are NOT
 // stored in the replay ring buffer — they are ephemeral. This is correct for

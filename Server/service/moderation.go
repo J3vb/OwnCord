@@ -653,16 +653,11 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 }
 
 func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time, reportID *int64) error {
-	ctx, span := telemetry.GlobalTracer("service/moderation").Start(ctx, "ModerationService.BanUser",
+	ctx, done := traceCall(ctx, "service/moderation", "ModerationService.BanUser",
 		telemetry.Int64("actor_id", actorID),
 		telemetry.Int64("target_id", targetID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "BanUser"))
-		span.End()
-	}()
+	defer done()
 
 	if err := requireHumanActor(actorID); err != nil {
 		return err
@@ -898,7 +893,7 @@ func (s *ModerationService) ListActionsForTarget(ctx context.Context, actorID, t
 // ListActionsForReport is the queue detail's "actions taken" list (plan
 // item 7). No permission check of its own — the caller
 // (ReportService.Get) has already gated the read with requireModerate,
-// guardConfidentiality and guardSelfReview.
+// guardConfidentiality and GuardSelfReviewFor.
 func (s *ModerationService) ListActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error) {
 	rows, err := s.st.ListModerationActionsForReport(ctx, reportID)
 	if err != nil {
