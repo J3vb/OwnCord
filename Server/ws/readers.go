@@ -57,6 +57,11 @@ type ReadySnapshotReader interface {
 	// warning issued to the connecting user that they have not yet
 	// acknowledged.
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
+	// MessageDeliveryFloorMS is the ready payload's message_retry_floor_ms
+	// capability: the timestamp below which a redelivered message is too old
+	// to dedupe against. Not a read of a row — an in-memory watermark on the
+	// handle — but it reaches the snapshot through the same seam as the rest.
+	MessageDeliveryFloorMS() int64
 }
 
 // MemberPayloadReader is what member broadcast payloads (hub_broadcast.go)
@@ -80,6 +85,14 @@ type DispatchReader interface {
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+	// GetReport and GetAppeal back the mod_queue and appeal_mod_queue
+	// broadcasts (moderation_queue.go), which resolve the frame's audience:
+	// audience resolution for queue broadcasts: no actor, so the
+	// actor-scoped service Get does not apply. Only the public id and the
+	// principals to exclude are read; nothing from either row reaches the
+	// wire but the public id and the state.
+	GetReport(ctx context.Context, id int64) (*db.Report, error)
+	GetAppeal(ctx context.Context, id int64) (*db.Appeal, error)
 }
 
 // HubReaders bundles the read seams HubOptions requires — every one of them
