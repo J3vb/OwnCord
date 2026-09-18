@@ -249,7 +249,7 @@ action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
 and the deletion marker's token — HMAC-SHA256 of the user id under
 `data/erasure.key` — takes the id's place: `subject_token` where the subject
 was the target, `actor_token` where they acted — and the same token in the
-report, report-event, moderation-action and appeal rows that name them
+report, report-note, report-event, moderation-action and appeal rows that name them
 (`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so a row naming two
 erased subjects keeps both, the rows about one subject remain linkable to
 each other by anyone who may read them, any `VIEW_AUDIT_LOG` holder

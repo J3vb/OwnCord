@@ -434,7 +434,7 @@ does not claim").
   subject appeared in keep their action, time and order with that token in
   place of the id (`audit_log.subject_token` where they were the target,
   `actor_token` where they acted) — and the same token in the report,
-  report-event, moderation-action and appeal rows that name them
+  report-note, report-event, moderation-action and appeal rows that name them
   (`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so the rows about
   one erased subject remain linkable to each other by anyone who may read
   them, any `VIEW_AUDIT_LOG` holder included, and to the identity only by
