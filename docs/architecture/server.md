@@ -1,7 +1,6 @@
 # Server Architecture
 
-**Verified against:** commit `5630aa1`, 2026-08-04; §D4 and the auth rows of
-§D3 against `fe1d11b8`, 2026-08-30 (B3-2)
+**Verified against:** commit `a3a0a49b`, 2026-09-18
 
 Single Go binary (`github.com/J3vb/OwnCord/Server`, Go 1.26). Pure-Go SQLite
 (`modernc.org/sqlite`, no CGO), chi router, `github.com/coder/websocket`,
@@ -79,17 +78,24 @@ that `*db.DB` satisfies; `ws` and `plugin` depend on their own small interfaces
 methods delegate to the sqlc-generated `db/dbgen` code (D2), so sqlc is now the
 type-checked query layer rather than dead generated code. Two dashed edges mark
 the residual seam: many REST handlers still receive a raw `*db.DB` alongside
-`svc`, and the `admin` package operates on `*db.DB` almost exclusively —
-consolidating those behind the service layer is the remaining work (audit
-A-2026-07-06 — resolved for the store seam itself; the residual consolidation
-is its backlog item 12). See [data-model.md](data-model.md).
+`svc`, and twelve `admin` files import `db` — nine only name its types, and
+three (`backup_maintenance.go`, `handlers_backup.go`, `update_handlers.go`)
+make raw calls, each because it needs the handle itself. Consolidating those
+behind the service layer is the remaining work (audit A-2026-07-06 — resolved
+for the store seam itself; the residual consolidation is its backlog item 12);
+the per-file table is in [server-boundaries.md](server-boundaries.md). See
+[data-model.md](data-model.md).
 
-`api.NewRouter` (`Server/api/router.go`) is the composition root: it constructs
-the rate limiter, TOTP key, storage, `service.New`, the `ws.Hub`, the LiveKit
-client/subprocess, the updater, the admin handler, and the plugin admin handler;
-spawns background goroutines; and mounts all routes. `main.go` performs only
-process-level wiring (config, TLS, DB, event persistence, HTTP server,
-shutdown).
+`app.StartRuntime` (`Server/internal/app/hub.go`) is the composition root: it
+builds the persistent rate limiter, `service.New`, the LiveKit client and its
+optional managed subprocess, and the `ws.Hub` through a validated
+`ws.HubOptions`, returning `api.Runtime`. `api.NewRouter`
+(`Server/api/router.go`) is then the route-mounting step: it loads the TOTP
+key, assembles the global middleware chain over the runtime it is handed,
+mounts the routes, owns the admin and plugin-admin handlers, and starts its
+own background goroutines (the rate-limiter cleanup ticker among them). It is
+invoked by `app.startRouter`. `main.go` performs only process-level wiring
+(config, TLS, DB, event persistence, HTTP server, shutdown).
 
 The `plugin` package is experimental and compiled out of release binaries;
 [plugins.md](plugins.md) records that boundary — what exists, what carries no
@@ -126,8 +132,10 @@ sequenceDiagram
     end
 ```
 
-**What this shows.** The global chain is assembled in `NewRouter`; note that
-chi's `middleware.RealIP` is deliberately omitted — client IP is resolved via
+**What this shows.** The global chain is assembled in `NewRouter`, which
+`app.StartRuntime` invokes as its route-mounting step over the already-built
+runtime, so the chain is assembled at mount time rather than at construction;
+note that chi's `middleware.RealIP` is deliberately omitted — client IP is resolved via
 `clientIPWithProxies` against configured trusted proxies instead, so spoofed
 `X-Real-IP`/`X-Forwarded-For` headers are not trusted by default. Authentication
 is bearer-token (SHA-256-hashed opaque tokens); authorization is enforced at two
@@ -201,11 +209,12 @@ diff the move separately from the rewrite:
    `db-import-boundary` fails if an import outlives its row. Constants move
    with the code that reads them; a converter that still names a `db` type
    (`toUserResponse`) moves to a file that legitimately imports `db`.
-7. **Composition root builds the service after its collaborators.** The
-   auth service needs the hub (broadcast) that `service.New` runs before, so
-   `router.go` constructs it separately, after `ws.NewHub`. B3-3 moves that
-   into `internal/app`; until then it is one line in `NewRouter`, which sits
-   at the `funlen` limit — fold, do not add.
+7. **Composition root builds the service after its collaborators.** The auth
+   service needs the hub it broadcasts through, so `app.StartRuntime` builds
+   the limiter and `service.New` first and the hub second, via
+   `ws.NewHub(ws.HubOptions{...})`. The ordering requirement is now enforced by
+   the options struct and `validateHubOptions` rather than by call order inside
+   one function — keep a slice's collaborators on that struct as it grows.
 8. **Evidence block:** pre-squash SHAs with the characterization run against
    each tree, before/after inventory rows, the full gate, and coverage of
    the handler files plus the service (blocks merged per file, each counted

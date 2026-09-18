@@ -1,6 +1,6 @@
 # WebSocket / Real-time Engine
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** commit `a3a0a49b`, 2026-09-18
 
 The `Server/ws` package (~9.5k LOC production code, the largest in the server)
 implements the real-time engine: a single `Hub` owning all client connections,
@@ -28,14 +28,14 @@ sequenceDiagram
 
     C->>S: WSS upgrade /api/v1/ws (Origin checked)
     Note over S: no HTTP AuthMiddleware —<br/>auth is in-band, 10s deadline
-    C->>S: {type:"auth", payload:{token, last_seq}}
+    C->>S: {type:"auth", payload:{token, last_seq, active_channel_id, epoch}}
     S->>S: validate token hash → session expiry → user → ban
     S->>H: register (kicks previous conn of same user)
     S-->>C: auth_ok {user, server_name, motd, replay_source}
 
     alt last_seq within in-memory ring buffer (Tier 1)
-        H-->>C: replay EventsSinceFiltered (perm-filtered, fail-closed)
-    else last_seq within events table (Tier 2, max 5000)
+        H-->>C: replay EventsSinceFilteredContent (perm-filtered, fail-closed)
+    else last_seq within events table (Tier 2, max = event_persistence.replay_cold_limit, default 5000)
         H-->>C: replay from cold-tier EventStore
     else too far behind, or channel visibility changed (Tier 3)
         H-->>C: full "ready" re-sync snapshot
@@ -55,13 +55,17 @@ picks the cheapest replay tier. A `visibilityChangeSeq` watermark forces a full
 re-sync whenever channel visibility changed while the client was away, so
 permission changes can never be replayed around. `auth_ok.replay_source`
 (`none|buffer|db`) reports which tier served the reconnect and feeds the
-`ws_reconnect_tier_total` metric.
+`ws_reconnect_tier_total` metric. `active_channel_id` is what lets a resuming
+client re-declare its channel without a separate focus frame, and an absent
+`epoch` is read as 0, the pre-epoch client — both are attacker-controlled input
+validated before use. Neither replay tier's depth is a fixed constant: they are
+the `event_persistence.replay_ring_size` and `replay_cold_limit` config knobs.
 
 ## D4b — Broadcast fanout and backpressure
 
 ```mermaid
 flowchart LR
-    EV["deliverBroadcast<br/>assign seq"] --> RB["EventRingBuffer<br/>(1000, Tier 1)"]
+    EV["deliverBroadcast<br/>assign seq"] --> RB["EventRingBuffer<br/>(event_persistence.replay_ring_size, default 1000, Tier 1)"]
     EV --> EP["EventPersister<br/>async batched → events table<br/>(Tier 2; drops if queue full)"]
     EV --> PLG["plugin EventSink"]
     EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(per-topic 100 msg/s limit)"]
@@ -108,14 +112,18 @@ hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
 un-throttled on disconnect and channel switch) are triggered from the applier via
 `Result.JoinVoice` / `Result.LeaveVoice` rather than re-expressed as pure events.
 
-The `Hub` also owns: stale-client sweep (90s), revoked-session sweep (30s, plus
+The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold),
+revoked-session sweep (30s, plus
 per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
 panic containment on the run loop (3 panics/60s → stop), LiveKit client and
 optional managed subprocess, and the voice E2EE key-holder map
-([voice-e2ee.md](voice-e2ee.md)). Many collaborators are attached
-post-construction via `SetLiveKit` / `SetEventPersister` /
-`SetPluginRegistry` setters that "must be called before Run" — temporal
-coupling noted in the audit.
+([voice-e2ee.md](voice-e2ee.md)). Collaborators are supplied up front through
+the validated `ws.HubOptions` (`Server/ws/hub_options.go`) — `NewHub` runs
+`validateHubOptions` before it builds, so an incomplete hub fails construction
+rather than at first use. The event-persistence pair is still attached after
+the hub is running (`SetEventPersister` / `SetEventStore`, from
+`Server/internal/app/persistence.go`), and that post-`Run` hot-swap is the
+temporal coupling the audit note names.
 
 **Source of truth:** `Server/ws/hub.go`, `Server/ws/serve.go`,
 `Server/ws/client.go`, `Server/ws/handlers.go`, `Server/ws/command.go`,
