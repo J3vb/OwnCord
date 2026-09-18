@@ -1,7 +1,17 @@
 #!/usr/bin/env node
-// Fail when a release.yml job that publishes something (pushes an image, cuts
-// a GitHub Release) carries no `environment: release`, and so runs with no
-// required-reviewer approval (R-09 / docs/plans/b1-release-tag-protection.sh).
+// Two independent checks over release.yml, both structural:
+//
+//  1. Fail when a release.yml job that publishes something (pushes an image,
+//     cuts a GitHub Release) carries no `environment: release`, and so runs
+//     with no required-reviewer approval (R-09 /
+//     docs/plans/b1-release-tag-protection.sh).
+//  2. Fail when a `path:` list in release.yml mixes parent directories. This
+//     is the invisible half of an `upload-artifact` step: the action roots the
+//     artifact at the least common ancestor of the search paths and strips
+//     exactly that prefix, so a list holding one repository-root path and one
+//     nested path keeps the nested file's directory *inside* the artifact. It
+//     downloads, but not beside its siblings, and the steps that consume it —
+//     the checksum and `attest-sbom` steps — look where it is not.
 //
 //   node scripts/check-release-environment.mjs
 //   node --test scripts/check-release-environment.test.mjs
@@ -77,6 +87,35 @@ export function auditReleaseEnvironment(src) {
     .map((j) => ({ name: j.name }));
 }
 
+// Parent directory of a path as written in a `path:` list: "" for a
+// repository-root entry, "Server" for "Server/chatserver.exe".
+const parentOf = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+
+// Returns every block-form `path:` list that mixes parents, as {line, paths}.
+// Scoped to release.yml (the caller reads that one file): the same invariant
+// holds for ci.yml's uploads, but this script exists for the release path, and
+// a whole-repo scan would fail on lists that legitimately mix.
+export function auditArtifactPathLists(src) {
+  const lines = src.split("\n");
+  const mixed = [];
+  for (let i = 0; i < lines.length; i++) {
+    const head = lines[i].match(/^(\s*)path:\s*\|\s*$/);
+    if (!head) continue;
+    const indent = head[1].length;
+    const paths = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim()) break;
+      if (line.match(/^(\s*)/)[1].length <= indent) break;
+      paths.push(line.trim());
+    }
+    if (paths.length > 1 && new Set(paths.map(parentOf)).size > 1) {
+      mixed.push({ line: i + 1, paths });
+    }
+  }
+  return mixed;
+}
+
 function main() {
   const path = join(ROOT, RELEASE_WORKFLOW);
   const src = readFileSync(path, "utf8");
@@ -98,7 +137,26 @@ function main() {
     );
     process.exit(1);
   }
+  const mixed = auditArtifactPathLists(src);
+  if (mixed.length) {
+    console.error(`\n${mixed.length} artifact path list(s) in ${RELEASE_WORKFLOW} mix parents:\n`);
+    for (const { line, paths } of mixed) {
+      console.error(`  ${RELEASE_WORKFLOW}:${line}`);
+      for (const p of paths)
+        console.error(`      ${p}  (parent: ${parentOf(p) || "<repository root>"})`);
+    }
+    console.error(
+      `\nGive every entry in one list the same parent directory. ` +
+        `upload-artifact roots the artifact at the least common ancestor of the ` +
+        `search paths and strips exactly that prefix, so a mixed list keeps the ` +
+        `nested file's directory inside the artifact: it downloads, but not ` +
+        `beside the items the checksum and attest-sbom steps expect.`,
+    );
+    process.exit(1);
+  }
+
   console.log(`release environment gate: every publishing job in ${RELEASE_WORKFLOW} is guarded`);
+  console.log(`release artifact gate: every path list in ${RELEASE_WORKFLOW} has one parent`);
 }
 
 const invokedDirectly =
