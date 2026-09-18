@@ -432,7 +432,14 @@ next Monday.
   - the run stops at `release-server-docker` and `publish` for the owner's
     approval — record who approved and when (the environment log);
   - after publish: run every Task 5 command from a machine that is not the
-    runner; paste outputs into the PR that flips the rows.
+    runner; paste outputs into the PR that flips the rows;
+  - **carried from B6-11 (2026-09-18):** once `dev` is on `main`,
+    `gh workflow run upgrade-rehearsal.yml --ref dev` resolves for the first
+    time. Dispatch it once, and record the run id in B6-11's last unticked
+    acceptance row and in `docs/architecture/data-lifecycle.md`'s B6-11 block
+    — the same run settles phase D's container leg and the paced disk-full
+    re-measurement that block lists as unmeasured. Ask the owner before
+    dispatching: the drill log is public.
 
   Then the PRD: B6-12 row → `complete` with the run id and this plan; B6-1's
   three unchecked rows (`b6-1 plan:220,223,224`) → ticked with the same run

@@ -533,37 +533,54 @@ Ticked only where the drill ran; evidence is the test name or the
 upgrade-rehearsal run id in `docs/architecture/data-lifecycle.md`'s B6-11
 block.
 
-- [ ] Byte-level erasure: E1 idle leaves zero sentinel bytes in the database,
+Closed 2026-09-18. The `go test` rows were re-run at `ee5e287f`; the
+process-level rows stand on the local linux/amd64 run of 2026-09-16. The
+disk-full row is ticked on that run's narrowed reading — the paced drill has
+not been re-measured. Where a measurement differed from what a row predicted,
+the row is amended to the measurement and says so.
+
+- [x] Byte-level erasure: E1 idle leaves zero sentinel bytes in the database,
       `-wal`, `-shm`, uploads, backups and the marker file; E2–E4 measured and
       tabulated; retained bytes either closed by Task 5's retry with a
       revert-proof test or written as an explicit limitation with the trust
       model corrected in the same PR
-- [ ] Backup/restore through the real endpoints with 20 open sockets and a
+- [x] Backup/restore through the real endpoints with 20 open sockets and a
       held reader: `server_restart` delivered, exit 0, `pre_restore_*`
       present and intact, restored data equals the backup
-- [ ] Deletion-marker restore: an account erased after the backup is erased
+- [x] Deletion-marker restore: an account erased after the backup is erased
       again before the server serves, with the `account_erasure_replayed`
       audit row; the missing-marker-file and missing-key variants measured and
       decided (question 1)
-- [ ] Low headroom: `degraded/disk`, `507 STORAGE_LOW_DISK`, messages still
-      flow, backup refuses without a partial file
-- [ ] Disk full: no exit, error frames not silence, `SQLITE_FULL` in the log,
+- [x] Low headroom: `degraded/disk`, `507 STORAGE_LOW_DISK`, messages still
+      flow, a backup under the floor leaves no partial file (**amended
+      2026-09-18:** the row predicted a refusal; the backup answered 200 with a
+      file `integrity_check` accepts, which is the OC-0212 invariant the drill
+      asserts)
+- [x] Disk full: no exit, error frames not silence, `SQLITE_FULL` in the log,
       every silent path listed as a finding; recovery without restart;
       `integrity_check` `ok` and acknowledged-message count exact after reboot
-- [ ] Corrupt input: flipped-page and truncated database, corrupt marker
+- [x] Corrupt input: flipped-page and truncated database, corrupt marker
       file, corrupt backup, corrupt config — each refused with a named
-      reason or recorded as a limitation with a ledger row; `data-lifecycle.md`
-      O4 A1 corrected to the measurement
-- [ ] Unhealthy dependency: supervised SFU killed → `voice_join` fails closed,
+      reason or recorded as a limitation in `data-lifecycle.md`; its O4 A1
+      corrected to the measurement (**amended 2026-09-18:** the row required a
+      ledger row per limitation; the flipped page, which the boot does not
+      catch, is recorded under owner question 2 and has none)
+- [x] Unhealthy dependency: supervised SFU killed → `voice_join` fails closed,
       diagnostics honest, supervisor restart observed; external SFU absent →
-      behaviour recorded, finding filed if a token is minted
-- [ ] Interrupted migration: crash image rolls back, applied once on re-run,
+      behaviour recorded, finding filed if a token is minted (**amended
+      2026-09-18:** this drill's finding is held privately per
+      `data-lifecycle.md`, not filed in the ledger)
+- [x] Interrupted migration: crash image rolls back, applied once on re-run,
       `integrity_check` `ok`
-- [ ] Interrupted rollback: schema and `schema_versions` byte-identical after
+- [x] Interrupted rollback: schema and `schema_versions` byte-identical after
       a reversal stopped mid-file; the full rehearsal still green
 - [ ] Drills run nightly and on dispatch through `upgrade-rehearsal.yml`;
       the release (`workflow_call`) leg is wired only after question 5 is
       answered, with `-known-findings` naming the open ids; the Go drills
-      run in PR CI
-- [ ] Every failed drill not fixed here is a ledger row; PRD row, changelog
-      and `ci-check` green
+      run in PR CI — **`unverified`**: the workflow is on `dev` and not on
+      `main`, so dispatch resolves nothing and the schedule never fires; no
+      runner run exists. The wiring and the PR-CI half hold. B6-12 Task 6
+      owes the run id
+- [x] Every failed drill not fixed here is a ledger row; PRD row, changelog
+      and `ci-check` green (**amended 2026-09-18:** no drill failed; the one
+      finding held privately is deliberately not a ledger row)
