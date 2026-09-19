@@ -193,8 +193,8 @@ const SURFACE_LENSES = [
     key: "client-state",
     prompt:
       `Surface: TypeScript client state and event handling. Files: Client/src/lib/*.ts and ` +
-      `src/stores/*.ts - prioritize dispatcher.ts, reconcile.ts, read-state.ts, router.ts, roomEventHandlers.ts, ` +
-      `navigation-guard.ts, rate-limiter.ts, channel-navigation.ts, and whatever the churn recon flagged.\n\n` +
+      `src/stores/*.ts - prioritize dispatcher.ts, read-state.ts, roomEventHandlers.ts, ` +
+      `rate-limiter.ts, channel-navigation.ts, and whatever the churn recon flagged.\n\n` +
       `Hunt specifically for: a listener/interval/observer registered without a matching teardown (check ` +
       `disposable.ts for the intended pattern and find who bypasses it); reconcile logic that drops or duplicates ` +
       `an entity when events arrive out of order; read-state that can mark unread messages read, or lose an unread ` +
