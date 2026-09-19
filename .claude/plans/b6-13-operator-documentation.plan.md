@@ -622,9 +622,10 @@ description or a recorded measurement.
       moved verbatim; Restore describes the real sequence and the marker
       replay; restore-is-not-rollback stated in both places; B6-11's
       paragraphs extended, not duplicated — the restore sequence matches
-      `Server/admin/handlers_backup.go:188-330` step for step; B6-11 is
-      confirmed unmerged (`origin/dev` HEAD `54ebe8e5` carries no "backup
-      set" text), so nothing here duplicates it
+      `Server/admin/handlers_backup.go:188-330` step for step; B6-11 landed
+      first (#1603) with its "a restorable install is a set" and disk-stage
+      paragraphs, so Restore extends them and Backup Strategy points at
+      Restore rather than restating the rule
 - [x] Updates: the failure block (audit rows, `.old`, verification refusal,
       Docker refusal) and the pre-check list — verified against
       `Server/updater/verify.go` and the `update_apply`/`update_applied`/
