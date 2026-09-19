@@ -59,6 +59,13 @@ The best route is an ordered server-first program:
 8. finish cross-client experience, accessibility, and polish;
 9. qualify one release candidate against the complete matrix.
 
+_(amended 2026-09-18, owner decision: B8 deferred to post-beta — the beta
+ships desktop-only (Windows x64/ARM64, Linux x64/ARM64); step 7 does not run
+before the beta, and step 9 qualifies desktop, server, and Docker, not
+browser/PWA/phone/tablet. Steps 6 and 8 keep their client-platform and
+accessibility scope in full. See B8's deferral block for re-entry
+conditions.)_
+
 This is deliberately not a wholesale rewrite. Existing server packages,
 desktop behavior, release asset names, updater contracts, and the shared
 client application remain stable unless a phase has evidence for a narrower
@@ -167,6 +174,16 @@ must map to one canonical OC issue or one private advisory before remediation.
 The phase exits are serial. Parallelism is allowed only inside the active phase
 or for non-mutating preparation of the next phase. Server behavior and
 operations are therefore stable through B6 before browser feature work begins.
+
+_(amended 2026-09-18, owner decision: B8 deferred to post-beta — the beta
+publishes as B7 → B9 → B10, desktop-only. Phase ids are unchanged; B8 keeps
+its position and id in this chain and reopens after B10 under the re-entry
+conditions in its section below.)_
+
+_(owner direction 2026-09-18, to be confirmed at HP-9: the beta publishes
+once B9's exit gate and B10's shortened release checklist are green — see
+B10's opening block for what that checklist keeps and what moves to a later
+beta-to-stable gate.)_
 
 ## Common entry and exit contract
 
@@ -913,8 +930,15 @@ without regressing the current application.
    behavior.
 2. Move native Tauri use behind the desktop adapter one responsibility at a
    time. Add contract tests before implementing browser adapters.
+   _(amended 2026-09-18, owner decision: B8 deferred to post-beta — the
+   contract tests stay in scope; the browser adapters they gate are built with
+   B8.)_
 3. Split target-neutral Vite configuration from desktop packaging and create
    explicit desktop and web compile gates from one source tree.
+   _(amended 2026-09-18, owner decision: the target-neutral Vite split stays
+   in scope; the web compile gate is deferred with B8. The native-import check
+   named in B7's required evidence is what keeps the browser target buildable
+   later without rework.)_
 4. Clear the 471-warning Oxlint baseline, unexplained Knip hints, unexpected
    test logs, and unjustified coverage exclusions. Ratchet all gates.
 5. Add client startup, route, LiveKit, RNNoise, and feature bundle budgets.
@@ -946,7 +970,9 @@ without regressing the current application.
     [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
     Phases 4–6: `platform/contracts` + `platform/desktop` first (the 20 native
     import sites move one responsibility at a time, contract tests before
-    any browser adapter), then hotspot decomposition (`dispatcher.ts`,
+    any browser adapter — _amended 2026-09-18, owner decision: "before any
+    browser adapter" now means before B8, post-beta_), then hotspot
+    decomposition (`dispatcher.ts`,
     `livekitSession.ts`, `livekitE2EE.ts`, messaging, settings), with unit
     tests colocated as `src/**/*.test.ts` only for modules being extracted.
     `lib/` and `stores/` are transitional — shrink them, never bulk-move.
@@ -964,11 +990,15 @@ without regressing the current application.
 The desktop adapter must reproduce the existing app plus approved B2–B6 client
 flows with no direct Tauri imports outside owned adapter/bootstrap files.
 Review performance, accessibility foundations, and packaging before filling in
-browser implementations.
+browser implementations. _(amended 2026-09-18, owner decision: B8 deferred to
+post-beta — "before filling in browser implementations" now means post-beta;
+this hold point's desktop-parity text is otherwise unchanged.)_
 
 ### Exit gate
 
 - One application compiles through explicit desktop and web contract surfaces.
+  _(amended 2026-09-18, owner decision: the desktop contract surface is what
+  the beta requires; the web contract surface is deferred with B8.)_
 - Native APIs are isolated and contract-tested.
 - Required client checks are green with zero unapproved warnings and honest
   coverage.
@@ -984,7 +1014,10 @@ browser implementations.
 
 - adapter inventory and contract-test matrix;
 - import-cycle and native-import checks;
-- unit, browser-smoke, E2E, Rust, Clippy, build, and dependency reports;
+- unit, browser-smoke, E2E, Rust, Clippy, build, and dependency reports
+  (_amended 2026-09-18: "browser-smoke" here is the existing Playwright smoke
+  of the desktop app's frontend, not the deferred browser product — it stays
+  in the beta's required evidence unchanged_);
 - bundle manifest and runtime performance measurements;
 - signed desktop artifact smoke matrix;
 - server-version/session/recovery integration recordings.
@@ -997,6 +1030,37 @@ UI flows for updates, profiles, sessions, and recovery may run in parallel.
 Architecture extraction never shares a change with new feature behavior.
 
 ## B8 — Deliver browser, PWA, phone, and tablet support
+
+**Deferred to post-beta (owner decision, 2026-09-18).** The public beta ships
+desktop-only (Windows x64/ARM64, Linux x64/ARM64). B8 is not cancelled or
+renumbered — it keeps this id and reopens as a post-beta phase. The section
+below is preserved unchanged as the plan of record for when it is reopened.
+
+**Re-entry conditions:**
+
+- (a) the beta is published (B10 / HP-10);
+- (b) HP-7 has confirmed the platform contracts and the native-import
+  isolation still hold at that time;
+- (c) the TLS block (B6-3, B6-4, B6-5) is delivered — service workers, media
+  capture, and Web Push need a secure context, and workstream 7's local-CA
+  path depends on it;
+- (d) an explicit owner decision reopens the phase.
+
+**What already exists and stays in place so this remains possible:**
+
+- the default-off browser-hosting switch and `GET /api/v1/server-info`
+  (B6-7 / roadmap B6 workstreams 6 and 16, `Server/api/router.go`,
+  `Server/config/config.go`);
+- the per-server Web Push subscription storage and dispatch (B5 / roadmap B5
+  workstream 9, B5-11, `Server/service/push.go`, `Server/service/push_dispatch.go`,
+  `Server/migrations/045_push_subscriptions.sql`);
+- the browser origin/CORS posture (B5-3): the disabled-by-default hosting key
+  proven to mount no route and serve no asset while disabled, plus the
+  mount-order/CSP constraints it records for B8, in `Server/api/router.go`;
+- B7's typed platform contracts and the rule that no native Tauri import
+  lives outside the desktop adapter, as designed in
+  `docs/architecture/platform-contracts.md` (B7 workstreams 1–2 build the
+  adapter itself; `Client/src/platform/` does not exist yet).
 
 **Objective:** implement the optional server-hosted browser client from the
 shared application, with honest secure-context, offline, push, and mobile
@@ -1102,7 +1166,9 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
 
 ### Entry gate
 
-- Desktop and browser platform matrices are green.
+- Desktop and browser platform matrices are green. _(amended 2026-09-18, owner
+  decision: the desktop platform matrix gates the beta; the browser matrix
+  moves with B8.)_
 - B5 service contracts are stable and security-reviewed.
 - Design tokens, interaction patterns, and accessibility test rules are agreed.
 
@@ -1128,8 +1194,12 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
    errors, virtual keyboard, and media controls.
 9. Clearly label desktop-only features, unsupported browser APIs, offline
    state, notification limitations, update state, and degraded media.
+   _(amended 2026-09-18, owner decision: the desktop-only labelling half stays
+   in beta scope; the unsupported-browser-API half moves with B8.)_
 10. Run privacy, moderation, deletion, retention, block, session, and
-    compatibility journeys across every client surface.
+    compatibility journeys across every client surface. _(amended 2026-09-18,
+    owner decision: "every client surface" is the desktop client for the
+    beta; browser, PWA, phone, and tablet surfaces move with B8.)_
 11. _(added 2026-08-29)_ Workstream 7's `app.css` split follows
     [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
     Phase 5 item 6: move source sections into owned files with selectors and
@@ -1141,17 +1211,21 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
 No new beta feature enters after this point. Review every requirement journey
 on all applicable surfaces, triage every accessibility defect, and freeze
 strings, protocol, migrations, and user-visible behavior for the release
-candidate.
+candidate. _(owner direction 2026-09-18, to be confirmed at HP-9: HP-9 is also
+the checkpoint at which the owner confirms or revises B10's cut list.)_
 
 ### Exit gate
 
 - Every approved feature has end-to-end desktop and browser evidence, with
-  documented browser exceptions.
+  documented browser exceptions. _(amended 2026-09-18, owner decision:
+  desktop evidence gates the beta; browser evidence moves with B8.)_
 - Message Requests, moderation, appeals, NSFW consent, and external content
   preserve server security and privacy rules.
 - Accessibility tests and manual assistive-technology checks have no release
   blocker.
-- Phone/tablet layouts expose all required navigation and actions.
+- Phone/tablet layouts expose all required navigation and actions. _(amended
+  2026-09-18, owner decision: deferred to post-beta with B8 — there is no
+  phone/tablet client in the beta.)_
 - English strings are centralized/structured for later translation.
 - No UI claims unsupported offline, media, push, update, or network behavior.
 - Performance budgets and OwnCord visual identity are preserved.
@@ -1160,8 +1234,11 @@ candidate.
 
 - requirement-journey matrix and recordings;
 - automated accessibility reports and manual keyboard/screen-reader/touch
-  checklist;
-- visual regression and responsive evidence;
+  checklist (_amended 2026-09-18, owner decision: keyboard, screen reader,
+  zoom, reflow, contrast, and reduced-motion checks stay in full for the
+  desktop beta; the touch-device half moves with B8_);
+- visual regression and responsive evidence (_amended 2026-09-18: responsive
+  device evidence moves with B8; desktop visual regression stays_);
 - privacy/network inspection for consent-gated content;
 - moderation role matrix and audit walkthrough;
 - translation-readiness scan and bundle/performance report.
@@ -1175,6 +1252,30 @@ global state changes are serialized.
 
 ## B10 — Qualify and publish the public beta
 
+**Owner direction, 2026-09-18, to be confirmed at HP-9.** B10 becomes a
+release checklist that closes out B9, so the public beta ships when B9's
+coding is done — a public beta is itself the soak. The items below are
+preserved as written; each one's verdict is recorded here rather than in the
+item text.
+
+| Item  | Verdict             | Note                                                                                                                                                                                                                                                                                                             |
+| ----- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | keep                | Required matrix on the RC SHA.                                                                                                                                                                                                                                                                                   |
+| 2     | moved               | Thirty consecutive green integration runs move to a later beta-to-stable gate (no phase id assigned yet).                                                                                                                                                                                                        |
+| 3     | moved               | The fourteen-day RC soak moves to the same beta-to-stable gate.                                                                                                                                                                                                                                                  |
+| 4     | keep                | In-place upgrade from alpha data and rollback. B6-8's rehearsal already runs both legs in CI before anything is signed or pushed (`.github/workflows/release.yml:550-562`).                                                                                                                                      |
+| 5     | keep                | Protocol-epoch re-run; not discussed, unchanged.                                                                                                                                                                                                                                                                 |
+| 6, 7  | keep                | Already narrowed to desktop clients, server artifacts, and Docker by the 2026-09-18 B8 deferral above; what remains after that narrowing is kept.                                                                                                                                                                |
+| 8     | reduced             | Reduced to one comparison run at the RC against B6-9's already-published 250/100/25 result, instead of reproducing the full profile.                                                                                                                                                                             |
+| 9     | keep                | Zero open P0/P1, zero unresolved advisory.                                                                                                                                                                                                                                                                       |
+| 10    | keep                | Version agreement, source snapshot, licenses, SBOM, provenance, checksums, signatures, update manifests, install/update/rollback; automated by B6-12 where true (`.github/workflows/release.yml`, SBOM/provenance/checksum/signing/update-manifest steps at lines 311, 632-633, 723-733, 815-820, 823, 889-903). |
+| 11    | reduced             | Kept, reduced to setup, security, privacy, operator, and recovery documentation; moderation, accessibility, support, feedback, and contribution documentation move to the beta-to-stable gate.                                                                                                                   |
+| 12    | keep                | Safe release notes and coordinated disclosure.                                                                                                                                                                                                                                                                   |
+| 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                             |
+| 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                   |
+| 15    | keep as written     | BPR-051's non-developer comprehension read. How it is satisfied is an open owner question to settle at HP-9.                                                                                                                                                                                                     |
+| HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                  |
+
 **Objective:** prove one immutable release candidate satisfies the complete
 product, security, platform, upgrade, operations, and community contract before
 publishing it on GitHub.
@@ -1185,7 +1286,10 @@ re-verifies every BPR.
 ### Entry gate
 
 - HP-9 freezes features, protocol, migrations, and strings.
-- All B0–B9 exit gates are green.
+- All B0–B7 and B9 exit gates are green. _(amended 2026-09-18, owner decision:
+  B8 is deferred to post-beta, so B8's exit gate is not a beta entry
+  requirement and is excluded from this list; it still governs B8 when B8
+  resumes.)_
 - One release-candidate commit and version are selected.
 - No unresolved security advisory or unverified release blocker exists.
 
@@ -1198,10 +1302,13 @@ re-verifies every BPR.
    B0/B1/HP-0/HP-1 observations from their recorded source commits with a
    dated correction. A green count check must not require rewriting history.
 2. Require 30 consecutive green integration runs, excluding only documented
-   external infrastructure cancellations.
+   external infrastructure cancellations. _(owner direction 2026-09-18, to be
+   confirmed at HP-9: moved to a later beta-to-stable gate — no phase id
+   assigned yet; see B10's opening block.)_
 3. Hold a 14-day release-candidate soak with long sessions, reconnects,
    upgrades, restarts, media, push, retention, deletion, moderation, and
-   operator review.
+   operator review. _(owner direction 2026-09-18, to be confirmed at HP-9:
+   moved to the same later beta-to-stable gate; see B10's opening block.)_
 4. Test in-place upgrade from representative 1.2.0-alpha data, attachments,
    configuration, credentials, and client settings, plus rollback within the
    declared boundary.
@@ -1211,11 +1318,20 @@ re-verifies every BPR.
    reintroduces a window.
 6. Re-run the full Windows x64/ARM64 and Linux x64/ARM64 desktop matrix, server
    artifacts, multi-architecture Docker, browser engines, Android
-   phone/tablet, and iPhone/iPad matrix.
+   phone/tablet, and iPhone/iPad matrix. _(amended 2026-09-18, owner decision:
+   the beta matrix is desktop clients + server artifacts + Docker; browser
+   engines, Android, and iPhone/iPad leave the beta qualification and move
+   with B8.)_
 7. Re-run domain, public-IP, LAN, offline, optional browser hosting, PWA,
    Web Push, backup/restore, disk-full, certificate rotation, and update
-   scenarios.
+   scenarios. _(amended 2026-09-18, owner decision: optional browser hosting,
+   PWA, and Web Push leave the beta qualification and move with B8. The
+   domain/public-IP/LAN/offline TLS scenarios are unchanged — they remain
+   governed by the 2026-09-11 TLS deferral and the HP-6 decision.)_
 8. Reproduce the 250/100/25 reference capacity profile and compare it with B6.
+   _(owner direction 2026-09-18, to be confirmed at HP-9: reduced to one
+   comparison run at the RC against B6-9's published result; see B10's
+   opening block.)_
 9. Confirm zero open P0/P1 defect, zero unresolved advisory, and explicit
    owner/rationale/review trigger for every accepted lower risk.
 10. Verify release version agreement, source snapshot, licenses, SBOM,
@@ -1223,13 +1339,22 @@ re-verifies every BPR.
     update, rollback, and download.
 11. Verify public setup, security, privacy, operator, recovery, moderation,
     accessibility, support, feedback, and contribution documentation.
+    _(owner direction 2026-09-18, to be confirmed at HP-9: reduced to setup,
+    security, privacy, operator, and recovery documentation; moderation,
+    accessibility, support, feedback, and contribution documentation move to
+    the beta-to-stable gate; see B10's opening block.)_
 12. Prepare safe release notes and coordinated fixed-vulnerability disclosure.
     Do not publish private exploit material by default.
 13. _(added 2026-08-28)_ `ci.yml` cancels in-progress runs on every ref,
     `main` included, so item 2's thirty consecutive runs cannot be counted as
     written. Exempt `main` from `cancel-in-progress` before the count starts.
+    _(owner direction 2026-09-18, to be confirmed at HP-9: moves with item 2
+    to the beta-to-stable gate — it exists only to make item 2 countable; see
+    B10's opening block.)_
 14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
-    self-hosted instance and one Docker instance.
+    self-hosted instance and one Docker instance. _(owner direction
+    2026-09-18, to be confirmed at HP-9: moves with item 3 to the
+    beta-to-stable gate; see B10's opening block.)_
 15. _(added 2026-08-31)_ Record BPR-051's non-developer comprehension read on
     the R-08 release scorecard: a non-developer reads `docs/trust-model.md`
     §"The short answer" and their answer to "who can read my messages?" fills
@@ -1242,18 +1367,28 @@ re-verifies every BPR.
 The owner reviews one final scorecard. Publication is allowed only when every
 required artifact points to the same commit, all evidence is green, the private
 security queue is empty, and rollback is rehearsed. A known blocker means
-no-go, regardless of elapsed time.
+no-go, regardless of elapsed time. _(owner direction 2026-09-18, to be
+confirmed at HP-9: the scorecard HP-10 reviews is B10's shortened release
+checklist above.)_
 
 ### Exit gate
 
 - The exact release candidate passes all phase and requirement evidence.
-- Thirty consecutive integration runs and the 14-day soak are green.
+  _(amended 2026-09-18, owner decision: B8's phase evidence and BPR-020
+  through BPR-025 are non-applicable to the beta release gates rather than
+  outstanding — B8 is deferred to post-beta and its evidence moves with it.
+  Every other phase and requirement is unchanged.)_
+- Thirty consecutive integration runs and the 14-day soak are green. _(owner
+  direction 2026-09-18, to be confirmed at HP-9: moved to the beta-to-stable
+  gate; see B10's opening block.)_
 - Zero P0/P1 and zero unresolved security advisory remain.
 - All supported artifacts install, start, connect, update, roll back, and
   verify.
 - Upgrade preserves required server data and client settings.
 - Capacity, performance, accessibility, privacy, deletion, recovery,
-  moderation, browser/PWA, and operations budgets pass.
+  moderation, browser/PWA, and operations budgets pass. _(amended
+  2026-09-18, owner decision: browser/PWA leaves the beta budget list and
+  moves with B8; the rest is unchanged.)_
 - GitHub release assets, source, metadata, checksums, signatures, SBOM, and
   provenance agree.
 - Public documentation and community intake are ready.
@@ -1261,35 +1396,42 @@ no-go, regardless of elapsed time.
 ### Required evidence
 
 - immutable release scorecard linked to the exact commit and tag;
-- integration-run history and 14-day soak log;
+- integration-run history and 14-day soak log (_owner direction 2026-09-18,
+  to be confirmed at HP-9: moved to the beta-to-stable gate; see B10's
+  opening block_);
 - complete platform/deployment/device matrix;
 - migration, rollback, restore, and deletion proof;
 - security closure attestations;
 - signed artifact and metadata verification;
 - anonymous download/install smoke;
-- final requirements traceability export with no missing or failed row.
+- final requirements traceability export with no missing or failed row
+  (_amended 2026-09-18, owner decision: B8's rows — BPR-020 through BPR-025 —
+  are marked non-applicable in the export rather than missing, so no deferred
+  B8 row can read as an outstanding beta gap_).
 
 ### Safe parallelism
 
 Platform, deployment, browser/device, capacity, accessibility, and
 documentation qualification may run in parallel against the same immutable
-candidate. Tagging and publication are serialized after HP-10.
+candidate. Tagging and publication are serialized after HP-10. _(amended
+2026-09-18, owner decision: the browser/device lane moves with B8; the beta's
+platform lane is desktop-only.)_
 
 ## Safe parallelism summary
 
-| Phase | Work that may overlap                                                  | Work that stays serialized                                              |
-| ----- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| B0    | Read-only validation, requirement mapping, independent security review | Shared test-infrastructure fixes and baseline acceptance                |
-| B1    | Docs, command design, artifact investigation, community templates      | Each move/rename and its full verification                              |
-| B2    | Fixtures, threat review, plugin inventory, dependency audit            | Protocol, permission, and E2EE production changes                       |
-| B3    | Guardrail tooling and measurement                                      | First vertical slice; shared schema/lifecycle/permission work           |
-| B4    | Registration/session and local diagnostics                             | Recovery, deletion, retention data contracts until HP-4                 |
-| B5    | Requests, moderation, content, and push after shared contracts         | Shared authz/audit/rate-limit/retention integration                     |
-| B6    | Packaging, TLS, load, failure drills, supply chain                     | Final candidate convergence and operator acceptance                     |
-| B7    | Gate cleanup and contract design; later independent UI flows           | Adapter moves and architecture extractions                              |
-| B8    | PWA, responsive, push, and media adapters after contracts              | Final cache/permission/navigation integration                           |
-| B9    | Feature UIs behind stable services                                     | Navigation, design tokens, global state, final accessibility acceptance |
-| B10   | Qualification lanes on one immutable candidate                         | Tag, publication, and coordinated disclosure                            |
+| Phase | Work that may overlap                                                                                                           | Work that stays serialized                                              |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| B0    | Read-only validation, requirement mapping, independent security review                                                          | Shared test-infrastructure fixes and baseline acceptance                |
+| B1    | Docs, command design, artifact investigation, community templates                                                               | Each move/rename and its full verification                              |
+| B2    | Fixtures, threat review, plugin inventory, dependency audit                                                                     | Protocol, permission, and E2EE production changes                       |
+| B3    | Guardrail tooling and measurement                                                                                               | First vertical slice; shared schema/lifecycle/permission work           |
+| B4    | Registration/session and local diagnostics                                                                                      | Recovery, deletion, retention data contracts until HP-4                 |
+| B5    | Requests, moderation, content, and push after shared contracts                                                                  | Shared authz/audit/rate-limit/retention integration                     |
+| B6    | Packaging, TLS, load, failure drills, supply chain                                                                              | Final candidate convergence and operator acceptance                     |
+| B7    | Gate cleanup and contract design; later independent UI flows                                                                    | Adapter moves and architecture extractions                              |
+| B8    | _Deferred to post-beta (owner decision, 2026-09-18)._ Plan of record: PWA, responsive, push, and media adapters after contracts | Final cache/permission/navigation integration                           |
+| B9    | Feature UIs behind stable services                                                                                              | Navigation, design tokens, global state, final accessibility acceptance |
+| B10   | Qualification lanes on one immutable candidate                                                                                  | Tag, publication, and coordinated disclosure                            |
 
 Preparation for the next phase may include design notes, fixtures, and
 non-mutating research. It may not merge production behavior before the current
@@ -1316,24 +1458,29 @@ accessibility, platform parity, or completion of an approved requirement.
 
 Every hold point and phase exit records at least:
 
-| Metric                         |                     Baseline |          Target | Actual | Exact evidence |
-| ------------------------------ | ---------------------------: | --------------: | -----: | -------------- |
-| Required checks green          |                refresh in B0 |            100% |        |                |
-| Open P0 / P1                   |                refresh in B0 |           0 / 0 |        |                |
-| Unresolved security advisories |                private count |               0 |        |                |
-| Requirement rows passing       |            0 fully qualified | 100% applicable |        |                |
-| Server aggregate/core coverage |              74.6% aggregate |         ratchet |        |                |
-| Client honest coverage         |                refresh in B0 |         ratchet |        |                |
-| Static-analysis warnings       |                   471 Oxlint |    0 unapproved |        |                |
-| Unit/browser/E2E/Rust          | two unit failures; E2E hangs | green and exits |        |                |
-| Largest startup/lazy chunks    |                refresh in B0 |          budget |        |                |
-| Desktop/browser/device matrix  |                   incomplete |  100% supported |        |                |
-| Server 250/100/25 profile      |                     unproven |             met |        |                |
-| Upgrade/rollback/restore       |                     unproven |           green |        |                |
-| Generated/doc drift            |                refresh in B0 |               0 |        |                |
+| Metric                          |                     Baseline |          Target | Actual | Exact evidence |
+| ------------------------------- | ---------------------------: | --------------: | -----: | -------------- |
+| Required checks green           |                refresh in B0 |            100% |        |                |
+| Open P0 / P1                    |                refresh in B0 |           0 / 0 |        |                |
+| Unresolved security advisories  |                private count |               0 |        |                |
+| Requirement rows passing        |            0 fully qualified | 100% applicable |        |                |
+| Server aggregate/core coverage  |              74.6% aggregate |         ratchet |        |                |
+| Client honest coverage          |                refresh in B0 |         ratchet |        |                |
+| Static-analysis warnings        |                   471 Oxlint |    0 unapproved |        |                |
+| Unit/browser/E2E/Rust           | two unit failures; E2E hangs | green and exits |        |                |
+| Largest startup/lazy chunks     |                refresh in B0 |          budget |        |                |
+| Desktop/browser/device matrix\* |                   incomplete |  100% supported |        |                |
+| Server 250/100/25 profile       |                     unproven |             met |        |                |
+| Upgrade/rollback/restore        |                     unproven |           green |        |                |
+| Generated/doc drift             |                refresh in B0 |               0 |        |                |
 
 The actual values and links belong in phase evidence, not as optimistic edits
 to this plan.
+
+\* _Amended 2026-09-18, owner decision: for the beta this row is the desktop
+client matrix (Windows x64/ARM64, Linux x64/ARM64) plus server artifacts and
+Docker images. Browser and device (Android, iPhone/iPad) rows move with B8
+and re-enter the scorecard when it does._
 
 ## Current implementation slice
 
