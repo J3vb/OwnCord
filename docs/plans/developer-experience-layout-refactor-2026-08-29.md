@@ -365,13 +365,18 @@ this work forward merely because the target directories are documented.
    bootstrap ownership.
 6. Split shared Vite configuration from target-specific behavior and add
    explicit `build:desktop` and `build:web` gates from one application tree.
+   _(Amended 2026-09-18, owner decision: the shared Vite split and the
+   `build:desktop` gate stay in scope for the beta; the `build:web` gate is
+   deferred with B8 — the beta has no browser target. The native-import check
+   in step 5 is what keeps the browser target buildable later without rework.)_
 7. Delete dead Rust command surfaces identified by the platform-contract map.
 
 **Hold point:** HP-7 proves desktop parity before browser implementations are
 filled in. _(Amended 2026-09-18, owner decision: B8 is deferred to
 post-beta, so "before browser implementations are filled in" now means
-post-beta. Steps 1–7 above, including contract tests and the desktop/web Vite
-split, remain in scope for the beta.)_
+post-beta. Steps 1–7 above, including contract tests and the shared Vite
+split, remain in scope for the beta; step 6's `build:web` gate moves with
+B8.)_
 
 ### Phase 5 — Decompose client features and hotspots
 

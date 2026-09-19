@@ -1286,7 +1286,10 @@ re-verifies every BPR.
 ### Entry gate
 
 - HP-9 freezes features, protocol, migrations, and strings.
-- All B0–B9 exit gates are green.
+- All B0–B7 and B9 exit gates are green. _(amended 2026-09-18, owner decision:
+  B8 is deferred to post-beta, so B8's exit gate is not a beta entry
+  requirement and is excluded from this list; it still governs B8 when B8
+  resumes.)_
 - One release-candidate commit and version are selected.
 - No unresolved security advisory or unverified release blocker exists.
 
@@ -1371,6 +1374,10 @@ checklist above.)_
 ### Exit gate
 
 - The exact release candidate passes all phase and requirement evidence.
+  _(amended 2026-09-18, owner decision: B8's phase evidence and BPR-020
+  through BPR-025 are non-applicable to the beta release gates rather than
+  outstanding — B8 is deferred to post-beta and its evidence moves with it.
+  Every other phase and requirement is unchanged.)_
 - Thirty consecutive integration runs and the 14-day soak are green. _(owner
   direction 2026-09-18, to be confirmed at HP-9: moved to the beta-to-stable
   gate; see B10's opening block.)_
@@ -1397,7 +1404,10 @@ checklist above.)_
 - security closure attestations;
 - signed artifact and metadata verification;
 - anonymous download/install smoke;
-- final requirements traceability export with no missing or failed row.
+- final requirements traceability export with no missing or failed row
+  (_amended 2026-09-18, owner decision: B8's rows — BPR-020 through BPR-025 —
+  are marked non-applicable in the export rather than missing, so no deferred
+  B8 row can read as an outstanding beta gap_).
 
 ### Safe parallelism
 
