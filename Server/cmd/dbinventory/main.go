@@ -98,10 +98,12 @@ func inventory(root string) ([]fileUse, error) {
 
 	// Pass 1: parse everything, collect per package the struct fields typed
 	// *db.DB and the package-level functions that return one — the two ways a
-	// file with no import of its own can be holding the handle.
+	// file with no import of its own can be holding the handle. A constructor
+	// is kept with the position of its *db.DB result, because that is what
+	// decides which name on the left receives the handle.
 	parsed := map[string]*ast.File{}
 	fieldsByPkg := map[string]map[string]bool{}
-	ctorsByPkg := map[string]map[string]bool{}
+	ctorsByPkg := map[string]map[string]int{}
 	for _, rel := range files {
 		f, err := parser.ParseFile(fset, filepath.Join(root, rel), nil, 0)
 		if err != nil {
@@ -115,14 +117,12 @@ func inventory(root string) ([]fileUse, error) {
 		dir := path.Dir(rel)
 		if fieldsByPkg[dir] == nil {
 			fieldsByPkg[dir] = map[string]bool{}
-			ctorsByPkg[dir] = map[string]bool{}
+			ctorsByPkg[dir] = map[string]int{}
 		}
 		for name := range invariants.DBHandleFields(f, alias) {
 			fieldsByPkg[dir][name] = true
 		}
-		for name := range invariants.DBHandleCtors(f, alias) {
-			ctorsByPkg[dir][name] = true
-		}
+		maps.Copy(ctorsByPkg[dir], invariants.DBHandleCtors(f, alias))
 	}
 
 	// Pass 2: per-file uses. A file with no import is analysed anyway when its
@@ -227,7 +227,7 @@ func declKinds(fset *token.FileSet, dir string) (map[string]kind, error) {
 	return kinds, nil
 }
 
-func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields, dbCtors map[string]bool) fileUse {
+func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields map[string]bool, dbCtors map[string]int) fileUse {
 	u := fileUse{
 		rel: rel, imports: alias != "",
 		types: map[string]int{}, funcs: map[string]int{}, values: map[string]int{},

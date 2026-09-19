@@ -57,11 +57,14 @@ type DBImportEntry struct {
 	// printed side by side. adapter, move and remove rows pin nothing and must
 	// measure nothing: that is what their disposition claims.
 	Calls calls
-	// Hands is the exact multiset of callees the file passes the bare handle
-	// to (callee → count): the composition root's wiring, and anywhere else
-	// the handle is read out of its carrier and given away. A hand-off is a
-	// handle use — the callee's parameter type is the owner it names — so a
-	// new one is a reviewable edit here rather than a side effect.
+	// Hands is the exact multiset of the places the file passes the bare
+	// handle to (callee or assignment target → count): the composition root's
+	// wiring, and anywhere else the handle is read out of its carrier and
+	// given away. A hand-off is a handle use — the callee's parameter type, or
+	// the field the assignment stores it into, is the owner it names — so a
+	// new one is a reviewable edit here rather than a side effect. A hand-off
+	// into a field renders as that field's path (`c.Store`), which is as much
+	// of the owner as a call's callee name is.
 	Hands calls
 }
 
@@ -215,8 +218,9 @@ var rawHandleTypes = map[string]bool{"DB": true, "Tx": true, "Conn": true}
 //
 //   - SQLDb() and SQLReaderDB() name nothing else in this tree — they are
 //     *db.DB's raw-pool accessors, whatever the receiver is spelled as;
-//   - BeginTx() on a value this file declares *db.DB opens a transaction the
-//     file then owns;
+//   - BeginTx() on a value this file declares *db.DB — by name or as the
+//     struct field its own type declaration introduces — opens a transaction
+//     the file then owns;
 //   - a *sql.DB, *sql.Tx or *sql.Conn in a file that also imports db is that
 //     handle escaping into database/sql. A file that opens its own sql.DB and
 //     never touches Server/db is a different question, and not this one.
@@ -247,7 +251,21 @@ func checkRawHandleOwner(f *ast.File, fset *token.FileSet, rel string) []Violati
 			case "SQLDb", "SQLReaderDB":
 				add(sel.Sel.Pos(), "calls "+sel.Sel.Name+"(), the raw database/sql pool behind the db handle")
 			case "BeginTx":
-				if id, ok := sel.X.(*ast.Ident); ok && vars[id.Name] {
+				// The receiver names the handle either directly
+				// (database.BeginTx) or as a field this file declares
+				// (a.database.BeginTx) — DBHandleVars carries both, because a
+				// struct field typed *db.DB is a *db.DB declaration like any
+				// other. A field declared in another file is not this rule's
+				// shape: no single file declares it, and cmd/dbinventory's
+				// package-wide walk is what catches that one.
+				var recv string
+				switch r := sel.X.(type) {
+				case *ast.Ident:
+					recv = r.Name
+				case *ast.SelectorExpr:
+					recv = r.Sel.Name
+				}
+				if vars[recv] {
 					add(sel.Sel.Pos(), "calls BeginTx() on the db handle, opening a transaction boundary")
 				}
 			}

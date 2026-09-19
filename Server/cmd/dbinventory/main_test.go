@@ -75,6 +75,11 @@ func TestInventorySeesUseWithoutImport(t *testing.T) {
 	// package is not a hand-off either.
 	write("ws/quiet.go", "package ws\n\nfunc quiet(n int) int { return n }\n")
 	write("ws/thread.go", "package ws\n"+importDB+"\nfunc a(d *db.DB) { b(d) }\nfunc b(d *db.DB) {}\n")
+	// No import: the handle is read out of its carrier and assigned into one
+	// this file cannot type — the shape that gives the handle to an interface
+	// field without naming it in a call or a literal.
+	write("ws/attach.go", "package ws\n\ntype carrier struct{ Store any }\n\n"+
+		"func (h *Hub) attach(c *carrier) { c.Store = h.db }\n")
 
 	rows, err := inventory(root)
 	if err != nil {
@@ -108,6 +113,15 @@ func TestInventorySeesUseWithoutImport(t *testing.T) {
 	}
 	if thread := got["ws/thread.go"]; len(thread.hands) != 0 {
 		t.Errorf("threading a *db.DB parameter inside one package is not a hand-off; got %v", thread.hands)
+	}
+	// Giving the handle to a field this file cannot type is a hand-off even
+	// though no callee receives it: the handle has left its carrier.
+	attach, ok := got["ws/attach.go"]
+	if !ok {
+		t.Fatalf("ws/attach.go assigns the handle into another carrier and must be a row; rows: %v", rows)
+	}
+	if !reflect.DeepEqual(attach.hands, map[string]int{"c.Store": 1}) {
+		t.Errorf("ws/attach.go hands = %v, want c.Store×1", attach.hands)
 	}
 }
 
@@ -164,6 +178,55 @@ func TestInventoryFollowsPackageConstructor(t *testing.T) {
 	}
 	if migrate := got["app/migrate.go"]; len(migrate.hands) != 0 {
 		t.Errorf("a db-package callee is not a hand-off; got %v", migrate.hands)
+	}
+}
+
+// TestInventoryBindsConstructorResultsByPosition is the positional half of the
+// constructor rule: results bind to the names on the left by their order in the
+// signature, so a constructor that returns its handle second must put the
+// handle in the second name. Binding the call rather than the result would
+// attach the handle to the error instead — a phantom *db.DB named `err`, whose
+// method calls measure as handle calls, while the real handle goes unmeasured
+// and its file never becomes a row.
+func TestInventoryBindsConstructorResultsByPosition(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, src string) {
+		t.Helper()
+		full := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const importDB = "import \"github.com/J3vb/OwnCord/Server/db\"\n"
+	write("db/db.go", "package db\n\ntype DB struct{}\n")
+	write("app/open.go", "package app\n"+importDB+
+		"\nfunc reopen() (error, *db.DB) { return nil, nil }\n")
+	// No import of its own: the handle arrives second and is handed on from
+	// there. err.Error() is not a handle call and svc.New(database) is a
+	// hand-off.
+	write("app/resume.go", "package app\nimport \"x/svc\"\n\n"+
+		"func resume() {\n\terr, database := reopen()\n\tif err != nil {\n\t\t_ = err.Error()\n\t}\n\tsvc.New(database)\n}\n")
+
+	rows, err := inventory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]fileUse{}
+	for _, r := range rows {
+		got[r.rel] = r
+	}
+	resume, ok := got["app/resume.go"]
+	if !ok {
+		t.Fatalf("app/resume.go hands on the handle and must be a row; rows: %v", rows)
+	}
+	if !reflect.DeepEqual(resume.hands, map[string]int{"svc.New": 1}) {
+		t.Errorf("app/resume.go hands = %v, want svc.New×1", resume.hands)
+	}
+	if len(resume.methods) != 0 {
+		t.Errorf("the error result is not the handle, so it makes no handle call; got %v", resume.methods)
 	}
 }
 

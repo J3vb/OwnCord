@@ -77,25 +77,38 @@ func DBHandleFields(f *ast.File, alias string) map[string]bool {
 	return out
 }
 
-// DBHandleCtors returns the names of package-level functions in the file whose
-// result list contains a *<alias>.DB: the package's own openers. A composition
-// root reaches the handle through one of these (`database, err :=
-// openDatabase(cfg)`) far more often than through db.Open* directly, and the
-// caller is usually a file that imports nothing from db at all. The caller
-// unions these across a package, like DBHandleFields, because the constructor
-// is declared in one file and called from another. Methods are left out: a
-// receiver's package cannot be known without type information.
-func DBHandleCtors(f *ast.File, alias string) map[string]bool {
-	out := map[string]bool{}
+// DBHandleCtors returns, for each package-level function in the file whose
+// result list contains a *<alias>.DB, the index of that result: the package's
+// own openers. A composition root reaches the handle through one of these
+// (`database, err := openDatabase(cfg)`) far more often than through db.Open*
+// directly, and the caller is usually a file that imports nothing from db at
+// all. The caller unions these across a package, like DBHandleFields, because
+// the constructor is declared in one file and called from another. Methods are
+// left out: a receiver's package cannot be known without type information.
+//
+// The index, not just the name: a call's results bind to the names on the left
+// by position, so it is openDatabase returning (*db.DB, error) that makes
+// `database, err :=` put the handle in `database`. Registered as a bare name,
+// a constructor returning its handle second would bind the error name as the
+// handle and leave the handle itself unmeasured.
+func DBHandleCtors(f *ast.File, alias string) map[string]int {
+	out := map[string]int{}
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Recv != nil || fn.Type.Results == nil {
 			continue
 		}
+		i := 0
 		for _, res := range fn.Type.Results.List {
-			if isDBPtr(res.Type, alias) {
-				out[fn.Name.Name] = true
+			width := len(res.Names)
+			if width == 0 {
+				width = 1 // an unnamed result still occupies a position
 			}
+			if isDBPtr(res.Type, alias) {
+				out[fn.Name.Name] = i
+				break
+			}
+			i += width
 		}
 	}
 	return out
@@ -109,34 +122,30 @@ func DBHandleCtors(f *ast.File, alias string) map[string]bool {
 // does, and not following it there would let a file call or hand on the handle
 // under a new name. fields and ctors may be nil, which is what a caller with no
 // package-wide view (the per-file rule) passes.
-func DBHandleVars(f *ast.File, alias string, fields, ctors map[string]bool) map[string]bool {
+func DBHandleVars(f *ast.File, alias string, fields map[string]bool, ctors map[string]int) map[string]bool {
 	vars := map[string]bool{}
 	add := func(names []*ast.Ident) {
 		for _, n := range names {
 			vars[n.Name] = true
 		}
 	}
-	// carries reports whether the right-hand side of a declaration or an
-	// assignment yields the handle.
-	carries := func(rhs ast.Expr) bool {
-		if openAssign(rhs, alias) {
-			return true
+	// bind names the left-hand side that receives the handle. A call is one
+	// expression standing for several results, so a single right-hand
+	// expression zips against every name it produces; otherwise the two lists
+	// pair up by position.
+	bind := func(lhs, rhs []ast.Expr) {
+		if len(rhs) != 1 && len(rhs) != len(lhs) {
+			return
 		}
-		switch x := rhs.(type) {
-		case *ast.SelectorExpr:
-			return fields[x.Sel.Name]
-		case *ast.CallExpr:
-			id, ok := x.Fun.(*ast.Ident)
-			return ok && ctors[id.Name]
-		}
-		return false
-	}
-	bind := func(lhs []ast.Expr, rhs []ast.Expr) {
-		for i, r := range rhs {
-			if i >= len(lhs) || !carries(r) {
+		for i, l := range lhs {
+			r := rhs[0]
+			if len(rhs) > 1 {
+				r = rhs[i]
+			}
+			if !handleCarrier(r, i, alias, fields, ctors) {
 				continue
 			}
-			if id, ok := lhs[i].(*ast.Ident); ok {
+			if id, ok := l.(*ast.Ident); ok {
 				vars[id.Name] = true
 			}
 		}
@@ -173,6 +182,29 @@ func identExprs(names []*ast.Ident) []ast.Expr {
 	return out
 }
 
+// handleCarrier reports whether the right-hand side of a declaration or an
+// assignment yields the handle at result position i. db.Open* is
+// (*db.DB, error) and a field read yields a single value, so both yield the
+// handle at position 0; a package constructor yields it wherever its own
+// result list puts it — which is the whole reason ctors carries an index.
+func handleCarrier(rhs ast.Expr, i int, alias string, fields map[string]bool, ctors map[string]int) bool {
+	if openAssign(rhs, alias) {
+		return i == 0
+	}
+	switch x := rhs.(type) {
+	case *ast.SelectorExpr:
+		return i == 0 && fields[x.Sel.Name]
+	case *ast.CallExpr:
+		id, ok := x.Fun.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		at, isCtor := ctors[id.Name]
+		return isCtor && at == i
+	}
+	return false
+}
+
 // openAssign reports whether expr is a call to <alias>.Open*(...).
 func openAssign(expr ast.Expr, alias string) bool {
 	call, ok := expr.(*ast.CallExpr)
@@ -196,13 +228,14 @@ func openAssign(expr ast.Expr, alias string) bool {
 //   - calls: every method call whose receiver is a *db.DB identifier or a
 //     *db.DB struct field (h.db.DeleteEventsForUser -> DeleteEventsForUser).
 //   - hands: every place the file gives the bare handle away. Reading it out
-//     of a struct field (h.db) and passing it on is a hand-off wherever it
-//     goes — the handle has left its carrier. A *db.DB local or parameter is a
-//     hand-off only when it is passed to another package (pkg.Func(...),
-//     pkg.Type{...}): threading a parameter on to a function or method of this
-//     same package hands it to nobody the row does not already name. Callees
-//     in the db package itself are never hand-offs — that is the handle's own
-//     package, not an owner.
+//     of a struct field (h.db) and passing it on — as a call argument, a
+//     struct-literal field, or the target of an assignment — is a hand-off
+//     wherever it goes: the handle has left its carrier. A *db.DB
+//     local or parameter is a hand-off only when it is passed to another
+//     package (pkg.Func(...), pkg.Type{...}): threading a parameter on to a
+//     function or method of this same package hands it to nobody the row does
+//     not already name. Callees in the db package itself are never hand-offs —
+//     that is the handle's own package, not an owner.
 func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[string]int) {
 	s := dbHandleScan{
 		pkgs:    importedNames(f),
@@ -214,6 +247,8 @@ func DBHandleCalls(f *ast.File, vars, fields map[string]bool, calls, hands map[s
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
+		case *ast.AssignStmt:
+			s.assignStmt(x)
 		case *ast.CallExpr:
 			s.callExpr(x)
 		case *ast.CompositeLit:
@@ -302,6 +337,31 @@ func (s dbHandleScan) compositeLit(x *ast.CompositeLit) {
 		if s.handed(kv.Value, crossPkg) {
 			s.hands[name]++
 		}
+	}
+}
+
+// assignStmt tallies a hand-off through an assignment into a field:
+// `holder.Store = h.db`. The handle has left its carrier, and the row can
+// still name where it went — the field's path — which is what a call argument
+// gives up when the callee is a value whose package and type are unknown. The
+// destination must be a field and not a name: `database := h.db` is the same
+// handle under a new name in this file, which DBHandleVars tracks as a local
+// rather than a hand-off. A local on the right is not one here for the same
+// reason it is not one as an argument — the destination's package, and whether
+// the destination is a different one at all, cannot be known.
+func (s dbHandleScan) assignStmt(x *ast.AssignStmt) {
+	if s.hands == nil || len(x.Lhs) != len(x.Rhs) {
+		return
+	}
+	for i, lhs := range x.Lhs {
+		if _, ok := lhs.(*ast.SelectorExpr); !ok {
+			continue
+		}
+		if !s.handed(x.Rhs[i], false) {
+			continue
+		}
+		name, _ := qualifiedName(lhs, s.pkgs)
+		s.hands[name]++
 	}
 }
 

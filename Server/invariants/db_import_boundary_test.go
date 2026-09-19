@@ -83,6 +83,13 @@ func TestDBImportBoundary(t *testing.T) {
 			rule: dbHandleOwnerID,
 		},
 		{
+			name: "BeginTx through a field this file declares is still the handle",
+			path: "api/dm_handler.go",
+			src:  "package api\n" + importDB + "\ntype adapter struct{ database *db.DB }\nfunc f(a *adapter) { _, _ = a.database.BeginTx(nil, nil) }\n",
+			want: 1,
+			rule: dbHandleOwnerID,
+		},
+		{
 			name: "BeginTx on something that is not the db handle is not ours",
 			path: "api/dm_handler.go",
 			src:  "package api\n" + importDB + "\nvar _ *db.DB\nfunc f(q queue) { q.BeginTx() }\n",
