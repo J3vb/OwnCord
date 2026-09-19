@@ -428,11 +428,9 @@ server {
 
 ## Backup Strategy
 
-A restorable install is a set, not one file. The built-in backup endpoint
-covers the **database only**; what has to travel with it is everything the
-database _points at_ — the uploads under `upload.storage_dir`, the three key
-files and the marker file beside `data/`, and your `config.yaml`. Back
-`data/` up wholesale on the same schedule as the database, and restore is not
+The built-in backup endpoint covers the **database only**. What a restore
+needs is the whole of `data/` plus your `config.yaml` — [Restore](#restore)
+states that rule once, with what was measured about it. Restore is not
 rollback: putting yesterday's database back is not the same operation as
 reverting an upgrade — the costs are different and
 [Rolling back](#rolling-back) is a separate procedure.
