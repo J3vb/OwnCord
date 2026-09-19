@@ -46,7 +46,7 @@ machine and fails, silently or confusingly, on everyone else's.
 `docs/plans/hp-6-scorecard-*.md` exists on `dev`), so this pass edits only the
 rows the ledger has already closed; the traceability landings, the README
 status lines, the roadmap's exit/evidence amendments, and this PRD's own
-`:225-231` B6-1 wording wait for the final pass at HP-6's signature.
+`:298-304` B6-1 wording wait for the final pass at HP-6's signature.
 
 | Item                                                           | Verdict             | PR(s) / `dev` SHA                                             | Stale today? | Wording target                                                                 | Edited this pass?                   |
 | -------------------------------------------------------------- | ------------------- | ------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------ | ----------------------------------- |
@@ -100,7 +100,7 @@ status lines, the roadmap's exit/evidence amendments, and this PRD's own
 | BPR-053                                                        | pending             | B6-15's PR not yet open                                       | no           | B6-15's sentence, copied verbatim                                              | no — final pass, B6-15 open         |
 | `README.md:22`                                                 | pending             | needs post-HP-6 state                                         | no           | B6 complete, B7 next, TLS deferred                                             | no — final pass                     |
 | `README.md:36`                                                 | pending             | needs HP-6 date and PR list                                   | no           | `**B6 ACCEPTED at HP-6 <date>**` sentence                                      | no — final pass                     |
-| `prd.md:138` vs `:225-231`                                     | pending             | needs RC tag run id                                           | no           | "proved by tag `<tag>` run `<id>`"                                             | no — final pass                     |
+| `prd.md:211` vs `:298-304`                                     | pending             | needs RC tag run id                                           | no           | "proved by tag `<tag>` run `<id>`"                                             | no — final pass                     |
 | `quick-start.md:13-18`                                         | pending             | B6-12 Task 6 owns it; RC tag not yet run                      | no           | flips when the tag publishes                                                   | no — B6-12's row                    |
 | `hp-4-scorecard-*.md:437-439` (stale support-bundle statement) | n/a                 | —                                                             | no           | not edited — signed document; BG-15's register row corrects the reader instead | no — never edited                   |
 
