@@ -395,7 +395,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	user, err := h.readers.Visibility.GetUserByID(ctx, userID)
 	if err == nil && user != nil {
 		// Same predicate as the ready payload and reconnect replay filtering.
-		allowed, err = h.computeAllowedChannels(ctx, h.db, user)
+		allowed, err = h.computeAllowedChannels(ctx, h.readers.Visibility, user)
 	}
 	if err != nil || user == nil {
 		// Visibility unresolved. Keeping the old subscriptions would leak, and

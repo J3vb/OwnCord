@@ -49,11 +49,16 @@ every address on every interface.
 
 ## Required Ports
 
+The complete list is the canonical table in
+[deployment.md](deployment.md#firewall-and-ports); these are the rows this
+guide's instructions touch:
+
 ### Always required
 
-| Port   | Protocol | Purpose                   |
-| ------ | -------- | ------------------------- |
-| `8443` | TCP      | OwnCord HTTPS + WebSocket |
+| Port   | Protocol | Purpose                                           |
+| ------ | -------- | ------------------------------------------------- |
+| `8443` | TCP      | OwnCord HTTPS + WebSocket                         |
+| `80`   | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
 
 ### Required only for voice/video
 

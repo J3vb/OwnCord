@@ -6,10 +6,13 @@ here **does not exist in the code yet**.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
 OwnCord is a Tauri desktop app whose frontend talks to native APIs directly.
-Beta requires the same frontend to also run in a browser. This document records
-**where the seam between "shared app" and "native host" will go**, and what has
-to move across it — so that B7 executes a decided plan instead of rediscovering
-the surface.
+The plan is for the same frontend to also run in a browser _(amended
+2026-09-18, owner decision: B8, the browser client, is deferred to
+post-beta — the beta ships desktop-only; B7's contracts below still land in
+the beta so the browser target stays possible without rework)_. This document
+records **where the seam between "shared app" and "native host" will go**, and
+what has to move across it — so that B7 executes a decided plan instead of
+rediscovering the surface.
 
 > **Nothing here is implemented.** B1 was an explicitly non-functional phase:
 > _"No native behaviour moves in B1. Adapter extraction is B7 and must not be

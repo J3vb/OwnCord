@@ -228,8 +228,10 @@ network path the server has is an action an admin or user took, a feature
 an operator switched on by configuration, or a connection to this machine
 itself. The inventory, the `egress-sites` invariant that enforces it, the
 runtime capture that proves the compiled defaults open nothing beyond
-loopback, and the data contract a future support bundle must satisfy are in
-[docs/architecture/diagnostics.md](architecture/diagnostics.md).
+loopback, and the data contract the support bundle follows are in
+[docs/architecture/diagnostics.md](architecture/diagnostics.md). How an
+administrator makes one — and what it holds — is the Deployment Guide's
+[Support bundle](deployment.md#support-bundle) section.
 
 ## Audit Logging
 
@@ -248,9 +250,19 @@ Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
 and the deletion marker's token — HMAC-SHA256 of the user id under
 `data/erasure.key` — takes the id's place: `subject_token` where the subject
-was the target, `actor_token` where they acted, so a row naming two erased
-subjects keeps both, and the trail re-identifies a subject only to whoever
-holds the key. The erasure's own `account_deleted` row is written
+was the target, `actor_token` where they acted — and the same token in the
+report, report-note, report-event, moderation-action and appeal rows that name them
+(`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so a row naming two
+erased subjects keeps both, the rows about one subject remain linkable to
+each other by anyone who may read them, any `VIEW_AUDIT_LOG` holder
+included, and the trail re-identifies a subject only to whoever holds
+`erasure.key` (the erasure-key holder, not the voice key holder of the
+E2EE section) — with two residues the token does not cover: the
+`erasure_jobs` row names the subject by bare user id and is never pruned
+(owner decision B6-15/3), so whoever may read it holds the identity without
+the key, and free text the erased account authored while moderating others
+(`report_notes.body`, `moderation_actions.reason`, `appeals.decision_note`)
+is unlinked but not cleared. The erasure's own `account_deleted` row is written
 that way from the start, and `account_erasure_replayed` records a start-up
 that erased a restored backup's copy of the account again.
 
@@ -320,6 +332,8 @@ The Tauri desktop client implements the following security measures:
 ## Security Hardening Checklist for Operators
 
 - [ ] Enable TLS (self-signed is the default; custom certs recommended for production)
+- [ ] Capture stdout (journald, Docker log driver, NSSM `AppStdout`) so crashes leave something to send — see [deployment.md — Logs](deployment.md#logs)
+- [ ] Back up the set, not just the database — see [deployment.md — Backup Strategy](deployment.md#backup-strategy)
 - [ ] Keep registration invite-only (the default) or closed; `approval` holds new accounts until you approve them in the admin panel, `open` admits anyone
 - [ ] Set a strong admin password
 - [ ] Configure rate limits (defaults are sensible but review for your use case)

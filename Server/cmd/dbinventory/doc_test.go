@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/invariants"
 )
 
 // The inventory table in this document is generated (`go run ./cmd/dbinventory`)
@@ -41,8 +43,8 @@ func TestServerBoundariesDocIsCurrent(t *testing.T) {
 		t.Fatalf("inventory(%q): %v", serverRoot, err)
 	}
 	var buf bytes.Buffer
-	if problems := printTable(&buf, rows); problems > 0 {
-		t.Fatalf("inventory reports %d unlisted importer(s) or stale allowlist row(s):\n%s",
+	if problems := printTable(&buf, rows, invariants.DBImportAllow); problems > 0 {
+		t.Fatalf("inventory reports %d unclassified handle use(s) or stale allowlist row(s):\n%s",
 			problems, buf.String())
 	}
 	generated := buf.String()
@@ -158,15 +160,21 @@ func at(s []string, i int) string {
 // program: if the block is right (checked above), these are right.
 type tallies struct {
 	total          int
+	noImport       int
 	typeOnly       int
 	typeOnlyByDisp map[string]int
 	byDisposition  map[string]int
 }
 
 var (
-	summaryRe = regexp.MustCompile(`(?m)^(\d+) files import .* (\d+) are type-only; (\d+) unlisted\.$`)
-	dispRe    = regexp.MustCompile(`(?m)^Dispositions: (.*)\. Move targets:`)
-	countRe   = regexp.MustCompile(`(\S+) (\d+)`)
+	// B6-14 re-pointed this: the summary counts use rather than imports, and
+	// splits the rows into the ones that import db and the ones that reach the
+	// handle through a package field.
+	summaryRe = regexp.MustCompile(`(?m)^(\d+) files use ` + "`db`" + ` outside .* ` +
+		`(\d+) import it, (\d+) use the handle without importing it; ` +
+		`(\d+) are type-only; (\d+) unlisted\.$`)
+	dispRe  = regexp.MustCompile(`(?m)^Dispositions: (.*)\. Move targets:`)
+	countRe = regexp.MustCompile(`(\S+) (\d+)`)
 )
 
 func readTallies(t *testing.T, generated string) tallies {
@@ -177,7 +185,8 @@ func readTallies(t *testing.T, generated string) tallies {
 	}
 	out := tallies{
 		total:          atoi(t, m[1]),
-		typeOnly:       atoi(t, m[2]),
+		noImport:       atoi(t, m[3]),
+		typeOnly:       atoi(t, m[4]),
 		typeOnlyByDisp: map[string]int{},
 		byDisposition:  map[string]int{},
 	}
@@ -191,14 +200,14 @@ func readTallies(t *testing.T, generated string) tallies {
 
 	// "N of them adapter" — the cross-tab the prose quotes twice and the
 	// summary line does not carry. Columns: file, types, funcs, methods,
-	// shape, disposition, family, why.
+	// hand-offs, shape, disposition, family, why.
 	for _, line := range normalize(generated) {
 		cells := cellsOf(line)
-		if len(cells) != 8 || isSeparatorRow(cells) || !strings.HasPrefix(cells[0], "`") {
+		if len(cells) != 9 || isSeparatorRow(cells) || !strings.HasPrefix(cells[0], "`") {
 			continue
 		}
-		if cells[4] == "type-only" {
-			out.typeOnlyByDisp[cells[5]]++
+		if cells[5] == "type-only" {
+			out.typeOnlyByDisp[cells[6]]++
 		}
 	}
 	if out.typeOnly != sum(out.typeOnlyByDisp) {
@@ -237,6 +246,13 @@ func checkProse(t *testing.T, generated, prose string) {
 		what: `"Type-only rows (N, of which K are adapter)"`,
 		re:   regexp.MustCompile(`Type-only rows \((\d+), of which (\d+) are ` + "`adapter`" + `\)`),
 		want: func([]string) []int { return []int{n.typeOnly, n.typeOnlyByDisp["adapter"]} },
+	}, {
+		// B6-14's count: the rows that exist because of what the file does,
+		// not what it imports. It is the whole point of the phase, so the
+		// document has to state it and this has to check it.
+		what: `"U of the N rows use the handle without importing db"`,
+		re:   regexp.MustCompile(`(\d+) of the (\d+) rows use the handle without importing ` + "`db`"),
+		want: func([]string) []int { return []int{n.noImport, n.total} },
 	}}
 
 	for _, c := range claims {

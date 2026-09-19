@@ -433,9 +433,18 @@ does not claim").
   `data/erasure.key`, generated beside `totp.key`; the audit rows the
   subject appeared in keep their action, time and order with that token in
   place of the id (`audit_log.subject_token` where they were the target,
-  `actor_token` where they acted), so the rows about one erased
-  subject remain linkable to each other, and to the identity only by whoever
-  holds the key — the operator. Two operator duties follow: back up
+  `actor_token` where they acted) — and the same token in the report,
+  report-note, report-event, moderation-action and appeal rows that name them
+  (`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so the rows about
+  one erased subject remain linkable to each other by anyone who may read
+  them, any `VIEW_AUDIT_LOG` holder included, and to the identity only by
+  whoever holds `erasure.key` — the operator (the erasure-key holder, not
+  the voice key holder of the E2EE section) — with two residues the token
+  does not cover: the `erasure_jobs` row names the subject by bare user id
+  and is never pruned (owner decision B6-15/3), so whoever may read it holds
+  the identity without the key, and free text the erased account authored
+  while moderating others (`report_notes.body`, `moderation_actions.reason`,
+  `appeals.decision_note`) is unlinked but not cleared. Two operator duties follow: back up
   `erasure.key` and the marker file beside the database (a restore with
   either missing has nothing to replay), and treat the key as the thing that
   re-identifies an erased account's audit trail.

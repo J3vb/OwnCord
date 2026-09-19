@@ -419,7 +419,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	}
 	retryFloorMS := int64(0)
 	if h.db != nil {
-		retryFloorMS = h.db.MessageDeliveryFloorMS()
+		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
 
 	return buildJSON(map[string]any{
