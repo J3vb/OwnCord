@@ -50,16 +50,18 @@ Measured with `git grep`, not estimated:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 21    |
 | Distinct `invoke` command names called from `Client/src/`  | 29    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 34    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 33    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
 | Files under `Client/src/platform/`                         | 0     |
 
 The handler count covers both attribute spellings — 21 `#[tauri::command]` plus
-13 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
-brackets undercounts to 21. One of the 34, `open_devtools`, sits behind
-`#[cfg(feature = "devtools")]`, so a default build registers 33.
+12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
+brackets undercounts to 21. Attributes and registrations are two different
+counts: of the 33 attributed functions, 31 appear in `generate_handler!`
+(`Client/src-tauri/src/lib.rs`), and one of those, `open_devtools`, sits behind
+`#[cfg(feature = "devtools")]`, so a default build registers 30.
 
 Reproduce:
 
@@ -75,13 +77,17 @@ undercounts by four (`ws_connect`, `ws_send`, `ws_disconnect`,
 `accept_cert_fingerprint`). Any future lint rule enforcing the seam must match
 the binding, not the call site.
 
-Four Rust handlers are registered but never invoked from `Client/src/`:
-`get_cert_fingerprint` and `store_cert_fingerprint` (used by
-`Client/tests/e2e/helpers.ts`), and `probe_credential_store` and `ptt_get_key`
-(no caller anywhere). The latter two are dead-surface candidates — B7's call,
-not B1's.
+One registered Rust handler is never invoked from `Client/src/`:
+`get_cert_fingerprint`, which the native E2E harness calls directly
+(`Client/tests/e2e/native/helpers.ts`) and `Client/tests/e2e/helpers.ts` stubs.
+It stays registered as "consumed by tests, unconsumed in production" (B7 PRD
+open question 11). `probe_credential_store`, the one handler with no caller
+anywhere, was deleted in B7-0. An earlier revision of this paragraph also named
+`store_cert_fingerprint` and `ptt_get_key`; neither command has ever existed in
+`generate_handler!`, so nothing further is owed there.
 
-There is no `window.__TAURI__` access and no environment branching, which is
+There is no `window.__TAURI__` access, and the only environment branching is
+the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is
 good news: every native dependency is a static or dynamic **import**, so a
 static check can find all of them. The only `typeof window` guards in
 `Client/src/lib/` are in `channel-mutes.ts` and `logger.ts`, and are unrelated
@@ -92,22 +98,22 @@ to desktop/browser branching.
 Thirteen capability clusters. Each becomes one file under `contracts/`, with
 matching implementations under `desktop/` and `browser/`.
 
-| Contract          | Files today                                                                   | Native surface                                      | Browser outlook                                           |
-| ----------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------- |
-| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/{attachments,embeds,media}.ts` | `plugin-http`                                       | native `fetch` — but CORS becomes a server concern        |
-| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens | ⚠ see hard cases                                          |
-| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`                                       | `api/core`; 8 invokes                               | ⚠ see hard cases                                          |
-| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)        | `localStorage` / IndexedDB                                |
-| Native proxies    | `lib/livekitSession.ts`, `lib/httpProxy.ts`                                   | `api/core`; 4 invokes                               | not needed — the proxies exist to work around desktop TLS |
-| Notifications     | `lib/notifications.ts`                                                        | `plugin-notification`, `api/window`                 | Notification API + Page Visibility                        |
-| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                             | in-memory ring buffer + download                          |
-| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                        | mostly unsupported; degrade                               |
-| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`    | unsupported — the page reloads instead                    |
-| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                     | `window.open`                                             |
-| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                        | `<a download>` / File System Access API                   |
-| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                  | ⚠ see hard cases                                          |
-| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                  | URL routing                                               |
-| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                           | build-time constant                                       |
+| Contract          | Files today                                                                   | Native surface                                       | Browser outlook                                           |
+| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/{attachments,embeds,media}.ts` | `plugin-http`                                        | native `fetch` — but CORS becomes a server concern        |
+| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens  | ⚠ see hard cases                                          |
+| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard | ⚠ see hard cases                                          |
+| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)         | `localStorage` / IndexedDB                                |
+| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                | not needed — the proxies exist to work around desktop TLS |
+| Notifications     | `lib/notifications.ts`                                                        | `plugin-notification`, `api/window`                  | Notification API + Page Visibility                        |
+| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                              | in-memory ring buffer + download                          |
+| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                         | mostly unsupported; degrade                               |
+| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`     | unsupported — the page reloads instead                    |
+| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                      | `window.open`                                             |
+| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                         | `<a download>` / File System Access API                   |
+| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                   | ⚠ see hard cases                                          |
+| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                   | URL routing                                               |
+| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                            | build-time constant                                       |
 
 Two files appear under more than one contract (`lib/profiles.ts` does HTTP and
 settings; `settings/AdvancedTab.ts` spans four). That is expected — the clusters

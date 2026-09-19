@@ -53,7 +53,7 @@ describe("platform-contracts count table matches the tree", () => {
   it("counts what the table says it counts", () => {
     expect(tauriImporters).toBe(21);
     expect(invokeNames).toBe(29);
-    expect(commandHandlers).toBe(34);
+    expect(commandHandlers).toBe(33);
   });
 
   it("states those same counts in the table", () => {
