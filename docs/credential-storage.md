@@ -195,16 +195,6 @@ credential store: OS keyring, persists until deleted (on disk)
 
 Anything else is an error line naming the problem.
 
-For a live end-to-end check there is a `probe_credential_store` command. It
-writes, reads back and deletes a throwaway entry and reports which backend
-served it, touching no real credential:
-
-```js
-await invoke("probe_credential_store");
-// { ok: true, backend: "Keyring", error: null }
-// (Backend enum variants serialize verbatim: "Keyring" | "DpapiFile" | "EncryptedFile")
-```
-
 ### From Windows directly
 
 Use `cmdkey`, **not** the Credential Manager control panel — the control panel

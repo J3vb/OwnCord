@@ -125,7 +125,6 @@ pub fn run() {
             credentials::save_pending_messages,
             credentials::load_pending_messages,
             credentials::delete_pending_messages,
-            credentials::probe_credential_store,
             update_commands::check_client_update,
             update_commands::download_and_install_update,
             ptt::ptt_start,

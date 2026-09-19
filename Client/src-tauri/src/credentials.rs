@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use crate::secret_store::{self, Backend};
+use crate::secret_store;
 
 /// Data returned from `load_credential`.
 ///
@@ -385,70 +385,6 @@ pub fn delete_pending_messages(app: AppHandle, host: String, user_id: u64) -> Re
     with_credential_lock(|| {
         let account = pending_messages_account(&host, user_id)?;
         secret_store::delete(&app, &account)
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Diagnostics
-// ---------------------------------------------------------------------------
-
-/// Result of [`probe_credential_store`].
-#[derive(Serialize, Debug)]
-pub struct CredentialStoreProbe {
-    /// Whether a write/read/delete cycle completed with the value intact.
-    pub ok: bool,
-    /// Which store served the probe, when it succeeded.
-    pub backend: Option<Backend>,
-    /// Failure detail, for the log and the support bundle.
-    pub error: Option<String>,
-}
-
-/// Write, read back and delete a throwaway secret to prove the credential store
-/// works on this machine.
-///
-/// This is the check to run when a user reports peers rejecting their voice
-/// announce: it distinguishes "the credential store is fine" from "writes are
-/// accepted and dropped" without touching any real credential. The probe
-/// account is removed again whatever the outcome.
-#[tauri::command(async)]
-pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
-    with_credential_lock(|| {
-        // Underscores are not legal in DNS hostnames, so this cannot collide
-        // with a real `{host}` or `identity:{host}` account.
-        const PROBE_ACCOUNT: &str = "__diagnostic_probe__";
-        const PROBE_SECRET: &str = "owncord-credential-store-probe";
-
-        let result = secret_store::set(&app, PROBE_ACCOUNT, PROBE_SECRET).and_then(|backend| {
-            match secret_store::get(&app, PROBE_ACCOUNT)? {
-                Some(ref got) if got == PROBE_SECRET => Ok(backend),
-                Some(_) => Err("read back a different value than was written".into()),
-                None => Err("the store reported a successful write but returned no entry".into()),
-            }
-        });
-
-        // Always clean up, including when the probe failed part-way through.
-        if let Err(e) = secret_store::delete(&app, PROBE_ACCOUNT) {
-            log::warn!("failed to remove credential store probe entry: {e}");
-        }
-
-        match result {
-            Ok(backend) => {
-                log::info!("credential store probe succeeded (backend: {backend:?})");
-                CredentialStoreProbe {
-                    ok: true,
-                    backend: Some(backend),
-                    error: None,
-                }
-            }
-            Err(e) => {
-                log::error!("credential store probe failed: {e}");
-                CredentialStoreProbe {
-                    ok: false,
-                    backend: None,
-                    error: Some(e),
-                }
-            }
-        }
     })
 }
 
