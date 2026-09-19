@@ -377,23 +377,23 @@ npm run format && npm run check:docs
 Ticked only where the gate actually ran; evidence is the baseline file, the
 corrected doc, and the diff.
 
-- [ ] `docs/plans/b7-0-client-baseline-2026-09-19.md` created with every
+- [x] `docs/plans/b7-0-client-baseline-2026-09-19.md` created with every
       number in Task 1 attributed to the command that produced it
-- [ ] `docs/architecture/platform-contracts.md`'s "Native proxies" row,
+- [x] `docs/architecture/platform-contracts.md`'s "Native proxies" row,
       missing files, and `ptt_get_key`/`store_cert_fingerprint` claims are
       corrected
-- [ ] `Client/tests/unit/platform-contracts-counts.test.ts` green, updated if
+- [x] `Client/tests/unit/platform-contracts-counts.test.ts` green, updated if
       a pinned constant moved
-- [ ] `Client/CLAUDE.md:19` reads 21 files
-- [ ] `probe_credential_store` removed from `credentials.rs` and `lib.rs`;
+- [x] `Client/CLAUDE.md:19` reads 21 files
+- [x] `probe_credential_store` removed from `credentials.rs` and `lib.rs`;
       `cargo test` and `cargo clippy` green
-- [ ] All 25 formerly-open-treated B7-tagged OC rows are verified against
+- [x] All 25 formerly-open-treated B7-tagged OC rows are verified against
       HEAD and either carry the ledger's `fixed` prefix in the register or,
       for any that fails re-verification, a milestone assignment or a B9
       re-tag with a written reason
-- [ ] Updated rows land in `docs/plans/repo-health-issue-register-2026-08-23.md`
-- [ ] PRD's B7-0 row flipped to `complete`; `docs/plans/README.md`'s B7 row
+- [x] Updated rows land in `docs/plans/repo-health-issue-register-2026-08-23.md`
+- [x] PRD's B7-0 row flipped to `complete`; `docs/plans/README.md`'s B7 row
       status updated
-- [ ] `node .superpowers/render-ledger.mjs --check` passes with no ledger
+- [x] `node .superpowers/render-ledger.mjs --check` passes with no ledger
       change
 - [ ] `ci-check` skill green
