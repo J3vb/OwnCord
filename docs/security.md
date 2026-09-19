@@ -255,7 +255,12 @@ erased subjects keeps both, the rows about one subject remain linkable to
 each other by anyone who may read them, any `VIEW_AUDIT_LOG` holder
 included, and the trail re-identifies a subject only to whoever holds
 `erasure.key` (the erasure-key holder, not the voice key holder of the
-E2EE section). The erasure's own `account_deleted` row is written
+E2EE section) — with two residues the token does not cover: the
+`erasure_jobs` row names the subject by bare user id and is never pruned
+(owner decision B6-15/3), so whoever may read it holds the identity without
+the key, and free text the erased account authored while moderating others
+(`report_notes.body`, `moderation_actions.reason`, `appeals.decision_note`)
+is unlinked but not cleared. The erasure's own `account_deleted` row is written
 that way from the start, and `account_erasure_replayed` records a start-up
 that erased a restored backup's copy of the account again.
 
