@@ -288,6 +288,32 @@ server's internals were reorganised behind service boundaries.
   two residues the token does not cover — the `erasure_jobs` row's bare user
   id and the free text an erased moderator authored — rather than claiming a
   deidentification the shipped code does not deliver.
+- **`docs/deployment.md` now answers day-2 operation from the page itself.**
+  Where logs actually land under journald, Docker, Task Scheduler and NSSM
+  (with the two `nssm set` lines a Windows service needs or it has no logs at
+  all); the support bundle — what it holds, what it never holds, and how to
+  download it from the admin panel; the configurable capacity ceilings and what
+  each returns when reached; what grows on disk and what is pruned, and the
+  thirteen steps the background maintenance pass takes in order.
+- **`docs/deployment.md` moves the backup set to where recovery is read.**
+  Backup Strategy carries the full list of what a restorable backup must
+  contain and what each file costs you to lose; Upgrade and Rollback keeps a
+  one-line pointer, and Restore now describes the real sequence the server
+  runs, including what a restore cannot bring back.
+- **`docs/deployment.md` documents the certificate per mode, honestly.**
+  Self-signed: two years, no expiry check, no reload — and the rotation
+  procedure with what every desktop client sees afterwards. ACME: what it
+  needs (inbound port 80 included) and what renews trigger on pinned desktop
+  clients. Manual and plaintext: the restart and the trade-off, respectively.
+- **`docs/deployment.md` gained "When it fails"** — a symptom-first section
+  for the failures an owner actually hits: the health endpoint, a server that
+  refuses to start, voice with no audio, voice that will not join, the
+  certificate-mismatch modal, a 2FA lockout after a restore, upload refusals,
+  an update that did not come back — and what to send when asking for help.
+- `docs/deployment.md`'s update-failure procedure names the audit rows the
+  updater writes, the two self-recovery shapes read from its verification and
+  rotation code, the pre-checks that prevent the failures, and the port-80
+  row for ACME moved into the canonical firewall table.
 
 ### Repository
 

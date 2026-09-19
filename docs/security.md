@@ -228,8 +228,10 @@ network path the server has is an action an admin or user took, a feature
 an operator switched on by configuration, or a connection to this machine
 itself. The inventory, the `egress-sites` invariant that enforces it, the
 runtime capture that proves the compiled defaults open nothing beyond
-loopback, and the data contract a future support bundle must satisfy are in
-[docs/architecture/diagnostics.md](architecture/diagnostics.md).
+loopback, and the data contract the support bundle follows are in
+[docs/architecture/diagnostics.md](architecture/diagnostics.md). How an
+administrator makes one — and what it holds — is the Deployment Guide's
+[Support bundle](deployment.md#support-bundle) section.
 
 ## Audit Logging
 
@@ -330,6 +332,8 @@ The Tauri desktop client implements the following security measures:
 ## Security Hardening Checklist for Operators
 
 - [ ] Enable TLS (self-signed is the default; custom certs recommended for production)
+- [ ] Capture stdout (journald, Docker log driver, NSSM `AppStdout`) so crashes leave something to send — see [deployment.md — Logs](deployment.md#logs)
+- [ ] Back up the set, not just the database — see [deployment.md — Backup Strategy](deployment.md#backup-strategy)
 - [ ] Keep registration invite-only (the default) or closed; `approval` holds new accounts until you approve them in the admin panel, `open` admits anyone
 - [ ] Set a strong admin password
 - [ ] Configure rate limits (defaults are sensible but review for your use case)

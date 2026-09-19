@@ -29,7 +29,7 @@ messaging, upload, idle and shutdown.
 | Support bundle               | Admin panel **Diagnostics**, `/admin/api/support-bundles/*`              | `ADMINISTRATOR` with a current login session; explicit preview and confirmation | local download only, never uploaded                                                        |
 | Audit log                    | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                                | no                                                                                         |
 | Backups                      | `backup.dir` (scheduled and on demand)                                   | the process owner; `MANAGE_SERVER` via the admin API                            | no                                                                                         |
-| Healthcheck CLI              | `owncord --healthcheck` probes this server's `/health`                   | the orchestrator                                                                | loopback only                                                                              |
+| Healthcheck CLI              | `chatserver healthcheck` probes this server's `/health`                  | the orchestrator                                                                | loopback only                                                                              |
 
 Log content is governed by `logging.level`; usernames, ids and client
 addresses appear at `info` (data-lifecycle class 22), which is why the
