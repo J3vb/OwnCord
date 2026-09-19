@@ -85,7 +85,7 @@ func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state strin
 	if h.db == nil {
 		return
 	}
-	report, err := h.db.GetReport(ctx, reportID)
+	report, err := h.readers.Dispatch.GetReport(ctx, reportID)
 	if err != nil || report == nil {
 		return
 	}
@@ -108,7 +108,7 @@ func (h *Hub) BroadcastAppealQueue(ctx context.Context, appealID int64, state st
 	if h.db == nil {
 		return
 	}
-	appeal, err := h.db.GetAppeal(ctx, appealID)
+	appeal, err := h.readers.Dispatch.GetAppeal(ctx, appealID)
 	if err != nil || appeal == nil {
 		return
 	}

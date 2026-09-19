@@ -103,6 +103,15 @@ Files in those packages that call through the field **without importing
 `db`**: two, both in `ws` (above). `internal/app` has none — every file that
 touches `a.database` also imports `db`.
 
+**Corrected during the build (2026-09-18).** The last sentence is wrong, and
+the grep above could not have shown it: `internal/app/lifecycle.go` imports
+`db` nowhere, holds the handle from the package's own constructor
+(`database, err := openDatabase(cfg)` — not `db.Open*`, so no `db` selector
+appears), closes it and hands it to nine start steps. It is a sixth census
+file and a third no-import row shape, found by Task 1's first run rather than
+by the census grep; it is `boundary` with `Calls: {Close: 1}` and the nine
+hand-offs. The row count lands at 64, not the 63 Task 3 forecast.
+
 **Measured violations under the extended guard, at HEAD: 5 files, 7 sites.**
 Three shapes: an `adapter` row making a call (1 site), a call in a file with
 no row (4 sites), an `adapter` row handing the bare handle where its own seam
@@ -457,7 +466,9 @@ cd Server && go test -race -count=1 ./ws/
 cd Server && go test -tags deadlock -count=1 ./ws/
 cd Server && go test -count=1 -run 'TestHP4_' ./db/
 # the census, independent of the tool (must agree with the tool's row set)
-grep -rn --include='*.go' --exclude='*_test.go' -E '\bh\.db\.[A-Z]' Server/ws   # 0 after Task 2
+# 2 after Task 2, not 0: hub_events.go:173,213 are the pinned replay-purge
+# deletes Task 2 says must not move. Any third hit is a regression.
+grep -rn --include='*.go' --exclude='*_test.go' -E '\bh\.db\.[A-Z]' Server/ws
 grep -rn --include='*.go' --exclude='*_test.go' -E '\.SQLDb\(\)|\.SQLReaderDB\(\)|BeginTx\(|\*sql\.(DB|Tx|Conn)\b' Server | grep -v '^Server/db/'   # boundary files only
 # docs + everything
 npm run format && npm run check:docs && npm run check:hygiene
@@ -513,27 +524,35 @@ npm run format && npm run check:docs && npm run check:hygiene
 Ticked only where the gate actually ran; evidence is the RED-proof output and
 the regenerated block in the PR.
 
-- [ ] Census recorded in the PR before Task 1: 5 files / 7 sites, listed with
+- [x] Census recorded in the PR before Task 1: 5 files / 7 sites, listed with
       file:line, and Task 1's first run reports exactly those
-- [ ] `DBImportEntry.Calls` and `.Hands` pin every `boundary` row that makes a
+- [x] `DBImportEntry.Calls` and `.Hands` pin every `boundary` row that makes a
       call or hand-off (13 + 1 new); `adapter` rows measure empty; the
       liveness test fails a row with neither an import nor a pinned call
-- [ ] The doc gate exits 1 on: a handle call in a file with no row, a call or
+- [x] The doc gate exits 1 on: a handle call in a file with no row, a call or
       hand-off in an `adapter` row, a drifted multiset — each proven RED with
       a probe and reverted
-- [ ] `db-import-boundary` reports `db-handle-owner` on a `*sql.Tx`/`*sql.DB`
+- [x] `db-import-boundary` reports `db-handle-owner` on a `*sql.Tx`/`*sql.DB`
       type or `SQLDb()`/`SQLReaderDB()`/`BeginTx()` call in a non-`boundary`
-      file — proven RED with a probe and reverted
-- [ ] `ws/hub_events.go` has a `boundary` row pinning exactly
+      file — proven RED with a probe and reverted. **Narrowed as built**: the
+      raw-type half also requires the file to import `db`, so a file that opens
+      its own `sql.DB` and never touches `Server/db` (`cmd/smoke/drills.go`) is
+      not this rule's business. Without type information the accessor calls are
+      the only evidence one file carries that a `*sql.DB` came from the handle.
+      Recorded in `server-boundaries.md` ("The per-file half: `db-handle-owner`")
+- [x] `ws/hub_events.go` has a `boundary` row pinning exactly
       `DeleteEventsForMessages: 1, DeleteEventsForUser: 1`; the file is
       unchanged; `-race` and `-tags deadlock` on `./ws/` green; `TestHP4_*`
       green
-- [ ] `serve_ready.go`, `hub_visibility.go`, `deps.go`, `moderation_queue.go`
+- [x] `serve_ready.go`, `hub_visibility.go`, `deps.go`, `moderation_queue.go`
       call the handle nowhere; the two new seam methods are documented on
       their interfaces
-- [ ] `server-boundaries.md`: block regenerated, Handle carriers table,
+- [x] `server-boundaries.md`: block regenerated, Handle carriers table,
       measurement section states the field-walk and the remaining
       interface-field limitation, every `doc_test.go` pattern matches a
       sentence that states the count it checks
 - [ ] B6-10 told about its stale `api/router.go` row; PRD row, changelog and
-      `ci-check` green
+      `ci-check` green — **unticked**: B6-10 merged before this branch started,
+      so there was no PR to tell and the `api/router.go` row is already
+      correct here (`PingRead SQLDb SQLReaderDB`); the PRD row and changelog
+      are done, and `ci-check` is the PR's gate, not this branch's

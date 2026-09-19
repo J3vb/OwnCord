@@ -221,7 +221,7 @@ func subjectFor(ctx context.Context, database DispatchReader, perms *permissions
 
 // subjectFor is the hub-wired form of the package-level subjectFor.
 func (h *Hub) subjectFor(ctx context.Context, userID, channelID int64) (permissions.Subject, error) {
-	return subjectFor(ctx, h.db, h.permChecker, h.perms, userID, channelID)
+	return subjectFor(ctx, h.readers.Dispatch, h.permChecker, h.perms, userID, channelID)
 }
 
 // channelSubject is subjectFor plus the channel's flags and, for a DM, the

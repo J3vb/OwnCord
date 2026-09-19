@@ -319,6 +319,13 @@ server's internals were reorganised behind service boundaries.
   for each server asset, and an attestation on the container image. None of it
   requires trusting the download page — [Verifying a
   Download](docs/deployment.md#verifying-a-download) has the commands.
+- The database-boundary guard now rejects handle **use**, not only imports: a
+  file that reaches the handle through a package field is measured even when it
+  imports nothing, every boundary file pins the exact calls and hand-offs it
+  makes, and an adapter file that makes one fails the gate. Four previously
+  unclassified websocket reads now go through the seam that owns them, and the
+  replay purge's two deletes stay exactly where they are, pinned. No behaviour
+  change.
 
 ## v1.2.0-alpha.4
 
