@@ -279,6 +279,15 @@ server's internals were reorganised behind service boundaries.
   voice — measured on a 2 vCPU / 4 GB machine, with the exact commands to
   re-run it yourself, and with the things the numbers do not mean written down
   next to them.
+- **Docs (not user-visible):** the beta product requirement for deleted-account
+  audit history, the requirement-traceability row, and the repository-health
+  register now describe the retained audit-token design as it was actually
+  built and approved at HP-4 — one stable per-subject token, not an erased
+  key — instead of the earlier, superseded wording. Those pages, and the
+  trust-model and security pages carrying the same claim, now also name the
+  two residues the token does not cover — the `erasure_jobs` row's bare user
+  id and the free text an erased moderator authored — rather than claiming a
+  deidentification the shipped code does not deliver.
 
 ### Repository
 

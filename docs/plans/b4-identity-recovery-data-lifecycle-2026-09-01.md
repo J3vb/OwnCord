@@ -1471,7 +1471,8 @@ audit rows about an erased subject keep action, time and order with
 drafts.
 
 Exit: unlinkability and non-resurrection tests green on alpha copies;
-`trust-model.md` backup caveat updated; BPR-053 row satisfied.
+`trust-model.md` backup caveat updated; BPR-053 row satisfied. _(the
+traceability evidence this line promised was recorded by B6-15, 2026-09-18)_
 
 **Evidence, 2026-09-03** — branch `feat/b4-10-deletion-markers`, stacked on
 #1517 (B4-9's review fix) until that merged as `7907c16` and was cascaded in;

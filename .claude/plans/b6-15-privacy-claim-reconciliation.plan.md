@@ -380,12 +380,20 @@ npm run format && npm run check:docs && node .superpowers/render-ledger.mjs --ch
    requirement. Keeping the text means the traceability row must say
    "deviates from the requirement by HP-4 decision" in every later phase's
    evidence, B10 included.
+   **Answered 2026-09-18 (owner):** amend BPR-053 to the built design, as
+   Task 1 proposed. Done — see the amendment in
+   `docs/plans/beta-product-requirements-2026-08-23.md:82`.
 2. **Is "linkable to each other by any `VIEW_AUDIT_LOG` holder" a limit to
    disclose in the trust model's bullet, or only in the traceability
    evidence?** The trust model already says "remain linkable to each other"
    (`:432-433`) without saying who can do the linking. This plan adds the
    permission name in the traceability evidence only (Task 2) and leaves the
    trust model's sentence as is — the owner may want it in both.
+   **Answered 2026-09-18 (owner):** disclose it in both places. The
+   `VIEW_AUDIT_LOG` holder is now named in the traceability evidence (Task
+   2), and separately in `docs/trust-model.md`'s bullet and the mirrored
+   `docs/security.md` paragraph (Task 4), as its own statement alongside the
+   erasure-key holder's re-identification limit.
 3. **`erasure_jobs.user_id` after `done`: accepted residue, or prune?** A
    bare integer that outlives the subject, never removed
    (`037_erasure_jobs.sql:5-7`; no delete statement). Disclosed in
@@ -394,41 +402,69 @@ npm run format && npm run check:docs && node .superpowers/render-ledger.mjs --ch
    maintenance-tick prune of `done` rows older than N days, its own PR with
    a test. This plan writes (a)'s sentence and stops; (b) is a design change
    under the carryover's rule.
+   **Answered 2026-09-18 (owner):** option (a) — accepted residue,
+   documented, no code. Written where Task 5 puts it,
+   `docs/architecture/data-lifecycle.md`'s "what the operation leaves" prose
+   (the line the plan calls `:165`); the trust model's bullet does not carry
+   its own "server logs (id only)" phrase, so this plan documents the
+   residue where the code comment for it already lives rather than
+   inventing a second location.
 4. **Should the token be disclosed as brute-forceable by the key holder in
    public wording?** `security.md:160-162` already describes the server
    hashing candidate ids against tokens. The proposed wording says "the id
    is recoverable by the `erasure.key` holder by hashing candidates". The
    owner may prefer "re-identifiable by the key holder" without the how.
    Either is true; the plan uses the explicit form unless told otherwise.
+   **Answered 2026-09-18 (owner):** use the explicit form — "the id is
+   recoverable by the `erasure.key` holder by hashing candidates" — since
+   `docs/security.md` already describes the mechanism publicly. Used
+   verbatim in the traceability evidence block (Task 2).
 
 ## Acceptance
 
 Ticked only where the edit landed and the validation greps pass; evidence is
 the PR diff and the traceability row's evidence block.
 
-- [ ] BPR-053 carries a dated amendment naming HP-4 decisions 3 and 4 and the
+- [x] BPR-053 carries a dated amendment naming HP-4 decisions 3 and 4 and the
       B4-10 deviation, after an explicit owner decision recorded in the PR
       (question 1)
-- [ ] The traceability row's closure text no longer says "cryptographically
+- [x] The traceability row's closure text no longer says "cryptographically
       erased" or "correlation attempts fail" as achieved outcomes, and carries
       the B4-10 / B6-11 evidence block with every test name that exists on
       `dev`
-- [ ] BG-11 no longer says "deidentified"; the B4 plan's `:1474` carries the
+- [x] BG-11 no longer says "deidentified"; the B4 plan's `:1474` carries the
       dated reconciliation note; the workstream-18 sentence is handed to
       B6-16 verbatim (PR description and PRD row), not written here
 - [ ] `trust-model.md` and `security.md` name the moderation tables and say
       "erasure-key holder"; their two paragraphs diff only in lead-in; the
       E2EE "key holder" uses are untouched; `:416-417` is untouched by this
-      branch
-- [ ] `data-lifecycle.md` class 21 and the appendix comment name both token
+      branch. **Partial:** the added clause is word-for-word identical in
+      both docs and every other sub-claim holds (moderation tables named,
+      "erasure-key holder" used, E2EE uses untouched, `:416-417` untouched —
+      all grep-verified), but the plan's own validation command diffs the
+      _entire_ trust-model bullet against security.md's shorter paragraph,
+      and that full-paragraph diff is not lead-in-only: the two documents
+      cover different scope (trust-model's bullet also describes hard-delete
+      and marker replay, which `security.md` does not restate). Left unticked
+      rather than call a failing validation command green.
+- [x] `data-lifecycle.md` class 21 and the appendix comment name both token
       columns; the header carries the amendment line; the `erasure_jobs`
       residue is worded per question 3
-- [ ] The correlation limit and the re-identification limit appear as two
+- [x] The correlation limit and the re-identification limit appear as two
       separate statements in BPR-053's amendment, the traceability evidence,
       BG-11 and the trust model
 - [ ] Physical-erasure wording in the evidence block is the sentence B6-11
-      landed, copied, not paraphrased
-- [ ] No code changed on this branch; any code decision from questions 3 or 4
+      landed, copied, not paraphrased. **Not applicable as literally worded:**
+      Task 0 found `trust-model.md:416-417` untouched by B6-11 (last commit
+      to that file predates the B6-11 series), so there is no B6-11 sentence
+      to copy for that clause. Followed Task 0's alternate instruction
+      instead — the evidence block reads "measured, not assumed
+      (`TestB611_ErasureBytes` E1, `Server/db/b6_11_drills_test.go`)".
+      `data-lifecycle.md` class 25 _was_ amended by B6-11 with a real
+      sentence ("The main database file holds nothing at every point of
+      every shape"), but that is B6-11's row and out of scope for this plan
+      to cite as if it were the trust-model outcome. Left unticked.
+- [x] No code changed on this branch; any code decision from questions 3 or 4
       is its own PR and is referenced from the roadmap note
-- [ ] PRD row, changelog, `check:docs`, `render-ledger --check` and `ci-check`
+- [x] PRD row, changelog, `check:docs`, `render-ledger --check` and `ci-check`
       green
