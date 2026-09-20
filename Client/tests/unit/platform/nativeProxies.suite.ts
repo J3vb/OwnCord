@@ -46,7 +46,11 @@ export function describeNativeProxiesSuite(
         ctx.subject.ensureHttpProxy("chat.example"),
         ctx.subject.ensureHttpProxy("chat.example"),
       ]);
-      expect(first).toBe(second);
+      // Asserting `first === second` alone is satisfied trivially by a
+      // subject that resolves nothing at all for both callers — pin what
+      // that shared value actually is too.
+      expect(first).toBe("http://127.0.0.1:51820");
+      expect(second).toBe(first);
     });
   });
 }
