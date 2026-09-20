@@ -170,6 +170,9 @@ jobs:
           SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
         run: |
           echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          # Printed as well as written, so the decision is readable in the log of
+          # each leg rather than only inferable from which steps ran.
+          echo "server checks selected: ${SELECTED:-true}"
           if [ "${SELECTED:-true}" != "true" ]; then
             echo "::notice::not selected for this change — this leg runs no server checks"
           fi
