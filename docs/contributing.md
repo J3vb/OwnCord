@@ -80,12 +80,14 @@ next section, and using them directly is equally correct.
 
 **Build & dev**
 
-| Command               | Description                                                      |
-| --------------------- | ---------------------------------------------------------------- |
-| `npm run dev`         | Start Vite dev server with hot reload                            |
-| `npm run build`       | TypeScript check + Vite production build                         |
-| `npm run tauri dev`   | Launch Tauri app in dev mode                                     |
-| `npm run tauri build` | Build release installer (NSIS on Windows, AppImage+deb on Linux) |
+| Command                 | Description                                                          |
+| ----------------------- | -------------------------------------------------------------------- |
+| `npm run dev`           | Start Vite dev server with hot reload (alias for `dev:desktop`)      |
+| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)    |
+| `npm run build`         | TypeScript check + Vite production build (alias for `build:desktop`) |
+| `npm run build:desktop` | TypeScript check + production build of the Tauri target              |
+| `npm run tauri dev`     | Launch Tauri app in dev mode                                         |
+| `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)     |
 
 **Tests**
 
