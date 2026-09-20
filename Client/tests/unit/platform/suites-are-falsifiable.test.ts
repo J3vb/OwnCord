@@ -133,6 +133,8 @@ describePushToTalkSuite(async () => {
   const native: PushToTalkNativeControl = {
     captureSucceedsWith: () => undefined,
     captureFailsWith: () => undefined,
+    configuredKey: () => undefined,
+    pollingStarted: () => false,
   };
   return { subject, native };
 }, failEveryTest);

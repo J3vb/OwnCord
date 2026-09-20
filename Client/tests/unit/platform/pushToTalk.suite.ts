@@ -9,6 +9,10 @@ import type { PushToTalk } from "../../../src/platform/contracts/pushToTalk";
 export interface NativeControl {
   captureSucceedsWith(vk: number): void;
   captureFailsWith(error: unknown): void;
+  /** Swap the persisted PTT-key preference the binding reads on `init()`. */
+  configuredKey(vk: number): void;
+  /** The binding's own bookkeeping of whether native key polling is running. */
+  pollingStarted(): boolean;
 }
 
 export interface PushToTalkSubject {
@@ -40,20 +44,47 @@ export function describePushToTalkSuite(
     });
 
     describe("init", () => {
-      check("resolves without starting native polling when no key is configured", async () => {
-        await expect(ctx.subject.init()).resolves.toBeUndefined();
+      // A single test, not two: "no key configured" alone is a negative
+      // claim (nothing happens) that an inert do-nothing subject satisfies
+      // trivially — the positive half (a configured key really starts
+      // polling) is what makes the negative half meaningful.
+      check("starts native polling only once a key is configured", async () => {
+        ctx.native.configuredKey(0);
+        await ctx.subject.init();
+        expect(ctx.native.pollingStarted()).toBe(false);
+
+        ctx.native.configuredKey(0x41);
+        await ctx.subject.init();
+        expect(ctx.native.pollingStarted()).toBe(true);
       });
     });
 
     describe("stop", () => {
-      check("resolves safely when nothing is bound", async () => {
+      check("resolves safely with nothing bound, without blocking a later start", async () => {
         await expect(ctx.subject.stop()).resolves.toBeUndefined();
+        ctx.native.configuredKey(0x41);
+        await ctx.subject.init();
+        expect(ctx.native.pollingStarted()).toBe(true);
+      });
+
+      check("stops native polling that init() started", async () => {
+        ctx.native.configuredKey(0x41);
+        await ctx.subject.init();
+        expect(ctx.native.pollingStarted()).toBe(true);
+        await ctx.subject.stop();
+        expect(ctx.native.pollingStarted()).toBe(false);
       });
     });
 
     describe("updateKey", () => {
-      check("resolves when disabling an unbound key", async () => {
-        await expect(ctx.subject.updateKey(0)).resolves.toBeUndefined();
+      // Same reasoning as init(): the "disabling" half only means something
+      // next to the "configuring" half.
+      check("starts polling for a newly configured key, stops it when disabled", async () => {
+        await ctx.subject.updateKey(0x41);
+        expect(ctx.native.pollingStarted()).toBe(true);
+
+        await ctx.subject.updateKey(0);
+        expect(ctx.native.pollingStarted()).toBe(false);
       });
     });
   });

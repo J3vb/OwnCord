@@ -11,14 +11,20 @@ import { describePushToTalkSuite } from "./pushToTalk.suite";
 const invoke = vi.fn();
 const listen = vi.fn();
 
+let configuredVk = 0;
+let captureBehavior: () => Promise<number> = () => Promise.reject(new Error("not configured"));
+let pollingLive = false;
+
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@components/settings/helpers", () => ({
-  loadPref: () => 0, // no PTT key configured — the common case
-  savePref: vi.fn(),
+  loadPref: () => configuredVk,
+  savePref: (_key: string, vk: number) => {
+    configuredVk = vk;
+  },
 }));
 vi.mock("@stores/voice.store", () => ({
   voiceStore: {
@@ -32,19 +38,22 @@ vi.mock("@stores/voice.store", () => ({
     subscribe: () => () => {},
   },
   setPttGated: vi.fn(),
-  setPttPollingLive: vi.fn(),
-  isPttPollingLive: () => false,
+  setPttPollingLive: (live: boolean) => {
+    pollingLive = live;
+  },
+  isPttPollingLive: () => pollingLive,
 }));
 
 describePushToTalkSuite(async () => {
   vi.resetModules();
-  invoke
-    .mockReset()
-    .mockImplementation((cmd: string) =>
-      cmd === "ptt_listen_for_key"
-        ? Promise.reject(new Error("not configured"))
-        : Promise.resolve(undefined),
-    );
+  configuredVk = 0;
+  pollingLive = false;
+  captureBehavior = () => Promise.reject(new Error("not configured"));
+  invoke.mockReset().mockImplementation((cmd: string) => {
+    if (cmd === "ptt_listen_for_key") return captureBehavior();
+    if (cmd === "ptt_polling_supported") return Promise.resolve(true);
+    return Promise.resolve(undefined);
+  });
   listen.mockReset().mockResolvedValue(() => {});
 
   const mod = await import("../../../src/lib/ptt");
@@ -59,14 +68,16 @@ describePushToTalkSuite(async () => {
     subject: legacy,
     native: {
       captureSucceedsWith(vk: number) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "ptt_listen_for_key" ? Promise.resolve(vk) : Promise.resolve(undefined),
-        );
+        captureBehavior = () => Promise.resolve(vk);
       },
       captureFailsWith(error: unknown) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "ptt_listen_for_key" ? Promise.reject(error) : Promise.resolve(undefined),
-        );
+        captureBehavior = () => Promise.reject(error);
+      },
+      configuredKey(vk: number) {
+        configuredVk = vk;
+      },
+      pollingStarted() {
+        return pollingLive;
       },
     },
   };
