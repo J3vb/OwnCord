@@ -38,7 +38,9 @@ try {
   exit(2);
 }
 
-const budgets = JSON.parse(readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"));
+const budgets = JSON.parse(
+  readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
+);
 
 const entry = manifest["index.html"];
 if (!entry || !entry.file) {
@@ -105,7 +107,9 @@ for (const [name, spec] of Object.entries(budgets.chunks)) {
     // direct dynamicImports edge would false-fail; membership in the startup
     // closure is the property that actually matters.
     if (closure.has(node.file)) {
-      console.error(`bundle-budget: FAIL ${name} must be lazy (statically reachable from the entry)`);
+      console.error(
+        `bundle-budget: FAIL ${name} must be lazy (statically reachable from the entry)`,
+      );
       failed = true;
     } else {
       extra += " [lazy]";
@@ -119,7 +123,9 @@ const marker = budgets.forbidEmbeddedWasm.marker;
 for (const node of Object.values(manifest)) {
   if (!node.file?.endsWith(".js")) continue;
   if (readFileSync(`${DIST}/${node.file}`, "utf8").includes(marker)) {
-    console.error(`bundle-budget: FAIL ${node.name ?? node.file} embeds the WASM marker '${marker}'`);
+    console.error(
+      `bundle-budget: FAIL ${node.name ?? node.file} embeds the WASM marker '${marker}'`,
+    );
     failed = true;
   }
 }

@@ -34,6 +34,7 @@ docs/audit-*.md
 # alone drops ~850 formattable files into src-tauri/target/.
 # Mirrors Client/.gitignore, .serena/.gitignore and .superpowers/sdd/.gitignore.
 Client/dist/
+Client/dist-budget/
 Client/coverage/
 Client/playwright-report/
 Client/test-results/
@@ -47,3 +48,9 @@ Client/src-tauri/gen/
 # The inherited instinct file is emitted by the homunculus tool and is not valid
 # YAML to a strict parser, so Prettier cannot read it at all.
 .claude/homunculus/
+
+# Machine-written agent state again, same rationale as the two entries above:
+# the firstmate lane supervisor drops a per-session busy-state plugin here
+# (untracked, ignored per-machine via .git/info/exclude, regenerated each
+# session). CI never sees it; a local gate must not turn red on it either.
+.opencode/plugins/
