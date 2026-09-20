@@ -9,12 +9,14 @@
 import { createStore, type Store } from "./store";
 import { fetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "./httpProxy";
+import { desktop } from "../platform/desktop";
+import type { SettingsStore } from "../platform/contracts/settings";
+import { isValidProfileShape } from "../platform/desktop/settings";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "owncord:profiles";
 const CURRENT_SCHEMA_VERSION = 1;
 const HEALTH_TIMEOUT_MS = 3000;
 const SLOW_THRESHOLD_MS = 1500;
@@ -57,16 +59,6 @@ interface StoredData {
 }
 
 /**
- * Persistence backend abstraction.
- * In production, wraps Tauri `invoke("save_settings", ...)` / `invoke("get_settings")`.
- * In tests, can be replaced with a synchronous Map-backed implementation.
- */
-export interface PersistenceBackend {
-  load(): Promise<StoredData | null>;
-  save(data: StoredData): Promise<void>;
-}
-
-/**
  * Fetch function type matching the Tauri HTTP plugin signature.
  * Allows injection of a mock in tests.
  */
@@ -75,23 +67,6 @@ export type FetchFn = typeof globalThis.fetch;
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
-
-function isValidProfileShape(item: unknown): item is ServerProfile {
-  if (typeof item !== "object" || item === null) return false;
-  const obj = item as Record<string, unknown>;
-  return (
-    typeof obj.id === "string" &&
-    typeof obj.name === "string" &&
-    obj.name.length > 0 &&
-    typeof obj.host === "string" &&
-    obj.host.length > 0 &&
-    typeof obj.username === "string" &&
-    typeof obj.color === "string" &&
-    typeof obj.autoConnect === "boolean" &&
-    (obj.rememberPassword === undefined || typeof obj.rememberPassword === "boolean") &&
-    (obj.lastConnected === null || typeof obj.lastConnected === "string")
-  );
-}
 
 function isValidStoredData(data: unknown): data is StoredData {
   if (typeof data !== "object" || data === null) return false;
@@ -103,47 +78,22 @@ function isValidStoredData(data: unknown): data is StoredData {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Default persistence backend
+// ---------------------------------------------------------------------------
+
+// The persistence-backend shape is the `SettingsStore` contract
+// (`src/platform/contracts/settings.ts`), re-exported under the name this
+// module's callers already import.
+export type { SettingsStore as PersistenceBackend };
+
 /**
- * Validates only the persistence envelope shape (schema version + a
- * profiles array), without requiring every individual profile inside it to
- * be well-formed. Used to tell "nothing/garbage was stored" apart from "a
- * valid envelope containing some malformed entries" — the latter should
- * have only the bad entries dropped, not the whole envelope discarded.
+ * The settings backend. Its native half is `platform/desktop/settings.ts`
+ * (B7-4) — the same `get_settings` / `save_settings` pair, envelope validation
+ * included. Kept as a factory because both call sites construct it that way.
  */
-function isValidStoredEnvelope(
-  data: unknown,
-): data is { schemaVersion: number; profiles: unknown[] } {
-  if (typeof data !== "object" || data === null) return false;
-  const obj = data as Record<string, unknown>;
-  return typeof obj.schemaVersion === "number" && Array.isArray(obj.profiles);
-}
-
-// ---------------------------------------------------------------------------
-// Default Tauri persistence backend
-// ---------------------------------------------------------------------------
-
-export function createTauriBackend(): PersistenceBackend {
-  return {
-    async load(): Promise<StoredData | null> {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const settings = await invoke<Record<string, unknown>>("get_settings");
-      const raw = settings[STORAGE_KEY];
-      if (raw === undefined || raw === null) return null;
-      if (!isValidStoredEnvelope(raw)) return null;
-      // The envelope itself is well-formed; salvage whichever individual
-      // profiles are valid rather than discarding the entire stored list
-      // because one entry is malformed (see OC-0060). Mirrors the per-item
-      // tolerance importProfiles() already has.
-      return {
-        schemaVersion: raw.schemaVersion,
-        profiles: raw.profiles.filter(isValidProfileShape),
-      };
-    },
-    async save(data: StoredData): Promise<void> {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("save_settings", { key: STORAGE_KEY, value: data });
-    },
-  };
+export function createTauriBackend(): SettingsStore {
+  return desktop.settings!;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,10 +151,7 @@ export interface ProfileManager {
   importProfiles(json: string): { imported: number; skipped: number };
 }
 
-export function createProfileManager(
-  backend: PersistenceBackend,
-  fetchFn?: FetchFn,
-): ProfileManager {
+export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn): ProfileManager {
   const initialState: ProfilesState = {
     profiles: [],
     healthStatuses: new Map(),

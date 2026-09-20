@@ -3,9 +3,11 @@
 // the registry stays `Partial<Platform>` until B7-5 adds the last member.
 import { credentials } from "./credentials";
 import { identity } from "./identity";
+import { settings } from "./settings";
 import type { Platform } from "../contracts";
 
 export const desktop: Partial<Platform> = {
   credentials,
   identity,
+  settings,
 };
