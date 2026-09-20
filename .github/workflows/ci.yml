@@ -460,6 +460,15 @@ jobs:
         # real unused-export finding sit invisible in every green run.
         run: npx knip
 
+      # `tauri-build` proves the desktop app actually bundles, but it is the
+      # slow three-OS job. This compiles the Tauri target on every client PR, so
+      # a broken `vite.config.desktop.ts` fails on the PR that breaks it instead
+      # of at `tauri build` time — and because it runs the same `build:desktop`
+      # script `beforeBuildCommand` runs, the two cannot disagree about what
+      # building the desktop app means.
+      - name: Desktop build (Tauri target)
+        run: npm run build:desktop
+
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
   # and must stay green — never "fix" a failing test by editing its assertions.
