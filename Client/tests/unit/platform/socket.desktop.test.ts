@@ -8,7 +8,7 @@
 // is expressed the way the transport sees it: the module's `invoke` accessor
 // throws, `ensureApis()` swallows it, and the command that follows fails.
 import { vi } from "vitest";
-import type { SocketTransport } from "../../../src/platform/contracts/socket";
+import type { SocketConnection, SocketTransport } from "../../../src/platform/contracts/socket";
 import { describeSocketTransportSuite } from "./socket.suite";
 
 const { invokeMock, listenMock, handlers } = vi.hoisted(() => {
@@ -79,26 +79,21 @@ describeSocketTransportSuite(async () => {
     return Promise.resolve(undefined);
   });
 
-  const transport = mod.createSocketTransport();
-
-  // The concrete transport is wider than the contract (its commands settle as
-  // promises); this binding exposes exactly the contract's surface.
-  const subject: SocketTransport = {
+  const transport: SocketTransport = mod.socket;
+  const connection: SocketConnection = transport.create();
+  // The suite drives one connection; the control below needs the promise the
+  // connect attempt settles as, which the contract now declares.
+  const subject: SocketConnection = {
+    ...connection,
     connect: (options) => {
-      lastConnect = transport.connect(options);
+      lastConnect = connection.connect(options);
       lastConnect.catch(() => undefined);
       return lastConnect;
     },
-    disconnect: () => transport.disconnect(),
-    send: (text) => transport.send(text),
-    acceptCertificate: (host, fingerprint) => transport.acceptCertificate(host, fingerprint),
-    onStateChange: (handler) => transport.onStateChange(handler),
-    onMessage: (handler) => transport.onMessage(handler),
-    onCertFirstUse: (handler) => transport.onCertFirstUse(handler),
-    onCertMismatch: (handler) => transport.onCertMismatch(handler),
   };
 
   return {
+    transport,
     subject,
     native: {
       async opens(): Promise<void> {
@@ -116,7 +111,7 @@ describeSocketTransportSuite(async () => {
       async emitsCert(status): Promise<void> {
         // The cert-tofu listener is the app-lifetime singleton the app
         // registers at bootstrap; make sure it is up before emitting.
-        await transport.startCertListener();
+        await connection.startCertListener();
         emit("cert-tofu", {
           host: "chat.example",
           fingerprint: "sha256:abc",

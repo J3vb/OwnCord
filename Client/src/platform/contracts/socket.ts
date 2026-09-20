@@ -1,11 +1,18 @@
 /**
- * The transport `lib/ws.ts` owns today: one WebSocket-shaped connection,
- * proxied through the native host so the app never has to trust an
- * unpinned TLS certificate itself.
+ * The socket capability: it hands out one transport per connection, proxied
+ * through the native host so the app never has to trust an unpinned TLS
+ * certificate itself.
  *
- * No-seam: `lib/ws.ts` is a closure returned by `createWsClient()`, not an
- * exported function — there is nothing to bind a legacy suite against yet.
- * The suite lands with the seam in B7-4.
+ * **Amended in B7-4**, which is the milestone that created this seam and may
+ * shape it. Two things the first draft could not express:
+ *
+ *   - The app needs a *fresh* transport per client — a new login, and every
+ *     test, must not inherit the previous one's listeners and certificate
+ *     registration. A registered singleton would be a second, never-connected
+ *     transport sitting next to the one the app runs on, so the capability is
+ *     a factory and the thing it returns is the transport.
+ *   - The commands settle as promises. `lib/ws.ts` classifies a failed dial
+ *     and a failed send, which a `void` return cannot carry.
  *
  * Narrowed to the seam (rule 3): the real `ws.on(type, listener)` dispatches
  * a parsed, protocol-typed `ServerMessage` — a domain type this contract must
@@ -13,11 +20,21 @@
  * as the native transport delivers it; parsing it into `ServerMessage` stays
  * in `lib/ws.ts`, on the app side of this seam.
  */
+export interface SocketTransport {
+  /** A transport for one connection. Each call is independent — callers that
+   *  need isolation (a fresh login, a test) get it by calling again. */
+  create(): SocketConnection;
+}
 
-/** Re-declared, structurally identical to `WsClientConfig` (`lib/ws.ts`). */
+/** Re-declared, structurally identical to the endpoint `lib/ws.ts` builds for
+ *  a profile host, plus the parts a transport needs to complete a login. */
 export interface SocketConnectOptions {
-  readonly host: string;
+  /** The endpoint to dial, already resolved by the app — bracketing a bare
+   *  IPv6 literal is a URL concern, not a transport one. */
+  readonly url: string;
   readonly token: string;
+  /** Reconnect policy and frame-size ceiling, for an adapter that owns them.
+   *  The app-side client owns both today. */
   readonly maxReconnectDelayMs?: number;
   readonly maxMessageSizeBytes?: number;
 }
@@ -38,10 +55,16 @@ export interface SocketCertEvent {
   readonly storedFingerprint?: string;
 }
 
-export interface SocketTransport {
-  connect(options: SocketConnectOptions): void;
-  disconnect(): void;
-  send(text: string): void;
+/** One connection's transport. */
+export interface SocketConnection {
+  /** Open the connection. Rejects when the handshake fails, or when there is
+   *  no native host at all — the caller tells those apart by the state it has
+   *  already seen, not by the error. */
+  connect(options: SocketConnectOptions): Promise<void>;
+  /** Close the connection and stop delivering frames. */
+  disconnect(): Promise<void>;
+  /** Rejects when the native send fails, so the caller can classify it. */
+  send(text: string): Promise<void>;
   /** Accept a changed certificate fingerprint for a host, then reconnect. */
   acceptCertificate(host: string, fingerprint: string): Promise<void>;
   onStateChange(handler: (state: SocketConnectionState) => void): () => void;
@@ -49,4 +72,7 @@ export interface SocketTransport {
   onMessage(handler: (text: string) => void): () => void;
   onCertFirstUse(handler: (event: SocketCertEvent) => void): () => void;
   onCertMismatch(handler: (event: SocketCertEvent) => void): () => void;
+  /** Register the app-lifetime certificate listener, before any connect.
+   *  Idempotent. */
+  startCertListener(): Promise<void>;
 }

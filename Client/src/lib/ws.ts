@@ -3,9 +3,8 @@
 // to proxy WSS through Rust, bypassing self-signed cert issues in webview.
 
 import type { ServerMessage, ClientMessage } from "./types";
-import { createSocketTransport, wsUrlFor, bracketBareIPv6Host } from "../platform/desktop/socket";
-import type { DesktopSocketTransport } from "../platform/desktop/socket";
-import type { SocketConnectionState } from "../platform/contracts/socket";
+import { desktop } from "../platform/desktop";
+import type { SocketConnection, SocketConnectionState } from "../platform/contracts/socket";
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 
@@ -127,17 +126,45 @@ export function normalizeHostForCertCompare(host: string): string {
   return stripped.replace(/^\[(.*)\]$/, "$1").toLowerCase();
 }
 
-// The native socket transport, and the URL helpers it owns, live behind the
-// `SocketTransport` contract in `platform/desktop/socket.ts` (B7-4). This
-// module keeps everything above that seam: the connection state machine, the
-// reconnect policy, the heartbeat, frame parsing and the send-failure codes.
-export { bracketBareIPv6Host };
+/**
+ * Wrap a bare (unbracketed) IPv6 literal in brackets so it can be embedded in
+ * a `wss://` authority, mirroring the detection api.ts's `isValidHost` and
+ * livekitSession.ts's `ensureLiveKitProxy` already use: more than one colon
+ * means the whole string is the address (a single colon is the host:port
+ * separator instead), and RFC 3986 gives a bare IPv6 literal no way to carry
+ * a port, so this never needs to split one off. A host that is already
+ * bracketed (or is a DNS name / IPv4 literal, with or without a port) is
+ * returned unchanged (OC-0163).
+ */
+export function bracketBareIPv6Host(host: string): string {
+  if (
+    !host.startsWith("[") &&
+    (host.match(/:/g) ?? []).length > 1 &&
+    /^[0-9A-Fa-f:.]+$/.test(host)
+  ) {
+    return `[${host}]`;
+  }
+  return host;
+}
+
+/** The `wss://` URL of the server's socket endpoint, for a profile host as
+ *  the user typed it. A bare IPv6 literal has to be bracketed or the URL
+ *  parser reads its first hextet as the host and the rest as a port. */
+export function wsUrlFor(host: string): string {
+  return `wss://${bracketBareIPv6Host(host)}/api/v1/ws`;
+}
+
+// The native socket transport lives behind the `SocketConnection` contract, in
+// the desktop implementation (B7-4); this module takes one transport per client
+// from the registry. Everything above that seam stays here: the connection
+// state machine, the reconnect policy, the heartbeat, frame parsing and the
+// send-failure codes.
 
 export function createWsClient() {
   // One transport per client: the certificate listener it registers is
   // app-lifetime state, and a second client (a fresh login, a test) must not
   // inherit a registration the first one made.
-  const transport: DesktopSocketTransport = createSocketTransport();
+  const transport: SocketConnection = desktop.socket!.create();
   let config: WsClientConfig | null = null;
   let state: ConnectionState = "disconnected";
   let reconnectAttempt = 0;
@@ -451,14 +478,20 @@ export function createWsClient() {
 
     setState("connecting");
 
+    const url = wsUrlFor(cfg.host);
     log.info("WebSocket connecting", {
-      url: wsUrlFor(cfg.host),
+      url,
       isReconnect: reconnectAttempt > 0,
       attempt: reconnectAttempt,
     });
 
     try {
-      await transport.connect(cfg);
+      await transport.connect({
+        url,
+        token: cfg.token,
+        maxReconnectDelayMs: cfg.maxReconnectDelayMs,
+        maxMessageSizeBytes: cfg.maxMessageSizeBytes,
+      });
     } catch (err) {
       if (gen !== wsGeneration) {
         // A disconnect() (or a newer connect()) landed while the transport was

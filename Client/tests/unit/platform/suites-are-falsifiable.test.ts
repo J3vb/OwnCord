@@ -17,6 +17,7 @@ import type { HttpClient } from "../../../src/platform/contracts/http";
 import type { IdentityStore } from "../../../src/platform/contracts/identityStore";
 import type { PendingMessageStore } from "../../../src/platform/contracts/pendingMessages";
 import type { PushToTalk } from "../../../src/platform/contracts/pushToTalk";
+import type { SocketConnection } from "../../../src/platform/contracts/socket";
 import type { SocketTransport } from "../../../src/platform/contracts/socket";
 import type { AppUpdater } from "../../../src/platform/contracts/updater";
 import type { SettingsStore } from "../../../src/platform/contracts/settings";
@@ -176,15 +177,19 @@ describeHttpClientSuite(async () => {
 
 describeSocketTransportSuite(async () => {
   const subject = {
-    connect: () => undefined,
-    disconnect: () => undefined,
-    send: () => undefined,
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    send: async () => undefined,
     acceptCertificate: async () => undefined,
     onStateChange: () => () => undefined,
     onMessage: () => () => undefined,
     onCertFirstUse: () => () => undefined,
     onCertMismatch: () => () => undefined,
-  } as unknown as SocketTransport;
+    startCertListener: async () => undefined,
+  } as unknown as SocketConnection;
+  // A capability that hands the same inert transport to every caller: `create`
+  // must return an independent one, and this must fail that.
+  const transport = { create: () => subject } as unknown as SocketTransport;
   const native: SocketTransportNativeControl = {
     opens: async () => undefined,
     closes: async () => undefined,
@@ -196,7 +201,7 @@ describeSocketTransportSuite(async () => {
     sent: () => [],
     accepted: () => [],
   };
-  return { subject, native };
+  return { transport, subject, native };
 }, failEveryTest);
 
 describePendingMessagesSuite(async () => {

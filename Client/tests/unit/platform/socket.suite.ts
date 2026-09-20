@@ -16,6 +16,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import type {
   SocketCertEvent,
+  SocketConnection,
   SocketConnectionState,
   SocketTransport,
 } from "../../../src/platform/contracts/socket";
@@ -45,11 +46,14 @@ export interface NativeControl {
 }
 
 export interface SocketSubject {
-  readonly subject: SocketTransport;
+  /** The capability the app takes a transport from. */
+  readonly transport: SocketTransport;
+  /** The transport it handed back, which the tests below drive. */
+  readonly subject: SocketConnection;
   readonly native: NativeControl;
 }
 
-const connectOptions = { host: "chat.example:8443", token: "tok" };
+const connectOptions = { url: "wss://chat.example:8443/api/v1/ws", token: "tok" };
 
 export function describeSocketTransportSuite(
   makeSubject: () => Promise<SocketSubject>,
@@ -60,6 +64,14 @@ export function describeSocketTransportSuite(
     let ctx: SocketSubject;
     beforeEach(async () => {
       ctx = await makeSubject();
+    });
+
+    describe("create", () => {
+      // The app takes a fresh transport per client — a new login must not
+      // inherit the previous connection's listeners, and neither must a test.
+      check("hands back an independent transport per call", () => {
+        expect(ctx.transport.create()).not.toBe(ctx.subject);
+      });
     });
 
     describe("state", () => {

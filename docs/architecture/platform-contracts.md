@@ -203,6 +203,16 @@ addition to `contracts/`, not just B7-3's:
    `{ subject, native }` and never a command name; command/argument
    assertions stay in the modules' existing unit tests.
 
+**One contract was amended in B7-4:** `contracts/socket.ts`. B7-3 declared
+`SocketTransport` as the transport object itself, which the app cannot use — it
+needs one transport _per client_ (a fresh login, and every test, must not
+inherit the previous connection's listeners or its certificate registration),
+and it needs the dial and the send to settle as promises so a failure can be
+classified. `SocketTransport` is now the capability (`create(): SocketConnection`)
+and `SocketConnection` is the transport it hands back. `Platform.socket`'s
+declared type did not change; its meaning did. The registry member is the
+factory `lib/ws.ts` calls, so nothing is registered that no one uses.
+
 Eight of the 17 rows already sat behind an exported function when B7-3 wrote
 their behaviour suites (`seam` in the responsibility map that milestone worked
 from): `CredentialStore`, `IdentityStore`, `SettingsStore`, `LogFiles` (the

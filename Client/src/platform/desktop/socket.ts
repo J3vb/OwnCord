@@ -1,19 +1,17 @@
-// The native WebSocket transport: the host's socket proxy behind the
-// `SocketTransport` contract. Lifted verbatim from `lib/ws.ts` (B7-4) — the
+// The native socket transport: the host's socket proxy behind the
+// `SocketConnection` contract. Lifted verbatim from `lib/ws.ts` (B7-4) — the
 // four proxy commands and the four event registrations, unchanged — so the
 // app-side socket layer in `lib/ws.ts` keeps its state machine, its reconnect
 // policy, its frame parsing and its send-failure codes above this seam.
 //
-// The concrete type is wider than the contract in exactly one way: the three
-// commands the app awaits resolve as promises (`connect` also rejects when
-// there is no native host at all), and `startCertListener()` is the bootstrap
-// registration `lib/ws.ts` exposes to the app. All of them are assignable to
-// the contract's `void` members, so the registry still holds a plain
-// `SocketTransport`.
+// The registered capability (`socket`) is the factory: one transport per
+// call, because a fresh login — and every test — must not inherit the
+// previous connection's listeners or its certificate registration.
 import { createLogger } from "@lib/logger";
 import type {
   SocketCertEvent,
   SocketConnectOptions,
+  SocketConnection,
   SocketConnectionState,
   SocketTransport,
 } from "../contracts/socket";
@@ -21,45 +19,16 @@ import type {
 const log = createLogger("ws");
 
 /**
- * Wrap a bare (unbracketed) IPv6 literal in brackets so it can be embedded in
- * a `wss://` authority, mirroring the detection api.ts's `isValidHost` and
- * livekitSession.ts's `ensureLiveKitProxy` already use: more than one colon
- * means the whole string is the address (a single colon is the host:port
- * separator instead), and RFC 3986 gives a bare IPv6 literal no way to carry
- * a port, so this never needs to split one off. A host that is already
- * bracketed (or is a DNS name / IPv4 literal, with or without a port) is
- * returned unchanged (OC-0163).
- */
-export function bracketBareIPv6Host(host: string): string {
-  if (
-    !host.startsWith("[") &&
-    (host.match(/:/g) ?? []).length > 1 &&
-    /^[0-9A-Fa-f:.]+$/.test(host)
-  ) {
-    return `[${host}]`;
-  }
-  return host;
-}
-
-/** The `wss://` URL of the server's socket endpoint, for a profile host as
- *  the user typed it. A bare IPv6 literal has to be bracketed or the URL
- *  parser reads its first hextet as the host and the rest as a port. */
-export function wsUrlFor(host: string): string {
-  return `wss://${bracketBareIPv6Host(host)}/api/v1/ws`;
-}
-
-/**
- * The native WebSocket transport: the four proxy commands (`ws_connect`,
+ * The native socket connection: the four proxy commands (`ws_connect`,
  * `ws_send`, `ws_disconnect`, `accept_cert_fingerprint`) and the four event
  * registrations (`ws-message`, `ws-state`, `ws-error`, `cert-tofu`) that reach
  * the Rust proxy.
  *
- * Lifted in place so B7-4's suite can pin today's behaviour before the
- * transport moves to `platform/desktop/socket.ts`. Everything the app layers
- * on top — the state machine, the reconnect policy, frame parsing, the send
- * failure codes — stays in this module, above the seam. In particular
- * `onMessage` hands out the raw frame text and `onStateChange` reports the
- * proxy's own lifecycle; neither parses a protocol frame.
+ * Lifted verbatim from `lib/ws.ts`, which is where the app-side layers on top
+ * of it stay: the state machine, the reconnect policy, frame parsing and the
+ * send-failure codes. In particular `onMessage` hands out the raw frame text
+ * and `onStateChange` reports the proxy's own lifecycle; neither parses a
+ * protocol frame.
  *
  * The concrete type is wider than `SocketTransport` in exactly one way: the
  * three commands this module awaits resolve as promises (`connect` also
@@ -68,18 +37,7 @@ export function wsUrlFor(host: string): string {
  * `main.ts` makes before any connection exists. All three are assignable to
  * the contract's `void` members.
  */
-export interface DesktopSocketTransport extends SocketTransport {
-  /** Open the proxy connection. Resolves once the handshake has been issued;
-   *  rejects when the native host is not there at all. */
-  connect(options: SocketConnectOptions): Promise<void>;
-  disconnect(): Promise<void>;
-  /** Send one frame. Rejects when the native send fails, so the caller can
-   *  classify the failure; the contract's `void` return discards it. */
-  send(text: string): Promise<void>;
-  startCertListener(): Promise<void>;
-}
-
-export function createSocketTransport(): DesktopSocketTransport {
+function createSocketConnection(): SocketConnection {
   // Native IPC handles — resolved at runtime in the native context.
   let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null =
     null;
@@ -224,7 +182,6 @@ export function createSocketTransport(): DesktopSocketTransport {
       throw new Error("Tauri APIs not available");
     }
 
-    const wsUrl = wsUrlFor(options.host);
     for (const listener of stateListeners) listener("connecting");
 
     // Set up event listeners before connecting. setupEventListeners() hands
@@ -247,7 +204,7 @@ export function createSocketTransport(): DesktopSocketTransport {
     eventUnsubs.push(...ownUnsubs);
 
     try {
-      await tauriInvoke("ws_connect", { url: wsUrl });
+      await tauriInvoke("ws_connect", { url: options.url });
     } catch (err) {
       if (gen !== generation) {
         // A disconnect() (or a newer connect()) landed while we were suspended
@@ -332,9 +289,5 @@ export function createSocketTransport(): DesktopSocketTransport {
   };
 }
 
-/** The transport itself, with the promise-returning commands `lib/ws.ts`
- *  awaits. */
-export const socketTransport: DesktopSocketTransport = createSocketTransport();
-
-/** The contract-shaped view of the same object, for the registry. */
-export const socket: SocketTransport = socketTransport;
+/** The socket capability: one transport per call. */
+export const socket: SocketTransport = { create: createSocketConnection };
