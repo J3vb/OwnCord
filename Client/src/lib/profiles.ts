@@ -9,8 +9,7 @@
 import { createStore, type Store } from "./store";
 import { ensureHttpProxy } from "./httpProxy";
 import { desktop } from "../platform/desktop";
-import type { SettingsStore } from "../platform/contracts/settings";
-import { isValidProfileShape } from "../platform/desktop/settings";
+import type { SettingsStore, SettingsSnapshot } from "../platform/contracts/settings";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,6 +66,43 @@ export type FetchFn = typeof globalThis.fetch;
 // Validation
 // ---------------------------------------------------------------------------
 
+/**
+ * Validates one profile entry of the stored envelope. A pure type guard over a
+ * plain object: it belongs to the app, not behind the desktop seam, where a
+ * different target's settings store could not reach it.
+ */
+export function isValidProfileShape(item: unknown): item is ServerProfile {
+  if (typeof item !== "object" || item === null) return false;
+  const obj = item as Record<string, unknown>;
+  return (
+    typeof obj.id === "string" &&
+    typeof obj.name === "string" &&
+    obj.name.length > 0 &&
+    typeof obj.host === "string" &&
+    obj.host.length > 0 &&
+    typeof obj.username === "string" &&
+    typeof obj.color === "string" &&
+    typeof obj.autoConnect === "boolean" &&
+    (obj.rememberPassword === undefined || typeof obj.rememberPassword === "boolean") &&
+    (obj.lastConnected === null || typeof obj.lastConnected === "string")
+  );
+}
+
+/**
+ * Validates only the persistence envelope shape (schema version + a profiles
+ * array), without requiring every individual profile inside it to be
+ * well-formed. Used to tell "nothing/garbage was stored" apart from "a valid
+ * envelope containing some malformed entries" — the latter should have only the
+ * bad entries dropped, not the whole envelope discarded.
+ */
+function isValidStoredEnvelope(
+  data: unknown,
+): data is { schemaVersion: number; profiles: unknown[] } {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.schemaVersion === "number" && Array.isArray(obj.profiles);
+}
+
 function isValidStoredData(data: unknown): data is StoredData {
   if (typeof data !== "object" || data === null) return false;
   const obj = data as Record<string, unknown>;
@@ -88,11 +124,29 @@ export type { SettingsStore as PersistenceBackend };
 
 /**
  * The settings backend. Its native half is `platform/desktop/settings.ts`
- * (B7-4) — the same `get_settings` / `save_settings` pair, envelope validation
- * included. Kept as a factory because both call sites construct it that way.
+ * (B7-4) — the same `get_settings` / `save_settings` pair — and the validation
+ * of what comes back stays here, with the profile shape it is about and with
+ * the file-import path that applies the same rule. Kept as a factory because
+ * both call sites construct it that way.
  */
 export function createTauriBackend(): SettingsStore {
-  return desktop.settings!;
+  const store = desktop.settings!;
+  return {
+    async load(): Promise<SettingsSnapshot | null> {
+      const raw = await store.load();
+      if (raw === null) return null;
+      if (!isValidStoredEnvelope(raw)) return null;
+      // The envelope itself is well-formed; salvage whichever individual
+      // profiles are valid rather than discarding the entire stored list
+      // because one entry is malformed (see OC-0060). Mirrors the per-item
+      // tolerance importProfiles() already has.
+      return {
+        schemaVersion: raw.schemaVersion,
+        profiles: raw.profiles.filter(isValidProfileShape),
+      };
+    },
+    save: (data: SettingsSnapshot): Promise<void> => store.save(data),
+  };
 }
 
 // ---------------------------------------------------------------------------
