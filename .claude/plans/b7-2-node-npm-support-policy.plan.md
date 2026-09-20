@@ -78,6 +78,7 @@ Facts at `48681909`, 2026-09-20.
 | `scripts/check-node-policy.mjs`, `scripts/check-node-policy.test.mjs`                                              | create                 | the drift check and its test                                               |
 | `scripts/run.mjs`                                                                                                  | edit `CHECK_HYGIENE`   | run the test then the check                                                |
 | `README.md`, `docs/contributing.md`, `docs/quick-start.md`, `Client/CLAUDE.md`, `.claude/skills/ci-check/SKILL.md` | edit                   | say 26; say "exactly this major", not "24+"                                |
+| `Client/vitest.config.ts`, `scripts/verify-gate-evidence.mjs`                                                      | edit comments only     | two comments that name Node 24 (Task 5)                                    |
 
 ## Tasks
 
