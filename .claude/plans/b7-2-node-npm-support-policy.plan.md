@@ -234,9 +234,9 @@ npx prettier --check .
 
 ## Acceptance
 
-- [ ] `engines` is `^26` / `^11` in all three roots; `.nvmrc` is `26`; the 18 supported-major pins are `26`, plus exactly one `node-version: "24"` line carrying the `deliberately NOT the supported major` comment
-- [ ] `@types/node` `^26`; lockfile diff limited to that and the `engines` mirror; typechecks and 5524 tests green
-- [ ] `check-node-policy.mjs` + test exist, run in `check:hygiene`, and fail on each of the four drift kinds
+- [x] `engines` is `^26` / `^11` in all three roots; `.nvmrc` is `26`; the 18 supported-major pins are `26`, plus exactly one `node-version: "24"` line carrying the `deliberately NOT the supported major` comment
+- [x] `@types/node` `^26`; lockfile diff limited to that and the `engines` mirror; typechecks and 5524 tests green
+- [x] `check-node-policy.mjs` + test exist, run in `check:hygiene`, and fail on each of the four drift kinds
 - [ ] `node-policy` job asserts `EBADENGINE` in all three roots on Node 24 and is ignored by the drift check
-- [ ] No document says "Node 24" or "24+"
-- [ ] `check:hygiene`, `check:client`, `prettier --check` exit 0
+- [x] No document says "Node 24" or "24+"
+- [x] `check:hygiene`, `check:client`, `prettier --check` exit 0
