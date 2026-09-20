@@ -5,18 +5,27 @@
 // produced it, with the text it printed.
 //
 // tests/setup.ts installs this; tests never call installConsoleGuard directly.
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 
 export type GuardedLevel = "warn" | "error";
+
+type ConsoleFn = (...args: unknown[]) => void;
 
 interface RecordedCall {
   readonly level: GuardedLevel;
   readonly args: readonly unknown[];
 }
 
-// The guard's own list. Deliberately not `mock.calls` of the spies below: a
-// test may install its own console spy (or call vi.restoreAllMocks), which
-// would replace or remove ours, so the guard reads this and nothing else.
+// The real functions, captured once at module load — before any test file has
+// had a chance to replace them — so afterEach can put them back and output
+// produced outside a test is not swallowed.
+const realConsole: Readonly<Record<GuardedLevel, ConsoleFn>> = {
+  warn: console.warn,
+  error: console.error,
+};
+
+// The guard's own list. Deliberately not `mock.calls` of a spy: a test may
+// install its own console spy, so the guard reads this and nothing else.
 let recorded: RecordedCall[] = [];
 
 function printable(value: unknown): string {
@@ -58,25 +67,47 @@ export function expectConsole(level: GuardedLevel, matcher: string | RegExp): vo
   recorded.splice(index, 1);
 }
 
+/**
+ * Fail the current test if a console.warn/console.error call went unclaimed.
+ * The guard's afterEach runs this; tests/unit/console-guard.test.ts calls it
+ * directly to prove the guard cannot be switched off.
+ */
+export function assertNoUnclaimedConsole(): void {
+  const unclaimed = recorded;
+  recorded = [];
+  if (unclaimed.length === 0) return;
+  const [first] = unclaimed;
+  throw new Error(
+    `Unexpected console.${first!.level}: ${text(first!)}` +
+      (unclaimed.length > 1 ? `\n(+${unclaimed.length - 1} more unclaimed)` : ""),
+  );
+}
+
 /** Install the guard. Called once, from tests/setup.ts. */
 export function installConsoleGuard(): void {
   beforeEach(() => {
     recorded = [];
     for (const level of ["warn", "error"] as const) {
-      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+      // A plain function, not a vitest mock. `vi.restoreAllMocks`,
+      // `vi.resetAllMocks` and `vi.clearAllMocks` only reach mocks vitest
+      // created, so a test file's own `beforeEach(() => vi.restoreAllMocks())`
+      // — which runs *after* this one — can no longer remove the recorder and
+      // leave its console output unchecked. A test's own
+      // `vi.spyOn(console, "warn")` wraps this function and restores back to
+      // it, so the call still lands in `recorded` unless the test replaces the
+      // implementation.
+      console[level] = (...args: unknown[]) => {
         recorded.push({ level, args });
-      });
+      };
     }
   });
 
   afterEach(() => {
-    const unclaimed = recorded;
-    recorded = [];
-    if (unclaimed.length === 0) return;
-    const [first] = unclaimed;
-    throw new Error(
-      `Unexpected console.${first!.level}: ${text(first!)}` +
-        (unclaimed.length > 1 ? `\n(+${unclaimed.length - 1} more unclaimed)` : ""),
-    );
+    try {
+      assertNoUnclaimedConsole();
+    } finally {
+      console.warn = realConsole.warn;
+      console.error = realConsole.error;
+    }
   });
 }
