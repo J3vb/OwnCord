@@ -62,10 +62,28 @@ jobs:
         with:
           node-version: 26
 
-      # Every branch writes an answer, so this step cannot fail the job.
       # `set -e` is deliberately NOT set: the guards below are explicit `if !`
-      # tests, because a git command that failed is a reason to select
+      # tests, because a git command that FAILED is a reason to select
       # everything, never a reason to skip every job that follows.
+      #
+      # But "this step cannot fail" is not the property to want, and an earlier
+      # version of this step aimed for it: each `--all` branch ended in an
+      # unconditional `exit 0`, so a selector invocation that died wrote nothing
+      # and the step still SUCCEEDED. `needs.changes.result` was then `success`
+      # with every output empty, `outputs.X == 'true'` was false everywhere, and
+      # the run skipped all nine gated jobs AND every step of both server legs —
+      # a green pull request with no check behind it. That branch is also the one
+      # every push to main and every PR into main takes.
+      #
+      # So the rule is the opposite: a selection that could not be COMPUTED must
+      # fail this step, because a failed step means `result != 'success'`, which
+      # every gated condition reads as "run". Failing here is safe by
+      # construction; exiting 0 with no answer is not.
+      #
+      # Nothing writes to $GITHUB_OUTPUT until the assertion at the bottom has
+      # seen a complete answer. Writing through a scratch file also keeps a
+      # half-written primary run from leaving duplicate keys behind when the
+      # fallback appends a second copy.
       - name: Select the jobs this change needs
         id: select
         shell: bash
@@ -74,32 +92,60 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -uo pipefail
-          out="$GITHUB_OUTPUT"
+          answer="$RUNNER_TEMP/selection.txt"
+          : > "$answer"
+
+          # The conservative answer, and the only way to write it: a `--all` that
+          # fails takes the job down with it rather than passing silently.
+          select_all() {
+            if ! node scripts/ci-select.mjs --all --reason "$1" --out "$answer"; then
+              echo "::error::ci-select --all failed ($1) — failing this job so every gated job runs"
+              exit 1
+            fi
+          }
 
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "dev" ]; then
-            node scripts/ci-select.mjs --all --reason "not a pull request into dev" --out "$out"
-            exit 0
+            select_all "not a pull request into dev"
+          else
+            base=""
+            base=$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null) || base=""
+            changed="$RUNNER_TEMP/changed-paths.txt"
+
+            if [ -z "$base" ]; then
+              echo "::warning::no merge base against origin/$BASE_REF — running every check"
+              select_all "no merge base"
+            elif ! git diff --name-status -M "$base" HEAD > "$changed"; then
+              echo "::warning::diff against $base failed — running every check"
+              select_all "diff failed"
+            elif ! node scripts/ci-select.mjs --paths-file "$changed" --out "$answer"; then
+              echo "::warning::selection failed — running every check"
+              : > "$answer"
+              select_all "selection failed"
+            fi
           fi
 
-          base=""
-          base=$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null) || base=""
-          if [ -z "$base" ]; then
-            echo "::warning::no merge base against origin/$BASE_REF — running every check"
-            node scripts/ci-select.mjs --all --reason "no merge base" --out "$out"
-            exit 0
-          fi
-
-          changed="$RUNNER_TEMP/changed-paths.txt"
-          if ! git diff --name-status -M "$base" HEAD > "$changed"; then
-            echo "::warning::diff against $base failed — running every check"
-            node scripts/ci-select.mjs --all --reason "diff failed" --out "$out"
-            exit 0
-          fi
-
-          node scripts/ci-select.mjs --paths-file "$changed" --out "$out" || {
-            echo "::warning::selection failed — running every check"
-            node scripts/ci-select.mjs --all --reason "selection failed" --out "$out"
+          # The assertion the whole fail-safe rests on. Every capability must be
+          # present with a decided value; anything less is an answer this job did
+          # not actually produce, and publishing it would skip jobs on silence.
+          # The expected names come from ci-select.mjs's own CAPABILITIES rather
+          # than a third hand-written copy, so this cannot drift away from the
+          # selector it is checking.
+          caps=$(node -e 'import("./scripts/ci-select.mjs").then((m) => console.log(m.CAPABILITIES.join(" ")))') || {
+            echo "::error::could not read CAPABILITIES from scripts/ci-select.mjs"
+            exit 1
           }
+          missing=""
+          for cap in $caps; do
+            grep -qE "^${cap}=(true|false)$" "$answer" || missing="$missing $cap"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::the selection is missing:$missing — failing this job so every gated job runs"
+            cat "$answer"
+            exit 1
+          fi
+
+          cat "$answer" >> "$GITHUB_OUTPUT"
+          cat "$answer"
 
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
@@ -119,9 +165,19 @@ jobs:
     # exactly that unexpanded form on every dev PR today, which is the same
     # behaviour.
     #
-    # So the matrix always expands — both required contexts always materialise,
-    # and they report `success`, not `skipped`, which also keeps
-    # scripts/verify-gate-evidence.mjs (R-09) satisfied at tag time.
+    # So the matrix always expands and both required contexts always
+    # materialise. Be honest about the price: because the gating is per-step,
+    # a leg that ran NO server check still reports `success` rather than
+    # `skipped`. On a pull request into dev a green `Server Build & Test` can
+    # therefore mean "the server legs were not selected for this diff" instead
+    # of "the server was tested" — read the `Decide whether this leg runs` step
+    # in the log to tell the two apart.
+    #
+    # That is not what keeps release evidence sound; `--all` on main is. A
+    # tagged commit lives on main, where the selector selects every capability,
+    # so the run scripts/verify-gate-evidence.mjs (R-09) reads at tag time is a
+    # full one. What this job must never do is fail to report at all, and that
+    # is the property the comment above is about.
     #
     # `!cancelled()` is load-bearing even so: without a status function, a job
     # whose `needs:` did not succeed is skipped before its `if:` is considered.
@@ -525,6 +581,22 @@ jobs:
 
       - name: Documents must agree with the findings ledger
         run: node scripts/check-doc-counts.mjs
+
+      # A reference document that cites a repository path which no longer
+      # exists reads fine and proves nothing. This lived inside
+      # Server/migrations/community_services_doc_test.go until the change
+      # selector landed: the cited paths are mostly under Client/ and docs/,
+      # and a diff confined to those selects no server job, so the gate was
+      # skipped by exactly the pull requests most likely to break it and the
+      # dangling citation merged green. It belongs in this job because it
+      # reads only Markdown and the existence of paths — no Go toolchain, no
+      # selection. Self-tested first, for the same reason the two matchers
+      # above are.
+      - name: Self-test the citation checker
+        run: node --test scripts/check-doc-citations.test.mjs
+
+      - name: Watched documents must not cite paths that do not exist
+        run: node scripts/check-doc-citations.mjs
 
       # OC-0395. A migration is recorded by filename with no content hash, so
       # editing one that has already shipped repairs nothing for the
