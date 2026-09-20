@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -16,12 +15,21 @@ import (
 // data-ownership and lifecycle model for the seven services B5 adds or
 // changes, and HP-5 reviews against it. Nothing compared it to the tree until
 // this test, and the failure it exists to prevent is the quiet one: a service
-// section deleted, a "Tested at" cell emptied, a cited test file renamed, or a
-// B5 migration landing with no data class documented for it.
+// section deleted, a "Tested at" cell emptied, or a B5 migration landing with
+// no data class documented for it.
 //
 // It lives in the migrations package because the coupling B5-0's acceptance
 // asks for is to the migrations B5 adds, and the embedded FS below is that
-// list by construction.
+// list by construction. Everything it checks is therefore about MIGRATIONS and
+// the document's own shape.
+//
+// The one part that was NOT about migrations — that every repository path the
+// document cites still exists — moved to scripts/check-doc-citations.mjs, which
+// runs in the unconditional `Docs & Ledger Consistency` job. It had to move:
+// the paths cited are mostly under Client/ and docs/, and since `dfa5f66a` a
+// diff confined to those selects no server job (scripts/ci-select.mjs), so a
+// pull request that renamed a cited file skipped the only leg that ran this
+// gate and merged green. That script's header records the reproduction.
 //
 // RUN IT WITH -count=1. The document is outside this module, so Go's test
 // cache does not record it as an input: edit a cell, re-run a plain
@@ -30,7 +38,6 @@ import (
 // for that reason — the same rule as TestServerBoundariesDocIsCurrent.
 const (
 	communityDoc = "../../docs/architecture/community-services.md"
-	repoRoot     = "../.."
 
 	// The migration range B5 reserves, in plan order: 044 B5-2, 045 B5-4,
 	// 046 B5-6, 047 B5-7, 048 B5-8, 049 B5-9, 050 B5-10.
@@ -81,16 +88,6 @@ var backtickSpan = regexp.MustCompile("`([^`\n]+)`")
 // migrationFile finds every NNN_name.sql the document names.
 var migrationFile = regexp.MustCompile(`\b(\d{3})_[a-z0-9_]+\.sql\b`)
 
-// plannedPaths are paths the document names that do not exist yet, each with
-// the step that creates it. The check runs in both directions: an unlisted
-// missing path fails, and a listed path that now EXISTS fails too, because
-// that means the step landed and the exemption is stale.
-//
-// Empty since B5-1 landed `Server/safefetch` (PR #1541): the exemption it held
-// was removed by the reverse check below, which is the whole point of having
-// one. Later steps add entries here for the packages they are about to create.
-var plannedPaths = map[string]string{}
-
 func TestCommunityServicesDocIsCurrent(t *testing.T) {
 	// Not a Skipf: a gate that excuses itself when its subject moves is worse
 	// than no gate (the same posture as TestServerBoundariesDocIsCurrent).
@@ -104,7 +101,6 @@ func TestCommunityServicesDocIsCurrent(t *testing.T) {
 	checkServicesPresent(t, sections)
 	checkTables(t, sections)
 	checkTestedAtCells(t, sections)
-	checkCitedPaths(t, doc)
 	checkMigrationCoupling(t, doc)
 }
 
@@ -257,40 +253,6 @@ func checkTestedAt(t *testing.T, service string, row int, cell string) {
 	}
 	t.Errorf("service %q abuse row %d: the \"Tested at\" cell %q neither cites a repository path "+
 		"nor names an owing step (B5-0..B5-12, HP-5, B7, B8, B9).", service, row, trimmed)
-}
-
-// ── cited paths ─────────────────────────────────────────────────────────────
-
-// checkCitedPaths fails when the document names a repository path that is not
-// there. Doc rot in a reference document is invisible otherwise: a renamed
-// test file leaves a citation that reads fine and proves nothing.
-func checkCitedPaths(t *testing.T, doc string) {
-	t.Helper()
-	seen := map[string]bool{}
-	for _, m := range backtickSpan.FindAllStringSubmatch(doc, -1) {
-		p := m[1]
-		if !repoPath.MatchString(p) || seen[p] {
-			continue
-		}
-		seen[p] = true
-		_, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(strings.TrimSuffix(p, "/"))))
-		exists := err == nil
-		step, planned := plannedPaths[p]
-		switch {
-		case exists && planned:
-			t.Errorf("%s exempts `%s` as owed by %s, but it exists now. Drop the exemption from plannedPaths.",
-				communityDoc, p, step)
-		case !exists && !planned:
-			t.Errorf("%s cites `%s`, which does not exist. Fix the citation, or add it to plannedPaths "+
-				"with the step that creates it.", communityDoc, p)
-		}
-	}
-	for p, step := range plannedPaths {
-		if !seen[p] {
-			t.Errorf("plannedPaths exempts `%s` (owed by %s) but %s does not cite it any more; drop the entry.",
-				p, step, communityDoc)
-		}
-	}
 }
 
 // ── migration coupling ──────────────────────────────────────────────────────
