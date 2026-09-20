@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, bracketBareIPv6Host } from "../../src/lib/ws";
 import { addLogListener, type LogEntry } from "../../src/lib/logger";
+import { expectConsole } from "../helpers/console";
 
 describe("WebSocket Client (Tauri proxy)", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -191,6 +192,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
         payload: { message: "Invalid token" },
       }),
     );
+    expectConsole("error", /\[ws\] Authentication failed/);
 
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -268,6 +270,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     });
 
     emitTauriEvent("ws-message", bigData);
+    expectConsole("warn", /\[ws\] Message exceeds size limit, dropping/);
     expect(messages).toHaveLength(0);
   });
 
@@ -280,6 +283,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     client.on("chat_message", (p) => messages.push(p));
 
     emitTauriEvent("ws-message", "not-json{{{");
+    expectConsole("warn", /\[ws\] Failed to parse WS message/);
     expect(messages).toHaveLength(0);
   });
 
@@ -292,6 +296,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const remove = addLogListener((e) => entries.push(e));
     const secret = "SUPER_SECRET_eyJhbGciOiJIUzI1NiJ9";
     emitTauriEvent("ws-message", secret + " not-json{{{");
+    expectConsole("warn", /\[ws\] Failed to parse WS message/);
     remove();
 
     // The decrypted frame must never reach the (on-disk-persisted) log...
@@ -1033,6 +1038,9 @@ describe("cleanupEventListeners edge cases", () => {
     // Disconnect triggers cleanupEventListeners — should not crash
     client.disconnect();
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[ws\] Failed to unsubscribe Tauri event listener/);
+    expectConsole("warn", /\[ws\] Failed to unsubscribe Tauri event listener/);
+    expectConsole("warn", /\[ws\] Failed to unsubscribe Tauri event listener/);
 
     expect(client.getState()).toBe("disconnected");
   });
@@ -1235,6 +1243,8 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
         },
       }),
     );
+    expectConsole("error", /\[ws\] Listener error for chat_message/);
+    expectConsole("error", /\[ws\] Listener error for chat_message/);
 
     // Both non-throwing listeners should have received the message
     expect(received).toEqual(["hello", "fourth:hello"]);

@@ -60,6 +60,7 @@ async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
     const pcManager = room.engine.pcManager;
     const reports: RTCStatsReport[] = [];
     for (const transport of [pcManager?.publisher, pcManager?.subscriber]) {
+      // oxlint-disable-next-line no-await-in-loop -- two transports only: parallelising a two-element poll buys nothing and complicates the optional chaining
       const report = await transport?.getStats();
       if (report) reports.push(report);
     }

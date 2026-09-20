@@ -136,6 +136,7 @@ export async function attemptAutoReconnect(
       };
       if (superseded()) {
         log.info("Auto-reconnect aborted after room creation");
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: the aborted attempt tears down its own room before returning
         await cleanupAbortedReconnect();
         return;
       }
@@ -155,6 +156,7 @@ export async function attemptAutoReconnect(
 
       if (superseded()) {
         log.info("Auto-reconnect aborted before room connect");
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: the aborted attempt tears down its own room before returning
         await cleanupAbortedReconnect();
         return;
       }
@@ -165,6 +167,7 @@ export async function attemptAutoReconnect(
       await deps.reannounceE2EE();
 
       if (superseded()) {
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: the aborted attempt tears down its own room before returning
         await cleanupAbortedReconnect();
         return;
       }
@@ -174,6 +177,7 @@ export async function attemptAutoReconnect(
 
       if (superseded()) {
         log.info("Auto-reconnect aborted after room connect");
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: the aborted attempt tears down its own room before returning
         await cleanupAbortedReconnect();
         return;
       }
@@ -214,6 +218,7 @@ export async function attemptAutoReconnect(
       const savedInput = loadPref<string>("audioInputDevice", "");
       if (savedInput) {
         try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the device switch must land before the next superseded check
           await newRoom.switchActiveDevice("audioinput", savedInput);
         } catch (err) {
           log.warn("Reconnect: saved input device unavailable, using default", err);
@@ -231,6 +236,7 @@ export async function attemptAutoReconnect(
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) {
         try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the device switch must land before the next superseded check
           await newRoom.switchActiveDevice("audiooutput", savedOutput);
         } catch (err) {
           log.warn("Reconnect: saved output device unavailable, using default", err);

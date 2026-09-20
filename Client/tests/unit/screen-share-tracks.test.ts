@@ -17,6 +17,7 @@ import process from "node:process";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
+import { expectConsole } from "../helpers/console";
 
 const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
@@ -249,6 +250,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable camera: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
     expect(createLocalVideoTrack).not.toHaveBeenCalled();
     expect(voiceStore.getState().localCamera).toBe(false);
@@ -260,6 +262,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable camera: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
   });
 
@@ -273,6 +276,7 @@ describe("enableCamera", () => {
 
     await enableCamera(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable camera/);
     // Without this the camera indicator light stays on with nothing published.
     expect(track.stop).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBeNull();
@@ -291,6 +295,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable camera/);
     expect(deps.onError).toHaveBeenCalledWith(message);
   });
 
@@ -398,6 +403,7 @@ describe("enableCamera", () => {
     rejectA(new DOMException("busy", "NotReadableError"));
     await enablingA;
 
+    expectConsole("warn", /\[screenShare\] Superseded camera enable failed/);
     expect(trackB.stop).not.toHaveBeenCalled();
     expect(state.manualCameraTrack).toBe(trackB);
     expect(voiceStore.getState().localCamera).toBe(true);
@@ -432,6 +438,7 @@ describe("disableCamera", () => {
 
     await disableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Failed to disable camera track \(non-fatal\)/);
     // The finally block matters: a failed teardown must not leave the UI
     // showing a camera that is not publishing.
     expect(voiceStore.getState().localCamera).toBe(false);
@@ -580,6 +587,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable screenshare: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
   });
@@ -594,6 +602,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     // Otherwise the OS keeps showing "screen is being shared" forever.
     expect(video.stop).toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([]);
@@ -608,6 +617,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
   });
 
@@ -636,6 +646,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     // track.stop() is programmatic and never fires the DOM "ended" event, so
     // LiveKit's ended-driven auto-unpublish never runs — without an explicit
     // unpublish the video track stays live in the room while nothing in this
@@ -743,6 +754,7 @@ describe("enableScreenshare", () => {
     rejectA(new Error("capture failed"));
     await enablingA;
 
+    expectConsole("warn", /\[screenShare\] Superseded screenshare enable failed/);
     expect(videoB.stop).not.toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([videoB]);
     expect(voiceStore.getState().localScreenshare).toBe(true);
@@ -775,6 +787,7 @@ describe("disableScreenshare", () => {
 
     await disableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
+    expectConsole("warn", /\[screenShare\] Failed to disable screenshare track \(non-fatal\)/);
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
@@ -1022,6 +1035,10 @@ it.each(["camera", "screen"])(
       if (kind === "screen") expect(audio.stop).toHaveBeenCalled();
       // Let a rejected unpublish reach the host's unhandled-rejection turn.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expectConsole("warn", /\[screenShare\] Failed to unpublish stopped video track/);
+      if (kind === "screen") {
+        expectConsole("warn", /\[screenShare\] Failed to unpublish stopped video track/);
+      }
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       process.off("unhandledRejection", unhandled);

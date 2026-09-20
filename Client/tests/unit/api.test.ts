@@ -20,6 +20,7 @@ vi.mock("../../src/lib/httpProxy", () => ({
 }));
 
 import { createApiClient, ApiClientError, type OnUnauthorized } from "../../src/lib/api";
+import { expectConsole } from "../helpers/console";
 
 function jsonResponse(data: unknown, status = 200): Response {
   return {
@@ -140,21 +141,25 @@ describe("API Client", () => {
     it("throws ApiClientError on non-ok response", async () => {
       mockFetch.mockResolvedValue(errorResponse(403, "FORBIDDEN", "No permission"));
       await expect(api.getMe()).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.getMe()).rejects.toMatchObject({
         status: 403,
         code: "FORBIDDEN",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("calls onUnauthorized on 401", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       await expect(api.getMe()).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
     it("does not call onUnauthorized on other errors", async () => {
       mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       await expect(api.getMe()).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -162,16 +167,19 @@ describe("API Client", () => {
       const networkErr = new TypeError("Failed to fetch");
       mockFetch.mockRejectedValue(networkErr);
       await expect(api.getMe()).rejects.toBe(networkErr);
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error fetch rejection (string) in a new Error", async () => {
       mockFetch.mockRejectedValue("connection refused");
       await expect(api.getMe()).rejects.toThrow("connection refused");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error non-string fetch rejection in a new Error via String()", async () => {
       mockFetch.mockRejectedValue(42);
       await expect(api.getMe()).rejects.toThrow("42");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("parseError falls back to statusText when JSON body is not parseable", async () => {
@@ -181,6 +189,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "Bad Gateway",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("parseError uses UNKNOWN when error field missing from JSON", async () => {
@@ -196,6 +205,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "bad input",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("parseError uses statusText when message field missing from JSON", async () => {
@@ -211,6 +221,7 @@ describe("API Client", () => {
         code: "VALIDATION",
         message: "Unprocessable",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("handles 204 No Content response", async () => {
@@ -370,10 +381,12 @@ describe("API Client", () => {
 
       it("still rejects hosts with disallowed characters", () => {
         expect(() => api.setConfig({ host: "evil host name" })).toThrow("Invalid host format");
+        expectConsole("error", /\[api\] setConfig rejected invalid host/);
       });
 
       it("still rejects hosts that could inject headers", () => {
         expect(() => api.setConfig({ host: "evil\r\nhost:8443" })).toThrow("Invalid host format");
+        expectConsole("error", /\[api\] setConfig rejected invalid host/);
       });
     });
   });
@@ -524,14 +537,17 @@ describe("API Client", () => {
     it("enableTotp throws ApiClientError on bad password", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "INVALID_PASSWORD", "Wrong password"));
       await expect(api.enableTotp("wrongpw")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.enableTotp("wrongpw")).rejects.toMatchObject({
         status: 401,
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("confirmTotp throws ApiClientError on invalid code", async () => {
       mockFetch.mockResolvedValue(errorResponse(400, "INVALID_CODE", "Invalid verification code"));
       await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("confirmTotp does NOT call onUnauthorized on a wrong enrollment code, even though the server answers 401", async () => {
@@ -545,6 +561,7 @@ describe("API Client", () => {
         status: 401,
         code: "UNAUTHORIZED",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -553,9 +570,11 @@ describe("API Client", () => {
         errorResponse(403, "TOTP_REQUIRED", "2FA is required by server policy"),
       );
       await expect(api.disableTotp("pw")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.disableTotp("pw")).rejects.toMatchObject({
         status: 403,
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 
@@ -578,6 +597,7 @@ describe("API Client", () => {
         status: 401,
         code: "INVALID_TOTP",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -587,22 +607,26 @@ describe("API Client", () => {
         status: 429,
         code: "RATE_LIMITED",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("re-throws Error when fetch rejects with Error", async () => {
       const networkErr = new TypeError("Network failure");
       mockFetch.mockRejectedValue(networkErr);
       await expect(api.verifyTotp("123456", "pt")).rejects.toBe(networkErr);
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error string rejection in new Error", async () => {
       mockFetch.mockRejectedValue("dns lookup failed");
       await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("dns lookup failed");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error non-string rejection via String()", async () => {
       mockFetch.mockRejectedValue(99);
       await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("99");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("passes AbortSignal to fetch", async () => {
@@ -740,12 +764,14 @@ describe("API Client", () => {
         status: 400,
         code: "BAD_REQUEST",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("uploadAvatar calls onUnauthorized on 401", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["x"], "me.png", { type: "image/png" });
       await expect(api.uploadAvatar(file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -756,12 +782,14 @@ describe("API Client", () => {
         status: 413,
         code: "FILE_TOO_LARGE",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("uploadFile calls onUnauthorized on 401 like other REST calls", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["x"], "f.txt");
       await expect(api.uploadFile(file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -769,6 +797,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       const file = new File(["x"], "f.txt");
       await expect(api.uploadFile(file)).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -797,6 +826,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "Internal Server Error",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 
@@ -860,6 +890,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["png"], "wave.png", { type: "image/png" });
       await expect(api.uploadEmoji("wave", file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -870,6 +901,7 @@ describe("API Client", () => {
         status: 403,
         code: "FORBIDDEN",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -1164,6 +1196,7 @@ describe("API Client", () => {
         status: 401,
         code: "UNAUTHORIZED",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 

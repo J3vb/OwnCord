@@ -249,10 +249,12 @@ describe("AudioPipeline", () => {
 
     it("falls back to setTimeout when AudioWorkletNode constructor throws", async () => {
       setupPipelineWithWorklet("success");
-      // Override AudioWorkletNode to throw
+      // Override AudioWorkletNode to throw. A `function`, not an arrow: the
+      // pipeline constructs it with `new`, and vitest warns about a `new` on a
+      // mock that is not constructible.
       vi.stubGlobal(
         "AudioWorkletNode",
-        vi.fn().mockImplementation(() => {
+        vi.fn(function () {
           throw new Error("AudioWorkletNode not supported");
         }),
       );

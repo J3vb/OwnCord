@@ -32,7 +32,7 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 // -- Server host state --------------------------------------------------------
 
 /** Module-level server host for resolving relative attachment URLs. */
-let _serverHost: string | null = null;
+let serverHost: string | null = null;
 
 /** Set the server host (called once from MainPage on connect).
  *  Strips a trailing default-HTTPS ":443" and lowercases, mirroring
@@ -49,7 +49,7 @@ let _serverHost: string | null = null;
  *  same guard as tofu.rs::cert_store_key (OC-0215).
  *
  *  A bare (unbracketed) IPv6 literal is then wrapped in brackets so it forms
- *  a parseable authority: resolveServerUrl interpolates _serverHost directly
+ *  a parseable authority: resolveServerUrl interpolates serverHost directly
  *  into a URL, and WHATWG's URL.host is always the bracketed form for IPv6,
  *  so isServerUrl's comparison also needs the bracketed form to ever match
  *  (OC-0241). */
@@ -58,7 +58,7 @@ export function setServerHost(host: string): void {
     host.endsWith(":443") && (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
       ? host.slice(0, -4)
       : host;
-  _serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
+  serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
@@ -66,8 +66,8 @@ export function resolveServerUrl(url: string): string {
   if (url.startsWith("http://") || url.startsWith("https://")) {
     return url;
   }
-  if (_serverHost !== null) {
-    return `https://${_serverHost}${url}`;
+  if (serverHost !== null) {
+    return `https://${serverHost}${url}`;
   }
   return url;
 }
@@ -178,10 +178,10 @@ function sanitizeContentType(raw: string): string {
 
 /** Check if a URL points to the configured OwnCord server. */
 function isServerUrl(url: string): boolean {
-  if (_serverHost === null) return false;
+  if (serverHost === null) return false;
   try {
     const parsed = new URL(url);
-    return parsed.host === _serverHost;
+    return parsed.host === serverHost;
   } catch {
     return false;
   }

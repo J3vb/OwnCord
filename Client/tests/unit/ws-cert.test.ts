@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
+import { expectConsole } from "../helpers/console";
 
 describe("cert mismatch blocking", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -55,6 +56,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(client.getState()).toBe("disconnected");
 
@@ -98,6 +100,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(client.getState()).toBe("disconnected");
 
@@ -139,6 +142,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(client.getState()).toBe("disconnected");
 
@@ -183,6 +187,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(client.getState()).toBe("disconnected");
 
@@ -218,6 +223,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(client.getState()).toBe("disconnected");
 
@@ -246,6 +252,7 @@ describe("cert mismatch blocking", () => {
       fingerprint: "sha256:NEW",
       status: "first_use",
     });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
 
     expect(firstUse).toHaveLength(1);
     expect(mismatch).toHaveLength(0);
@@ -264,6 +271,7 @@ describe("cert mismatch blocking", () => {
       fingerprint: "sha256:NEW",
       status: "first_use",
     });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
 
     expect(firstUse).toHaveLength(1);
   });
@@ -296,6 +304,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:ORIGINAL",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(mismatchEvents).toHaveLength(1);
 
@@ -340,6 +349,7 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     // Still notified — so a connect-page prompt for that OTHER host works...
     expect(mismatchEvents).toHaveLength(1);
@@ -376,6 +386,8 @@ describe("cert mismatch blocking", () => {
       status: "mismatch",
     });
     expect(client.getState()).toBe("disconnected");
+
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     // A fresh connect() call — not preceded by disconnect() or
     // acceptCertFingerprint() (e.g. the suppressed-modal path where a second
@@ -422,6 +434,7 @@ describe("cert mismatch blocking", () => {
       fingerprint: "sha256:NEW",
       status: "mismatch",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
     expect(client.getState()).toBe("disconnected");
 
     mockInvoke.mockClear();
@@ -695,6 +708,7 @@ describe("acceptCertFingerprint edge cases", () => {
       fingerprint: "sha256:NEW",
       status: "mismatch",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
     expect(client.getState()).toBe("disconnected");
 
     // Accept fingerprint
@@ -747,6 +761,7 @@ describe("disconnect resets certMismatchBlock", () => {
       fingerprint: "sha256:NEW",
       status: "mismatch",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     // Intentional disconnect should clear the block
     client.disconnect();

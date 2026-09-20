@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionScope } from "../../src/lib/sessionScope";
+import { expectConsole } from "../helpers/console";
 
 describe("SessionScope", () => {
   it("invalidates identity before cleanup and cleans all resources exactly once", () => {
@@ -14,6 +15,7 @@ describe("SessionScope", () => {
     const unregister = scope.addCleanup(() => calls.push("already released"));
     unregister();
     scope.dispose();
+    expectConsole("warn", /\[session\] Session resource cleanup failed/);
     scope.dispose();
     expect(calls).toEqual(["listener", "timer"]);
     const late = vi.fn();

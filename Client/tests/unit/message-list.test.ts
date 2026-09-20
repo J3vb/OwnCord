@@ -20,6 +20,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
   messagesStore.setState(() => ({
@@ -755,6 +756,12 @@ describe("MessageList", () => {
         setMessages(1, [makeMessage({ id: 1, content: `v${i}` })]);
         messagesStore.flush();
       }
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
 
       const rowDuringBurst = container.querySelector("[data-testid='message-1']");
       expect(rowDuringBurst).not.toBeNull();
@@ -807,6 +814,7 @@ describe("MessageList", () => {
         // or touching the DOM, so the target (far outside the last rendered
         // window) never actually renders.
         const result = msgList.scrollToMessage(90);
+        expectConsole("error", /\[MessageList\] renderWindow REBUILD called >30 times in 2s/);
 
         // The rebuild did not happen — the row is not in the DOM — so this must
         // be reported as a failed jump (matching the "false if the message is

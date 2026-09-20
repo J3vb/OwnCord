@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
+import { expectConsole } from "../helpers/console";
 
 describe("EmojiPicker", () => {
   let container: HTMLDivElement;
@@ -139,13 +140,15 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
-  it("renders a resolvable custom emoji as an image, not as its token text", () => {
+  it("renders a resolvable custom emoji as an image, not as its token text", async () => {
     setCustomEmoji([{ id: 1, shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }]);
     emojiStore.flush();
     const { picker } = makePicker({
       customEmoji: [{ shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }],
     });
-
+    await vi.waitFor(() => {
+      expectConsole("error", "[attachments] Failed to fetch attachment image");
+    });
     const cell = picker.element.querySelector(".ep-emoji-custom");
     expect(cell).not.toBeNull();
     expect(cell?.querySelector("img.custom-emoji")?.getAttribute("data-shortcode")).toBe(
@@ -155,13 +158,16 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
-  it("selecting a custom emoji inserts its :shortcode: token", () => {
+  it("selecting a custom emoji inserts its :shortcode: token", async () => {
     setCustomEmoji([{ id: 1, shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }]);
     emojiStore.flush();
     const onSelect = vi.fn();
     const { picker } = makePicker({
       onSelect,
       customEmoji: [{ shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }],
+    });
+    await vi.waitFor(() => {
+      expectConsole("error", "[attachments] Failed to fetch attachment image");
     });
 
     (picker.element.querySelector(".ep-emoji-custom") as HTMLElement).click();
@@ -374,7 +380,7 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
-  it("keeps an unresolvable :shortcode: usable again once its server's emoji load", () => {
+  it("keeps an unresolvable :shortcode: usable again once its server's emoji load", async () => {
     localStorage.setItem("owncord:recent-emoji", JSON.stringify([":blobwave:", "😀"]));
     clearCustomEmoji();
     emojiStore.flush();
@@ -391,6 +397,9 @@ describe("EmojiPicker", () => {
     emojiStore.flush();
 
     const { picker: reopened } = makePicker();
+    await vi.waitFor(() => {
+      expectConsole("error", "[attachments] Failed to fetch attachment image");
+    });
     const recentLabel = Array.from(reopened.element.querySelectorAll(".ep-category-label")).find(
       (l) => l.textContent === "Recent",
     );

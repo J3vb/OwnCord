@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
 }));
 
 const { initDeepLinks, parseInviteLink } = await import("@lib/deep-link");
+import { expectConsole } from "../helpers/console";
 
 beforeEach(() => {
   register.mockReset().mockResolvedValue(undefined);
@@ -96,6 +97,8 @@ describe("initDeepLinks", () => {
     const onInvite = vi.fn();
 
     await initDeepLinks(onInvite);
+    expectConsole("warn", /\[deep-link\] Ignoring unrecognized deep link/);
+    expectConsole("warn", /\[deep-link\] Ignoring unrecognized deep link/);
 
     expect(onInvite).toHaveBeenCalledTimes(1);
     expect(onInvite).toHaveBeenCalledWith("GOOD", undefined);
@@ -168,6 +171,7 @@ describe("initDeepLinks", () => {
     const onInvite = vi.fn();
 
     await expect(initDeepLinks(onInvite)).resolves.toBeUndefined();
+    expectConsole("warn", /\[deep-link\] Failed to initialize deep links/);
 
     expect(onInvite).not.toHaveBeenCalled();
     expect(onOpenUrl).not.toHaveBeenCalled();
@@ -177,6 +181,7 @@ describe("initDeepLinks", () => {
     onOpenUrl.mockRejectedValue(new Error("no listener slot"));
 
     await expect(initDeepLinks(vi.fn())).resolves.toBeUndefined();
+    expectConsole("warn", /\[deep-link\] Failed to initialize deep links/);
   });
 });
 

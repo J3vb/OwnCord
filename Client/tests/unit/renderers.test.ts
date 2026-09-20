@@ -25,6 +25,7 @@ import {
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
+import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -500,7 +501,7 @@ describe("renderers", () => {
       setReactionUsersFetcher(null);
     });
 
-    it("renders attachments for image types", () => {
+    it("renders attachments for image types", async () => {
       const msg = makeMessage({
         attachments: [
           {
@@ -515,6 +516,9 @@ describe("renderers", () => {
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
+      await vi.waitFor(() => {
+        expectConsole("error", "[attachments] Failed to fetch attachment image");
+      });
 
       expect(container.querySelector(".msg-image")).not.toBeNull();
 
