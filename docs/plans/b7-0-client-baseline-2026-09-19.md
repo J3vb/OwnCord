@@ -232,3 +232,49 @@ half is recorded above.
   listener add/remove sites.
 - **HP-7** cannot cite a startup or memory baseline until someone runs the
   method above on a real desktop and appends the numbers to this file.
+
+## B7-7 bundle-budget baseline (2026-09-20)
+
+**Amended 2026-09-20 (owner decision): the gzip tool is Node
+`zlib.gzipSync` at level 9, not the `gzip -9` CLI.** Decision 10 named
+`gzip -9`; this keeps the level and format but pins the implementation —
+the CLI differs between GNU, macOS and busybox, and a gate people first
+meet in CI is a bad gate for a Windows-first desktop app. Node's zlib is
+pinned by the repo's own Node ^26 policy and runs identically everywhere,
+so `bundle-budget.mjs` needs no `optional()` probe. Both figures for the
+same pre-fix `livekitSession` chunk, recorded once as a bridge to the
+gzip-CLI column above: CLI `gzip -9 -c` 1,358,542 B, Node zlib-9
+1,344,534 B — the spread is well inside the budget headroom.
+
+Measured at `dev` `4c45d26a` (B7-7 base) with
+`cd Client && npm run build:budget` — the scratch `--manifest` build whose
+`dist-budget/.vite/manifest.json` names every chunk, so the startup payload
+is the entry's **static closure** (entry file + static imports + linked
+CSS), not a fixed file list:
+
+| Measure                       | Before (barrel import)              | After (deep import, B7-7) | Budget          |
+| ----------------------------- | ----------------------------------- | ------------------------- | --------------- |
+| Startup closure (zlib-9)      | 87,982 B                            | 87,974 B                  | 90,000 B        |
+| `livekitSession` (zlib-9)     | 1,344,534 B (CLI gzip-9: 1,358,542) | 20,192 B                  | 800,000 B       |
+| `livekitSession` minified     | 2,003,591 B                         | 78,194 B                  | —               |
+| `livekit` (zlib-9)            | 132,225 B                           | 132,225 B                 | 135,000 B, lazy |
+| `MainPage` (zlib-9)           | 56,853 B                            | 56,855 B                  | 60,000 B        |
+| `AGFzbQ` embedded-Wasm marker | present in `livekitSession`         | absent everywhere         | forbidden       |
+
+The before/after gap is the RNNoise barrel fix (C-07): the barrel re-exported
+`createRNNWasmModuleSync`, whose module embeds ~1.9 MB of WASM as base64, and
+the package has no `sideEffects` field so it shipped in `livekitSession`
+though nothing called it. The deep import keeps the same async factory and the
+same runtime `locateFile`/fetch paths — only the import specifier changed.
+
+The startup closure's ~2 kB headroom under the 90 kB ceiling is deliberate
+per the ratchet rule (decision 9): thresholds move only with a decomposition
+milestone, and B7-9 sets the real ceiling from measurement. The
+`livekitSession` budget is the owner's own decision-10 post-decomposition
+figure (800 kB) adopted now — 1,400 kB would pass the very barrel regression
+this milestone fixes (1,358,542 B CLI gzip-9), and the no-embedded-WASM
+marker assertion catches that regression exactly rather than by size.
+
+"Runtime" in the milestone name is bundle-size-only: startup time and memory
+have a defined method above and are measured on a real desktop; no
+runtime-timing gate is added in CI.
