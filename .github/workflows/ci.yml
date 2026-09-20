@@ -297,12 +297,23 @@ jobs:
       # line here. Server/ci_tags_test.go guards this class going forward:
       # it fails if any tagged Server test file has no `go test` leg above
       # that both sets its tag and runs its package.
+      #
+      # `-run` narrows this leg to the tests that need a plain build, because
+      # running the whole package here re-ran everything the two universal legs
+      # already cover. Measured: the package is 62.6s, of which
+      # TestSetupLimiter_ReapsStaleEntries is 60.00s and is UNTAGGED — it is in
+      # the -race and deadlock legs already. This leg exists only for the
+      # `!race && !deadlock` tests, so it runs only those (0.088s).
+      # ci_tags_test.go now also requires the -run pattern to match every test
+      # in every constrained file it claims to cover, so adding a second
+      # `!race && !deadlock` test fails the guard instead of being silently
+      # left out of the only leg that could run it.
       - name: Run tag-gated tests (-tags wazero, -tags otel)
         if: matrix.os == 'ubuntu-latest'
         run: |
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
-          go test -count=1 ./admin/...
+          go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
