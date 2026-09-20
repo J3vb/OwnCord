@@ -31,6 +31,14 @@ type goTestInvocation struct {
 	line     string
 	tags     map[string]bool
 	packages []string
+	// run is the -run pattern, decoded, or "" when the invocation runs every
+	// test in the packages it names. A pattern narrows what a leg EXECUTES, so
+	// a leg that sets the right tags and then filters out the one test that
+	// needed them is not coverage. Without this field a future
+	// `!race && !deadlock` test added beside the RingBuffer one would be
+	// compiled into the plain leg and then filtered out by its -run, silently,
+	// which is the same shape of hole as OC-0398 itself.
+	run string
 }
 
 var goTestLineRe = regexp.MustCompile(`\bgo test\b(.*)$`)
@@ -60,6 +68,13 @@ func parseGoTestInvocations(ciYML string) []goTestInvocation {
 				for tag := range strings.SplitSeq(strings.TrimPrefix(f, "-tags="), ",") {
 					inv.tags[tag] = true
 				}
+			case f == "-run":
+				if i+1 < len(fields) {
+					inv.run = unquote(fields[i+1])
+					i++
+				}
+			case strings.HasPrefix(f, "-run="):
+				inv.run = unquote(strings.TrimPrefix(f, "-run="))
 			case strings.HasPrefix(f, "./"), f == "...":
 				inv.packages = append(inv.packages, f)
 			}
@@ -71,16 +86,75 @@ func parseGoTestInvocations(ciYML string) []goTestInvocation {
 	return out
 }
 
+// unquote strips one layer of shell quoting. The pattern is read as text out of
+// a YAML `run:` block, so a pattern written as -run "^TestX$" arrives with its
+// quotes still attached; without this the regex would be anchored on a literal
+// quote and match nothing, and the guard would fail on a correct ci.yml.
+func unquote(s string) string {
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
+var testFuncRe = regexp.MustCompile(`(?m)^func (Test[A-Za-z0-9_]*)\(`)
+
+// topLevelTests returns the top-level test functions a file declares — the
+// names `-run` is matched against. TestMain is excluded because -run never
+// applies to it, so requiring a pattern to name it would be a false alarm.
+func topLevelTests(src []byte) []string {
+	var names []string
+	for _, m := range testFuncRe.FindAllSubmatch(src, -1) {
+		if name := string(m[1]); name != "TestMain" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// runCovers reports whether an invocation's -run pattern would execute every
+// test named in tests. An empty pattern runs everything and so covers them all,
+// and so does any pattern when the file declares no top-level test at all —
+// there is nothing for -run to filter.
+func runCovers(pattern string, tests []string) bool {
+	if pattern == "" {
+		return true
+	}
+	// `go test -run` splits its pattern on "/" into one pattern per subtest
+	// level; only the first part is matched against a top-level test name.
+	first, _, _ := strings.Cut(pattern, "/")
+	re, err := regexp.Compile(first)
+	if err != nil {
+		return false // an unparseable pattern cannot be shown to cover anything
+	}
+	for _, name := range tests {
+		if !re.MatchString(name) {
+			return false
+		}
+	}
+	return true
+}
+
 // packageCovered reports whether one of the invocation's package patterns
-// (e.g. "./...", "./plugin/...") includes the package at pkgDir (e.g.
-// "admin", "" for the Server root) the way `go test`'s "..." wildcard does.
+// (e.g. "./...", "./plugin/...", "./admin/") includes the package at pkgDir
+// (e.g. "admin", "" for the Server root) the way `go test`'s "..." wildcard and
+// its plain-directory form both do.
 func packageCovered(patterns []string, pkgDir string) bool {
 	pkgDir = filepath.ToSlash(pkgDir)
 	for _, p := range patterns {
 		if p == "./..." || p == "..." {
 			return true // covers every package, including the Server root
 		}
+		// "./admin/...", "./admin" and "./admin/" all name the same package and
+		// `go test` accepts every one of them. Trimming only the "/..." suffix
+		// left "admin/" for the trailing-slash form, which then matched
+		// nothing — so a contributor writing the shortest spelling was told
+		// their leg covered no package at all.
 		p = strings.TrimSuffix(strings.TrimPrefix(p, "./"), "/...")
+		p = strings.TrimSuffix(p, "/")
 		if pkgDir == p || strings.HasPrefix(pkgDir, p+"/") {
 			return true
 		}
@@ -104,14 +178,18 @@ var knownGOOSGOARCH = map[string]bool{
 }
 
 // isConstraintCovered reports whether some invocation both runs pkgDir's
-// package and sets tags such that expr evaluates true. Tags outside
-// knownGOOSGOARCH must come from an invocation's own -tags/-race flags —
-// they are never assumed true, so a positive custom tag with no matching
-// ci.yml line (e.g. a future `//go:build integration`) is correctly
-// reported uncovered rather than silently passing.
-func isConstraintCovered(expr constraint.Expr, pkgDir string, invocations []goTestInvocation) bool {
+// package, sets tags such that expr evaluates true, and — when it carries a
+// -run pattern — would actually execute every top-level test the constrained
+// file declares. Tags outside knownGOOSGOARCH must come from an invocation's
+// own -tags/-race flags — they are never assumed true, so a positive custom tag
+// with no matching ci.yml line (e.g. a future `//go:build integration`) is
+// correctly reported uncovered rather than silently passing.
+func isConstraintCovered(expr constraint.Expr, pkgDir string, tests []string, invocations []goTestInvocation) bool {
 	for _, inv := range invocations {
 		if !packageCovered(inv.packages, pkgDir) {
+			continue
+		}
+		if !runCovers(inv.run, tests) {
 			continue
 		}
 		if expr.Eval(func(tag string) bool {
@@ -186,7 +264,7 @@ func TestCITagGatedTestsAreReachable(t *testing.T) {
 		if pkgDir == "." {
 			pkgDir = ""
 		}
-		if !isConstraintCovered(expr, pkgDir, invocations) {
+		if !isConstraintCovered(expr, pkgDir, topLevelTests(src), invocations) {
 			uncovered = append(uncovered, fmt.Sprintf("%s: %q never runs in any CI `go test` leg for package ./%s/...", path, line, pkgDir))
 		}
 		return nil
@@ -220,7 +298,7 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if isConstraintCovered(expr, "foo", invocations) {
+		if isConstraintCovered(expr, "foo", nil, invocations) {
 			t.Fatal("a tag no invocation ever sets must not be reported covered")
 		}
 	})
@@ -234,8 +312,77 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if isConstraintCovered(expr, "admin", invocations) {
+		if isConstraintCovered(expr, "admin", nil, invocations) {
 			t.Fatal("neither invocation sets the wazero tag; a same-package match on an unrelated line must not count as coverage")
+		}
+	})
+
+	t.Run("a -run filter that would skip the constrained file's test is uncovered", func(t *testing.T) {
+		// The plain admin leg is narrowed with -run so it stops re-running the
+		// package the universal legs already cover. That narrowing is only safe
+		// while the pattern still names every test the constrained files
+		// declare, so this is the gap the guard has to close: tags and package
+		// both match, and the filter still excludes the test.
+		expr, err := constraint.Parse("//go:build !race && !deadlock")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tests := []string{"TestRingBuffer_WriteDoesNotAllocate"}
+
+		excludes := parseGoTestInvocations(`run: go test -count=1 -run '^TestSomethingElse$' ./admin/`)
+		if isConstraintCovered(expr, "admin", tests, excludes) {
+			t.Fatal("a -run pattern matching none of the file's tests must not count as coverage")
+		}
+
+		// ...and a pattern that covers only SOME of them is caught too, which is
+		// the shape a second `!race && !deadlock` test would create. Written as a
+		// literal rather than `append(tests, ...)` so the slice is not grown in
+		// place for a one-off case (prealloc).
+		partial := parseGoTestInvocations(`run: go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/`)
+		twoTests := []string{"TestRingBuffer_WriteDoesNotAllocate", "TestSecondPlainOnlyTest"}
+		if isConstraintCovered(expr, "admin", twoTests, partial) {
+			t.Fatal("a -run pattern that covers some but not all of the file's tests must not count as coverage")
+		}
+
+		// The real ci.yml line, quotes and all, does cover it.
+		covering := parseGoTestInvocations(`run: go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/`)
+		if !isConstraintCovered(expr, "admin", tests, covering) {
+			t.Fatal("the plain leg's -run pattern names the constrained test; it must be reported covered")
+		}
+	})
+
+	t.Run("quotes around a -run pattern are stripped, so a correct ci.yml is not a false alarm", func(t *testing.T) {
+		for _, line := range []string{
+			`run: go test -run '^TestX$' ./admin/`,
+			`run: go test -run "^TestX$" ./admin/`,
+			`run: go test -run=^TestX$ ./admin/`,
+			`run: go test -run ^TestX$ ./admin/`,
+		} {
+			invocations := parseGoTestInvocations(line)
+			if len(invocations) != 1 || invocations[0].run != "^TestX$" {
+				t.Fatalf("%q parsed to run=%q, want ^TestX$", line, invocations[0].run)
+			}
+		}
+	})
+
+	t.Run("only the first -run segment is matched against a top-level test name", func(t *testing.T) {
+		// `go test -run TestX/sub` still runs TestX; treating the whole string
+		// as one regex would fail to match and report a false alarm.
+		if !runCovers("^TestX$/sub", []string{"TestX"}) {
+			t.Fatal("a subtest-qualified pattern must still cover its top-level test")
+		}
+	})
+
+	t.Run("TestMain is not something -run has to name", func(t *testing.T) {
+		// -run never filters TestMain, so a pattern need not match it and
+		// requiring it to would fail every package that declares one.
+		src := []byte("func TestMain(m *testing.M) {\n}\n\nfunc TestReal(t *testing.T) {\n}\n")
+		got := topLevelTests(src)
+		if len(got) != 1 || got[0] != "TestReal" {
+			t.Fatalf("topLevelTests returned %v, want [TestReal]", got)
+		}
+		if !runCovers("^TestReal$", got) {
+			t.Fatal("a pattern naming the file's only real test must cover it despite TestMain")
 		}
 	})
 
@@ -249,6 +396,18 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 		}
 		if !packageCovered([]string{"./..."}, "db") {
 			t.Fatal(`"./..." must cover every package, including a subpackage like "db"`)
+		}
+		// Regression: the trailing-slash and bare forms are what a contributor
+		// writes when narrowing a leg, and `go test` accepts both. Trimming
+		// only "/..." left "admin/" and matched nothing, so a correct leg was
+		// reported as covering no package.
+		for _, form := range []string{"./admin", "./admin/", "./admin/..."} {
+			if !packageCovered([]string{form}, "admin") {
+				t.Fatalf(`%q must cover the "admin" package`, form)
+			}
+			if packageCovered([]string{form}, "api") {
+				t.Fatalf(`%q must not cover the "api" package`, form)
+			}
 		}
 	})
 }
