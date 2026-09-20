@@ -706,6 +706,32 @@ explain the gap:
   per-phase writer-wait deltas for this drill. That is the instrument this
   profile is missing, and it is why the paragraph above stops where it does.
 
+**The harness has since been corrected (OC-0446), and the figures above predate
+it.** Three things changed, none of which re-measures anything published here:
+
+- **The stop is placed to equalize the windows.** The workflow now derives
+  `RESTART_AT` as the midpoint that makes the steady-before and steady-after
+  windows the same length — `(2·ramp + sustain − recovery) / 2`, which for the
+  BPR-030 defaults is 135 s instead of 90 s. Both windows become 75 s of full
+  fan-out.
+- **The phases are read off the run clock, not off whether a connection
+  resumed.** `restartPhase` splits the run into `ramp`, `pre-restart`,
+  `recovery` and `post-restart`. The ramp is excluded from both steady windows;
+  the outage and its reconnects are *published as their own phase* rather than
+  discarded, because that cost is exactly what burying it in a warm-up
+  exclusion would erase. A resumed connection is no longer evidence of
+  anything — it is true for every sample after the stop, including those taken
+  while the rest of the cohort was still coming back.
+- **The observer VU runs under `restart`**, so the per-phase writer-wait
+  deltas exist on both sides of the stop, and a floor on
+  `ws_deliveries{phase:pre-restart}` / `{phase:post-restart}` fails the drill
+  when a window did not carry the workload — a comparison between two windows
+  is worthless if either was empty.
+
+The next restart run will publish an attributable post-restart figure. The
+34/51 ms and 393/452 ms above remain what that run measured, and remain not an
+equal-load comparison.
+
 #### Ceiling search
 
 ```
@@ -769,3 +795,25 @@ The rest of what the run says, for whoever re-runs it:
   population-short**, and neither is published as a server ceiling.
 - The per-step figures are informational. Nothing is gated on them and no new
   budget is set by them.
+
+**The harness has since been corrected (OC-0447), and the figures above predate
+it.** The search no longer walks into the limiter:
+
+- **The cohort is spread across channels.** The workflow seeds
+  `ceil(ceiling_max / 150)` text channels and passes their ids to k6, and each
+  connection picks one by its own VU slot. One message per connection per 2 s
+  over 4 channels is 62.5 messages/s per channel at step 500 — a third of the
+  limiter left unused — instead of 250/s on one. Connections now
+  `channel_focus` the channel they post in, so a VU's subscription matches its
+  traffic.
+- **Shedding is now a hard failure, not a footnote.** A post-run step greps
+  the server log for `topic rate limit exceeded` on the ceiling leg and fails
+  the run if it finds any, with the same posture as the run's own
+  `obs_ws_conn_rejects == 0`: the search is shaped to stay under the limiter,
+  so a shed frame means the shaping is wrong and the steps above the first shed
+  are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
+  the failure so the fix is one input away.
+
+The table above remains what that run measured. The step-100 figure is
+unaffected by any of this — it was never near the limiter — and is still the
+last step at which every budget held.

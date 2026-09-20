@@ -85,6 +85,13 @@
 //   K6_SUSTAIN          - Duration at peak (default: 180s)
 //   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000)
 //   K6_VOICE_CHANNEL_ID - Voice channel id; unset disables the voice leg
+//   K6_CEILING_CHANNELS - Comma-separated text channel ids the ceiling search
+//                         spreads its cohort over (default: K6_CHANNEL_ID for
+//                         every connection, which sheds above 100)
+//   K6_RESTART_AT       - Restart drill: seconds from run start to the stop
+//                         (default: the value that equalizes both windows)
+//   K6_RESTART_RECOVERY_S - Restart drill: seconds of outage+reconnect after
+//                         the stop, published as its own phase (default 30)
 //   K6_VOICE_VUS        - How many VUs join voice (default: 25 when the
 //                         voice channel is set, 0 otherwise)
 //   K6_STORM_AT         - operational: seconds into the sustain (after
@@ -117,9 +124,11 @@ const IS_CEILING = PROFILE === "ceiling-search";
 // The B6-10 profiles. A metric registered under this flag must not exist on a
 // capacity run: that summary's metric key set is B6-9's, byte for byte.
 const IS_B6_10 = PROFILE !== "capacity";
-// The observer scenario and its metrics run under operational and
-// ceiling-search — one measures per phase, the other per step.
-const OBS_ON = IS_OPERATIONAL || IS_CEILING;
+// The observer scenario and its metrics run under operational,
+// ceiling-search and restart — one measures per phase, the other per step,
+// and the restart drill needs the per-phase writer-wait delta to exist on
+// BOTH sides of the stop (OC-0446) or it cannot say what the stop cost.
+const OBS_ON = IS_OPERATIONAL || IS_CEILING || IS_RESTART;
 // k6 hands out VU ids test-wide from a pool filled in VU-init completion
 // order, so which id the observer holds is NOT deterministic: a dispatch on
 // 77fdce30 gave a WebSocket VU id 1, and the old `__VU - OBS_VUS` username
@@ -297,6 +306,50 @@ function seconds(d) {
 const RAMP_S = seconds(RAMP);
 const SUSTAIN_S = seconds(SUSTAIN);
 const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
+
+// The channel THIS VU uses. Identical to CHANNEL_ID on every profile but the
+// ceiling search, which spreads its cohort across K6_CEILING_CHANNELS: one
+// message per SEND_INTERVAL_MS per connection into a SINGLE channel makes step
+// N a load of N/(SEND_INTERVAL_MS/1000) messages per second on that one topic,
+// past the server's topicRateLimitPerSecond (100, a constant in the code) from
+// step 200 up. Every step at or above that is shed by a constant, and the
+// latency it reports is the shed queue's -- so the search could never locate a
+// hardware ceiling above it (OC-0447). Spreading the cohort keeps each
+// channel's rate under the limiter and makes the measurement about hardware.
+// The sender and its channel_focus/typing/resume all use this same id, so a
+// VU's subscription matches the channel it posts in.
+const CHANNEL_IDS = (__ENV.K6_CEILING_CHANNELS || "")
+  .split(",")
+  .map((v) => parseInt(v.trim(), 10))
+  .filter((v) => Number.isFinite(v) && v > 0);
+const VU_CHANNEL_ID =
+  IS_CEILING && CHANNEL_IDS.length > 0 ? CHANNEL_IDS[__VU % CHANNEL_IDS.length] : CHANNEL_ID;
+
+// Restart-drill phase boundaries (OC-0446). The drill's before and after
+// windows are only comparable if they hold the same population for the same
+// length, so the stop is placed to equalize them -- the caller derives
+// RESTART_AT the same way and passes it, so the two cannot disagree:
+//   ramp         0 .. RAMP_S                 population still climbing
+//   pre-restart  RAMP_S .. RESTART_AT        full fan-out
+//   recovery     RESTART_AT .. +RECOVERY_S   the outage and the reconnects
+//   post-restart +RECOVERY_S .. end          full fan-out
+// The ramp is excluded from both steady windows (a population still climbing
+// is not the population under test); the outage is NOT excluded from the
+// report -- it is published as its own phase, because the user-visible cost of
+// a restart is exactly what burying it in a warm-up exclusion would erase.
+const RESTART_RECOVERY_S = parseInt(__ENV.K6_RESTART_RECOVERY_S || "30");
+const RUN_S = RAMP_S + SUSTAIN_S;
+const RESTART_AT = parseInt(
+  __ENV.K6_RESTART_AT || String(Math.round((RUN_S + RAMP_S - RESTART_RECOVERY_S) / 2)),
+);
+// A steady window that did not carry the workload cannot support a
+// comparison. The floor is a fraction of the deliveries the window should have
+// produced: every connection posts once per SEND_INTERVAL_MS and every OTHER
+// connection receives it. Deliberately loose -- it exists to catch a window
+// that stalled or was never filled, not to re-litigate the budget.
+const RESTART_MIN_SAMPLES = Math.floor(
+  PEAK_VUS * (1000 / SEND_INTERVAL_MS) * (PEAK_VUS - 1) * 0.3 * Math.max(RESTART_AT - RAMP_S, 0),
+);
 // The storm's fire time: K6_STORM_AT seconds into the sustain, on the
 // scenario clock (scenarioStartMs is exec.scenario.startTime for the VU, the
 // observer's own start for the phase window — both scenarios start at t=0).
@@ -515,10 +568,21 @@ export const options = {
           sends_lost: ["count==0"],
           // Pass-through thresholds (see passThroughThresholds) that only
           // materialize the pre/post-restart series in the summary.
+          "ws_delivery_latency_ms{phase:ramp}": ["p(95)>=0"],
           "ws_delivery_latency_ms{phase:pre-restart}": ["p(95)>=0"],
+          "ws_delivery_latency_ms{phase:recovery}": ["p(95)>=0"],
           "ws_delivery_latency_ms{phase:post-restart}": ["p(95)>=0"],
+          "ws_broadcast_latency_ms{phase:ramp}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:pre-restart}": ["p(95)>=0"],
+          "ws_broadcast_latency_ms{phase:recovery}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:post-restart}": ["p(95)>=0"],
+          // Validity, not a budget (OC-0446): the drill compares two windows,
+          // and the comparison means nothing if either did not carry the
+          // workload. A window that stalled, or that the generator never
+          // filled, fails here instead of publishing a percentile computed
+          // from whatever few frames happened to arrive.
+          "ws_deliveries{phase:pre-restart}": [`count>=${RESTART_MIN_SAMPLES}`],
+          "ws_deliveries{phase:post-restart}": [`count>=${RESTART_MIN_SAMPLES}`],
         }
       : {}),
     // A cap in config must never be published as the hardware ceiling. Only
@@ -570,11 +634,26 @@ function stepTags(holdOnly) {
   return { step: holdOnly && inStepRamp() ? `${v}-ramp` : String(v) };
 }
 
-// Restart-drill phase tags: which side of the stop a sample landed on, so
-// the document can say whether a missed budget was the drained server, the
-// rebooted one, or both. A resumed connection is by construction post-restart.
-function restartTags(resumedConn) {
-  return IS_RESTART ? { phase: resumedConn ? "post-restart" : "pre-restart" } : undefined;
+// restartPhase names the window a sample landed in, from the run clock.
+// Time-based rather than resume-based (OC-0446): "has this connection
+// resumed?" is true for every sample taken after the stop, including those
+// taken while the rest of the cohort was still reconnecting, so it cannot
+// separate the outage from the steady state that follows it. A sample's own
+// clock can, and the boundaries it compares against are the ones the caller
+// scheduled.
+function restartPhase() {
+  const t = runElapsedS();
+  if (t < RAMP_S) return "ramp";
+  if (t < RESTART_AT) return "pre-restart";
+  if (t < RESTART_AT + RESTART_RECOVERY_S) return "recovery";
+  return "post-restart";
+}
+
+// Restart-drill phase tags, so the document can say whether a missed budget
+// was the drained server, the outage and its reconnects, or the rebooted
+// server holding the same load.
+function restartTags() {
+  return IS_RESTART ? { phase: restartPhase() } : undefined;
 }
 
 // The pass-through thresholds, one per (metric, step) pair.
@@ -792,7 +871,7 @@ function accountForDrainSends(token) {
   let before = 0;
   for (let page = 0; page < 50 && unseen.length; page++) {
     const q = `limit=100${before ? `&before=${before}` : ""}`;
-    const res = http.get(`${HTTP_URL}/api/v1/channels/${CHANNEL_ID}/messages?${q}`, {
+    const res = http.get(`${HTTP_URL}/api/v1/channels/${VU_CHANNEL_ID}/messages?${q}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status !== 200) {
@@ -905,7 +984,7 @@ export default function () {
         envelope("auth", {
           token: token,
           last_seq: vuLastSeq,
-          active_channel_id: CHANNEL_ID,
+          active_channel_id: VU_CHANNEL_ID,
         }),
       );
       resumeStartedAt = Date.now();
@@ -953,7 +1032,7 @@ export default function () {
                 rebasing = true;
               }
               // channel_focus after auth_ok is idempotent (protocol.md:160).
-              socket.send(envelope("channel_focus", { channel_id: CHANNEL_ID }));
+              socket.send(envelope("channel_focus", { channel_id: VU_CHANNEL_ID }));
               if (IS_RESTART) {
                 restartResumeTime.add(Date.now() - resumeStartedAt);
               }
@@ -971,7 +1050,7 @@ export default function () {
             // The channel subscription comes from this round trip: before it
             // completes, nothing broadcast to the channel reaches this
             // connection at all (docs/protocol.md, active_channel_id).
-            socket.send(envelope("channel_focus", { channel_id: CHANNEL_ID }));
+            socket.send(envelope("channel_focus", { channel_id: VU_CHANNEL_ID }));
             if (joinsVoice && !IS_OPERATIONAL) {
               // Capacity joins once on ready, as B6-9. Under operational the
               // churn timer owns every join, so all joins land on the shared
@@ -986,7 +1065,7 @@ export default function () {
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
-                stepTags(true) ?? restartTags(resumedConn),
+                stepTags(true) ?? restartTags(),
               );
               delete pendingSends[data.id];
             }
@@ -1007,8 +1086,8 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags(resumedConn));
-              deliveries.add(1);
+              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags());
+              deliveries.add(1, restartTags());
             }
             break;
           }
@@ -1176,7 +1255,7 @@ export default function () {
         JSON.stringify({
           type: "chat_send",
           id: id,
-          payload: { channel_id: CHANNEL_ID, content: content },
+          payload: { channel_id: VU_CHANNEL_ID, content: content },
         }),
       );
       wsMessages.add(1);
@@ -1186,7 +1265,7 @@ export default function () {
     // Typing indicators (client->server type is typing_start, not "typing").
     socket.setInterval(function () {
       if (ready || resumedConn) {
-        socket.send(envelope("typing_start", { channel_id: CHANNEL_ID }));
+        socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
       }
     }, 4000);
 

@@ -261,10 +261,38 @@ jobs:
             ;;
           esac
 
-          # The restart drill stops the server 30 s into the sustain. K6_RAMP
-          # below is 60 s, so this is 90 s from run start; it is derived rather
-          # than written as 90 so the two cannot drift apart.
-          restart_at=$((60 + 30))
+          # The restart drill stops the server mid-sustain. The stop is
+          # PLACED, not guessed (OC-0446): the drill compares a window before
+          # the stop against a window after it, and that comparison is only
+          # meaningful if both hold the same population for the same length.
+          # The run is ramp + sustain; the steady-before window is
+          # restart_at - ramp and the steady-after window is
+          # run - restart_at - recovery, so equalizing them gives the midpoint
+          # below. The old value (60 + 30 = 90) left 30 s of full fan-out
+          # before the stop against ~186 s after it, which is the imbalance
+          # that made the published post-restart p95 unattributable.
+          # ws-load.js derives the same boundaries and takes this one as an
+          # override, so the tagger and the drill cannot disagree.
+          ramp_s=60
+          sustain_s=180
+          recovery_s=30
+          restart_at=$(((2 * ramp_s + sustain_s - recovery_s) / 2))
+
+          # The ceiling search spreads its connections over this many text
+          # channels (OC-0447). Each connection posts one message per
+          # K6_SEND_INTERVAL_MS (2 s), so one channel carries N/2 messages per
+          # second at step N -- past the server's topicRateLimitPerSecond (100,
+          # a constant in the code) from N=200 up, which is why every step at
+          # or above 200 was shed and the search could not see a hardware
+          # ceiling above it. 150 messages/s per channel leaves a third of the
+          # limiter unused as headroom.
+          ceiling_channels=$(((CEILING_MAX + 149) / 150))
+          # An `[ ] && assign` here would abort the step: GitHub runs this
+          # shell with -e, and a false test leaves the whole AND-list at
+          # status 1.
+          if [ "$ceiling_channels" -lt 1 ]; then
+            ceiling_channels=1
+          fi
 
           {
             echo "HTTP_BASE=$scheme://127.0.0.1:8443"
@@ -273,6 +301,8 @@ jobs:
             echo "SEED_USERS=$seed_users"
             echo "VOICE_LEG=$voice_leg"
             echo "RESTART_AT=$restart_at"
+            echo "RESTART_RECOVERY_S=$recovery_s"
+            echo "CEILING_CHANNELS=$ceiling_channels"
           } >>"$GITHUB_ENV"
 
       # --- boot, one step per leg -------------------------------------------
@@ -428,6 +458,26 @@ jobs:
           echo "CHANNEL_ID=$CHANNEL_ID" >>"$GITHUB_ENV"
           echo "VOICE_ID=$VOICE_ID" >>"$GITHUB_ENV"
 
+          # The ceiling search's cohort is spread over CEILING_CHANNELS text
+          # channels (OC-0447); the one above is the first of them, and every
+          # other profile keeps using it alone. The ids go to k6 as a
+          # comma-separated list, and a connection picks one by its own VU
+          # slot, so a step's cohort divides evenly between them.
+          CEILING_CHANNEL_IDS="$CHANNEL_ID"
+          if [ "$PROFILE" = "ceiling-search" ]; then
+            for i in $(seq 2 "$CEILING_CHANNELS"); do
+              cid=$(curl -sk -X POST "$BASE/admin/api/channels" \
+                -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+                -d "{\"name\":\"loadtest-$i\",\"type\":\"text\"}" | jq -r .id)
+              if [ -z "$cid" ] || [ "$cid" = "null" ]; then
+                echo "::error::ceiling channel $i create failed"
+                exit 1
+              fi
+              CEILING_CHANNEL_IDS="$CEILING_CHANNEL_IDS,$cid"
+            done
+          fi
+          echo "CEILING_CHANNEL_IDS=$CEILING_CHANNEL_IDS" >>"$GITHUB_ENV"
+
           INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"max_uses":0}' | jq -r .code)
@@ -488,6 +538,9 @@ jobs:
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
           K6_CEILING_MAX: ${{ inputs.ceiling_max }}
+          K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
+          K6_RESTART_AT: ${{ env.RESTART_AT }}
+          K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
         run: |
           mkdir -p Server/scripts/k6/reports
 
@@ -617,6 +670,27 @@ jobs:
             kill "$(cat "$WORK/server.pid")" 2>/dev/null || true
             sleep 3
           fi
+
+      # A cap in the code must never be published as the hardware ceiling
+      # (OC-0447). The search now spreads its cohort over enough channels to
+      # stay under topicRateLimitPerSecond, so ANY shed frame on this leg means
+      # the shaping is wrong and the steps at and above it measured the limiter
+      # rather than the machine -- they are inconclusive, not a ceiling. Same
+      # posture as the run's own obs_ws_conn_rejects == 0, which makes the
+      # same claim about the connection cap.
+      - name: Assert the ceiling search never hit the topic limiter
+        if: always() && inputs.profile == 'ceiling-search' && matrix.leg == 'constrained'
+        run: |
+          if [ ! -f "$WORK/server.log" ]; then
+            echo "::error::no server.log to check for topic-limiter shedding"
+            exit 1
+          fi
+          shed=$(grep -c 'topic rate limit exceeded' "$WORK/server.log" || true)
+          if [ "$shed" != "0" ]; then
+            echo "::error::$shed frame(s) were shed by topicRateLimitPerSecond. The search is shaped to stay under it (CEILING_CHANNELS=$CEILING_CHANNELS), so this means the shaping is wrong: the steps above the first shed are INCONCLUSIVE, not a server ceiling. Widen K6_CEILING_CHANNELS and re-run; do NOT publish these steps as the hardware ceiling."
+            exit 1
+          fi
+          echo "no topic-limiter shedding: every step was limited by the server, not by the limiter"
 
       - name: Upload results
         if: always()
