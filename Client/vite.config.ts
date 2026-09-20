@@ -1,20 +1,12 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import { resolve } from "path";
 
-const host = process.env.TAURI_DEV_HOST;
-
-/** Strip crossorigin attributes — Tauri serves via custom protocol. */
-function stripCrossOrigin(): Plugin {
-  return {
-    name: "strip-crossorigin",
-    transformIndexHtml(html) {
-      return html.replace(/\s+crossorigin/g, "");
-    },
-  };
-}
-
+/**
+ * Target-neutral config. Settings that exist only because the Tauri desktop
+ * shell is the consumer live in `vite.config.desktop.ts`; nothing here may
+ * assume a target. Plain `vite build` on this file is the non-desktop build.
+ */
 export default defineConfig({
-  plugins: [stripCrossOrigin()],
   build: {
     modulePreload: { polyfill: false },
     cssCodeSplit: false,
@@ -42,15 +34,5 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
-    watch: {
-      // Never watch the Rust tree. `tauri dev` runs Vite as its
-      // `beforeDevCommand`, so without this the watcher picks up
-      // `src-tauri/target/` and dies with EBUSY the moment cargo writes the
-      // output DLL on Windows — taking the whole dev session with it. Tauri
-      // already watches `src-tauri` itself for rebuilds.
-      ignored: ["**/src-tauri/**"],
-    },
   },
 });

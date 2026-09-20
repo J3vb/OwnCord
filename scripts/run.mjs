@@ -217,6 +217,12 @@ const CHECK_HYGIENE = [
   // Repository Hygiene job instead of a new required check.
   step("node", ["--test", "scripts/check-node-policy.test.mjs"], "."),
   step("node", ["scripts/check-node-policy.mjs"], "."),
+  // The change selector decides which of the OTHER jobs run at all, so a wrong
+  // rule here is a test that silently did not execute — the same shape of
+  // failure as the two guards above, and for the same reason it is self-tested
+  // on every PR rather than only at release. `ci-select.mjs` cannot check
+  // itself: its own path selects every capability, so this step always runs.
+  step("node", ["--test", "scripts/ci-select.test.mjs"], "."),
 ];
 
 // Every check, in the order `check` has always run them. release:preflight

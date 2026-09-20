@@ -143,7 +143,7 @@ is met on stated hardware with published p95/p99 measurements.**
 | Concurrent voice         | ≥ 25 — **met 2026-09-12** (625/625 tracks, 0% loss)                                       | `Server/scripts/voice-load.sh` wrapping `lk load-test`, 25 audio publishers + 25 subscribers, plus k6 driving the OwnCord join/leave/token path; decided 2026-09-11                                                                     |
 | Latency budgets          | tightened from the first run — see [capacity.md](../capacity.md) (initial set 2026-09-11) | load-test dataset + reproducible commands                                                                                                                                                                                               |
 | Reference hardware       | 2 vCPU / 4 GB RAM / SSD, Linux x64 (decided 2026-09-11)                                   | B6-9's constrained leg in `load-baseline.yml` (`--cpuset-cpus=0,1 --cpus=2 --memory=4g --memory-swap=4g`); numbers publish only from that leg, and the ceiling leg is explicitly non-gating. Published in [capacity.md](../capacity.md) |
-| TLS mode matrix          | 4/4 pass (domain, public IP, LAN, offline)                                                | network-mode integration matrix                                                                                                                                                                                                         |
+| TLS mode matrix          | **not measured — B6-3 – B6-5 deferred; accepted limitation at HP-6 (owner, 2026-09-20)**  | no producer. `acme` is implemented but unqualified and renewal is the owner's responsibility; a reverse proxy is the recommended HTTPS path; no public-IP or offline TLS story is claimed                                               |
 | Artifact matrix          | every asset installs, migrates, becomes healthy, drains, restarts, restores               | artifact and container install/boot matrix                                                                                                                                                                                              |
 | Operator usability       | an unfamiliar owner completes every HP-6 task from docs alone                             | HP-6 operator usability record                                                                                                                                                                                                          |
 
@@ -248,6 +248,25 @@ point:
   deferred that row is unmeasured, so HP-6 either records it as an accepted
   limitation or waits for the TLS work. That is an owner decision at the hold
   point, not something a later milestone silently resolves.
+
+  **Decided 2026-09-20 (owner): accepted limitation.** The TLS matrix row
+  reads "not measured — B6-3 – B6-5 deferred", and HP-6 signs around it. The
+  owner's reasoning is that certificate renewal is not OwnCord's to prove: a
+  server owner already has tooling built for it. Three consequences, all
+  documentation rather than code:
+
+  1. `tls.mode: "acme"` **stays in the code exactly as it is** — nothing is
+     removed and no existing config breaks. What changes is its status: it is
+     documented as implemented but untested, with renewal the owner's
+     responsibility, rather than as a path this project qualifies.
+  2. **A reverse proxy in front is the recommended HTTPS story** for an owner
+     with a domain — Caddy, nginx or Traefik terminates TLS and proxies to
+     OwnCord. This is a change of posture, not only of wording: it demotes
+     built-in ACME from a documented option to a discouraged one, which is why
+     it is recorded here with a date rather than edited quietly into the docs.
+  3. **No public-IP or offline TLS story is claimed at all**, consistent with
+     the B6-6 narrowing below.
+
 - **B6-6 (direct port-forward operation) narrows.** It can still qualify
   port-forwarding, CGNAT, hairpin-NAT and firewall limits honestly, but it
   cannot claim a working HTTPS/WSS path on a public IP, because nothing issues

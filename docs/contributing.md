@@ -80,12 +80,14 @@ next section, and using them directly is equally correct.
 
 **Build & dev**
 
-| Command               | Description                                                      |
-| --------------------- | ---------------------------------------------------------------- |
-| `npm run dev`         | Start Vite dev server with hot reload                            |
-| `npm run build`       | TypeScript check + Vite production build                         |
-| `npm run tauri dev`   | Launch Tauri app in dev mode                                     |
-| `npm run tauri build` | Build release installer (NSIS on Windows, AppImage+deb on Linux) |
+| Command                 | Description                                                          |
+| ----------------------- | -------------------------------------------------------------------- |
+| `npm run dev`           | Start Vite dev server with hot reload (alias for `dev:desktop`)      |
+| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)    |
+| `npm run build`         | TypeScript check + Vite production build (alias for `build:desktop`) |
+| `npm run build:desktop` | TypeScript check + production build of the Tauri target              |
+| `npm run tauri dev`     | Launch Tauri app in dev mode                                         |
+| `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)     |
 
 **Tests**
 
@@ -209,10 +211,28 @@ on admins. So a PR is self-mergeable once CI is green, but no commit reaches
 `dev` without CI having run on it. Settings and rationale live in
 [`docs/plans/b0-dev-branch-protection.sh`](plans/b0-dev-branch-protection.sh).
 
-Two consequences worth knowing before you open a PR:
+Three consequences worth knowing before you open a PR:
 
 - The Docker and Tauri Full Build jobs are gated on `main` and report as
   _skipped_ on a PR into `dev`. That is expected, not a failure.
+- Which of the remaining jobs run is chosen from your diff, and **only on a PR
+  into `dev`**. A plan or prose change runs neither the server legs nor the
+  browser suites; a change to `.github/`, `scripts/`, a lockfile, or any path
+  the classifier has not been taught runs everything. The rules — and the
+  cross-boundary dependencies behind them, such as the two `docs/architecture`
+  files a Go test reads — are in
+  [`scripts/ci-select.mjs`](../scripts/ci-select.mjs), and its unit suite runs
+  in the Repository Hygiene check. To see what your branch selects:
+
+  ```bash
+  git diff --name-status -M origin/dev...HEAD > "$TMPDIR/changed-paths.txt"
+  node scripts/ci-select.mjs --paths-file "$TMPDIR/changed-paths.txt"
+  ```
+
+  A PR into `main` always runs every job, because release evidence requires each
+  required check to have concluded `success` on the tagged commit, so a
+  legitimately skipped check would block the release instead of saving anything.
+
 - Squash merge, and a conventional commit subject on the squashed commit.
 
 ## Branch Naming
