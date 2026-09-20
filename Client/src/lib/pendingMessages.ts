@@ -4,6 +4,10 @@
  */
 import { isTauri, invoke } from "@tauri-apps/api/core";
 import { addOptimisticMessage, markSendFailed } from "@stores/messages.store";
+import type {
+  PendingMessageOwner,
+  PendingMessageStore,
+} from "../platform/contracts/pendingMessages";
 import type { MessageUser } from "./types";
 import { createLogger } from "./logger";
 
@@ -13,23 +17,23 @@ export const PENDING_MESSAGE_MAX_COUNT = 64;
 export const PENDING_MESSAGE_MAX_BYTES = 128 * 1024;
 const ID_PATTERN = /^\d{13}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export interface PendingMessageOwner {
-  readonly host: string;
-  readonly userId: number;
-}
 export interface PendingTextMessage {
   readonly clientMessageId: string;
   readonly channelId: number;
   readonly content: string;
   readonly createdAt: number;
 }
-export interface PendingMessagePersistence {
-  load(owner: PendingMessageOwner): Promise<string | null>;
-  save(owner: PendingMessageOwner, value: string): Promise<void>;
-  delete(owner: PendingMessageOwner): Promise<void>;
-}
+// The owner and persistence shapes are the `PendingMessageStore` contract
+// (`src/platform/contracts/pendingMessages.ts`), re-exported under the names
+// this module's callers already import. B7-4 moves the native store behind
+// `platform/desktop`; the names here keep the call-site move a pure rename.
+export type { PendingMessageOwner, PendingMessageStore };
+export type { PendingMessageStore as PendingMessagePersistence };
 
-const nativePersistence: PendingMessagePersistence = {
+/** The native pending-message store. Lifted in place, verbatim, so B7-4's
+ *  suite can pin today's behaviour before the store moves to
+ *  `platform/desktop/pendingMessages.ts`. */
+export const nativePersistence: PendingMessageStore = {
   async load(owner) {
     if (!isTauri()) return null;
     return invoke<string | null>("load_pending_messages", { ...owner });
@@ -109,7 +113,7 @@ export class PendingMessageQueue {
 
   constructor(
     readonly owner: PendingMessageOwner,
-    private readonly persistence: PendingMessagePersistence,
+    private readonly persistence: PendingMessageStore,
     private readonly serialize: (operation: () => Promise<void>) => Promise<void>,
     onRecovered: (draft: PendingTextMessage) => void,
     private retryFloor = 0,

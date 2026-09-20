@@ -2,6 +2,7 @@
 // Uses Tauri's HTTP plugin fetch to bypass self-signed cert rejection in webview.
 
 import { fetch } from "@tauri-apps/plugin-http";
+import type { HttpClient } from "../platform/contracts/http";
 import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
 import { isValidHost } from "./hostValidation";
@@ -79,6 +80,14 @@ interface SessionsListResponse {
 
 const log = createLogger("api");
 
+/** The HTTP transport, lifted in place so B7-4's suite can pin today's
+ *  behaviour before it moves to `platform/desktop/http.ts`. Verbatim: the
+ *  native plugin implements the Web-standard signature, so the seam is a
+ *  pass-through and nothing else. */
+export const httpClient: HttpClient = {
+  fetch: (url, init) => fetch(url, init),
+};
+
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
   let config: Readonly<ApiClientConfig> = Object.freeze({ ...initialConfig });
@@ -126,7 +135,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       log.debug(`${label} →`, { method, path });
       let res: Response;
       try {
-        res = await owner.run(fetch(`${origin}${prefix}${path}`, init));
+        res = await owner.run(httpClient.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
@@ -650,7 +659,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
         owner.assertCurrent();
-        const res = await owner.run(fetch(`${origin}/api/v1/health`, { signal: transport.signal }));
+        const res = await owner.run(
+          httpClient.fetch(`${origin}/api/v1/health`, { signal: transport.signal }),
+        );
         owner.assertCurrent();
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");

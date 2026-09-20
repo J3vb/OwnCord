@@ -3,6 +3,12 @@
 // to proxy WSS through Rust, bypassing self-signed cert issues in webview.
 
 import type { ServerMessage, ClientMessage } from "./types";
+import type {
+  SocketCertEvent,
+  SocketConnectOptions,
+  SocketConnectionState,
+  SocketTransport,
+} from "../platform/contracts/socket";
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 
@@ -11,25 +17,6 @@ const log = createLogger("ws");
 /** Monotonic generation counter — incremented on each connect() to invalidate
  *  stale event listeners from a previous connection attempt. */
 let wsGeneration = 0;
-
-// Tauri IPC imports — resolved at runtime in Tauri context
-let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
-let tauriListen:
-  ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null =
-  null;
-
-// Dynamically load Tauri APIs (avoids import errors in test/browser env)
-async function ensureTauriApis(): Promise<void> {
-  if (tauriInvoke !== null) return;
-  try {
-    const core = await import("@tauri-apps/api/core");
-    const event = await import("@tauri-apps/api/event");
-    tauriInvoke = core.invoke;
-    tauriListen = event.listen;
-  } catch {
-    log.warn("Tauri APIs not available — WebSocket proxy will not work");
-  }
-}
 
 export type ConnectionState =
   "disconnected" | "connecting" | "authenticating" | "connected" | "reconnecting";
@@ -164,7 +151,299 @@ export function bracketBareIPv6Host(host: string): string {
   return host;
 }
 
+/** The `wss://` URL of the server's socket endpoint, for a profile host as
+ *  the user typed it. A bare IPv6 literal has to be bracketed or the URL
+ *  parser reads its first hextet as the host and the rest as a port. */
+export function wsUrlFor(host: string): string {
+  return `wss://${bracketBareIPv6Host(host)}/api/v1/ws`;
+}
+
+/**
+ * The native WebSocket transport: the four proxy commands (`ws_connect`,
+ * `ws_send`, `ws_disconnect`, `accept_cert_fingerprint`) and the four event
+ * registrations (`ws-message`, `ws-state`, `ws-error`, `cert-tofu`) that reach
+ * the Rust proxy.
+ *
+ * Lifted in place so B7-4's suite can pin today's behaviour before the
+ * transport moves to `platform/desktop/socket.ts`. Everything the app layers
+ * on top — the state machine, the reconnect policy, frame parsing, the send
+ * failure codes — stays in this module, above the seam. In particular
+ * `onMessage` hands out the raw frame text and `onStateChange` reports the
+ * proxy's own lifecycle; neither parses a protocol frame.
+ *
+ * The concrete type is wider than `SocketTransport` in exactly one way: the
+ * three commands this module awaits resolve as promises (`connect` also
+ * rejects when there is no native host at all, which is today's early return
+ * in `connect()`), and `startCertListener()` is the bootstrap registration
+ * `main.ts` makes before any connection exists. All three are assignable to
+ * the contract's `void` members.
+ */
+export interface DesktopSocketTransport extends SocketTransport {
+  /** Open the proxy connection. Resolves once the handshake has been issued;
+   *  rejects when the native host is not there at all. */
+  connect(options: SocketConnectOptions): Promise<void>;
+  disconnect(): Promise<void>;
+  /** Send one frame. Rejects when the native send fails, so the caller can
+   *  classify the failure; the contract's `void` return discards it. */
+  send(text: string): Promise<void>;
+  startCertListener(): Promise<void>;
+}
+
+export function createSocketTransport(): DesktopSocketTransport {
+  // Native IPC handles — resolved at runtime in the native context.
+  let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null =
+    null;
+  let tauriListen:
+    ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null =
+    null;
+
+  const messageListeners = new Set<(text: string) => void>();
+  const stateListeners = new Set<(state: SocketConnectionState) => void>();
+  const certFirstUseListeners = new Set<(event: SocketCertEvent) => void>();
+  const certMismatchListeners = new Set<(event: SocketCertEvent) => void>();
+
+  /** Monotonic generation counter — incremented on each connect() so a stale
+   *  attempt's listeners and IPC rejections are ignored. */
+  let generation = 0;
+
+  // Native event unsubscribe functions
+  const eventUnsubs: Array<() => void> = [];
+
+  // Global cert-tofu listener unsub (registered once, active for the whole app
+  // lifetime so first-use/mismatch events are received during the connect
+  // page's health checks — before any WS connect).
+  let certListenerUnsub: (() => void) | null = null;
+
+  // Dynamically load the native APIs (avoids import errors in test/browser env)
+  async function ensureApis(): Promise<void> {
+    if (tauriInvoke !== null) return;
+    try {
+      const core = await import("@tauri-apps/api/core");
+      const event = await import("@tauri-apps/api/event");
+      tauriInvoke = core.invoke;
+      tauriListen = event.listen;
+    } catch {
+      log.warn("Tauri APIs not available — WebSocket proxy will not work");
+    }
+  }
+
+  // Invokes each unsub handle in `unsubs`, tolerating handles that throw or
+  // return a rejected promise (the native resource may already have been
+  // invalidated after disconnect).
+  function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
+    for (const unsub of unsubs) {
+      try {
+        const result = unsub() as unknown;
+        if (result instanceof Promise) {
+          result.catch((err) => {
+            log.warn("Failed to unsubscribe Tauri event listener", err);
+          });
+        }
+      } catch (err) {
+        log.debug("Sync unsubscribe error (safe to ignore)", err);
+      }
+    }
+  }
+
+  function cleanupEventListeners(): void {
+    unsubscribeAll(eventUnsubs);
+    eventUnsubs.length = 0;
+  }
+
+  // Route a cert-tofu event (from the http or ws proxy) to the right listeners.
+  // Registered globally via startCertListener so first-use/mismatch events are
+  // received during the connect page's health checks, before any WS connect.
+  function handleCertTofu(raw: SocketCertEvent): void {
+    log.info("TOFU cert event", { host: raw.host, status: raw.status });
+    if (raw.status === "first_use") {
+      for (const listener of certFirstUseListeners) listener(raw);
+    } else if (raw.status === "mismatch") {
+      for (const listener of certMismatchListeners) listener(raw);
+    }
+    // "trusted" → no action
+  }
+
+  // Registers this attempt's native event listeners and returns the unsub
+  // handles it created, WITHOUT touching the shared `eventUnsubs` array.
+  // Ownership of those handles (splicing them in, or tearing them down if this
+  // attempt turns out to be stale) is the caller's job — see connect(). This
+  // keeps a still-in-flight attempt's registrations from ever being visible to
+  // (and therefore clearable by) another attempt that resumes around the same
+  // time; see OC-0219.
+  async function setupEventListeners(): Promise<Array<() => void>> {
+    if (tauriListen === null) return [];
+
+    // Capture generation so stale listeners from a previous connect() are no-ops.
+    const gen = generation;
+    const ownUnsubs: Array<() => void> = [];
+
+    // Server messages — raw frame text, exactly as the native transport
+    // delivered it.
+    const unsubMsg = await tauriListen("ws-message", (e) => {
+      if (gen !== generation) return;
+      for (const listener of messageListeners) listener(e.payload as string);
+    });
+    ownUnsubs.push(unsubMsg);
+
+    // Connection state changes from the proxy
+    const unsubState = await tauriListen("ws-state", (e) => {
+      if (gen !== generation) return;
+      const rustState = e.payload as string;
+      log.debug("Rust WS state", { state: rustState });
+
+      if (rustState === "open") {
+        for (const listener of stateListeners) listener("connected");
+      } else if (rustState === "closed") {
+        for (const listener of stateListeners) listener("disconnected");
+      }
+    });
+    ownUnsubs.push(unsubState);
+
+    // Errors
+    const unsubErr = await tauriListen("ws-error", (e) => {
+      if (gen !== generation) return;
+      log.warn("WebSocket error (proxy)", { error: e.payload });
+    });
+    ownUnsubs.push(unsubErr);
+
+    // Register the global cert-tofu listener on first connect (idempotent).
+    // Deliberately NOT part of ownUnsubs/eventUnsubs — it is a singleton for
+    // the app's lifetime, not scoped to any one connect() attempt.
+    if (certListenerUnsub === null) {
+      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
+        handleCertTofu(e.payload as SocketCertEvent);
+      });
+    }
+
+    return ownUnsubs;
+  }
+
+  async function connect(options: SocketConnectOptions): Promise<void> {
+    generation++;
+    // Captured so a disconnect() landing mid-await (this function has three
+    // await points below) can be detected on resume — disconnect() bumps
+    // generation too, so a mismatch here means this attempt was cancelled.
+    const gen = generation;
+    await ensureApis();
+    if (gen !== generation) {
+      // A disconnect() (or a newer connect()) landed while we were suspended
+      // here — this attempt is cancelled, do not proceed.
+      return;
+    }
+    if (tauriInvoke === null) {
+      throw new Error("Tauri APIs not available");
+    }
+
+    const wsUrl = wsUrlFor(options.host);
+    for (const listener of stateListeners) listener("connecting");
+
+    // Set up event listeners before connecting. setupEventListeners() hands
+    // back only the handles THIS attempt registered — they are not spliced
+    // into the shared `eventUnsubs` until the gen check below confirms this
+    // attempt is still current. That ownership split is what stops a stale
+    // attempt's cleanup from ever reaching a newer attempt's listeners, even
+    // if the newer attempt finished registering its own listeners while this
+    // one was still suspended above (OC-0219).
+    cleanupEventListeners();
+    const ownUnsubs = await setupEventListeners();
+    if (gen !== generation) {
+      // Cancelled while awaiting the native IPC round trips inside
+      // setupEventListeners(). Tear down only the listeners THIS (now-stale)
+      // attempt just registered — never the shared eventUnsubs array, which
+      // may already hold a newer attempt's live listeners by now.
+      unsubscribeAll(ownUnsubs);
+      return;
+    }
+    eventUnsubs.push(...ownUnsubs);
+
+    try {
+      await tauriInvoke("ws_connect", { url: wsUrl });
+    } catch (err) {
+      if (gen !== generation) {
+        // A disconnect() (or a newer connect()) landed while we were suspended
+        // on the native IPC round trip — this rejection belongs to a
+        // superseded attempt (the proxy deliberately rejects a handshake it
+        // displaced with "superseded by a newer connection"). The newer
+        // attempt may already be connected; do not act on it.
+        log.debug("ws_connect rejection from superseded attempt, ignoring", err);
+        return;
+      }
+      log.error("ws_connect failed", err);
+      // Cert mismatch is handled by the cert-tofu event listener, which
+      // latches before this catch runs; the reconnect policy above the seam
+      // checks that latch and will no-op if it is set.
+      for (const listener of stateListeners) listener("disconnected");
+    }
+  }
+
+  async function disconnect(): Promise<void> {
+    // Invalidate any connect() suspended mid-await so it notices on resume
+    // instead of finishing setup and opening the very socket this teardown
+    // was meant to prevent.
+    generation++;
+    cleanupEventListeners();
+    if (tauriInvoke !== null) {
+      try {
+        await tauriInvoke("ws_disconnect");
+      } catch (err) {
+        log.debug("ws_disconnect error during cleanup (safe to ignore)", err);
+      }
+    }
+  }
+
+  async function acceptCertificate(host: string, fingerprint: string): Promise<void> {
+    await ensureApis();
+    if (tauriInvoke === null) {
+      throw new Error("Tauri APIs not available");
+    }
+    await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
+    log.info("Accepted new cert fingerprint", { host });
+  }
+
+  return {
+    connect,
+    disconnect,
+    async send(text: string): Promise<void> {
+      if (tauriInvoke === null) {
+        throw new Error("Tauri APIs not available");
+      }
+      await tauriInvoke("ws_send", { message: text });
+    },
+    acceptCertificate,
+
+    onMessage(handler: (text: string) => void): () => void {
+      messageListeners.add(handler);
+      return () => messageListeners.delete(handler);
+    },
+
+    onStateChange(handler: (state: SocketConnectionState) => void): () => void {
+      stateListeners.add(handler);
+      return () => stateListeners.delete(handler);
+    },
+
+    onCertFirstUse(handler: (event: SocketCertEvent) => void): () => void {
+      certFirstUseListeners.add(handler);
+      return () => certFirstUseListeners.delete(handler);
+    },
+
+    onCertMismatch(handler: (event: SocketCertEvent) => void): () => void {
+      certMismatchListeners.add(handler);
+      return () => certMismatchListeners.delete(handler);
+    },
+
+    async startCertListener(): Promise<void> {
+      if (certListenerUnsub !== null) return;
+      await ensureApis();
+      if (tauriListen === null) return;
+      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
+        handleCertTofu(e.payload as SocketCertEvent);
+      });
+    },
+  };
+}
+
 export function createWsClient() {
+  const transport = createSocketTransport();
   let config: WsClientConfig | null = null;
   let state: ConnectionState = "disconnected";
   let reconnectAttempt = 0;
@@ -172,11 +451,18 @@ export function createWsClient() {
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let intentionalClose = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
+  // Mirror of the proxy's own open/closed state, kept here because the
+  // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
   let lastSeq = 0;
 
-  // Tauri event unsubscribe functions
-  const eventUnsubs: Array<() => void> = [];
+  // The transport's reports, for the lifetime of this client. Each one is a
+  // thin forwarder into the app-side logic that already handled the matching
+  // native event.
+  transport.onMessage(handleMessage);
+  transport.onStateChange(handleTransportState);
+  transport.onCertFirstUse(handleCertFirstUse);
+  transport.onCertMismatch(handleCertMismatch);
 
   // Type-safe listener registry
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
@@ -196,11 +482,6 @@ export function createWsClient() {
 
   // TOFU first-use confirmation listeners (F4/F8)
   const certFirstUseListeners = new Set<CertFirstUseListener>();
-
-  // Global cert-tofu Tauri listener unsub (registered once via startCertListener,
-  // active for the whole app lifetime so first-use/mismatch events are received
-  // during the connect page's health checks — before any WS connect).
-  let certListenerUnsub: (() => void) | null = null;
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -371,169 +652,100 @@ export function createWsClient() {
     }
   }
 
-  // Route a cert-tofu event (from the http or ws proxy) to the right listeners.
-  // Registered globally via startCertListener so first-use/mismatch events are
-  // received during the connect page's health checks, before any WS connect.
-  function handleCertTofu(raw: CertTofuEvent): void {
-    log.info("TOFU cert event", { host: raw.host, status: raw.status });
-    if (raw.status === "first_use") {
-      log.warn("TOFU: first-use certificate — awaiting user confirmation", {
-        host: raw.host,
-        fingerprint: raw.fingerprint,
+  // The transport's cert-tofu reports, already routed by status: the app's
+  // reaction to each is unchanged from when this module listened for the
+  // native event itself.
+  function handleCertFirstUse(raw: CertTofuEvent): void {
+    log.warn("TOFU: first-use certificate — awaiting user confirmation", {
+      host: raw.host,
+      fingerprint: raw.fingerprint,
+    });
+    for (const listener of certFirstUseListeners) {
+      listener(raw);
+    }
+  }
+
+  function handleCertMismatch(raw: CertTofuEvent): void {
+    const evt: CertTofuEvent = {
+      ...raw,
+      storedFingerprint: raw.storedFingerprint ?? parseStoredFingerprint(raw.message),
+    };
+    log.error("Certificate fingerprint mismatch!", {
+      host: evt.host,
+      fingerprint: evt.fingerprint,
+      storedFingerprint: evt.storedFingerprint,
+    });
+    // Only latch/tear down THIS connection when the mismatch is for the
+    // host it's actually connected to — the http proxy emits mismatch
+    // events for any tunneled host, and the connect page health-checks
+    // every saved profile, so an unrelated profile's rotated cert must not
+    // permanently kill this socket's reconnect loop.
+    if (config !== null && raw.host === normalizeHostForCertCompare(config.host)) {
+      certMismatchBlock = true;
+      // A reconnect armed before the mismatch arrived would still fire and
+      // call connect(), which clears the latch — resuming the loop against
+      // the very host whose certificate just changed. Latching only blocks
+      // FUTURE scheduling, so the pending attempt has to be cancelled here.
+      cancelReconnect();
+      setState("disconnected");
+    }
+    // Notified unconditionally either way — the connect page's first-use
+    // and mismatch modals key off host and need every event.
+    for (const listener of certMismatchListeners) {
+      listener(evt);
+    }
+  }
+
+  // The transport's proxy lifecycle, turned into the app's reaction: an open
+  // proxy is still unauthenticated until `auth_ok` arrives, and a closed one
+  // starts the reconnect policy unless the close was intentional.
+  function handleTransportState(next: SocketConnectionState): void {
+    if (next === "connected") {
+      proxyOpen = true;
+      log.info("WebSocket open, sending auth", {
+        host: config?.host ?? "unknown",
+        isReconnect: reconnectAttempt > 0,
+        lastSeq,
       });
-      for (const listener of certFirstUseListeners) {
-        listener(raw);
-      }
-    } else if (raw.status === "mismatch") {
-      const evt: CertTofuEvent = {
-        ...raw,
-        storedFingerprint: raw.storedFingerprint ?? parseStoredFingerprint(raw.message),
-      };
-      log.error("Certificate fingerprint mismatch!", {
-        host: evt.host,
-        fingerprint: evt.fingerprint,
-        storedFingerprint: evt.storedFingerprint,
+      setState("authenticating");
+      if (config === null) return;
+      // active_channel_id only matters on a resume (last_seq > 0); on a
+      // fresh connect the ready payload re-establishes everything anyway.
+      // Omitted when unknown so the frame stays byte-identical to before
+      // for callers that never register a provider.
+      const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
+      send({
+        type: "auth",
+        payload: {
+          token: config.token,
+          last_seq: lastSeq,
+          epoch: PROTOCOL_EPOCH,
+          ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
+        },
       });
-      // Only latch/tear down THIS connection when the mismatch is for the
-      // host it's actually connected to — the http proxy emits mismatch
-      // events for any tunneled host, and the connect page health-checks
-      // every saved profile, so an unrelated profile's rotated cert must not
-      // permanently kill this socket's reconnect loop.
-      if (config !== null && raw.host === normalizeHostForCertCompare(config.host)) {
-        certMismatchBlock = true;
-        // A reconnect armed before the mismatch arrived would still fire and
-        // call connect(), which clears the latch — resuming the loop against
-        // the very host whose certificate just changed. Latching only blocks
-        // FUTURE scheduling, so the pending attempt has to be cancelled here.
-        cancelReconnect();
+    } else if (next === "disconnected") {
+      proxyOpen = false;
+      log.info("WebSocket closed", {
+        host: config?.host ?? "unknown",
+        intentional: intentionalClose,
+        certBlocked: certMismatchBlock,
+      });
+      stopHeartbeat();
+      if (!intentionalClose) {
+        scheduleReconnect();
+      } else {
         setState("disconnected");
       }
-      // Notified unconditionally either way — the connect page's first-use
-      // and mismatch modals key off host and need every event.
-      for (const listener of certMismatchListeners) {
-        listener(evt);
-      }
     }
-    // "trusted" → no action
-  }
-
-  // Registers this attempt's Tauri event listeners and returns the unsub
-  // handles it created, WITHOUT touching the shared `eventUnsubs` array.
-  // Ownership of those handles (splicing them into `eventUnsubs`, or tearing
-  // them down if this attempt turns out to be stale) is the caller's job —
-  // see connect(). This keeps a still-in-flight attempt's registrations from
-  // ever being visible to (and therefore clearable by) another attempt that
-  // resumes around the same time; see OC-0219.
-  async function setupEventListeners(): Promise<Array<() => void>> {
-    if (tauriListen === null) return [];
-
-    // Capture generation so stale listeners from a previous connect() are no-ops.
-    const gen = wsGeneration;
-    const ownUnsubs: Array<() => void> = [];
-
-    // Server messages
-    const unsubMsg = await tauriListen("ws-message", (e) => {
-      if (gen !== wsGeneration) return;
-      handleMessage(e.payload as string);
-    });
-    ownUnsubs.push(unsubMsg);
-
-    // Connection state changes from Rust
-    const unsubState = await tauriListen("ws-state", (e) => {
-      if (gen !== wsGeneration) return;
-      const rustState = e.payload as string;
-      log.debug("Rust WS state", { state: rustState });
-
-      if (rustState === "open") {
-        proxyOpen = true;
-        log.info("WebSocket open, sending auth", {
-          host: config?.host ?? "unknown",
-          isReconnect: reconnectAttempt > 0,
-          lastSeq,
-        });
-        setState("authenticating");
-        if (config === null) return;
-        // active_channel_id only matters on a resume (last_seq > 0); on a
-        // fresh connect the ready payload re-establishes everything anyway.
-        // Omitted when unknown so the frame stays byte-identical to before
-        // for callers that never register a provider.
-        const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
-        send({
-          type: "auth",
-          payload: {
-            token: config.token,
-            last_seq: lastSeq,
-            epoch: PROTOCOL_EPOCH,
-            ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
-          },
-        });
-      } else if (rustState === "closed") {
-        proxyOpen = false;
-        log.info("WebSocket closed", {
-          host: config?.host ?? "unknown",
-          intentional: intentionalClose,
-          certBlocked: certMismatchBlock,
-        });
-        stopHeartbeat();
-        if (!intentionalClose) {
-          scheduleReconnect();
-        } else {
-          setState("disconnected");
-        }
-      }
-    });
-    ownUnsubs.push(unsubState);
-
-    // Errors
-    const unsubErr = await tauriListen("ws-error", (e) => {
-      if (gen !== wsGeneration) return;
-      log.warn("WebSocket error (proxy)", { error: e.payload });
-    });
-    ownUnsubs.push(unsubErr);
-
-    // Register the global cert-tofu listener on first connect (idempotent).
-    // startCertListener() registers the same listener at app bootstrap so
-    // first-use/mismatch events are also caught during the connect page's health
-    // checks, before any WS connection exists. Deliberately NOT part of
-    // ownUnsubs/eventUnsubs — it is a singleton for the app's lifetime, not
-    // scoped to any one connect() attempt.
-    if (certListenerUnsub === null) {
-      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
-        handleCertTofu(e.payload as CertTofuEvent);
-      });
-    }
-
-    return ownUnsubs;
-  }
-
-  // Invokes each unsub handle in `unsubs`, tolerating handles that throw or
-  // return a rejected promise (the Tauri resource may already have been
-  // invalidated after disconnect).
-  function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
-    for (const unsub of unsubs) {
-      try {
-        const result = unsub() as unknown;
-        if (result instanceof Promise) {
-          result.catch((err) => {
-            log.warn("Failed to unsubscribe Tauri event listener", err);
-          });
-        }
-      } catch (err) {
-        log.debug("Sync unsubscribe error (safe to ignore)", err);
-      }
-    }
-  }
-
-  function cleanupEventListeners(): void {
-    unsubscribeAll(eventUnsubs);
-    eventUnsubs.length = 0;
+    // "connecting" — this client sets that state itself before asking the
+    // transport to dial, so a report here is already reflected.
   }
 
   async function connect(cfg: WsClientConfig): Promise<void> {
     wsGeneration++;
-    // Captured so a disconnect() landing mid-await (this function has three
-    // await points below) can be detected on resume — disconnect() bumps
-    // wsGeneration too, so a mismatch here means this attempt was cancelled.
+    // Captured so a disconnect() landing mid-attempt can be detected on resume
+    // — disconnect() bumps wsGeneration too, so a mismatch here means this
+    // attempt was cancelled.
     const gen = wsGeneration;
     config = cfg;
     intentionalClose = false;
@@ -545,63 +757,23 @@ export function createWsClient() {
 
     setState("connecting");
 
-    await ensureTauriApis();
-    if (gen !== wsGeneration) {
-      // A disconnect() (or a newer connect()) landed while we were
-      // suspended here — this attempt is cancelled, do not proceed.
-      return;
-    }
-    if (tauriInvoke === null) {
-      log.error("Tauri APIs not available, cannot connect WebSocket");
-      setState("disconnected");
-      return;
-    }
-
-    const wsUrl = `wss://${bracketBareIPv6Host(cfg.host)}/api/v1/ws`;
     log.info("WebSocket connecting", {
-      url: wsUrl,
+      url: wsUrlFor(cfg.host),
       isReconnect: reconnectAttempt > 0,
       attempt: reconnectAttempt,
     });
 
-    // Set up event listeners before connecting. setupEventListeners() hands
-    // back only the handles THIS attempt registered — they are not spliced
-    // into the shared `eventUnsubs` until the gen check below confirms this
-    // attempt is still current. That ownership split is what stops a stale
-    // attempt's cleanup (just below) from ever reaching a newer attempt's
-    // listeners, even if the newer attempt finished registering its own
-    // listeners while this one was still suspended above (OC-0219).
-    cleanupEventListeners();
-    const ownUnsubs = await setupEventListeners();
-    if (gen !== wsGeneration) {
-      // Cancelled while awaiting the Tauri IPC round trips inside
-      // setupEventListeners(). Tear down only the listeners THIS (now-stale)
-      // attempt just registered — never the shared eventUnsubs array, which
-      // may already hold a newer attempt's live listeners by now.
-      unsubscribeAll(ownUnsubs);
-      return;
-    }
-    eventUnsubs.push(...ownUnsubs);
-
     try {
-      await tauriInvoke("ws_connect", { url: wsUrl });
+      await transport.connect(cfg);
     } catch (err) {
       if (gen !== wsGeneration) {
-        // A disconnect() (or a newer connect()) landed while we were
-        // suspended on the Tauri IPC round trip — this rejection belongs to
-        // a superseded attempt (the Rust proxy deliberately rejects a
-        // handshake it displaced with "superseded by a newer connection").
-        // The newer attempt may already be connected; do not act on it.
-        log.debug("ws_connect rejection from superseded attempt, ignoring", err);
+        // A disconnect() (or a newer connect()) landed while the transport was
+        // dialling — this failure belongs to a superseded attempt.
         return;
       }
-      log.error("ws_connect failed", err);
+      log.error("Tauri APIs not available, cannot connect WebSocket", err);
       proxyOpen = false;
-
-      // Cert mismatch is handled by the cert-tofu event listener
-      // (which sets certMismatchBlock before this catch runs).
-      // scheduleReconnect() checks certMismatchBlock and will no-op if set.
-      scheduleReconnect();
+      setState("disconnected");
     }
   }
 
@@ -617,14 +789,14 @@ export function createWsClient() {
   }
 
   function sendRaw(json: string, id?: string): void {
-    if (tauriInvoke === null || !proxyOpen) {
+    if (!proxyOpen) {
       log.warn("Cannot send, WebSocket not open");
       // Deferred so a caller that registers the envelope id right after send()
       // returns (the optimistic-row flow) sees the failure after registration.
       queueMicrotask(() => notifySendFailure(id, "OFFLINE"));
       return;
     }
-    tauriInvoke("ws_send", { message: json }).catch((err: unknown) => {
+    void transport.send(json).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("channel full")) {
         // Outbound channel is saturated — surface the drop to listeners so an
@@ -653,13 +825,7 @@ export function createWsClient() {
   }
 
   async function disconnectProxy(): Promise<void> {
-    if (tauriInvoke !== null) {
-      try {
-        await tauriInvoke("ws_disconnect");
-      } catch (err) {
-        log.debug("ws_disconnect error during cleanup (safe to ignore)", err);
-      }
-    }
+    await transport.disconnect();
     proxyOpen = false;
   }
 
@@ -667,15 +833,15 @@ export function createWsClient() {
     // Invalidate any connect() suspended mid-await (e.g. cancelled
     // auto-login, logout racing a fresh connect) so it notices on resume
     // instead of finishing setup and opening the very socket this teardown
-    // was meant to prevent. See setupEventListeners()'s tauriListen guards
-    // and connect()'s own gen checks.
+    // was meant to prevent. See the transport's own generation guards and
+    // connect()'s gen checks.
     wsGeneration++;
     intentionalClose = true;
     log.info("WebSocket disconnecting (intentional)", { host: config?.host ?? "unknown" });
     certMismatchBlock = false;
     cancelReconnect();
     stopHeartbeat();
-    cleanupEventListeners();
+    proxyOpen = false;
     void disconnectProxy();
     setState("disconnected");
     config = null;
@@ -704,7 +870,7 @@ export function createWsClient() {
           reject(signal.reason);
           return;
         }
-        if (state !== "connected" || !proxyOpen || tauriInvoke === null) {
+        if (state !== "connected" || !proxyOpen) {
           reject(new Error("The application connection is not ready."));
           return;
         }
@@ -738,9 +904,7 @@ export function createWsClient() {
         pongListeners.add(onPong);
         stateListeners.add(onState);
         signal.addEventListener("abort", onAbort, { once: true });
-        void tauriInvoke("ws_send", {
-          message: JSON.stringify({ type: "ping", payload: {} }),
-        }).catch(fail);
+        void transport.send(JSON.stringify({ type: "ping", payload: {} })).catch(fail);
       });
     },
 
@@ -781,12 +945,7 @@ export function createWsClient() {
      * mismatch events are received even before a WS connection exists.
      */
     async startCertListener(): Promise<void> {
-      if (certListenerUnsub !== null) return;
-      await ensureTauriApis();
-      if (tauriListen === null) return;
-      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
-        handleCertTofu(e.payload as CertTofuEvent);
-      });
+      await transport.startCertListener();
     },
 
     /** Register a listener for TOFU first-use confirmation events (F4/F8). */
@@ -807,13 +966,8 @@ export function createWsClient() {
      * then reconnect.
      */
     async acceptCertFingerprint(host: string, fingerprint: string): Promise<void> {
-      await ensureTauriApis();
-      if (tauriInvoke === null) {
-        throw new Error("Tauri APIs not available");
-      }
-      await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
+      await transport.acceptCertificate(host, fingerprint);
       certMismatchBlock = false;
-      log.info("Accepted new cert fingerprint", { host });
     },
 
     getState(): ConnectionState {

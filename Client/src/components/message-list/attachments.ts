@@ -14,6 +14,7 @@ import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { save } from "@tauri-apps/plugin-dialog";
+import type { FileSaver } from "../../platform/contracts/fileSave";
 
 const log = createLogger("attachments");
 import { writeFile } from "@tauri-apps/plugin-fs";
@@ -640,6 +641,15 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   return wrap;
 }
 
+/** Save-to-disk, lifted in place so B7-4's suite can pin today's behaviour
+ *  before the pair moves to `platform/desktop/fileSave.ts`. Both calls are
+ *  verbatim: the dialog still receives `{ defaultPath }` and the file still
+ *  receives the caller's bytes. */
+export const fileSaver: FileSaver = {
+  pickSaveLocation: (suggestedName) => save({ defaultPath: suggestedName }),
+  writeFile: (path, data) => writeFile(path, data),
+};
+
 /** Download a file via Tauri HTTP plugin and save to disk with native dialog.
  *  NOTE: This requires fs:allow-write-file with path "**" in capabilities because
  *  the user chooses the save location via the native OS dialog — the destination is
@@ -647,7 +657,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
-    const filePath = await save({ defaultPath: filename });
+    const filePath = await fileSaver.pickSaveLocation(filename);
     if (filePath === null) return; // User cancelled
 
     // Fetch file data — server downloads go through the cert-pinned HTTP proxy
@@ -660,7 +670,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     }
 
     const buffer = await res.arrayBuffer();
-    await writeFile(filePath, new Uint8Array(buffer));
+    await fileSaver.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
     alert(`Download failed for ${filename} — check logs for details`);
