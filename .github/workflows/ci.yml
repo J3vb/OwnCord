@@ -20,8 +20,112 @@ permissions:
   contents: read
 
 jobs:
+  # Decides which of the jobs below run. The rules — and the cross-boundary
+  # dependencies they were traced from — are documented in scripts/ci-select.mjs,
+  # and its unit suite runs inside the Repository Hygiene check.
+  #
+  # Two properties of this job are load-bearing. It has no `if:` of its own, and
+  # it is expected to succeed on every event: the jobs below take it as a
+  # `needs:`, and a job whose dependency did not succeed is skipped. The
+  # "not a pull request into dev" case is therefore answered inside the step
+  # (`--all`) rather than by skipping this job, so that "this job ran" and
+  # "these outputs exist" are the same statement.
+  #
+  # Selection is deliberately limited to a pull request INTO DEV. A PR into main
+  # and a push to main run every capability, because
+  # scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each context in
+  # docs/plans/b0-dev-branch-protection.sh to have concluded `success` on the
+  # tagged commit and counts `skipped` as NOT success. Releases are cut from
+  # main, so a check legitimately skipped there would block the release instead
+  # of saving anything. Day-to-day work happens on PRs into dev, which is where
+  # the long runs the audit measured came from.
+  changes:
+    name: Change selection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      server: ${{ steps.select.outputs.server }}
+      client: ${{ steps.select.outputs.client }}
+      rust: ${{ steps.select.outputs.rust }}
+      browser: ${{ steps.select.outputs.browser }}
+      integration: ${{ steps.select.outputs.integration }}
+      native: ${{ steps.select.outputs.native }}
+      harness: ${{ steps.select.outputs.harness }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The diff is taken from the merge base, so both ends of it have to be
+          # present. docs-consistency fetches full history for the same reason.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      # Every branch writes an answer, so this step cannot fail the job.
+      # `set -e` is deliberately NOT set: the guards below are explicit `if !`
+      # tests, because a git command that failed is a reason to select
+      # everything, never a reason to skip every job that follows.
+      - name: Select the jobs this change needs
+        id: select
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          out="$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "dev" ]; then
+            node scripts/ci-select.mjs --all --reason "not a pull request into dev" --out "$out"
+            exit 0
+          fi
+
+          base=""
+          base=$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null) || base=""
+          if [ -z "$base" ]; then
+            echo "::warning::no merge base against origin/$BASE_REF — running every check"
+            node scripts/ci-select.mjs --all --reason "no merge base" --out "$out"
+            exit 0
+          fi
+
+          changed="$RUNNER_TEMP/changed-paths.txt"
+          if ! git diff --name-status -M "$base" HEAD > "$changed"; then
+            echo "::warning::diff against $base failed — running every check"
+            node scripts/ci-select.mjs --all --reason "diff failed" --out "$out"
+            exit 0
+          fi
+
+          node scripts/ci-select.mjs --paths-file "$changed" --out "$out" || {
+            echo "::warning::selection failed — running every check"
+            node scripts/ci-select.mjs --all --reason "selection failed" --out "$out"
+          }
+
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
+    needs: changes
+    # This job runs on EVERY event; the selection is applied to its STEPS.
+    #
+    # It cannot carry a job-level `if:`. Both names on the required-check list
+    # are the EXPANDED matrix names — `Server Build & Test (ubuntu-latest)` and
+    # `(windows-latest)` — and a job-level `if:` is evaluated BEFORE matrix
+    # expansion, so a skipped matrix job reports ONE context under the
+    # unexpanded name instead. That was probed on this repository rather than
+    # reasoned about: a commit with `if: false` here produced a single context
+    # named `Server Build & Test (${{ matrix.os }})`, and the two required names
+    # were never created at all. A required check that never reports blocks
+    # every PR forever, which is the one failure mode this must not have.
+    # `Server Docker Build (verify, linux/${{ matrix.arch }})` reports under
+    # exactly that unexpanded form on every dev PR today, which is the same
+    # behaviour.
+    #
+    # So the matrix always expands — both required contexts always materialise,
+    # and they report `success`, not `skipped`, which also keeps
+    # scripts/verify-gate-evidence.mjs (R-09) satisfied at tag time.
+    #
+    # `!cancelled()` is load-bearing even so: without a status function, a job
+    # whose `needs:` did not succeed is skipped before its `if:` is considered.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +145,40 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # The one place this leg reads the selection, and the FIRST thing it does
+      # after checkout: the decision has to precede tool setup, or a change with
+      # no server work still pays for a Go install, a Node install and a Go
+      # cache restore on both matrix legs.
+      #
+      # `shell: bash` is not optional here. This matrix includes
+      # windows-latest, whose default shell is pwsh, and `${SELECTED:-true}` is
+      # bash parameter expansion that PowerShell rejects as an invalid variable
+      # reference. Observed, not reasoned about: the Windows leg failed with
+      # `ParserError` in a .ps1 file, exit 1. The fail-safe below still did its
+      # job — the value was never written, so every later step ran rather than
+      # skipped — but the step itself failed the leg, so the fix is the shell.
+      #
+      # Written so that a MISSING value means "run": every step below tests
+      # `!= 'false'`, so if this step wrote nothing — or a later edit renamed the
+      # variable — the leg runs in full rather than silently skipping every gate.
+      # A gate that fails open is the failure this whole design exists to avoid,
+      # so the comparison is against the value that means SKIP, never against the
+      # one that means run.
+      - name: Decide whether this leg runs
+        shell: bash
+        env:
+          SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+        run: |
+          echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          # Printed as well as written, so the decision is readable in the log of
+          # each leg rather than only inferable from which steps ran.
+          echo "server checks selected: ${SELECTED:-true}"
+          if [ "${SELECTED:-true}" != "true" ]; then
+            echo "::notice::not selected for this change — this leg runs no server checks"
+          fi
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: env.RUN_SERVER != 'false'
         with:
           go-version: "1.26"
           cache-dependency-path: Server/go.sum
@@ -54,10 +191,12 @@ jobs:
       # "not a usable floor file", which is the wrong diagnosis. Not cached: the
       # job installs no npm dependencies.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: env.RUN_SERVER != 'false'
         with:
           node-version: 26
 
       - name: Build server
+        if: env.RUN_SERVER != 'false'
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
       # release.yml smokes every shipped asset with this harness. Running it
@@ -67,6 +206,7 @@ jobs:
       # owner-visible lifecycle: cold boot, migrate, healthy, graceful drain to a
       # clean exit, then restart on the same data directory.
       - name: Smoke server binary (boot, migrate, drain, restart)
+        if: env.RUN_SERVER != 'false'
         run: go run ./cmd/smoke ./${{ matrix.binary }}
 
       # B6-8, standalone leg. The smoke above proves this build boots on an
@@ -92,6 +232,7 @@ jobs:
       # released binary the harness spawns, which reads only OWNCORD_* and has
       # no business being handed one.
       - name: Download the release to upgrade from
+        if: env.RUN_SERVER != 'false'
         shell: bash
         env:
           # Read-only, and only to fetch a release asset.
@@ -133,6 +274,7 @@ jobs:
           echo "REHEARSAL_FROM=$from" >> "$GITHUB_ENV"
 
       - name: Rehearse upgrade and rollback from the latest release
+        if: env.RUN_SERVER != 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -141,38 +283,44 @@ jobs:
       # Phase B + C build-tag matrix. Each tag variant must compile so the
       # tag boundaries don't drift.
       - name: Build with -tags otel (Phase B Step 8)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags otel ./...
       - name: Build with -tags wazero (Phase C Step 9)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags wazero ./...
       - name: Build with -tags otel,wazero (full community-hub build)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags otel,wazero ./...
 
       - name: Go vulnerability check
+        if: env.RUN_SERVER != 'false'
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 
       # Generated sqlc output must never drift from db/queries/. One leg of
       # the matrix is enough; make is not guaranteed on the Windows runner.
       - name: Verify generated sqlc output (make sqlc-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make sqlc-install sqlc-verify
 
       # Protocol message-type constants (Go + TS) must never drift from
       # protocol/schema.json — the single source of truth.
       - name: Verify generated protocol constants (make protocol-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make protocol-verify
 
       # The route, table and config-key index blocks in docs/ must never drift
       # from the mounted router, the migrated schema and config.Config's yaml
       # tags. Same one-leg rule as the two checks above.
       - name: Verify generated docs (make docs-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make docs-verify
 
       - name: Run tests with race detection and coverage
+        if: env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
       - name: Run tests with deadlock detection
+        if: env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
@@ -183,6 +331,7 @@ jobs:
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
       - name: Run document gates (-count=1)
+        if: env.RUN_SERVER != 'false'
         run: go test -count=1 ./cmd/dbinventory/ ./migrations/
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
@@ -202,12 +351,23 @@ jobs:
       # line here. Server/ci_tags_test.go guards this class going forward:
       # it fails if any tagged Server test file has no `go test` leg above
       # that both sets its tag and runs its package.
+      #
+      # `-run` narrows this leg to the tests that need a plain build, because
+      # running the whole package here re-ran everything the two universal legs
+      # already cover. Measured: the package is 62.6s, of which
+      # TestSetupLimiter_ReapsStaleEntries is 60.00s and is UNTAGGED — it is in
+      # the -race and deadlock legs already. This leg exists only for the
+      # `!race && !deadlock` tests, so it runs only those (0.088s).
+      # ci_tags_test.go now also requires the -run pattern to match every test
+      # in every constrained file it claims to cover, so adding a second
+      # `!race && !deadlock` test fails the guard instead of being silently
+      # left out of the only leg that could run it.
       - name: Run tag-gated tests (-tags wazero, -tags otel)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: |
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
-          go test -count=1 ./admin/...
+          go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
@@ -216,7 +376,7 @@ jobs:
       # so the floors are pinned to one leg and the figure stays deterministic.
       # Ratchet rule in Server/CLAUDE.md.
       - name: Check coverage floor
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
@@ -234,6 +394,7 @@ jobs:
       # its own; the schema pass only bought a prettier error message, priced
       # at a third-party site inside the gate.
       - name: Lint
+        if: env.RUN_SERVER != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.11.3
@@ -247,6 +408,8 @@ jobs:
   # is covered where it exists: rust-tests and the tauri-build matrix.
   client-check:
     name: Client Static Checks
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -472,6 +635,8 @@ jobs:
 
   client-tests:
     name: Client Unit Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -509,6 +674,8 @@ jobs:
   # run with --all-targets here (tauri-build's lib-only clippy skips test code).
   rust-tests:
     name: Rust Unit Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     defaults:
@@ -554,6 +721,8 @@ jobs:
   # Mocked desktop boundary: unexpected IPC/page errors and flakes fail.
   client-e2e:
     name: Client E2E (Playwright)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -574,8 +743,25 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright tests
+      # Fast feedback by default. `client-e2e-parity` runs the complete
+      # 292-test suite against the built bundle, and until this split this job
+      # ran those same 292 against the dev server — the two configs share
+      # testDir and testIgnore, so the jobs differed only in which server served
+      # the app (10.8 and 8.8 minutes for one identical test set).
+      #
+      # So this leg runs the 92-test smoke set (Client/playwright.config.smoke.ts)
+      # and widens back to the full 292 when the specs or their fixtures moved —
+      # at that point the smoke set is no longer a fair sample of the change.
+      # The two steps are complementary rather than a default and an override,
+      # so exactly one runs; the full-suite condition doubles as the fail-safe,
+      # running the full suite if the selection job did not succeed.
+      - name: Run Playwright tests (full development suite)
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.harness == 'true' }}
         run: npx playwright test --config=playwright.config.ts
+
+      - name: Run Playwright tests (smoke)
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.harness != 'true' }}
+        run: npm run test:e2e:smoke
 
       # Browser-mode unit tests (tests/browser/): real AudioContext + WASM
       # behind the same Chromium, so the noise-suppression pipeline has a
@@ -596,6 +782,8 @@ jobs:
   # Each admin attempt owns a fresh real server and database.
   admin-e2e:
     name: Admin Panel E2E (real server)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -638,6 +826,8 @@ jobs:
   # Keep the historical check name: live branch protection already requires it.
   client-e2e-parity:
     name: Client E2E (parity subset, blocking)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -808,6 +998,8 @@ jobs:
 
   client-fullstack:
     name: Client E2E (real server and media)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -842,6 +1034,8 @@ jobs:
 
   client-native:
     name: Client E2E (Windows native)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 75
     defaults:
@@ -923,6 +1117,8 @@ jobs:
   # because of its trailing comment, so the two do not contradict each other.
   node-policy:
     name: Node policy (refused major)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
