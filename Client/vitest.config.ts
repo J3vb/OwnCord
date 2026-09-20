@@ -64,6 +64,7 @@ export default defineConfig({
       // UpdateNotifier.ts each sat here while having (or gaining) tests, so
       // their coverage never showed up in any report.
       exclude: [
+        // Type declarations only: no runtime statements to cover.
         "src/**/*.d.ts",
         // App bootstrap: wires the DOM, router and stores together at startup.
         // Has no seam to test below the e2e level; covered by tests/e2e.
@@ -76,7 +77,7 @@ export default defineConfig({
         "src/lib/noise-suppression.ts",
       ],
       thresholds: {
-        statements: 70,
+        statements: 90,
         branches: 70,
         functions: 70,
         lines: 70,

@@ -137,7 +137,8 @@ const CHECK_CLIENT = [
   step("node", ["scripts/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
   step("npm", ["run", "lint"], "Client"),
-  step("npm", ["test"], "Client"),
+  step("npm", ["run", "knip"], "Client"),
+  step("npm", ["run", "test:coverage"], "Client"),
 ];
 
 // Matches ci.yml's Rust Unit Tests job exactly: --lib for tests, --all-targets
