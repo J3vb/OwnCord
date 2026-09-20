@@ -46,6 +46,7 @@ import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -2218,6 +2219,7 @@ describe("ChannelSidebar voice identity badge", () => {
       expect(btn).not.toBeNull();
       return btn;
     });
+    expectConsole("warn", /\[ChannelSidebar\] E2EE: could not compute changed-key fingerprint/);
     trustBtn.click();
 
     expect(mockRePinPeerIdentity).not.toHaveBeenCalled();

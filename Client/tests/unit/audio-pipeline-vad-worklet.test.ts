@@ -35,6 +35,7 @@ vi.mock("livekit-client", () => ({
 }));
 
 import { AudioPipeline } from "../../src/lib/audioPipeline";
+import { expectConsole } from "../helpers/console";
 
 describe("AudioPipeline", () => {
   let pipeline: AudioPipeline;
@@ -264,6 +265,9 @@ describe("AudioPipeline", () => {
         // Should have fallen back to setTimeout
         expect(pipeline.vadUsingWorklet).toBe(false);
       });
+      // The throwing stub is an arrow vi.fn(), so vitest warns when the
+      // pipeline constructs it with `new` — the warning under test here.
+      expectConsole("warn", "[vitest] The vi.fn() mock did not use 'function' or 'class'");
     });
   });
 

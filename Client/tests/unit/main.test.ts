@@ -171,6 +171,7 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { expectConsole } from "../helpers/console";
 import { clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
@@ -274,6 +275,7 @@ describe("main.ts connected overlay (OC-0063)", () => {
       server_name: "My Guild",
       motd: "Welcome to My Guild!",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     const overlay = document.querySelector('[data-testid="connected-overlay"]');
     expect(overlay).not.toBeNull();
@@ -329,6 +331,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
       server_name: "Mid Handshake Co",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     // auth_ok landed: the overlay is mounted over #app while the router is
     // still "connect" — it only moves to "main" from the overlay's own
@@ -360,6 +363,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
       server_name: "Wide Window Co",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     // `ready` arrives and arms the overlay's 800ms onReady timer (which
     // would otherwise call router.navigate("main") on its own).
@@ -400,6 +404,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
       server_name: "Server A",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
     // ConnectedOverlay.markReady() fires onReady after READY_DELAY_MS (800ms),
     // which calls router.navigate("main") — main.ts's only route away from
@@ -443,6 +448,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
       server_name: "Server A",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
     await vi.advanceTimersByTimeAsync(800);
 
@@ -501,6 +507,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
       server_name: "Server D",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
     await vi.advanceTimersByTimeAsync(800);
 
@@ -524,6 +531,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
       server_name: "Server D",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
     await vi.advanceTimersByTimeAsync(800);
     clearAuth("user");
@@ -574,6 +582,7 @@ describe("main.ts session ownership", () => {
     const old = capturedConnectCallbacks.onLogin!("same.example", "alice", "first-password");
     const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" });
     await capturedConnectCallbacks.onLogin!("same.example", "bob", "second-password");
+    expectConsole("warn", /\[main\] Credential delete failed/);
     const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
       typeof createApiClient
     >;

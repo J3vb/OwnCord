@@ -6,6 +6,7 @@ import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 import dispatcherSource from "../../src/lib/dispatcher.ts?raw";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
+import { expectConsole } from "../helpers/console";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
@@ -277,6 +278,8 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("auth_error", { message: "Invalid token" });
 
+    expectConsole("error", /\[dispatcher\] Auth failed/);
+
     const state = authStore.getState();
     expect(state.isAuthenticated).toBe(false);
     expect(state.user).toBeNull();
@@ -299,6 +302,8 @@ describe("WS Dispatcher", () => {
       min_epoch: PROTOCOL_EPOCH + 1,
     });
 
+    expectConsole("error", /\[dispatcher\] Auth failed/);
+
     expect(uiStore.getState().updateRequiredHost).toBe("chat.example:8443");
     expect(uiStore.getState().transientError).toBe("update the client");
     expect(authStore.getState().isAuthenticated).toBe(false);
@@ -320,6 +325,7 @@ describe("WS Dispatcher", () => {
       server_epoch: PROTOCOL_EPOCH - 1,
       min_epoch: PROTOCOL_EPOCH - 1,
     });
+    expectConsole("error", /\[dispatcher\] Auth failed .*update the server/);
     expect(uiStore.getState().updateRequiredHost).toBeNull();
 
     // Server older than the client: still a protocol refusal, still a valid
@@ -327,6 +333,7 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().logoutReason).toBe("protocol_epoch");
 
     mock.dispatch("auth_error", { message: "Invalid token" });
+    expectConsole("error", /\[dispatcher\] Auth failed .*Invalid token/);
     expect(uiStore.getState().updateRequiredHost).toBeNull();
     expect(authStore.getState().logoutReason).toBe("user");
   });
@@ -1355,6 +1362,7 @@ describe("WS Dispatcher", () => {
     // It noticed the row moved and asked again rather than applying the snapshot.
     await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(2));
     expect(getChannelMessages(1)[0]).toMatchObject({ id: 501, deleted: true });
+    expectConsole("warn", /\[dispatcher\] Failed to reconcile a deduplicated send/);
   });
 
   it("does not refetch history for an ordinary send ack", async () => {
@@ -2222,6 +2230,7 @@ describe("WS Dispatcher", () => {
 
       expect(isChannelLoaded(1)).toBe(false);
       expect(getHistoryLoadState(1)).toBe("error");
+      expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
     });
 
     // Mirror of the .then guard: a rejection that lands after the user
@@ -2266,6 +2275,7 @@ describe("WS Dispatcher", () => {
       await Promise.resolve();
 
       expect(getHistoryLoadState(1)).not.toBe("error");
+      expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
     });
   });
 
@@ -3327,6 +3337,7 @@ describe("WS Dispatcher", () => {
       reason: "update",
       delay_seconds: 10,
     });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     const error = uiStore.getState().transientError;
     expect(error).toContain("Server is restarting");
@@ -3338,6 +3349,7 @@ describe("WS Dispatcher", () => {
       reason: null,
       delay_seconds: 5,
     });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     const error = uiStore.getState().transientError;
     expect(error).toContain("maintenance");
@@ -3359,6 +3371,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("server_restart", { reason: "shutdown", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     // Kicked back to login: auth cleared, reason preserved so the logout
     // wiring keeps the saved credential.
@@ -3382,6 +3395,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     expect(authStore.getState().isAuthenticated).toBe(true);
   });
@@ -3397,6 +3411,7 @@ describe("WS Dispatcher", () => {
       code: "BANNED",
       message: "You have been banned from this server",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(authStore.getState().isAuthenticated).toBe(false);
     const error = uiStore.getState().transientError;
@@ -3405,6 +3420,7 @@ describe("WS Dispatcher", () => {
 
   it("wires error BANNED with empty message uses default", () => {
     mock.dispatch("error", { code: "BANNED", message: "" });
+    expectConsole("error", /\[dispatcher\] Server error/);
     const error = uiStore.getState().transientError;
     expect(error).toBe("You have been banned");
   });
@@ -3420,6 +3436,7 @@ describe("WS Dispatcher", () => {
       code: "BANNED",
       message: "You have been banned from this server",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     // clearAuth() alone flips isAuthenticated, but main.ts's authStore
     // subscriber only tears down the ws (and cancels the reconnect loop) when
@@ -3443,6 +3460,7 @@ describe("WS Dispatcher", () => {
       code: "RATE_LIMITED",
       message: "Too many requests",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Too many requests", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3454,6 +3472,7 @@ describe("WS Dispatcher", () => {
       code: "FORBIDDEN",
       message: "Insufficient permissions",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Insufficient permissions", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3462,6 +3481,7 @@ describe("WS Dispatcher", () => {
   it("wires error RATE_LIMITED with empty message uses default (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
+    expectConsole("error", /\[dispatcher\] Server error/);
     expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
@@ -3477,6 +3497,7 @@ describe("WS Dispatcher", () => {
       code: "UNKNOWN",
       message: "Something odd",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Something odd", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3491,6 +3512,7 @@ describe("WS Dispatcher", () => {
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock.dispatch("error", { code: "BAD_REQUEST", message: "Message too long" }, "edit-id-1");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Message too long", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3518,6 +3540,7 @@ describe("WS Dispatcher", () => {
 
     // Error echoes the request id → the specific row is marked failed…
     mock.dispatch("error", { code: "SLOW_MODE", message: "slow down" }, "corr-1");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     const row = getChannelMessages(7)[0]!;
     expect(row.status).toBe("failed");
@@ -3553,6 +3576,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "blocked" }, "corr-dm");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.has(5)).toBe(true);
     // Still marks the row failed (existing behaviour preserved).
@@ -3571,6 +3595,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "corr-nondm");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
   });
@@ -3609,6 +3634,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "not a participant" }, "corr-group");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.has(5)).toBe(false);
     // Still marks the row failed (existing behaviour preserved).
@@ -3812,6 +3838,7 @@ describe("WS Dispatcher", () => {
     await Promise.resolve();
     emojiStore.flush();
     expect(listCustomEmoji()).toEqual([]);
+    expectConsole("warn", /\[dispatcher\] Failed to load custom emoji/);
   });
 
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
@@ -4571,6 +4598,7 @@ describe("WS Dispatcher", () => {
     });
 
     // The dispatcher should detect stale voice state and send voice_leave
+    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
     expect(mock.ws.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_leave", payload: {} }),
     );
@@ -4749,16 +4777,19 @@ describe("WS Dispatcher", () => {
 
     it("surfaces CHANNEL_FULL as a toast", () => {
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "voice channel is full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith("voice channel is full", "error");
     });
 
     it("falls back to a readable message when the server sends none", () => {
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith("That voice channel is full", "error");
     });
 
     it("surfaces VIDEO_LIMIT as a toast", () => {
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith(
         "That voice channel has reached its video limit",
         "error",
@@ -4771,6 +4802,7 @@ describe("WS Dispatcher", () => {
     // voice_state says camera=false, so VIDEO_LIMIT is otherwise cosmetic.
     it("rolls back the local camera publish on VIDEO_LIMIT", async () => {
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockDisableCamera).toHaveBeenCalled();
@@ -4781,6 +4813,7 @@ describe("WS Dispatcher", () => {
     it("does not set the transient error", () => {
       uiStore.setState((prev) => ({ ...prev, transientError: null }));
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(uiStore.getState().transientError).toBeNull();
     });
 
@@ -4794,6 +4827,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4807,6 +4841,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "connected" }));
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBe(5);
       expect(voiceStore.getState().voiceStatus).toBe("connected");
@@ -4825,6 +4860,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4834,6 +4870,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4859,6 +4896,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockLeaveVoice).toHaveBeenCalledWith(true);
@@ -4890,6 +4928,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "no permission" }, "vid-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
@@ -4903,6 +4942,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
 
       mock.dispatch("error", { code: "RATE_LIMITED", message: "" }, "vid-2");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockDisableScreenshare).toHaveBeenCalled();
@@ -4915,6 +4955,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "unrelated-id");
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
@@ -4931,6 +4972,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
 
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-screen-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-screen-1");
@@ -4949,6 +4991,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
 
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-superseded-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-superseded-1");

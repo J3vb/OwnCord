@@ -9,12 +9,8 @@ import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
 
-// Several tests below assert on the logger's debug lines through a
-// console.debug spy, so this file raises the level the global setup lowered
-// (C-04) and puts it back afterwards.
-beforeEach(() => {
-  setLogLevel("debug");
-});
+// The three tests that assert on the logger's debug lines raise the level the
+// global setup lowered (C-04) for themselves; this puts it back.
 afterEach(() => {
   setLogLevel("warn");
 });
@@ -477,6 +473,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("flashTaskbar", true);
     // Disable other notification types to isolate
@@ -510,6 +507,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("notificationSounds", true);
     testPrefs.set("desktopNotifications", false);
@@ -625,6 +623,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);

@@ -17,6 +17,7 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { expectConsole } from "../helpers/console";
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -583,6 +584,7 @@ describe("VoiceAudioTab UI structure", () => {
       expect(texts.some((t) => t?.includes("Could not enumerate"))).toBe(true);
     });
 
+    expectConsole("warn", /\[VoiceAudioTab\] Mic access denied or unavailable/);
     ac.abort();
   });
 
@@ -796,6 +798,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Should not throw — mic meter stays empty
     await new Promise((r) => setTimeout(r, 0));
+    expectConsole("warn", /\[VoiceAudioTab\] Mic access denied or unavailable/);
     ac.abort();
   });
 

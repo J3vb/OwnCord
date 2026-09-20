@@ -4,6 +4,7 @@ const { mockFetch, mockProxy } = vi.hoisted(() => ({ mockFetch: vi.fn(), mockPro
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
 vi.mock("../../src/lib/httpProxy", () => ({ ensureHttpProxy: mockProxy }));
 import { createApiClient, type ApiClient } from "../../src/lib/api";
+import { expectConsole } from "../helpers/console";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -57,6 +58,7 @@ describe("API session ownership", () => {
     api = createApiClient({ host: "same.example", token: "alice" }, unauthorized);
     mockFetch.mockResolvedValue(response({ error: "UNAUTHORIZED", message: "Expired" }, 401));
     await expect(api.getMe()).rejects.toMatchObject({ status: 401 });
+    expectConsole("warn", /\[api\] API error/);
     expect(unauthorized).toHaveBeenCalledOnce();
     expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
   });

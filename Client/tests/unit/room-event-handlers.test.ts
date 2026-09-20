@@ -25,6 +25,7 @@ import type { RoomEventDeps } from "@lib/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
+import { expectConsole } from "../helpers/console";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 
@@ -218,6 +219,7 @@ describe("handleLocalTrackPublished", () => {
     await vi.waitFor(() => {
       expect(applyMicMuteState).toHaveBeenCalled();
     });
+    expectConsole("warn", /\[roomEventHandlers\] applyMicMuteState failed/);
   });
 });
 
@@ -440,6 +442,7 @@ describe("handleAudioPlaybackChanged", () => {
     h.handlers.handleAudioPlaybackChanged();
     document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
     // The browser blocks autoplay until a user gesture; without this the user
     // joins a call and hears nothing at all.
     await vi.waitFor(() => {
@@ -468,6 +471,8 @@ describe("handleAudioPlaybackChanged", () => {
     await vi.waitFor(() => {
       expect(h.room.startAudio).toHaveBeenCalledTimes(1);
     });
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
   });
 
   it("removeAutoplayUnlock drops the pending listener", () => {
@@ -478,6 +483,7 @@ describe("handleAudioPlaybackChanged", () => {
     h.handlers.removeAutoplayUnlock();
     document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
     expect(h.room.startAudio).not.toHaveBeenCalled();
   });
 
@@ -499,6 +505,7 @@ describe("handleAudioPlaybackChanged", () => {
     h.handlers.handleAudioPlaybackChanged();
     document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
     expect(h.room.startAudio).not.toHaveBeenCalled();
   });
 
@@ -507,6 +514,7 @@ describe("handleAudioPlaybackChanged", () => {
     const h = build({ getRoom: () => room });
 
     h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /\[roomEventHandlers\] Audio playback blocked by browser/);
     room = null; // user left voice before clicking
 
     expect(() => {
@@ -530,6 +538,7 @@ describe("handleEncryptionError", () => {
 
     h.handlers.handleEncryptionError(new Error("worker crashed"));
 
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
     expect(voiceStore.getState().encryptionDegraded).toBe(true);
   });
 
@@ -538,6 +547,7 @@ describe("handleEncryptionError", () => {
 
     h.handlers.handleEncryptionError(new Error("worker crashed"), undefined);
 
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
     expect(voiceStore.getState().encryptionDegraded).toBe(true);
   });
 });
@@ -660,6 +670,7 @@ describe("handleDisconnected", () => {
     await vi.waitFor(() => {
       expect(h.room.disconnect).toHaveBeenCalled();
     });
+    expectConsole("warn", /\[roomEventHandlers\] Failed to disconnect stale room/);
   });
 
   it("tolerates a missing error callback", () => {
