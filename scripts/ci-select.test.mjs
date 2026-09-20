@@ -1,0 +1,245 @@
+import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { CAPABILITIES, classify, parseNameStatus } from "./ci-select.mjs";
+
+// A path list is the only input; everything below goes through the same
+// `git diff --name-status -M` shape the workflow feeds it, so the parser and
+// the classifier are exercised together rather than only in isolation.
+const picked = (nameStatus) => classify(parseNameStatus(nameStatus));
+const runs = (nameStatus, cap) => picked(nameStatus)[cap];
+
+test("a documentation-only change runs no application job", () => {
+  const sel = picked(
+    [
+      "M\tdocs/plans/b7-plan-2026-09-20.md",
+      "A\tdocs/architecture/diagnostics.md",
+      "M\tREADME.md",
+      "M\tCHANGELOG.md",
+    ].join("\n"),
+  );
+  for (const cap of CAPABILITIES) {
+    assert.equal(sel[cap], false, `${cap} must not run for a prose-only change`);
+  }
+});
+
+test("a prose change still leaves the two always-on jobs alone", () => {
+  // Hygiene and Docs & Ledger Consistency are not capabilities: they are
+  // unconditional jobs in ci.yml. This test records that the classifier
+  // deliberately has no say over them, so a future edit does not "helpfully"
+  // gate the formatting gate away from the changes that most need it.
+  assert.equal(CAPABILITIES.includes("hygiene"), false);
+  assert.equal(CAPABILITIES.includes("docs"), false);
+});
+
+test("an added server file runs the server job", () => {
+  assert.equal(runs("A\tServer/service/new_thing.go", "server"), true);
+});
+
+test("a modified client file runs the client, browser and native jobs", () => {
+  const sel = picked("M\tClient/src/pages/MainPage.ts");
+  assert.equal(sel.client, true);
+  assert.equal(sel.browser, true);
+  assert.equal(sel.native, true, "the native job builds this bundle and drives this UI");
+  assert.equal(sel.server, false, "a client-only change must not spend the server legs");
+});
+
+test("a deleted client file is treated like any other client change", () => {
+  assert.equal(runs("D\tClient/src/components/Old.ts", "browser"), true);
+});
+
+test("a rename selects both the component that lost the file and the one that gained it", () => {
+  const sel = picked("R100\tServer/service/moved.go\tClient/src/lib/moved.ts");
+  assert.equal(sel.server, true, "Server/ lost a file and must be re-tested");
+  assert.equal(sel.client, true, "Client/ gained a file and must be re-tested");
+});
+
+test("a rename that stays inside one component selects that component once", () => {
+  const sel = picked("R090\tClient/src/lib/a.ts\tClient/src/lib/b.ts");
+  assert.equal(sel.client, true);
+  assert.equal(sel.server, false);
+});
+
+test("a mixed change is the union of its parts", () => {
+  const sel = picked(
+    ["A\tClient/src/lib/x.ts", "M\tServer/ws/hub.go", "M\tdocs/protocol.md"].join("\n"),
+  );
+  assert.equal(sel.server, true);
+  assert.equal(sel.client, true);
+  assert.equal(sel.rust, false, "nothing Rust-related moved");
+});
+
+// ─── The traced cross-boundary dependencies. Each of these is a real read in
+// the tree, cited in ci-select.mjs. They are the cases a plain
+// "docs/ is prose" or "only Server/ affects Server" rule gets wrong.
+
+test("docs/schema.md runs the server job, because a Go test reads it", () => {
+  assert.equal(runs("M\tdocs/schema.md", "server"), true);
+});
+
+test("docs/api.md runs both the server job and the client unit suite", () => {
+  const sel = picked("M\tdocs/api.md");
+  assert.equal(sel.server, true, "make docs-verify compares the generated blocks in it");
+  assert.equal(sel.client, true, "tests/contract/api-profile-route.test.ts reads it");
+});
+
+test("the two architecture docs the Go gates read are not treated as prose", () => {
+  assert.equal(runs("M\tdocs/architecture/server-boundaries.md", "server"), true);
+  assert.equal(runs("M\tdocs/architecture/community-services.md", "server"), true);
+});
+
+test("Client/src/lib/types.ts runs the server job, though it lives under Client/", () => {
+  const sel = picked("M\tClient/src/lib/types.ts");
+  assert.equal(sel.server, true, "permissions/schema_doc_test.go reads it");
+  assert.equal(sel.client, true);
+});
+
+test("the admin panel HTML runs the client unit suite, though it lives under Server/", () => {
+  const sel = picked("M\tServer/admin/static/index.html");
+  assert.equal(sel.client, true, "five tests/contract specs read it");
+  assert.equal(sel.server, true);
+});
+
+test("the findings ledger runs the server job, because the smoke drill reads it", () => {
+  assert.equal(runs("M\t.superpowers/findings-ledger.json", "server"), true);
+});
+
+test("a protocol schema change runs every component that consumes the generated types", () => {
+  const sel = picked("M\tprotocol/schema.json");
+  assert.equal(sel.server, true, "ws/message_types.go is generated from it");
+  assert.equal(sel.client, true, "src/lib/protocolTypes.ts is generated from it");
+  assert.equal(sel.browser, true);
+  assert.equal(sel.native, true);
+});
+
+// ─── Conservative expansion: the paths whose blast radius is unbounded.
+
+test("a workflow file selects every capability", () => {
+  const sel = picked("M\t.github/workflows/ci.yml");
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true, `${cap} after a ci.yml edit`);
+});
+
+test("a shared script selects every capability", () => {
+  const sel = picked("M\tscripts/check-tauri-versions.mjs");
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
+});
+
+test("the root lockfile selects every capability", () => {
+  const sel = picked("M\tpackage-lock.json");
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true, `${cap} after the root lockfile`);
+});
+
+test("the client lockfile selects the components that consume the client npm tree, and no others", () => {
+  // Deliberately not "everything": the Rust crate and the Go server do not
+  // resolve through Client/package-lock.json, so spending their jobs on it
+  // would be cost without coverage. It IS a harness change — a vite or
+  // Playwright bump moves the ground under the smoke run — which is why the
+  // development browser run widens to full.
+  const sel = picked("M\tClient/package-lock.json");
+  for (const cap of ["client", "browser", "integration", "native", "harness"]) {
+    assert.equal(sel[cap], true, `${cap} after the client lockfile`);
+  }
+  for (const cap of ["server", "rust"]) {
+    assert.equal(sel[cap], false, `${cap} does not resolve through the client npm tree`);
+  }
+});
+
+test("a path the classifier has never been taught selects everything", () => {
+  const sel = picked("A\tsome/new/top-level-thing.bin");
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
+});
+
+test("an empty diff selects everything rather than nothing", () => {
+  // The shape of a failed or truncated diff: the safe answer is the full run.
+  const sel = classify([]);
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
+});
+
+// ─── The command line itself. A wrong flag name or a broken --out write would
+// surface as every job silently skipping rather than as a red build, so the
+// entry point is exercised rather than trusted. It is also the only place the
+// `key=value` shape $GITHUB_OUTPUT requires is asserted.
+
+const CLI = fileURLToPath(new URL("./ci-select.mjs", import.meta.url));
+
+function runCli(args, pathsFile) {
+  const dir = mkdtempSync(join(tmpdir(), "ci-select-"));
+  const out = join(dir, "out.txt");
+  const full = [...args, "--out", out];
+  if (pathsFile !== undefined) {
+    const file = join(dir, "changed.txt");
+    writeFileSync(file, pathsFile);
+    full.push("--paths-file", file);
+  }
+  execFileSync(process.execPath, [CLI, ...full], { stdio: "pipe" });
+  return readFileSync(out, "utf8");
+}
+
+test("--all writes every capability true, one key=value line each", () => {
+  const text = runCli(["--all"]);
+  const rows = text.trimEnd().split("\n");
+  assert.equal(rows.length, CAPABILITIES.length);
+  for (const cap of CAPABILITIES) assert.match(text, new RegExp(`^${cap}=true$`, "m"));
+});
+
+test("a --paths-file run selects from the rows and writes the same shape", () => {
+  const text = runCli([], "M\tServer/ws/hub.go\n");
+  assert.match(text, /^server=true$/m);
+  assert.match(text, /^client=false$/m);
+  assert.equal(text.trimEnd().split("\n").length, CAPABILITIES.length);
+});
+
+test("--all with no --paths-file still succeeds, because a selection is never a check", () => {
+  // The workflow relies on this exiting 0: a non-zero exit here would skip
+  // every job that consumes the outputs.
+  const text = runCli(["--all", "--reason", "not a pull request into dev"]);
+  assert.match(text, /^native=true$/m);
+});
+
+// ─── The smoke/full split for the development browser run.
+
+test("editing the e2e specs widens the development browser run to full", () => {
+  assert.equal(runs("M\tClient/tests/e2e/connect-page.spec.ts", "harness"), true);
+});
+
+test("editing a spec fixture widens it too", () => {
+  assert.equal(runs("A\tClient/tests/e2e/support/helpers.ts", "harness"), true);
+});
+
+test("an ordinary application change does not widen it", () => {
+  assert.equal(runs("M\tClient/src/pages/MainPage.ts", "harness"), false);
+});
+
+test("a Rust change reaches rust-tests and the native job, not the browser jobs", () => {
+  const sel = picked("M\tClient/src-tauri/src/lib.rs");
+  assert.equal(sel.rust, true);
+  assert.equal(sel.native, true);
+  assert.equal(sel.browser, false);
+});
+
+// ─── Parser shape.
+
+test("the parser ignores anything that is not a name-status row", () => {
+  assert.deepEqual(parseNameStatus(""), []);
+  assert.deepEqual(parseNameStatus("not a status row"), []);
+  assert.deepEqual(parseNameStatus("M\tone.go"), ["one.go"]);
+  assert.deepEqual(parseNameStatus("R100\told.go\tnew.go"), ["old.go", "new.go"]);
+});
+
+test("a path that escapes the repository is not silently accepted", () => {
+  // normalise() rejects these, and classify() then takes the conservative
+  // branch rather than guessing which component "../../etc/passwd" belongs to.
+  const sel = classify(["../../etc/passwd"]);
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
+});
+
+test("every capability is a key of the result, so a missing output cannot skip a job", () => {
+  const sel = picked("M\tdocs/protocol.md");
+  for (const cap of CAPABILITIES) {
+    assert.equal(typeof sel[cap], "boolean", `${cap} must be present and boolean`);
+  }
+});
