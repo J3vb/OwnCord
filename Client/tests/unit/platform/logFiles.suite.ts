@@ -9,8 +9,13 @@ import type { LogFiles } from "../../../src/platform/contracts/logFiles";
 
 export interface NativeControl {
   succeedWith(): void;
-  failWith(error: unknown): void;
   unavailable(): void;
+  /** Simulate the app logger emitting one entry — persisted only once
+   *  `init()` has wired up the listener that feeds the write buffer. */
+  logEntry(): void;
+  /** The raw line-batches the native filesystem layer has actually received
+   *  via a write call so far, in call order. */
+  written(): readonly string[];
 }
 
 export type LogFilesSeam = Pick<LogFiles, "init" | "flush" | "clearPending" | "getDir">;
@@ -39,7 +44,7 @@ export function describeLogFilesSuite(
       check("returns the resolved log directory after a successful init()", async () => {
         ctx.native.succeedWith();
         await ctx.subject.init();
-        expect(ctx.subject.getDir()).not.toBeNull();
+        expect(typeof ctx.subject.getDir()).toBe("string");
       });
     });
 
@@ -64,16 +69,33 @@ export function describeLogFilesSuite(
     });
 
     describe("flush", () => {
-      check("resolves after a successful init()", async () => {
+      check("writes buffered log entries through to the native filesystem", async () => {
         ctx.native.succeedWith();
         await ctx.subject.init();
-        await expect(ctx.subject.flush()).resolves.toBeUndefined();
+        ctx.native.logEntry();
+        await ctx.subject.flush();
+        expect(ctx.native.written().length).toBeGreaterThan(0);
       });
     });
 
     describe("clearPending", () => {
-      check("resolves even with nothing buffered", async () => {
-        await expect(ctx.subject.clearPending()).resolves.toBeUndefined();
+      // A bare "writes nothing" alone is a negative claim an inert
+      // do-nothing subject satisfies trivially (it never writes anything at
+      // all) — the contrasting write in the second half is what proves
+      // clearPending() actually discarded the first entry rather than the
+      // subject just never persisting anything.
+      check("discards buffered entries so a following flush() writes nothing new", async () => {
+        ctx.native.succeedWith();
+        await ctx.subject.init();
+
+        ctx.native.logEntry();
+        await ctx.subject.clearPending();
+        await ctx.subject.flush();
+        expect(ctx.native.written()).toEqual([]);
+
+        ctx.native.logEntry();
+        await ctx.subject.flush();
+        expect(ctx.native.written().length).toBe(1);
       });
     });
   });

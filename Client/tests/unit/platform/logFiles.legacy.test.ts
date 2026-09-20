@@ -8,6 +8,7 @@
 // vi.resetModules() + a fresh dynamic import per test, mirroring
 // tests/integration/client-updater-lifecycle.test.ts.
 import { vi } from "vitest";
+import type { LogEntry } from "../../../src/lib/logger";
 import type { LogFilesSeam } from "./logFiles.suite";
 import { describeLogFilesSuite } from "./logFiles.suite";
 
@@ -19,16 +20,22 @@ const readDir = vi.fn();
 const remove = vi.fn();
 const exists = vi.fn();
 
+let capturedListener: ((entry: LogEntry) => void) | null = null;
+
 vi.mock("@tauri-apps/api/path", () => ({ appLogDir, join }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ mkdir, writeTextFile, readDir, remove, exists }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-  addLogListener: () => () => {},
+  addLogListener: (listener: (entry: LogEntry) => void) => {
+    capturedListener = listener;
+    return () => {};
+  },
   getLogBuffer: () => [],
 }));
 
 describeLogFilesSuite(async () => {
   vi.resetModules();
+  capturedListener = null;
   for (const mock of [appLogDir, join, mkdir, writeTextFile, readDir, remove, exists]) {
     mock.mockReset();
   }
@@ -53,11 +60,19 @@ describeLogFilesSuite(async () => {
       succeedWith() {
         appLogDir.mockResolvedValue("/logs");
       },
-      failWith(error: unknown) {
-        appLogDir.mockRejectedValue(error);
-      },
       unavailable() {
         appLogDir.mockRejectedValue(new Error("not running under the native host"));
+      },
+      logEntry() {
+        capturedListener?.({
+          timestamp: new Date().toISOString(),
+          level: "info",
+          component: "test",
+          message: "a log entry",
+        });
+      },
+      written() {
+        return writeTextFile.mock.calls.map((call) => call[1] as string);
       },
     },
   };

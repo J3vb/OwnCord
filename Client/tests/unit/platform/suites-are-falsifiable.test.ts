@@ -91,8 +91,9 @@ describeLogFilesSuite(async () => {
   } as unknown as LogFilesSeam;
   const native: LogFilesNativeControl = {
     succeedWith: () => undefined,
-    failWith: () => undefined,
     unavailable: () => undefined,
+    logEntry: () => undefined,
+    written: () => [],
   };
   return { subject, native };
 }, failEveryTest);
