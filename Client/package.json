@@ -9,7 +9,8 @@
   },
   "scripts": {
     "postinstall": "patch-package --error-on-fail --error-on-warn",
-    "dev": "vite",
+    "dev": "npm run dev:desktop",
+    "dev:desktop": "vite --config vite.config.desktop.ts",
     "build": "npm run build:desktop",
     "build:desktop": "tsc -p tsconfig.build.json && vite build --config vite.config.desktop.ts",
     "preview": "vite preview",
