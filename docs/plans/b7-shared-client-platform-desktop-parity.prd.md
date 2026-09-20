@@ -10,8 +10,11 @@
 > **Drafted:** 2026-09-19. **Base commit:** `ccd9a5d` (`dev`).
 >
 > The B7 entry gate is not yet met — HP-6 is unsigned (B6 close-out state,
-> below) — so only B7-0 (verify claims and record the entry baselines) may
-> start; every other milestone below waits on B7-0's verdicts and on HP-6.
+> below). **Amended 2026-09-20 (owner decision): HP-6 is no longer B7's
+> gate.** B7-4 onward may proceed without it, because HP-6 cannot be reached
+> before the beta: it takes B6-12's rehearsed tag as its release candidate,
+> and the owner is cutting no further release until the beta ships — which B7
+> itself precedes. HP-6 still runs before the beta, against that tag.
 > B7-0's plan is drafted alongside this PRD.
 
 ## Problem
@@ -325,7 +328,8 @@ candidate, not browser exposure (that purpose moved to B8, owner decision
 that nothing creates `Client/src/platform/` before the entry gate is
 verified. B7-1, B7-2, and B7-3 may proceed in parallel once B7-0 lands, and
 may start before HP-6 signs (decision 15): gate cleanup, the Node policy and
-contract design consume no server service. B7-4 onward wait for HP-6. B7-3 → B7-4
+contract design consume no server service. B7-4 onward no longer wait for
+HP-6 (decision 18, 2026-09-20). B7-3 → B7-4
 → B7-5 are serialized by responsibility, since B7-4 and B7-5 both migrate
 call sites into the same adapter B7-3 shapes. B7-6 runs beside B7-4/B7-5 —
 it is a build-config change, not a call-site migration, so it does not need
@@ -387,6 +391,7 @@ signature.
 - [x] **Decided 2026-09-19 (owner-delegated):** confirmed — B7-0 ran before HP-6 (#1626). B7-1, B7-2 and B7-3 may also start before HP-6: they touch gates, the Node policy and contract files only, and consume no server service. B7-4 onward wait for HP-6's signature. _Why:_ the entry gate protects the client from consuming unstable server services; those three consume none. Question as recorded: **Entry gate item 1 is unmet until HP-6 signs: may B7-0 (measure and verify only, no `Client/src/platform/`) start before HP-6 (default yes) while every other milestone waits?** HP-6 is pending with all 15 acceptance boxes unticked and cannot start before B6-12's tag rehearsal. Proposed default: yes — B7-0 may start now since it creates no `platform/` code, but B7-1 through B7-18 wait for HP-6's signature.
 - [x] **Decided 2026-09-19 (owner-delegated):** keep `b7-<slug>.prd.md`, matching B6. README rows are the status authority, not the file name. Question as recorded: **PRD file name: `b7-<slug>.prd.md` like B6 (default, used here) versus pattern rule 1's `bN-<slug>-<date>.md`.** The B6 PRD is named without a date suffix; other plan documents in the repo follow a dated pattern. Proposed default: match B6's convention, as used for this file.
 - [x] **Decided 2026-09-19 (owner-delegated):** confirmed — every B7 change lands through a draft PR from a feature branch into `dev`. Question as recorded: **This preparation lands through a draft PR from `docs/b7-prd` into `dev` because `dev` is PR-only; confirm.** `dev` is a protected, PR-only branch (`docs/contributing.md:194-231`). Proposed default: yes, a draft PR from `docs/b7-prd`.
+- [x] **Decided 2026-09-20 (owner, decision 18):** HP-6 is removed as B7's entry gate; B7-4 onward proceed without it. This supersedes the 2026-09-19 decision above, which held B7-4 through B7-18 for HP-6's signature. _Why:_ the two constraints are circular. HP-6's Task 0 takes B6-12's rehearsed tag as its release candidate and stops outright if B6-12 has not landed, because "every server artifact installs" is only provable from a tag run; B6-12's rehearsal is the next real alpha tag, a throwaway having been refuted (it would reach every auto-updating server); and the owner is cutting no further release until the beta. The beta ships after B9 (`docs/plans/README.md:45`), so waiting for HP-6 would mean B7 waits on a tag that cannot exist until after B7 is done. The risk the gate guards against is unchanged and small here: it protects the client from consuming unstable server services, and B7-4/B7-5 migrate client call sites onto the desktop adapter rather than consuming new server surface. Question as recorded: **B7-4 is blocked by HP-6, HP-6 is blocked by a release tag, and the release tag is blocked until the beta, which B7 precedes — cut the tag anyway, waive HP-6 as B7's gate, or build a non-publishing rehearsal?** Owner chose to waive. **What this does not change:** HP-6 still runs before the beta, against B6-12's tag; it is deferred, not cancelled, and B6-12 and B6-16 stay `in-progress`.
 
 ## Risks
 
