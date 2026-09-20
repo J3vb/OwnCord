@@ -204,16 +204,22 @@ the now-unused `Backend` import from `credentials.rs`.
 
 ### Startup and memory
 
-Not measurable in this container: no display, no desktop build, and
-`npm run tauri build` is CI-only by `Client/CLAUDE.md`. The method for the
-number this file does not carry is: `cd Client && npm run tauri dev` on a
-developer machine, open the Tauri devtools performance timeline, record
-time-to-connect-page (navigation start to the connect form's first paint) and
-the WebView process RSS after 60 s idle on the main page, from the OS process
-list. No CI job produces either number and none is added here. Roadmap entry
-gate item 3 ("desktop behavior, bundle, startup, memory, and test baselines are
-recorded") therefore stays **open** for its startup and memory halves; every
-other half is recorded above.
+**Amended 2026-09-20 (owner decision): startup and memory measured on a real desktop.**
+
+Measured on a Windows 11 developer desktop with `cd Client && npm run tauri dev`
+(Vite dev server, not a production build): time-to-connect-page was **598 ms**,
+navigation start to the connect form's first paint, read from the WebView2
+devtools Performance timeline. Largest contentful paint landed in the same frame
+(0.60 s), so the connect form is what paints first and no splash precedes it.
+The WebView held **380 MB** RSS across its six processes after 60 s idle on the
+connect page; `owncord-client.exe` itself, a seventh process, held 42 MB. One
+correction to the method above: `tauri dev` runs `cargo run
+--no-default-features`, and the devtools entry point is the `open_devtools`
+command behind the `devtools` cargo feature, so `npm run tauri dev -- --features
+devtools` is required — without it F12, Ctrl+Shift+I and the in-app DevTools
+button all fail silently. Roadmap entry gate item 3 ("desktop behavior, bundle,
+startup, memory, and test baselines are recorded") is therefore satisfied; every
+half is recorded above.
 
 ## What this changes for later milestones
 
