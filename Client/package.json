@@ -10,7 +10,8 @@
   "scripts": {
     "postinstall": "patch-package --error-on-fail --error-on-warn",
     "dev": "vite",
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "npm run build:desktop",
+    "build:desktop": "tsc -p tsconfig.build.json && vite build --config vite.config.desktop.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
