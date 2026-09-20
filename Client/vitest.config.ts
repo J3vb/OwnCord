@@ -7,7 +7,7 @@ import { resolve } from "path";
 // `--localstorage-file`, and `Storage` names Node's class, which silently
 // defeats every `vi.spyOn(Storage.prototype, ...)` in the suite (OC-0415).
 // Switching Node's implementation off leaves jsdom's as the only one, which is
-// what the suite has always assumed and what CI's Node 24 happened to give.
+// what the suite has always assumed and what CI's Node 26 happened to give.
 //
 // This module is evaluated in vitest's parent process, and the worker
 // processes inherit its environment — `poolOptions.forks.execArgv` does NOT

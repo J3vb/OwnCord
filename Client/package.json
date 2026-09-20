@@ -4,8 +4,8 @@
   "version": "1.2.0-alpha.4",
   "type": "module",
   "engines": {
-    "node": ">=24",
-    "npm": ">=10"
+    "node": "^26",
+    "npm": "^11"
   },
   "scripts": {
     "postinstall": "patch-package --error-on-fail --error-on-warn",
@@ -46,7 +46,7 @@
     "@stryker-mutator/typescript-checker": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@tauri-apps/cli": "^2",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.6.2",
     "@vitest/browser-playwright": "^4.1.11",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.1",

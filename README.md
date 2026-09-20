@@ -130,7 +130,8 @@ Two main components:
 ### Prerequisites
 
 - Go 1.26+
-- Node.js 24+ (see `Client/.nvmrc`)
+- Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
+  `npm ci`)
 - Rust stable (client builds)
 
 ### Build from source

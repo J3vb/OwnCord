@@ -55,7 +55,7 @@ jobs:
       # job installs no npm dependencies.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Build server
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
@@ -256,7 +256,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -346,7 +346,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Self-test the count matcher
         run: node --test scripts/check-doc-counts.test.mjs
@@ -430,7 +430,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       # Root install only -- prettier is the sole dependency this job needs, and
       # the client's install is client-check's job.
@@ -472,7 +472,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -555,7 +555,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -602,7 +602,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -639,7 +639,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -745,7 +745,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -812,7 +812,7 @@ jobs:
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
@@ -846,7 +846,7 @@ jobs:
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - name: Check resolved Tauri npm and Rust versions
@@ -897,3 +897,45 @@ jobs:
             Client/playwright-report/
             Client/test-results/
           retention-days: 7
+
+  # Workstream 17 asks for a refused unsupported major to be verified, and only
+  # a real other-major Node can do it: `npm install --node-version=23` exits 0
+  # against `>=24`, because the flag does not feed the root-package engine check.
+  # So this job installs a wrong Node on purpose and requires the refusal.
+  #
+  # `set +e` is load-bearing: GitHub starts the step as `bash -e -o pipefail`, so
+  # `-e` is already on from the command line and leaving it out of `set` does
+  # not turn it off — the first expected `npm ci` failure would abort the step
+  # silently, before its exit code could be read. Each exit code is captured
+  # before any pipe, for the same reason.
+  #
+  # Deliberately not on any required-checks list: it is a hard-failing job that
+  # is visible on every PR. `scripts/check-node-policy.mjs` skips this pin
+  # because of its trailing comment, so the two do not contradict each other.
+  node-policy:
+    name: Node policy (refused major)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24" # deliberately NOT the supported major
+
+      # `--ignore-scripts` is correct here only: the install is meant to fail
+      # before any script runs, so nothing should be executed on the way down.
+      - name: Every package root must refuse a wrong major
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          for d in . Client tools/mcp-introspect; do
+            out=$(cd "$d" && npm ci --ignore-scripts 2>&1)
+            rc=$?
+            if [ "$rc" -eq 0 ] || ! grep -q EBADENGINE <<<"$out"; then
+              echo "::error::$d accepted Node 24 (exit $rc) -- engine-strict is not refusing"
+              echo "$out"
+              exit 1
+            fi
+            echo "$d refused Node 24: $(grep -m1 EBADENGINE <<<"$out")"
+          done
