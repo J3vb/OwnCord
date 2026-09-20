@@ -717,7 +717,7 @@ it.** Three things changed, none of which re-measures anything published here:
 - **The phases are read off the run clock, not off whether a connection
   resumed.** `restartPhase` splits the run into `ramp`, `pre-restart`,
   `recovery` and `post-restart`. The ramp is excluded from both steady windows;
-  the outage and its reconnects are *published as their own phase* rather than
+  the outage and its reconnects are _published as their own phase_ rather than
   discarded, because that cost is exactly what burying it in a warm-up
   exclusion would erase. A resumed connection is no longer evidence of
   anything — it is true for every sample after the stop, including those taken
