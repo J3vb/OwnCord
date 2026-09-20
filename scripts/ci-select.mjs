@@ -30,14 +30,17 @@
 //   Server reads outside Server/:
 //     protocol/schema.json                     api/absence_contract_test.go
 //     docs/schema.md                           permissions/schema_doc_test.go
-//     docs/api.md                              make docs-verify (gendocs blocks)
+//     docs/api.md                              cmd/gendocs (gendocs blocks)
+//     docs/server-configuration.md             cmd/gendocs (gendocs blocks)
 //     docs/architecture/server-boundaries.md   cmd/dbinventory/doc_test.go
 //     docs/architecture/community-services.md  migrations/community_services_doc_test.go
 //     Client/src/lib/types.ts                  permissions/schema_doc_test.go
+//     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
 //     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
 //
 //   Client reads outside Client/:
 //     docs/api.md                              tests/contract/api-profile-route.test.ts
+//     docs/architecture/platform-contracts.md  tests/unit/platform-contracts-counts.test.ts
 //     Server/admin/static/index.html           tests/contract/server-admin-static-*.test.ts
 //     protocol/schema.json                     src/lib/protocolTypes.ts is generated from it
 //
@@ -63,11 +66,16 @@ export const CAPABILITIES = [
 /** Server paths outside the Client/Server pair that a Server test reads. */
 const SERVER_READS_OUTSIDE = new Set([
   "protocol/schema.json",
+  // The three documents `make docs-verify` regenerates and compares. Leaving
+  // any one out means a hand-edit to it merges without cmd/gendocs ever
+  // running, which is the drift the gate exists to catch.
   "docs/schema.md",
   "docs/api.md",
+  "docs/server-configuration.md",
   "docs/architecture/server-boundaries.md",
   "docs/architecture/community-services.md",
   "Client/src/lib/types.ts",
+  "Client/src-tauri/tauri.conf.json",
   ".superpowers/findings-ledger.json",
 ]);
 
@@ -75,6 +83,7 @@ const SERVER_READS_OUTSIDE = new Set([
 const CLIENT_READS_OUTSIDE = new Set([
   "protocol/schema.json",
   "docs/api.md",
+  "docs/architecture/platform-contracts.md",
   "Server/admin/static/index.html",
 ]);
 
@@ -162,7 +171,13 @@ export function classify(paths) {
     }
 
     if (path.startsWith("Server/")) {
-      add("server", "integration");
+      // `integration` because the real-server suites drive this server, and
+      // `native` because the Windows job builds it (`npm run test:e2e:build-server`)
+      // and then tests it through the actual Rust/WebView2 transport — including
+      // packaged-update.spec.ts against Server/updater. A server change that
+      // breaks only that path would otherwise merge with the required native
+      // check reported as skipped.
+      add("server", "integration", "native");
       // The admin panel's HTML is asserted against by the client's contract
       // specs, so a Server change to it is also a client-unit-test change.
       if (path.startsWith("Server/admin/static/")) add("client");

@@ -140,6 +140,40 @@ test("the findings ledger runs the server job, because the smoke drill reads it"
   assert.equal(runs("M\t.superpowers/findings-ledger.json", "server"), true);
 });
 
+test("all three gendocs targets run the server job, not just two of them", () => {
+  // cmd/gendocs declares apiDoc, schemaDoc and configDoc. Missing any one of
+  // them meant a hand-edit to it merged without `make docs-verify` ever running
+  // — which is precisely the drift that gate exists to catch.
+  for (const doc of ["docs/api.md", "docs/schema.md", "docs/server-configuration.md"]) {
+    assert.equal(runs(`M\t${doc}`, "server"), true, `${doc} is a gendocs target`);
+  }
+});
+
+test("tauri.conf.json runs the server job, because a Go test reads it", () => {
+  // Server/updater/tauri_key_contract_test.go asserts the Tauri updater key
+  // differs from the server's default signature key, by reading this file.
+  const sel = picked("M\tClient/src-tauri/tauri.conf.json");
+  assert.equal(sel.server, true, "updater/tauri_key_contract_test.go reads it");
+  assert.equal(sel.rust, true);
+  assert.equal(sel.native, true);
+});
+
+test("the platform-contracts document runs the client unit suite", () => {
+  // Client/tests/unit/platform-contracts-counts.test.ts reads it and asserts
+  // its counts against the source tree.
+  const sel = picked("M\tdocs/architecture/platform-contracts.md");
+  assert.equal(sel.client, true, "platform-contracts-counts.test.ts reads it");
+  assert.equal(sel.browser, true);
+});
+
+test("a server change also runs the native job, which builds and drives that server", () => {
+  // The native job runs `npm run test:e2e:build-server` and then exercises the
+  // result through the real Rust/WebView2 transport.
+  const sel = picked("M\tServer/updater/verify.go");
+  assert.equal(sel.server, true);
+  assert.equal(sel.native, true, "the native journey builds this server and tests it");
+});
+
 test("a protocol schema change runs every component that consumes the generated types", () => {
   const sel = picked("M\tprotocol/schema.json");
   assert.equal(sel.server, true, "ws/message_types.go is generated from it");

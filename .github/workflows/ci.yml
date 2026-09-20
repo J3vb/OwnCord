@@ -104,19 +104,28 @@ jobs:
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
     needs: changes
-    # The gate every job below repeats, so it is explained once here.
+    # This job runs on EVERY event; the selection is applied to its STEPS.
     #
-    # `needs.changes.result != 'success'` is the fail-safe: if the selection job
-    # did not succeed — a runner failure, a checkout failure — this job RUNS.
-    # Testing only the output would read an absent output as "false" and skip,
-    # turning an infrastructure failure into a green PR that tested nothing.
+    # It cannot carry a job-level `if:`. Both names on the required-check list
+    # are the EXPANDED matrix names — `Server Build & Test (ubuntu-latest)` and
+    # `(windows-latest)` — and a job-level `if:` is evaluated BEFORE matrix
+    # expansion, so a skipped matrix job reports ONE context under the
+    # unexpanded name instead. That was probed on this repository rather than
+    # reasoned about: a commit with `if: false` here produced a single context
+    # named `Server Build & Test (${{ matrix.os }})`, and the two required names
+    # were never created at all. A required check that never reports blocks
+    # every PR forever, which is the one failure mode this must not have.
+    # `Server Docker Build (verify, linux/${{ matrix.arch }})` reports under
+    # exactly that unexpanded form on every dev PR today, which is the same
+    # behaviour.
     #
-    # `!cancelled()` is what lets the expression be read at all: without a
-    # status function, a job whose `needs:` did not succeed is skipped before
-    # its `if:` is considered, so the fail-safe above could never fire. The
-    # `changes` job is written to always succeed, and this is the belt beside
-    # that's braces.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    # So the matrix always expands — both required contexts always materialise,
+    # and they report `success`, not `skipped`, which also keeps
+    # scripts/verify-gate-evidence.mjs (R-09) satisfied at tag time.
+    #
+    # `!cancelled()` is load-bearing even so: without a status function, a job
+    # whose `needs:` did not succeed is skipped before its `if:` is considered.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -152,7 +161,23 @@ jobs:
         with:
           node-version: 26
 
+      # The one place this leg reads the selection. Written so that a MISSING
+      # value means "run": every step below tests `!= 'false'`, so if this step
+      # wrote nothing — or a later edit renamed the variable — the leg runs in
+      # full rather than silently skipping every gate. A gate that fails open is
+      # the failure this whole design exists to avoid, so the comparison is
+      # against the value that means SKIP, never against the one that means run.
+      - name: Decide whether this leg runs
+        env:
+          SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+        run: |
+          echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          if [ "${SELECTED:-true}" != "true" ]; then
+            echo "::notice::not selected for this change — this leg runs no server checks"
+          fi
+
       - name: Build server
+        if: env.RUN_SERVER != 'false'
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
       # release.yml smokes every shipped asset with this harness. Running it
@@ -162,6 +187,7 @@ jobs:
       # owner-visible lifecycle: cold boot, migrate, healthy, graceful drain to a
       # clean exit, then restart on the same data directory.
       - name: Smoke server binary (boot, migrate, drain, restart)
+        if: env.RUN_SERVER != 'false'
         run: go run ./cmd/smoke ./${{ matrix.binary }}
 
       # B6-8, standalone leg. The smoke above proves this build boots on an
@@ -187,6 +213,7 @@ jobs:
       # released binary the harness spawns, which reads only OWNCORD_* and has
       # no business being handed one.
       - name: Download the release to upgrade from
+        if: env.RUN_SERVER != 'false'
         shell: bash
         env:
           # Read-only, and only to fetch a release asset.
@@ -228,6 +255,7 @@ jobs:
           echo "REHEARSAL_FROM=$from" >> "$GITHUB_ENV"
 
       - name: Rehearse upgrade and rollback from the latest release
+        if: env.RUN_SERVER != 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -236,38 +264,44 @@ jobs:
       # Phase B + C build-tag matrix. Each tag variant must compile so the
       # tag boundaries don't drift.
       - name: Build with -tags otel (Phase B Step 8)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags otel ./...
       - name: Build with -tags wazero (Phase C Step 9)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags wazero ./...
       - name: Build with -tags otel,wazero (full community-hub build)
+        if: env.RUN_SERVER != 'false'
         run: go build -tags otel,wazero ./...
 
       - name: Go vulnerability check
+        if: env.RUN_SERVER != 'false'
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 
       # Generated sqlc output must never drift from db/queries/. One leg of
       # the matrix is enough; make is not guaranteed on the Windows runner.
       - name: Verify generated sqlc output (make sqlc-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make sqlc-install sqlc-verify
 
       # Protocol message-type constants (Go + TS) must never drift from
       # protocol/schema.json — the single source of truth.
       - name: Verify generated protocol constants (make protocol-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make protocol-verify
 
       # The route, table and config-key index blocks in docs/ must never drift
       # from the mounted router, the migrated schema and config.Config's yaml
       # tags. Same one-leg rule as the two checks above.
       - name: Verify generated docs (make docs-verify)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make docs-verify
 
       - name: Run tests with race detection and coverage
+        if: env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
       - name: Run tests with deadlock detection
+        if: env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
@@ -278,6 +312,7 @@ jobs:
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
       - name: Run document gates (-count=1)
+        if: env.RUN_SERVER != 'false'
         run: go test -count=1 ./cmd/dbinventory/ ./migrations/
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
@@ -309,7 +344,7 @@ jobs:
       # `!race && !deadlock` test fails the guard instead of being silently
       # left out of the only leg that could run it.
       - name: Run tag-gated tests (-tags wazero, -tags otel)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: |
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
@@ -322,7 +357,7 @@ jobs:
       # so the floors are pinned to one leg and the figure stays deterministic.
       # Ratchet rule in Server/CLAUDE.md.
       - name: Check coverage floor
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
@@ -340,6 +375,7 @@ jobs:
       # its own; the schema pass only bought a prettier error message, priced
       # at a third-party site inside the gate.
       - name: Lint
+        if: env.RUN_SERVER != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.11.3
