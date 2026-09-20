@@ -122,10 +122,19 @@ if [ -n "$ts_staged" ]; then
     if [ ! -d Client/node_modules ]; then
         printf 'pre-commit: WARNING: node_modules missing in Client; skipping client checks (run npm install there).\n' >&2
     else
-        rel=$(printf '%s\n' "$ts_staged" | sed 's|^Client/||')
+        # Warnings are denied under src/ only: tests/ carries its own
+        # pre-existing backlog (512 warnings), which B7-1 does not burn down.
+        src_rel=$(printf '%s\n' "$ts_staged" | grep '^Client/src/' | sed 's|^Client/||')
+        test_rel=$(printf '%s\n' "$ts_staged" | grep '^Client/tests/' | sed 's|^Client/||')
         cd Client || exit 1
-        # shellcheck disable=SC2086
-        npx oxlint $rel || fail "oxlint"
+        if [ -n "$src_rel" ]; then
+            # shellcheck disable=SC2086
+            npx oxlint --deny-warnings $src_rel || fail "oxlint"
+        fi
+        if [ -n "$test_rel" ]; then
+            # shellcheck disable=SC2086
+            npx oxlint $test_rel || fail "oxlint"
+        fi
         npm run -s typecheck || fail "tsc --noEmit"
         cd "$repo_root" || exit 1
     fi

@@ -294,7 +294,10 @@ jobs:
         run: bash ../scripts/npm-audit-gate.sh --selftest
 
       - name: Oxlint (fast correctness checks)
-        run: npx oxlint src/
+        run: npx oxlint --deny-warnings src/
+
+      - name: Import cycles (ceiling 29, B7-10 lowers it)
+        run: npm run lint:cycles
 
       - name: TypeScript check
         run: npx tsc --noEmit
