@@ -51,9 +51,9 @@ function matches(message: string, matcher: string | RegExp): boolean {
 }
 
 /**
- * Claim one recorded console.<level> call whose first argument matches
- * `matcher` (substring for a string, .test() for a RegExp). Fails the test if
- * there is no such call.
+ * Claim one recorded console.<level> call whose text — every argument, joined —
+ * matches `matcher` (substring for a string, .test() for a RegExp). Fails the
+ * test if there is no such call.
  */
 export function expectConsole(level: GuardedLevel, matcher: string | RegExp): void {
   const index = recorded.findIndex((call) => call.level === level && matches(text(call), matcher));
