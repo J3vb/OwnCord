@@ -30,7 +30,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   arrive (OC-0415). There is no shim any more. If storage tests fail en masse,
   check that `NODE_OPTIONS` block at the top of `vitest.config.ts` before your
   change (`poolOptions.forks.execArgv` does not work — vitest replaces it). CI
-  pins Node 24.
+  pins Node 26.
 - `src/lib/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. Other modules do register their own

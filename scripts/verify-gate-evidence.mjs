@@ -145,9 +145,10 @@ async function main() {
 
 // Run only when invoked directly, so `evaluate` and `requiredContexts` can be
 // imported and exercised without the module trying to reach the network.
-// Compared against argv[1] rather than `import.meta.main`, which needs Node
-// 24.2 while package.json's engines floor is >=24 — on 24.0 it is undefined and
-// the script would silently do nothing.
+// Compared against argv[1] rather than the newer `import.meta.main`: the
+// engines floor is `^26`, where `import.meta.main` is defined, so the two are
+// equivalent here — the guard is spelled the way every other check in
+// `scripts/` spells it.
 const invokedDirectly =
   process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 

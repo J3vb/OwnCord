@@ -13,8 +13,10 @@ How to set up the development environment and contribute to OwnCord.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.26+** (server)
-- **Node.js 24+** (client) — pinned in `Client/.nvmrc`; `engine-strict` makes a
-  wrong major a hard failure, not a warning
+- **Node.js 26.x / npm 11.x** (client) — `Client/.nvmrc` is the source of truth;
+  `engine-strict` makes a different major a hard failure at `npm ci`, not a
+  warning, and `node scripts/check-node-policy.mjs` fails the Repository
+  Hygiene job when any other statement of the version disagrees with it
 - **Rust / Cargo** (Tauri client — not needed for server-only work)
 - **Docker + Compose v2** (optional — alternative to building the server locally)
 
@@ -358,8 +360,13 @@ closing audit findings 2026-04-07 #8 / DC-11):
   client dependencies outright.
 - **Version skew is pinned at the toolchain level** too: `Client/.nvmrc`, every
   `actions/setup-node` in CI, and an `engines` block in all three
-  `package.json` files say Node 24 — with `engine-strict=true` in each
-  package's `.npmrc`, so a wrong major fails the install instead of warning.
+  `package.json` files say Node 26 — with `engine-strict=true` in each
+  package's `.npmrc`, so a different major fails the install instead of
+  warning. Three things keep them from drifting apart: `Client/.nvmrc` is the
+  single source of truth, `node scripts/check-node-policy.mjs` fails the
+  Repository Hygiene job when any other statement disagrees with it, and the
+  `node-policy` CI job installs a wrong major on purpose to prove all three
+  roots really do refuse it.
   `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
   and GitHub Actions are SHA-pinned with Dependabot bumping the pins. The one
   deliberate exception is the plugin toolchain: TinyGo and Binaryen are
