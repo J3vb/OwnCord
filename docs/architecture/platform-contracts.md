@@ -95,7 +95,7 @@ to desktop/browser branching.
 
 ## Proposed contracts
 
-Thirteen capability clusters. Each becomes one file under `contracts/`, with
+Fifteen capability clusters. Each becomes one file under `contracts/`, with
 matching implementations under `desktop/` and `browser/`.
 
 | Contract          | Files today                                                                   | Native surface                                       | Browser outlook                                           |
@@ -114,6 +114,7 @@ matching implementations under `desktop/` and `browser/`.
 | Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                   | ⚠ see hard cases                                          |
 | Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                   | URL routing                                               |
 | App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                            | build-time constant                                       |
+| Dev tools         | `main.ts:86-89`, `settings/AdvancedTab.ts:70`                                 | `api/core` (`open_devtools`)                         | unsupported — the browser has its own devtools already    |
 
 Two files appear under more than one contract (`lib/profiles.ts` does HTTP and
 settings; `settings/AdvancedTab.ts` spans four). That is expected — the clusters
@@ -145,6 +146,57 @@ using `plugin-global-shortcut`, because it must observe a key held down while
 OwnCord is unfocused. A browser cannot see keys outside its tab. The browser
 adapter can offer in-tab PTT or voice-activity detection, but not the desktop
 behaviour.
+
+## Contracts (B7-3)
+
+B7-3 implemented this design. `Client/src/platform/contracts/` holds one
+type-only file per row of the map above (17 files, `index.ts` re-exporting
+each and a `Platform` interface with one readonly member per interface), and
+`Client/src/platform/desktop/index.ts` is an empty, typed `Partial<Platform>`
+that B7-4/B7-5 fill in one capability at a time. Nothing moved: every call
+site still lives where the "Files today" column above says it does.
+
+Six rules the reviewer checked, kept here because they hold for every future
+addition to `contracts/`, not just B7-3's:
+
+1. **Contracts mirror the native seam.** A contract method describes one
+   native capability and the value its caller receives, with today's exact
+   parameters and result types where an exported function already sits at
+   that seam. No API redesign.
+2. **Host-neutral, down to the text.** No `@tauri-apps` import, no Tauri
+   type, no "Tauri"/"invoke" in an identifier — and the literal strings
+   `@tauri-apps` and `invoke("` must not appear anywhere under
+   `src/platform/`, comments included.
+3. **No production imports, no domain types.** Contracts import nothing from
+   `@lib/*`/`@stores/*`/`@components/*`/`@pages/*`. Small host result types
+   are re-declared, structurally identical, rather than imported.
+4. **Reuse before inventing.** Where an existing interface already has the
+   right shape (`PersistenceBackend`, `PendingMessagePersistence`), the
+   contract matches it member for member so the call-site move stays a pure
+   rename.
+5. **The typechecker is the oracle.** Each seam row's suite assigns today's
+   legacy binding to a variable typed as the contract with no cast — a cast
+   there would mean the contract is wrong.
+6. **Suites assert behaviour, not wiring.** A suite sees only
+   `{ subject, native }` and never a command name; command/argument
+   assertions stay in the modules' existing unit tests.
+
+Eight of the 17 rows already sit behind an exported function today (`seam`
+in the responsibility map this milestone worked from) and got a behaviour
+suite now, run against a legacy binding of today's `src/lib` exports:
+`CredentialStore`, `IdentityStore`, `SettingsStore`, `LogFiles` (the
+`logPersistence` half only), `NativeProxies` (`ensureHttpProxy` only),
+`AppUpdater`, `PushToTalk`, `DeepLinks`. Those suites live in
+`Client/tests/unit/platform/*.suite.ts`, run today against
+`*.legacy.test.ts`; B7-4/B7-5 re-run the same suite files against
+`platform/desktop` once each capability's call sites move — a green run
+before and after is the evidence the move changed nothing. The remaining
+rows (and the no-seam half of the two split rows above) are contract-only
+until the milestone that creates their seam writes the suite.
+
+`Client/knip.json` ignores `src/platform/**` for now — every file under it is
+exported for a consumer that doesn't exist yet. B7-4 removes that ignore the
+moment the first production call site imports from `platform/desktop`.
 
 ## Ownership
 
