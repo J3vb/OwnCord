@@ -22,7 +22,6 @@ permissions:
 jobs:
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
-    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -248,7 +247,6 @@ jobs:
   # is covered where it exists: rust-tests and the tauri-build matrix.
   client-check:
     name: Client Static Checks
-    if: false
     runs-on: ubuntu-latest
     defaults:
       run:
