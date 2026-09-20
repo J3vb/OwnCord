@@ -54,7 +54,9 @@ export default defineConfig({
     // child — globalTeardown kills the listener, which only releases the
     // runner's ChildProcess handle if that listener is the child itself. Going
     // through `npm run dev` would leave the npm process holding it open.
-    command: "node node_modules/vite/bin/vite.js",
+    // --config is explicit because a bare `vite` resolves the SHARED config,
+    // which since the B7-6 split no longer carries the desktop settings.
+    command: "node node_modules/vite/bin/vite.js --config vite.config.desktop.ts",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

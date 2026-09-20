@@ -58,14 +58,15 @@ intended — it is the gate this milestone adds value to. Do not attempt
 
 ## Files to Change
 
-| Path                               | Change                                    |
-| ---------------------------------- | ----------------------------------------- |
-| `Client/vite.config.ts`            | becomes the shared, target-neutral config |
-| `Client/vite.config.desktop.ts`    | new: the desktop overlay                  |
-| `Client/package.json`              | add `build:desktop`; keep `build` working |
-| `Client/src-tauri/tauri.conf.json` | `beforeBuildCommand` → the desktop script |
-| `.github/workflows/ci.yml`         | the desktop compile gate                  |
-| `docs/architecture/*.md`           | only if a doc states the build shape      |
+| Path                               | Change                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| `Client/vite.config.ts`            | becomes the shared, target-neutral config                              |
+| `Client/vite.config.desktop.ts`    | new: the desktop overlay                                               |
+| `Client/package.json`              | add `build:desktop` / `dev:desktop`; keep `build` and `dev` working    |
+| `Client/src-tauri/tauri.conf.json` | `beforeBuildCommand` **and** `beforeDevCommand` → the desktop scripts  |
+| `Client/playwright.config.ts`      | its `webServer` runs Vite directly, so it needs the overlay explicitly |
+| `.github/workflows/ci.yml`         | the desktop compile gate                                               |
+| `docs/contributing.md`             | the Build & dev command table                                          |
 
 **Never** edit generated files, `docs/plans/*`, `CHANGELOG.md`, or any status
 row.
