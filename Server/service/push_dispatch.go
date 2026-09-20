@@ -118,6 +118,12 @@ type pushCoalesceKey struct {
 // pushRoundItem is one subscription's state carried between dispatch
 // rounds: the request is built once (encryption and VAPID signing happen a
 // single time), and re-sent unchanged on every round it survives to.
+//
+// That request is therefore a snapshot of everything the subscription said at
+// Notify time — endpoint, credentials, and the VAPID key that signed it. It is
+// only safe to re-send because subscriptionStillCurrent re-reads the row
+// immediately before every attempt and refuses the request if any of those has
+// moved on; the saved bytes are never re-encrypted for a changed row (R3).
 type pushRoundItem struct {
 	sub db.PushSubscriptionForDispatch
 	req safefetch.Request
@@ -326,6 +332,15 @@ func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (saf
 // prune, non-retryable failure, or the retry budget running out) lands in
 // exactly one counter before returning false.
 func (d *PushDispatcher) attemptOne(ctx context.Context, channelID, authorID int64, item pushRoundItem, attempt int) bool {
+	// Subscription first, then eligibility: this pair is what makes the saved,
+	// never-re-encrypted item.req safe to re-send. Both run before the fetch
+	// on every attempt — including the first, which a saturated send pool can
+	// hold for a whole round — so a revocation or a block landing anywhere in
+	// the dispatch's lifetime stops the work rather than delivering to a
+	// subscription or a recipient that no longer wants it (R3).
+	if !d.subscriptionStillCurrent(ctx, item) {
+		return false
+	}
 	if !d.stillEligible(ctx, channelID, authorID, item.sub.UserID) {
 		return false
 	}
@@ -444,17 +459,30 @@ func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID
 
 // stillEligible re-resolves, immediately before one delivery attempt, the
 // things that can change while a bounded dispatch is in flight: the
-// recipient came online, the channel was labelled nsfw (or their
-// acknowledgement of an already-labelled channel was revoked -- eligibleFor's
-// CanReadContent call covers both), the recipient lost CanViewChannel, or --
-// for a one-to-one DM -- the recipient no longer trusts the author: they
-// ignored or deleted the pending request between attempts, which is the half
-// trustsAuthor re-checks (its IsTrustedSender lookup; the blocked half of the
-// audience is applied once, up front, by coalesceAudience's blockers map).
-// Called before every attempt, first and retry alike, so a
-// revoke mid-dispatch drops the remaining retries rather than delivering one
-// anyway.
+// recipient blocked the author, the recipient came online, the channel was
+// labelled nsfw (or their acknowledgement of an already-labelled channel was
+// revoked -- eligibleFor's CanReadContent call covers both), the recipient
+// lost CanViewChannel, or -- for a one-to-one DM -- the recipient no longer
+// trusts the author: they ignored or deleted the pending request between
+// attempts, which is the half trustsAuthor re-checks (its IsTrustedSender
+// lookup).
+//
+// The block half is re-asked here PER ATTEMPT, not just read once by
+// coalesceAudience's blockers map. That map is a snapshot taken before the
+// dispatch began, and a dispatch spans up to three rounds across a 1s/4s
+// backoff schedule plus a 10s fetcher deadline -- long enough for the
+// recipient to block the author in between. A block is a withdrawal of
+// consent to be contacted, so the retries it lands between must not fire;
+// IsBlocked asks the one (blocker, blocked) pair the item names, rather than
+// the whole server's blocker set, so this stays a single indexed lookup per
+// attempt (R3).
+//
+// Called before every attempt, first and retry alike, so a revoke mid-dispatch
+// drops the remaining retries rather than delivering one anyway.
 func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID, userID int64) bool {
+	if d.recipientBlocksAuthor(ctx, userID, authorID) {
+		return false
+	}
 	ch, err := d.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return false

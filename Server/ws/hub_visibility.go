@@ -118,10 +118,15 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	return audience
 }
 
-// channelNSFWFilter is broadcastChannelEvent's B5-7 gate for a content-bearing
+// channelNSFWFilter is deliverBroadcast's B5-7 gate for a content-bearing
 // kind (chat_message, chat_edited, reaction_update, plugin_broadcast — see
 // contentBearingKinds): who among a channel's CURRENT topic subscribers may
-// receive it. Deliberately does NOT resolve a candidate list itself — unlike
+// receive it. Called on the dispatch goroutine at the head of the broadcast
+// queue, immediately before seqMu is taken — not by the enqueueing caller, so
+// the label and the acknowledgements it reads are the ones in force when the
+// event is dispatched rather than when it was queued (OC-0449).
+//
+// Deliberately does NOT resolve a candidate list itself — unlike
 // channelReadAudienceImpl, which is used for direct-recipient delivery of
 // low-frequency metadata (channel_create/update), content stays on the
 // ordinary topic-Publish path (PublishFiltered) so it keeps that path's

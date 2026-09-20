@@ -1,5 +1,5 @@
 {
-  "nextId": 448,
+  "nextId": 451,
   "findings": [
     {
       "id": "OC-0001",
@@ -10374,6 +10374,56 @@
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
       "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number."
+    },
+    {
+      "id": "OC-0448",
+      "title": "A release can move its tags onto container images that were not the ones validated",
+      "file": ".github/workflows/release.yml",
+      "line": 619,
+      "severity": "high",
+      "why": "Affected property: the bytes that reach the release tags are the bytes that were verified, and a failed verification leaves the tags where they were. The publication job validates after it has already written the tags, so a failure below the push leaves them moved.",
+      "status": "open",
+      "found": "2026-09-20",
+      "hunt": "review-2026-09-20",
+      "lens": "read-the-pipeline",
+      "finder": "review-2026-09-20",
+      "fix": null
+    },
+    {
+      "id": "OC-0449",
+      "title": "A channel's NSFW content gate was bound to when a frame was queued rather than when it is delivered",
+      "file": "Server/ws/hub_broadcast.go",
+      "line": 359,
+      "severity": "medium",
+      "why": "Affected property: a content-bearing channel frame is authorized against the channel label and the recipient's acknowledgement in force when it is dispatched. The gate was resolved by the enqueueing caller and carried as a precomputed filter, so consent changes landing while the frame waited were not seen by it, and a frame queued while a channel was unlabelled carried no filter at all.",
+      "status": "fixed",
+      "found": "2026-09-20",
+      "hunt": "review-2026-09-20",
+      "lens": "read-the-code",
+      "finder": "review-2026-09-20",
+      "fix": {
+        "commit": "e4afb92e",
+        "test": "Server/ws/nsfw_dispatch_ordering_test.go",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0450",
+      "title": "Push dispatch did not revalidate the subscription or the block relation before each attempt",
+      "file": "Server/service/push_dispatch.go",
+      "line": 328,
+      "severity": "medium",
+      "why": "Affected property: dispatch contacts a recipient only on a subscription they still hold, and not at all once they have blocked the author. The audience-wide blocker set was read once before the dispatch began, and the saved request was never re-checked against the row it was encrypted for.",
+      "status": "fixed",
+      "found": "2026-09-20",
+      "hunt": "review-2026-09-20",
+      "lens": "read-the-code",
+      "finder": "review-2026-09-20",
+      "fix": {
+        "commit": "b44f1554",
+        "test": "Server/service/push_dispatch_test.go",
+        "revertProof": "pass"
+      }
     }
   ]
 }

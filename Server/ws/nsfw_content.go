@@ -4,41 +4,82 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"time"
 )
 
 // broadcastChannelEvent is EmitEvents' ChannelEvent route (B5-7): a metadata
 // kind (contentBearingKinds is false) goes straight to BroadcastToChannel,
 // unchanged — the ordinary topic-subscriber Publish path, at exactly its
 // pre-B5-7 cost. A content-bearing kind stays on that SAME path (still
-// channel-scoped, bm.recipients nil) but carries a contentFilter — see
-// channelNSFWFilter — so deliverBroadcast narrows the topic's subscribers by
-// CanReadContent's ack check at the moment it actually publishes, after the
-// topic limiter and the seq allocation, under the same seqMu section that
-// serializes against a concurrent reconnect. Withheld from the plugin sink
-// entirely when the channel turned out to be labelled (decision 13: a
-// plugin has no acknowledgement).
+// channel-scoped, bm.recipients nil) but is marked with nsfwChannelID, so
+// deliverBroadcast resolves the channel's label and the recipient's
+// acknowledgement at DISPATCH time and narrows the topic's subscribers by
+// CanReadContent's ack check there. Withheld from the plugin sink entirely
+// when the channel turns out to be labelled (decision 13: a plugin has no
+// acknowledgement).
+//
+// The gate used to be resolved here, at enqueue, and handed over as a
+// precomputed filter. That made a queued frame's authorization a property of
+// when it was QUEUED rather than of when it was DELIVERED: a consent
+// revocation completing while the frame waited in h.broadcast was not seen by
+// it, and — the same defect from the other side — a frame queued while the
+// channel was still unlabelled carried no filter at all, so labelling the
+// channel before it dispatched delivered it to everyone, including a plugin
+// sink that decision 13 says must never receive a labelled channel's content
+// (OC-0449). Resolving on the dispatch goroutine also moves a database round
+// trip off every emitting request handler and onto the one goroutine that
+// already serializes broadcasts.
 func (h *Hub) broadcastChannelEvent(ctx context.Context, e ChannelEvent) {
+	_ = ctx
 	if !contentBearingKinds[e.EventType()] {
 		h.BroadcastToChannel(e.ChannelID(), e.Payload())
 		return
 	}
-	allow, labelled := h.channelNSFWFilter(ctx, e.ChannelID())
-	bm := broadcastMsg{
-		channelID:      e.ChannelID(),
-		msg:            e.Payload(),
-		contentFilter:  allow,
-		skipPluginSink: labelled,
-		enqueuedAt:     time.Now(),
-	}
-	select {
-	case h.broadcast <- bm:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping channel content",
-			"channel_id", e.ChannelID(), "msg_len", len(e.Payload()))
-	}
+	h.enqueue(broadcastMsg{
+		channelID:     e.ChannelID(),
+		msg:           e.Payload(),
+		nsfwChannelID: e.ChannelID(),
+	}, "channel content")
 }
+
+// resolveChannelContentGate answers B5-7's content gate for one queued
+// broadcast, on the dispatch goroutine, immediately before deliverBroadcast
+// takes seqMu. A zero channelID — every metadata kind and every ordinary
+// broadcast — resolves nothing and costs nothing.
+//
+// Deliberately outside seqMu: this is a database round trip, and seqMu
+// serializes EVERY broadcast, so holding it across one would tax every other
+// publisher (including the voice_state fan-out OC-0445 is about) for a read
+// only this frame needs. The ordering contract that buys is stated on
+// nsfwDispatchResolveRaceHook: a revocation or relabelling that has completed
+// by this point is honoured by this event; one landing after it cannot recall
+// frames already authorized, and nothing here claims it can.
+func (h *Hub) resolveChannelContentGate(channelID int64) (allow func(userID int64) bool, labelled bool) {
+	if channelID == 0 {
+		return nil, false
+	}
+	if nsfwDispatchResolveRaceHook != nil {
+		nsfwDispatchResolveRaceHook(channelID)
+	}
+	return h.channelNSFWFilter(context.Background(), channelID)
+}
+
+// nsfwDispatchResolveRaceHook, when non-nil, runs once per content-bearing
+// channel event on the dispatch goroutine, immediately BEFORE
+// deliverBroadcast resolves that event's B5-7 gate and before seqMu is taken.
+// Test-only (always nil in production): it is the deterministic barrier the
+// ordering contract needs to be pinned rather than raced for.
+//
+// The contract it exists to pin: the gate is resolved when the event reaches
+// the dispatch loop, so a revocation or a relabelling that has COMPLETED by
+// then is honoured by that event. A caller that enqueues, then mutates
+// consent, then lets dispatch run is in the honoured case; the hook lets a
+// test hold dispatch at exactly that boundary, mutate, and release, instead
+// of sleeping and hoping the mutation landed in the window. What the contract
+// does NOT promise is retraction: a revocation landing after resolution but
+// before the bytes reach a send queue cannot recall frames already authorized,
+// and nothing here claims it can. Mirrors the established
+// reconnectFrameReadableRaceHook / refreshChannelVisibilityRaceHook pattern.
+var nsfwDispatchResolveRaceHook func(channelID int64)
 
 // contentBearingKinds classifies every server->client message type as either
 // CONTENT (carries a message body or metadata that discloses one) or

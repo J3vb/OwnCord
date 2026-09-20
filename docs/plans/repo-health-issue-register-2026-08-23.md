@@ -76,11 +76,11 @@ together as if each row were a unique defect:
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     439 |
-| Open      |       3 |
+| Fixed     |     441 |
+| Open      |       4 |
 | Declined  |       4 |
 | Duplicate |       1 |
-| **Total** | **447** |
+| **Total** | **450** |
 
 The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt (eighteen
 since fixed — eleven by B3-9 in PR #1454 and earlier, `OC-0323` by the B3-8
