@@ -336,6 +336,15 @@ a start, and a message to every user:
 
 ### Let's Encrypt (ACME)
 
+> **Not the recommended path for a domain (owner decision, 2026-09-20).** Put
+> a reverse proxy in front instead — see
+> [Reverse Proxy Topology](#reverse-proxy-topology). Built-in ACME works and
+> is staying, but this project does not qualify it: renewal across expiry,
+> restart and rotation has never been exercised here, so renewal is your
+> responsibility. Caddy, nginx and Traefik are built for that job and are
+> tested by far more operators than OwnCord has. Choose built-in ACME only if
+> you would rather not run a proxy, and read the pinning note below first.
+
 Automatic certificate issuance and renewal. Requires port 80 open and a public domain.
 
 ```yaml
@@ -387,7 +396,22 @@ readable by anyone on the path;
 ## Reverse Proxy Topology
 
 OwnCord terminates its own TLS by default and does not require a reverse
-proxy. If you front it with one anyway (shared host, existing nginx, central
+proxy. **For a public domain, fronting it with one is nonetheless the
+recommended setup (owner decision, 2026-09-20):** the proxy owns certificate
+issuance and renewal, which is the part this project does not qualify (see
+[Let's Encrypt (ACME)](#lets-encrypt-acme)). Caddy obtains and renews
+certificates with no configuration beyond the hostname; nginx and Traefik do
+the same with certbot or their own ACME support. Set `tls.mode: "off"` on
+OwnCord when the proxy terminates TLS, and keep OwnCord bound to a private
+interface.
+
+One consequence worth knowing before you choose: with a proxy terminating TLS,
+desktop clients pin the _proxy's_ certificate, so renewals there trigger the
+same first-use mismatch modal described under
+[Let's Encrypt (ACME)](#lets-encrypt-acme). Proxy or not, certificate rotation
+is visible to desktop clients ([trust-model.md](trust-model.md)).
+
+Whatever your reason for fronting it (shared host, existing nginx, central
 cert management), three things matter:
 
 1. **What the proxy can front.** Everything on port 8443 — the REST API, the
