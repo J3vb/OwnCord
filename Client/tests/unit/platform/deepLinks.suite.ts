@@ -3,15 +3,18 @@
 // (`parseInviteLink`/`parseMessageLink`) is pure and already covered
 // elsewhere — this suite only asserts what `onInvite`/`onMessage` receive
 // for a cold-start link.
+//
+// No test for "the native host is unavailable": `init()` resolving without
+// calling either callback is exactly what a subject that does nothing at all
+// also does — there is no other caller-observable effect at this seam to pin
+// instead. See docs/architecture/platform-contracts.md's "Contracts (B7-3)"
+// section, "Suite coverage gaps".
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { DeepLinks } from "../../../src/platform/contracts/deepLinks";
 
 export interface NativeControl {
   /** Cold-start links the native plugin reports via `getCurrent()`. */
   coldStartLinks(urls: readonly string[]): void;
-  /** The native deep-link plugin is unavailable (e.g. not running under the
-   *  native host). */
-  unavailable(): void;
 }
 
 export interface DeepLinksSubject {
@@ -45,17 +48,5 @@ export function describeDeepLinksSuite(
       expect(onMessage).toHaveBeenCalledWith(7, 42);
       expect(onInvite).not.toHaveBeenCalled();
     });
-
-    check(
-      "resolves without calling either callback when the native host is unavailable",
-      async () => {
-        ctx.native.unavailable();
-        const onInvite = vi.fn();
-        const onMessage = vi.fn();
-        await expect(ctx.subject.init(onInvite, onMessage)).resolves.toBeUndefined();
-        expect(onInvite).not.toHaveBeenCalled();
-        expect(onMessage).not.toHaveBeenCalled();
-      },
-    );
   });
 }

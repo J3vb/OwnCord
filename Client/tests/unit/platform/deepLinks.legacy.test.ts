@@ -34,11 +34,6 @@ describeDeepLinksSuite(async () => {
           onOpenUrl: vi.fn().mockResolvedValue(undefined),
         }));
       },
-      unavailable() {
-        vi.doMock("@tauri-apps/plugin-deep-link", () => {
-          throw new Error("not running under the native host");
-        });
-      },
     },
   };
 });

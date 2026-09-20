@@ -146,7 +146,6 @@ describeDeepLinksSuite(async () => {
   } as unknown as DeepLinks;
   const native: DeepLinksNativeControl = {
     coldStartLinks: () => undefined,
-    unavailable: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);
