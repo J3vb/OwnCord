@@ -9,7 +9,6 @@ import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { formatByteSize } from "@lib/connectionStats";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
@@ -200,7 +199,7 @@ export function isTrustedServerUrl(url: string): boolean {
  * no credentials.
  */
 async function fetchServerFile(url: string): Promise<Response> {
-  if (!isServerUrl(url)) return tauriFetch(url);
+  if (!isServerUrl(url)) return desktop.http!.fetch(url);
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
@@ -208,7 +207,7 @@ async function fetchServerFile(url: string): Promise<Response> {
   if (token !== null) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return tauriFetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
+  return desktop.http!.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */

@@ -1,11 +1,8 @@
-// Legacy binding for the HttpClient suite: today's plugin `fetch`, reached
-// through `lib/api.ts`'s `httpClient` seam, wrapped with no cast against the
-// contract. B7-4 re-runs `http.suite.ts` against `platform/desktop` instead
-// of this file.
-//
-// `api.ts` builds its REST client on `ensureHttpProxy` and the session scope,
-// neither of which this seam test exercises; the mocks below keep the module
-// import inert the same way the existing api unit tests do.
+// Desktop binding for the HttpClient suite: `platform/desktop`'s HTTP client.
+// B7-4 ran the same suite file against the in-place seam in `lib/api.ts` first
+// (proving it could fail and pinning today's behaviour), then re-bound it
+// here. The legacy binding is deleted with this commit: its export is now
+// internal.
 import { vi } from "vitest";
 import type { HttpClient } from "../../../src/platform/contracts/http";
 import { describeHttpClientSuite } from "./http.suite";
@@ -15,13 +12,9 @@ const { fetchMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
 
-const mod = await import("../../../src/lib/api");
-const legacy: HttpClient = mod.httpClient;
+const mod = await import("../../../src/platform/desktop/http");
+const desktopBinding: HttpClient = mod.http;
 
 const requested: string[] = [];
 
@@ -37,7 +30,7 @@ function reset(): void {
 describeHttpClientSuite(async () => {
   reset();
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       respondsWith(response: Response) {
         reset();

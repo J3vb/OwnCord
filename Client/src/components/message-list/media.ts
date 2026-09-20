@@ -9,8 +9,8 @@ import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { isSafeUrl } from "./attachments";
+import { desktop } from "../../platform/desktop";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
@@ -171,9 +171,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, "Loading...");
     const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-    tauriFetch(oembedUrl, {
-      signal: AbortSignal.timeout(5000),
-    })
+    desktop
+      .http!.fetch(oembedUrl, {
+        signal: AbortSignal.timeout(5000),
+      })
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
         if (generation !== mediaCacheGeneration) {

@@ -7,7 +7,6 @@
  */
 
 import { createStore, type Store } from "./store";
-import { fetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "./httpProxy";
 import { desktop } from "../platform/desktop";
 import type { SettingsStore } from "../platform/contracts/settings";
@@ -159,8 +158,16 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
 
   const store = createStore<ProfilesState>(initialState);
 
-  // Resolve which fetch to use: injected mock, Tauri plugin, or global
-  const doFetch: FetchFn = fetchFn ?? fetch;
+  // Resolve which fetch to use: an injected mock, or the platform's HTTP
+  // client. The contract takes a URL string, so a non-string input is resolved
+  // to its URL rather than stringified — both call sites below build strings,
+  // but a Request that reached here must not become "[object Request]".
+  const doFetch: FetchFn =
+    fetchFn ??
+    ((input, init) => {
+      if (typeof input === "string") return desktop.http!.fetch(input, init);
+      return desktop.http!.fetch(input instanceof URL ? input.href : input.url, init);
+    });
 
   // Resolve the origin for a health check. With an injected fetch (tests) we
   // keep the direct https URL the mock expects; otherwise we route through the
