@@ -35,7 +35,6 @@ vi.mock("livekit-client", () => ({
 }));
 
 import { AudioPipeline } from "../../src/lib/audioPipeline";
-import { expectConsole } from "../helpers/console";
 
 describe("AudioPipeline", () => {
   let pipeline: AudioPipeline;
@@ -250,10 +249,12 @@ describe("AudioPipeline", () => {
 
     it("falls back to setTimeout when AudioWorkletNode constructor throws", async () => {
       setupPipelineWithWorklet("success");
-      // Override AudioWorkletNode to throw
+      // Override AudioWorkletNode to throw. A `function`, not an arrow: the
+      // pipeline constructs it with `new`, and vitest warns about a `new` on a
+      // mock that is not constructible.
       vi.stubGlobal(
         "AudioWorkletNode",
-        vi.fn().mockImplementation(() => {
+        vi.fn(function () {
           throw new Error("AudioWorkletNode not supported");
         }),
       );
@@ -265,9 +266,6 @@ describe("AudioPipeline", () => {
         // Should have fallen back to setTimeout
         expect(pipeline.vadUsingWorklet).toBe(false);
       });
-      // The throwing stub is an arrow vi.fn(), so vitest warns when the
-      // pipeline constructs it with `new` — the warning under test here.
-      expectConsole("warn", "[vitest] The vi.fn() mock did not use 'function' or 'class'");
     });
   });
 
