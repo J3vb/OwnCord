@@ -112,7 +112,7 @@ next section, and using them directly is equally correct.
 | `npm run typecheck:build` | Typecheck build config only                                    |
 | `npm run lint`            | oxlint (warnings denied) + import cycles + ESLint check (src/) |
 | `npm run lint:fix`        | ESLint auto-fix                                                |
-| `npm run lint:ox`         | oxlint only (fast correctness checks)                          |
+| `npm run lint:ox`         | oxlint only; fails on any warning under `Client/src/`          |
 | `npm run format`          | Prettier format (src/ + tests/)                                |
 | `npm run format:check`    | Prettier check only (no writes)                                |
 | `npm run knip`            | Dead code and unused export detection                          |
