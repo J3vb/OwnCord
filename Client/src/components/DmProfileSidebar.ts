@@ -136,6 +136,9 @@ function saveNote(userId: number, host: string, text: string): void {
 // Component factory
 // ---------------------------------------------------------------------------
 
+// Divider helper
+const makeDivider = (): HTMLDivElement => createElement("div", { class: "dps-divider" });
+
 export function createDmProfileSidebar(
   options: DmProfileSidebarOptions,
 ): DmProfileSidebarComponent {
@@ -261,9 +264,6 @@ export function createDmProfileSidebar(
     appendChildren(statusLine, statusDotInline, statusText);
 
     appendChildren(content, nameEl, statusLine);
-
-    // Divider helper
-    const makeDivider = (): HTMLDivElement => createElement("div", { class: "dps-divider" });
 
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {

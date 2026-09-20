@@ -13,6 +13,25 @@ export interface QuickSwitcherOptions {
   readonly onClose: () => void;
 }
 
+function getChannelIcon(ch: Channel): SVGSVGElement {
+  return ch.type === "voice" ? createIcon("volume-2", 14) : createIcon("hash", 14);
+}
+
+function getFilteredChannels(query: string): readonly Channel[] {
+  const state = channelsStore.getState();
+  // DM rows are synthesized into channelsStore once opened, but they have
+  // their own sidebar path (full clearDmUnread/setSidebarMode handling) —
+  // listing them here too would select via a bare setActiveChannel and
+  // leave their unread/mention badge lit forever.
+  const all = Array.from(state.channels.values()).filter((ch) => ch.type !== "dm");
+  const sorted = [...all].toSorted((a, b) => a.position - b.position);
+
+  if (query.length === 0) return sorted;
+
+  const lower = query.toLowerCase();
+  return sorted.filter((ch) => ch.name.toLowerCase().includes(lower));
+}
+
 export function createQuickSwitcher(options: QuickSwitcherOptions): MountableComponent {
   const ac = new AbortController();
   const signal = ac.signal;
@@ -24,25 +43,6 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   let filteredChannels: readonly Channel[] = [];
   let unsubscribe: (() => void) | null = null;
   let restoreFocus: (() => void) | null = null;
-
-  function getChannelIcon(ch: Channel): SVGSVGElement {
-    return ch.type === "voice" ? createIcon("volume-2", 14) : createIcon("hash", 14);
-  }
-
-  function getFilteredChannels(query: string): readonly Channel[] {
-    const state = channelsStore.getState();
-    // DM rows are synthesized into channelsStore once opened, but they have
-    // their own sidebar path (full clearDmUnread/setSidebarMode handling) —
-    // listing them here too would select via a bare setActiveChannel and
-    // leave their unread/mention badge lit forever.
-    const all = Array.from(state.channels.values()).filter((ch) => ch.type !== "dm");
-    const sorted = [...all].toSorted((a, b) => a.position - b.position);
-
-    if (query.length === 0) return sorted;
-
-    const lower = query.toLowerCase();
-    return sorted.filter((ch) => ch.name.toLowerCase().includes(lower));
-  }
 
   function renderResults(): void {
     clearChildren(resultsDiv);

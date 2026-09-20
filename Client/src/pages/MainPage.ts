@@ -87,6 +87,62 @@ export interface MainPageOptions {
 // MainPage
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the profile panel's data from the live stores for a 1:1 DM channel.
+ * Null for a group (no single "recipient" -- see the caller) or a channel
+ * that is no longer a DM. Shared by the initial open and by the live
+ * refresh below so the two can never disagree on how a status/name is
+ * derived.
+ */
+function buildDmProfileUser(channelId: number): DmProfileData | null {
+  const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+  // A group has no single "recipient" — dm.store.ts documents .recipient as
+  // just the first of .participants for a group, with group-correct code
+  // expected to read .participants instead. A 1:1 profile panel built from
+  // it would present one arbitrary member's identity as the conversation.
+  if (dmChannel === undefined || dmChannel.isGroup) return null;
+
+  const recipient = dmChannel.recipient;
+  // Prefer membersStore's status, like the chat header's refreshDmHeader
+  // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
+  // this correct even for a DM partner who isn't a guild member.
+  const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
+  const status =
+    rawStatus === "online" || rawStatus === "idle" || rawStatus === "dnd" || rawStatus === "offline"
+      ? rawStatus
+      : ("offline" as const);
+
+  return {
+    id: recipient.id,
+    username: recipient.username,
+    // The DM header this panel opens from renders through dmDisplayName,
+    // which prefers the nickname -- drop it here and the panel shows a
+    // different identity from the header the reader just clicked.
+    displayName: recipient.displayName ?? null,
+    avatar: recipient.avatar || null,
+    status,
+    about: null,
+    joinDate: null,
+  };
+}
+
+/**
+ * Resolve a channel's display name. A DM is named by who is in it (or, for a
+ * group, by its name), and the store is the authority on that — the channels
+ * store carries a synthesised copy that can lag a rename or a departure.
+ */
+function resolveChannelName(channelId: number, channelName: string, channelType?: string): string {
+  if (channelType === "dm") {
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dm !== undefined) return dmDisplayName(dm);
+  }
+  return channelName;
+}
+
+function getCurrentUserId(): number {
+  return authStore.getState().user?.id ?? 0;
+}
+
 export function createMainPage(options: MainPageOptions): MountableComponent {
   const { ws, api } = options;
 
@@ -184,10 +240,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  function getCurrentUserId(): number {
-    return authStore.getState().user?.id ?? 0;
-  }
-
   /**
    * Re-assert the status the user picked, if the server disagrees.
    *
@@ -219,65 +271,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  the latest value — see @lib/presence. */
   function applyPresence(status: UserStatus): void {
     presenceSender.send(status);
-  }
-
-  /**
-   * Resolve a channel's display name. A DM is named by who is in it (or, for a
-   * group, by its name), and the store is the authority on that — the channels
-   * store carries a synthesised copy that can lag a rename or a departure.
-   */
-  function resolveChannelName(
-    channelId: number,
-    channelName: string,
-    channelType?: string,
-  ): string {
-    if (channelType === "dm") {
-      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      if (dm !== undefined) return dmDisplayName(dm);
-    }
-    return channelName;
-  }
-
-  /**
-   * Build the profile panel's data from the live stores for a 1:1 DM channel.
-   * Null for a group (no single "recipient" -- see the caller) or a channel
-   * that is no longer a DM. Shared by the initial open and by the live
-   * refresh below so the two can never disagree on how a status/name is
-   * derived.
-   */
-  function buildDmProfileUser(channelId: number): DmProfileData | null {
-    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-    // A group has no single "recipient" — dm.store.ts documents .recipient as
-    // just the first of .participants for a group, with group-correct code
-    // expected to read .participants instead. A 1:1 profile panel built from
-    // it would present one arbitrary member's identity as the conversation.
-    if (dmChannel === undefined || dmChannel.isGroup) return null;
-
-    const recipient = dmChannel.recipient;
-    // Prefer membersStore's status, like the chat header's refreshDmHeader
-    // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
-    // this correct even for a DM partner who isn't a guild member.
-    const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
-    const status =
-      rawStatus === "online" ||
-      rawStatus === "idle" ||
-      rawStatus === "dnd" ||
-      rawStatus === "offline"
-        ? rawStatus
-        : ("offline" as const);
-
-    return {
-      id: recipient.id,
-      username: recipient.username,
-      // The DM header this panel opens from renders through dmDisplayName,
-      // which prefers the nickname -- drop it here and the panel shows a
-      // different identity from the header the reader just clicked.
-      displayName: recipient.displayName ?? null,
-      avatar: recipient.avatar || null,
-      status,
-      about: null,
-      joinDate: null,
-    };
   }
 
   /** Toggle the DM profile sidebar open/closed for the current DM partner. */

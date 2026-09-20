@@ -572,6 +572,31 @@ function addRecentEmoji(emoji: string): void {
 // EmojiPicker
 // ---------------------------------------------------------------------------
 
+function buildEmojiSpan(emoji: string): HTMLSpanElement {
+  const span = createElement("span", {
+    class: "ep-emoji",
+    title: emoji,
+    role: "option",
+    // Mirrors the title (the character or :shortcode: token) — e2e specs
+    // select cells by title, so the accessible name must never diverge.
+    "aria-label": emoji,
+    // Read by the delegated click handler on scrollArea (see mount-time
+    // listener above) instead of a per-cell listener.
+    "data-emoji": emoji,
+  });
+  // A `:shortcode:` entry shows its image; everything else is the character
+  // itself. An unresolvable shortcode falls back to the text, which is what
+  // it would render as in a message anyway.
+  const image = buildCustomEmojiNode(emoji);
+  if (image !== null) {
+    span.classList.add("ep-emoji-custom");
+    span.appendChild(image);
+  } else {
+    setText(span, emoji);
+  }
+  return span;
+}
+
 export function createEmojiPicker(options: EmojiPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
@@ -652,31 +677,6 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   function handleEmojiClick(emoji: string): void {
     addRecentEmoji(emoji);
     options.onSelect(emoji);
-  }
-
-  function buildEmojiSpan(emoji: string): HTMLSpanElement {
-    const span = createElement("span", {
-      class: "ep-emoji",
-      title: emoji,
-      role: "option",
-      // Mirrors the title (the character or :shortcode: token) — e2e specs
-      // select cells by title, so the accessible name must never diverge.
-      "aria-label": emoji,
-      // Read by the delegated click handler on scrollArea (see mount-time
-      // listener above) instead of a per-cell listener.
-      "data-emoji": emoji,
-    });
-    // A `:shortcode:` entry shows its image; everything else is the character
-    // itself. An unresolvable shortcode falls back to the text, which is what
-    // it would render as in a message anyway.
-    const image = buildCustomEmojiNode(emoji);
-    if (image !== null) {
-      span.classList.add("ep-emoji-custom");
-      span.appendChild(image);
-    } else {
-      setText(span, emoji);
-    }
-    return span;
   }
 
   function renderAllCategories(categories: readonly EmojiCategory[]): void {

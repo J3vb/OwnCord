@@ -93,6 +93,12 @@ export interface ChannelController {
 // Factory
 // ---------------------------------------------------------------------------
 
+function currentMessageUser(): MessageUser | null {
+  const u = authStore.getState().user;
+  if (u === null) return null;
+  return { id: u.id, username: u.username, avatar: u.avatar };
+}
+
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
   const {
     ws,
@@ -260,12 +266,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
-
-    function currentMessageUser(): MessageUser | null {
-      const u = authStore.getState().user;
-      if (u === null) return null;
-      return { id: u.id, username: u.username, avatar: u.avatar };
-    }
 
     function performSend(
       content: string,
