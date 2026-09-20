@@ -900,9 +900,11 @@ jobs:
   # against `>=24`, because the flag does not feed the root-package engine check.
   # So this job installs a wrong Node on purpose and requires the refusal.
   #
-  # `set -uo pipefail` and NOT `-e`: GitHub's default bash already runs with -e,
-  # and the first expected failure would abort the step before it could be read.
-  # Each exit code is captured before any pipe, for the same reason.
+  # `set +e` is load-bearing: GitHub starts the step as `bash -e -o pipefail`, so
+  # `-e` is already on from the command line and leaving it out of `set` does
+  # not turn it off — the first expected `npm ci` failure would abort the step
+  # silently, before its exit code could be read. Each exit code is captured
+  # before any pipe, for the same reason.
   #
   # Deliberately not on any required-checks list: it is a hard-failing job that
   # is visible on every PR. `scripts/check-node-policy.mjs` skips this pin
@@ -922,6 +924,7 @@ jobs:
       - name: Every package root must refuse a wrong major
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           for d in . Client tools/mcp-introspect; do
             out=$(cd "$d" && npm ci --ignore-scripts 2>&1)

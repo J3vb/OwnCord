@@ -157,8 +157,7 @@ Facts at `48681909`, 2026-09-20.
   `actions/setup-node` SHA as the other jobs but `node-version: 24` — write it
   as `node-version: "24"` **with quotes and a trailing comment**
   `# deliberately NOT the supported major` — and one step with `shell: bash`
-  whose script starts `set -uo pipefail` (**not** `-e`: GitHub's default bash
-  runs with `-e`, and the first expected failure would abort the step). For
+  whose script starts `set +e` then `set -uo pipefail`. (`set +e` is required: GitHub starts the step as `bash -e -o pipefail`, so `-e` is on from the command line and omitting it from `set` does not turn it off — the first draft of this plan got that wrong and the job died silently at the first expected failure, PR #1628.) For
   each `d` of `.`, `Client`, `tools/mcp-introspect` it runs
   `out=$(cd "$d" && npm ci --ignore-scripts 2>&1); rc=$?` — `rc` captured before
   any pipe — and fails the job, echoing `$out`, unless `rc` is non-zero **and**
