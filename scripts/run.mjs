@@ -163,6 +163,14 @@ const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
 // wait behind ten minutes of -race.
 const CHECK_DOCS = [
   step("node", ["scripts/check-doc-counts.mjs"], "."),
+  // A reference document that cites a path which no longer exists reads fine
+  // and proves nothing. This ran inside Server/migrations' doc gate until the
+  // change selector landed: the paths cited are mostly under Client/ and docs/,
+  // and a diff confined to those selects no server job, so the gate was skipped
+  // by exactly the pull requests most likely to break it. Self-tested first,
+  // for the same reason the count and migration matchers are.
+  step("node", ["--test", "scripts/check-doc-citations.test.mjs"], "."),
+  step("node", ["scripts/check-doc-citations.mjs"], "."),
   // OC-0395. A shipped migration is immutable: migrate.go tracks one by
   // filename and keeps no content hash, so editing it changes nothing for any
   // installation that already applied it. Nothing else can see that — a fresh

@@ -21,6 +21,23 @@
 //
 // The required set is read from b0-dev-branch-protection.sh rather than
 // duplicated, so pinning a new check cannot leave this gate behind.
+//
+// ── What a green required check means, and where ────────────────────────────
+// Since `dfa5f66a`, ci.yml selects which jobs run from the diff, but ONLY on a
+// pull request into `dev`. On a push to `main` and a PR into `main` the
+// selector answers `--all`, so every required context really does run there —
+// and that is what keeps this gate sound, because a tagged commit sits on
+// `main` and its latest run for each context is that full one.
+//
+// On a pull request into `dev` the same names mean less. A gated job that was
+// not selected reports `skipped`, which evaluate() already refuses. The two
+// `Server Build & Test` legs are the ones to know about: they cannot carry a
+// job-level `if:` without destroying their matrix-expanded contexts, so they
+// always run and gate their STEPS instead — and a leg that ran no step still
+// reports `success`. A green `Server Build & Test` on a dev PR therefore means
+// "the server legs were not selected for this diff" just as often as it means
+// "the server was tested". Do not extend this gate to trust dev-PR evidence
+// for those two contexts without changing how they report.
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -79,7 +96,12 @@ export function evaluate(required, checkRuns) {
       continue;
     }
     // `neutral` and `skipped` are not success. A required check that skipped on
-    // the tagged commit proves nothing about it.
+    // the tagged commit proves nothing about it — which is exactly how a
+    // selection that legitimately skipped a job on a dev PR is refused here.
+    //
+    // The converse does NOT hold for every context: see the header. `success`
+    // proves the check ran only because a tagged commit lives on `main`, where
+    // the selector answers `--all`.
     if (run.conclusion !== "success") {
       problems.push(`${name}: ${run.conclusion}`);
     }
