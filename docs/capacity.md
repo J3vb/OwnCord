@@ -716,12 +716,16 @@ it.** Three things changed, none of which re-measures anything published here:
   fan-out.
 - **The phases are read off the run clock, not off whether a connection
   resumed.** `restartPhase` splits the run into `ramp`, `pre-restart`,
-  `recovery` and `post-restart`. The ramp is excluded from both steady windows;
-  the outage and its reconnects are _published as their own phase_ rather than
-  discarded, because that cost is exactly what burying it in a warm-up
-  exclusion would erase. A resumed connection is no longer evidence of
-  anything — it is true for every sample after the stop, including those taken
-  while the rest of the cohort was still coming back.
+  `recovery`, `post-restart` and `ramp-down`. The ramp and the ramp-down are
+  excluded from both steady windows — the second because `TOTAL_S` runs 20 s
+  past `SUSTAIN_S`, and a still-draining population is no more comparable to a
+  fixed one than a still-filling one; the outage and its reconnects are
+  _published as their own phase_ rather than discarded, because that cost is
+  exactly what burying it in a warm-up exclusion would erase. A resumed
+  connection is no longer evidence of anything — it is true for every sample
+  after the stop, including those taken while the rest of the cohort was still
+  coming back. The observer's samples carry these same phase names, so its
+  writer-wait and reader-wait deltas split at the stop too.
 - **The observer VU runs under `restart`**, so the per-phase writer-wait
   deltas exist on both sides of the stop, and a floor on
   `ws_deliveries{phase:pre-restart}` / `{phase:post-restart}` fails the drill

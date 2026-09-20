@@ -329,10 +329,11 @@ const VU_CHANNEL_ID =
 // windows are only comparable if they hold the same population for the same
 // length, so the stop is placed to equalize them -- the caller derives
 // RESTART_AT the same way and passes it, so the two cannot disagree:
-//   ramp         0 .. RAMP_S                 population still climbing
-//   pre-restart  RAMP_S .. RESTART_AT        full fan-out
-//   recovery     RESTART_AT .. +RECOVERY_S   the outage and the reconnects
-//   post-restart +RECOVERY_S .. end          full fan-out
+//   ramp         0 .. RAMP_S                          population climbing
+//   pre-restart  RAMP_S .. RESTART_AT                 full fan-out
+//   recovery     RESTART_AT .. RESTART_AT+RECOVERY_S  the outage + reconnects
+//   post-restart .. RUN_S                             full fan-out
+//   ramp-down    RUN_S .. end                         population draining
 // The ramp is excluded from both steady windows (a population still climbing
 // is not the population under test); the outage is NOT excluded from the
 // report -- it is published as its own phase, because the user-visible cost of
@@ -342,6 +343,11 @@ const RUN_S = RAMP_S + SUSTAIN_S;
 const RESTART_AT = parseInt(
   __ENV.K6_RESTART_AT || String(Math.round((RUN_S + RAMP_S - RESTART_RECOVERY_S) / 2)),
 );
+// The restart drill's phases, in the order they occur. Declared here, with the
+// other restart constants, because the pass-through thresholds are built while
+// `options` is still being evaluated (above) and a `const` referenced before
+// its own line is a temporal-dead-zone error, not an empty value.
+const RESTART_PHASES = ["ramp", "pre-restart", "recovery", "post-restart", "ramp-down"];
 // A steady window that did not carry the workload cannot support a
 // comparison. The floor is a fraction of the deliveries the window should have
 // produced: every connection posts once per SEND_INTERVAL_MS and every OTHER
@@ -572,10 +578,12 @@ export const options = {
           "ws_delivery_latency_ms{phase:pre-restart}": ["p(95)>=0"],
           "ws_delivery_latency_ms{phase:recovery}": ["p(95)>=0"],
           "ws_delivery_latency_ms{phase:post-restart}": ["p(95)>=0"],
+          "ws_delivery_latency_ms{phase:ramp-down}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:ramp}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:pre-restart}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:recovery}": ["p(95)>=0"],
           "ws_broadcast_latency_ms{phase:post-restart}": ["p(95)>=0"],
+          "ws_broadcast_latency_ms{phase:ramp-down}": ["p(95)>=0"],
           // Validity, not a budget (OC-0446): the drill compares two windows,
           // and the comparison means nothing if either did not carry the
           // workload. A window that stalled, or that the generator never
@@ -641,12 +649,22 @@ function stepTags(holdOnly) {
 // separate the outage from the steady state that follows it. A sample's own
 // clock can, and the boundaries it compares against are the ones the caller
 // scheduled.
-function restartPhase() {
-  const t = runElapsedS();
+//
+// The run is RAMP_S + SUSTAIN_S + RAMP_DOWN, so the steady windows end at
+// RUN_S, NOT at the end of the run: the trailing ramp-down is still draining
+// PEAK_VUS to zero, and tagging that as post-restart would fold a falling
+// population into the percentile the pre-restart window is compared against
+// (Codex P2 on #1629). It gets its own phase, exactly like the ramp.
+function restartPhaseAt(t) {
   if (t < RAMP_S) return "ramp";
   if (t < RESTART_AT) return "pre-restart";
   if (t < RESTART_AT + RESTART_RECOVERY_S) return "recovery";
-  return "post-restart";
+  if (t < RUN_S) return "post-restart";
+  return "ramp-down";
+}
+
+function restartPhase() {
+  return restartPhaseAt(runElapsedS());
 }
 
 // Restart-drill phase tags, so the document can say whether a missed budget
@@ -693,12 +711,6 @@ function passThroughThresholds() {
   const out = {};
   const tiers = ["buffer", "db", "none"];
   for (const t of tiers) out[`ws_replay_source{tier:${t}}`] = ["count>=0"];
-  if (IS_RESTART) {
-    for (const o of ["acked", "errored", "unanswered"]) {
-      out[`sends_during_drain{outcome:${o}}`] = ["count>=0"];
-    }
-    return out; // no observer scenario under the restart drill
-  }
   const perPhase = [
     "obs_db_writer_wait_count",
     "obs_db_writer_wait_seconds",
@@ -706,6 +718,20 @@ function passThroughThresholds() {
     "obs_db_reader_wait_seconds",
     "obs_ws_conn_rejects",
   ];
+  if (IS_RESTART) {
+    for (const o of ["acked", "errored", "unanswered"]) {
+      out[`sends_during_drain{outcome:${o}}`] = ["count>=0"];
+    }
+    // The restart drill runs the observer too, and its per-phase writer-wait
+    // and reader-wait deltas are the evidence that says what the stop cost.
+    // Those samples are tagged with the RESTART phases (see obsPhase), so the
+    // keys have to name those — the operational PHASES below would materialize
+    // series this run never produces and collapse the ones it does.
+    for (const p of RESTART_PHASES) {
+      for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
+    }
+    return out;
+  }
   for (const p of PHASES) {
     for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
@@ -1326,6 +1352,12 @@ let obsPrev = null;
 //   sustain — the peak before either of those.
 function obsPhase(nowMs) {
   const t = (nowMs - obsStart) / 1000;
+  // The restart drill runs the observer too (OC-0446), and the evidence it is
+  // there for is the per-phase writer-wait delta either side of the stop — so
+  // its samples carry the RESTART phases. Falling through to the operational
+  // names below would tag everything from UPLOADS_START_S onward as "upload"
+  // on a run with no upload leg, leaving no pre/post-restart split at all.
+  if (IS_RESTART) return restartPhaseAt(t);
   if (t < RAMP_S) return "ramp";
   if (IS_OPERATIONAL && nowMs >= stormFireAt(obsStart) && nowMs <= stormFireAt(obsStart) + 30000) {
     return "storm";
@@ -1379,20 +1411,32 @@ export function observerScenario() {
     // and backpressure delta are per-phase figures (a run total cannot say
     // which phase the reconnects or the drops happened in), and k6 sub-metric
     // keys take both tags — `obs_reconnect_tier{phase:storm,tier:buffer}`.
-    obsReconnectTier.add(d("reconnect_tier_buffer"), { phase, tier: "buffer" });
-    obsReconnectTier.add(d("reconnect_tier_db"), { phase, tier: "db" });
-    obsReconnectTier.add(d("reconnect_tier_full"), { phase, tier: "full" });
-    obsBackpressure.add(d("backpressure_queue_disconnects"), {
-      phase,
-      kind: "queue_disconnects",
-    });
-    obsBackpressure.add(d("backpressure_high_fallbacks"), {
-      phase,
-      kind: "high_fallbacks",
-    });
-    obsBackpressure.add(d("backpressure_low_drops"), { phase, kind: "low_drops" });
+    //
+    // These three are registered for the operational profile only, and the
+    // restart drill reaches this branch too (OC-0446 runs the observer under
+    // restart so the writer-wait deltas exist on both sides of the stop).
+    // Dereferencing a null metric here would throw on the observer's second
+    // poll and kill the VU, taking the writer-wait evidence above with it —
+    // which is the whole reason restart runs an observer. A null metric is
+    // skipped instead.
+    if (obsReconnectTier) {
+      obsReconnectTier.add(d("reconnect_tier_buffer"), { phase, tier: "buffer" });
+      obsReconnectTier.add(d("reconnect_tier_db"), { phase, tier: "db" });
+      obsReconnectTier.add(d("reconnect_tier_full"), { phase, tier: "full" });
+    }
+    if (obsBackpressure) {
+      obsBackpressure.add(d("backpressure_queue_disconnects"), {
+        phase,
+        kind: "queue_disconnects",
+      });
+      obsBackpressure.add(d("backpressure_high_fallbacks"), {
+        phase,
+        kind: "high_fallbacks",
+      });
+      obsBackpressure.add(d("backpressure_low_drops"), { phase, kind: "low_drops" });
+    }
     obsConnRejects.add(d("ws_conn_rejects"), { phase });
-    if (body.upload_storage_used_mb !== undefined) {
+    if (obsUploadStorage && body.upload_storage_used_mb !== undefined) {
       obsUploadStorage.add(body.upload_storage_used_mb, { phase });
     }
   }

@@ -237,15 +237,20 @@ jobs:
           # regardless of `users`. Every other profile seeds `users`.
           # Every k6 VU logs in as loadtest<its own test-wide id> (ws-load.js),
           # so the seed count is the VU count: the observer VU on top of the
-          # sockets for the search, and on operational the observer plus the
-          # WebSocket cohort plus the uploads cohort, which need DISJOINT
-          # accounts. With the BPR-030 defaults (250 users, 100 connections)
-          # `users` already covers 201; a smaller `users` would strand VUs on
-          # a login that cannot succeed.
+          # sockets for the search, on operational the observer plus the
+          # WebSocket cohort plus the uploads cohort, and on restart the
+          # observer plus the WebSocket cohort — the observer VU is the
+          # highest id in the pool and its account must exist, or the
+          # nondeterministic allocation below strands a WebSocket VU on a
+          # login that cannot succeed (Codex P2 on #1629). With the BPR-030
+          # defaults (250 users, 100 connections) `users` already covers all
+          # of these; a smaller `users` is what would break them.
           if [ "$PROFILE" = "ceiling-search" ]; then
             seed_users=$((CEILING_MAX + 1))
           elif [ "$PROFILE" = "operational" ] && [ "$SEED_USERS_INPUT" -lt $((2 * CONNECTIONS + 1)) ]; then
             seed_users=$((2 * CONNECTIONS + 1))
+          elif [ "$PROFILE" = "restart" ] && [ "$SEED_USERS_INPUT" -lt $((CONNECTIONS + 1)) ]; then
+            seed_users=$((CONNECTIONS + 1))
           else
             seed_users="$SEED_USERS_INPUT"
           fi
