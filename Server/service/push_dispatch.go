@@ -326,45 +326,6 @@ func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (saf
 	}, true
 }
 
-// subscriptionStillCurrent re-reads, immediately before one delivery attempt,
-// the subscription row this item's request was built from, and reports
-// whether it is still the SAME subscription: same row id, same owner, same
-// endpoint, same credentials, and still scoped to the VAPID key the request
-// was signed with.
-//
-// Nothing downstream re-encrypts item.req — prepareRequest encrypts to the
-// recipient's public key once and the retry rounds re-send those exact bytes —
-// so a row that has been deleted (the user revoked this device), replaced, or
-// rotated onto a new VAPID key would otherwise still receive a push encrypted
-// for the credentials it no longer has: undecryptable at best, delivered to an
-// endpoint the user just disowned at worst. Fails closed on every lookup
-// error, and on a row that is simply absent from the listing (ListPushSubscriptionsForDispatch
-// filters on the RUNNING key, so a rotated key makes this the same miss as a
-// deletion).
-//
-// Reusing the listing rather than adding a get-by-id keeps the lookup on the
-// same indexed path the audience query already takes, and costs one query per
-// attempt — an attempt is a network fetch under a 10s policy deadline, so this
-// is not the round's bottleneck. Bounded by construction: one row is compared,
-// and the query is scoped to the single user the item already names.
-func (d *PushDispatcher) subscriptionStillCurrent(ctx context.Context, item pushRoundItem) bool {
-	subs, err := d.st.ListPushSubscriptionsForDispatch(ctx, []int64{item.sub.UserID}, d.push.currentKeyID())
-	if err != nil {
-		slog.Error("PushDispatcher.subscriptionStillCurrent ListPushSubscriptionsForDispatch",
-			"err", err, "user_id", item.sub.UserID)
-		return false
-	}
-	for _, s := range subs {
-		if s.ID != item.sub.ID {
-			continue
-		}
-		return s.Endpoint == item.sub.Endpoint &&
-			s.P256dh == item.sub.P256dh &&
-			s.Auth == item.sub.Auth
-	}
-	return false
-}
-
 // attemptOne performs one delivery attempt (1-based attempt number) for
 // item, re-checking eligibility immediately before it. It reports whether
 // item should be retried in a later round; every terminal outcome (success,
@@ -519,12 +480,7 @@ func (d *PushDispatcher) eligibleFor(ctx context.Context, ch *db.Channel, userID
 // Called before every attempt, first and retry alike, so a revoke mid-dispatch
 // drops the remaining retries rather than delivering one anyway.
 func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID, userID int64) bool {
-	blocked, err := d.st.IsBlocked(ctx, userID, authorID)
-	if err != nil {
-		slog.Error("PushDispatcher.stillEligible IsBlocked", "err", err, "user_id", userID)
-		return false
-	}
-	if blocked {
+	if d.recipientBlocksAuthor(ctx, userID, authorID) {
 		return false
 	}
 	ch, err := d.st.GetChannel(ctx, channelID)

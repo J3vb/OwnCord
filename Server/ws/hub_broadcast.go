@@ -370,29 +370,8 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 
 	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
 	// head of the queue, before seqMu — rather than by whoever enqueued the
-	// frame. See nsfwChannelID for why the enqueue site's precomputed filter
-	// was unsound in both directions.
-	//
-	// Deliberately outside seqMu: this is a database round trip, and seqMu
-	// serializes EVERY broadcast, so holding it across one would tax every
-	// other publisher — including the voice_state fan-out OC-0445 is about —
-	// for a read only this frame needs. The ordering contract that buys is
-	// stated on nsfwDispatchResolveRaceHook: a revocation or relabelling that
-	// has completed by this point is honoured by this event; one landing after
-	// it cannot recall frames already authorized.
-	//
-	// Nothing is resolved for the overwhelmingly common case — a metadata kind
-	// or an ordinary broadcast — because nsfwChannelID is zero there.
-	var (
-		contentFilter func(userID int64) bool
-		labelled      bool
-	)
-	if bm.nsfwChannelID != 0 {
-		if nsfwDispatchResolveRaceHook != nil {
-			nsfwDispatchResolveRaceHook(bm.nsfwChannelID)
-		}
-		contentFilter, labelled = h.channelNSFWFilter(context.Background(), bm.nsfwChannelID)
-	}
+	// frame. See resolveChannelContentGate and nsfwChannelID.
+	contentFilter, labelled := h.resolveChannelContentGate(bm.nsfwChannelID)
 
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that

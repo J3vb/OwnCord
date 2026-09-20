@@ -41,6 +41,28 @@ func (h *Hub) broadcastChannelEvent(ctx context.Context, e ChannelEvent) {
 	}, "channel content")
 }
 
+// resolveChannelContentGate answers B5-7's content gate for one queued
+// broadcast, on the dispatch goroutine, immediately before deliverBroadcast
+// takes seqMu. A zero channelID — every metadata kind and every ordinary
+// broadcast — resolves nothing and costs nothing.
+//
+// Deliberately outside seqMu: this is a database round trip, and seqMu
+// serializes EVERY broadcast, so holding it across one would tax every other
+// publisher (including the voice_state fan-out OC-0445 is about) for a read
+// only this frame needs. The ordering contract that buys is stated on
+// nsfwDispatchResolveRaceHook: a revocation or relabelling that has completed
+// by this point is honoured by this event; one landing after it cannot recall
+// frames already authorized, and nothing here claims it can.
+func (h *Hub) resolveChannelContentGate(channelID int64) (allow func(userID int64) bool, labelled bool) {
+	if channelID == 0 {
+		return nil, false
+	}
+	if nsfwDispatchResolveRaceHook != nil {
+		nsfwDispatchResolveRaceHook(channelID)
+	}
+	return h.channelNSFWFilter(context.Background(), channelID)
+}
+
 // nsfwDispatchResolveRaceHook, when non-nil, runs once per content-bearing
 // channel event on the dispatch goroutine, immediately BEFORE
 // deliverBroadcast resolves that event's B5-7 gate and before seqMu is taken.
