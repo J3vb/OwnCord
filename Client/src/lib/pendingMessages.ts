@@ -2,8 +2,8 @@
  * Native persistence uses the same verified encrypted store as credentials;
  * browser builds keep drafts in memory and never write message text to Web Storage.
  */
-import { isTauri, invoke } from "@tauri-apps/api/core";
 import { addOptimisticMessage, markSendFailed } from "@stores/messages.store";
+import { desktop } from "../platform/desktop";
 import type {
   PendingMessageOwner,
   PendingMessageStore,
@@ -24,29 +24,11 @@ export interface PendingTextMessage {
   readonly createdAt: number;
 }
 // The owner and persistence shapes are the `PendingMessageStore` contract
-// (`src/platform/contracts/pendingMessages.ts`), re-exported under the names
-// this module's callers already import. B7-4 moves the native store behind
-// `platform/desktop`; the names here keep the call-site move a pure rename.
+// (`src/platform/contracts/pendingMessages.ts`), whose desktop implementation
+// is `platform/desktop/pendingMessages.ts` (B7-4). Re-exported under the names
+// this module's callers already import, so the move stayed a pure rename.
 export type { PendingMessageOwner, PendingMessageStore };
 export type { PendingMessageStore as PendingMessagePersistence };
-
-/** The native pending-message store. Lifted in place, verbatim, so B7-4's
- *  suite can pin today's behaviour before the store moves to
- *  `platform/desktop/pendingMessages.ts`. */
-export const nativePersistence: PendingMessageStore = {
-  async load(owner) {
-    if (!isTauri()) return null;
-    return invoke<string | null>("load_pending_messages", { ...owner });
-  },
-  async save(owner, value) {
-    if (!isTauri()) return;
-    await invoke("save_pending_messages", { ...owner, value });
-  },
-  async delete(owner) {
-    if (!isTauri()) return;
-    await invoke("delete_pending_messages", { ...owner });
-  },
-};
 
 function sameOwner(a: PendingMessageOwner, b: PendingMessageOwner): boolean {
   return a.host === b.host && a.userId === b.userId;
@@ -223,7 +205,7 @@ export function activatePendingMessages(
   void activeQueue?.deactivate(false);
   activeQueue = new PendingMessageQueue(
     owner,
-    nativePersistence,
+    desktop.pendingMessages!,
     serializePendingWrites,
     (draft) => {
       addOptimisticMessage({

@@ -1,11 +1,14 @@
-// Legacy binding for the PendingMessageStore suite: today's
-// `lib/pendingMessages.ts` native store, wrapped with no cast against the
-// contract. B7-4 re-runs `pendingMessages.suite.ts` against
-// `platform/desktop` instead of this file.
+// Desktop binding for the PendingMessageStore suite: `platform/desktop`'s
+// pending-message store. B7-4 ran the same suite file against the in-place
+// seam in `lib/pendingMessages.ts` first (proving it could fail and pinning
+// today's behaviour), then re-bound it here. The legacy binding is deleted
+// with this commit: its export is now internal, so it would assert nothing
+// the desktop binding does not.
 //
 // The store reads `isTauri`/`invoke` per call, so toggling the live values
 // below moves it between "succeeds" / "fails" / "not a native host" with no
-// module reset — the same getter trick `credentials.legacy.test.ts` uses.
+// module reset — the getter trick this file has used since it was the legacy
+// binding.
 import { vi } from "vitest";
 import type { PendingMessageOwner } from "../../../src/platform/contracts/pendingMessages";
 import type { PendingMessageStore } from "../../../src/platform/contracts/pendingMessages";
@@ -24,16 +27,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     return core.invoke;
   },
 }));
-vi.mock("@stores/messages.store", () => ({
-  addOptimisticMessage: vi.fn(),
-  markSendFailed: vi.fn(),
-}));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-const mod = await import("../../../src/lib/pendingMessages");
-const legacy: PendingMessageStore = mod.nativePersistence;
+const mod = await import("../../../src/platform/desktop/pendingMessages");
+const desktopBinding: PendingMessageStore = mod.pendingMessages;
 
 let isNative = true;
 let loadResult: string | null = null;
@@ -73,7 +72,7 @@ describePendingMessagesSuite(async () => {
   core.isTauri = () => isNative;
   core.invoke = invoke;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       loadReturns(value: string | null) {
         loadResult = value;

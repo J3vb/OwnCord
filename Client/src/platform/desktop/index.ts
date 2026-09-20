@@ -4,6 +4,7 @@
 import { credentials } from "./credentials";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
+import { pendingMessages } from "./pendingMessages";
 import { settings } from "./settings";
 import type { Platform } from "../contracts";
 
@@ -11,5 +12,6 @@ export const desktop: Partial<Platform> = {
   credentials,
   identity,
   logFiles,
+  pendingMessages,
   settings,
 };
