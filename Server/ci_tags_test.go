@@ -335,9 +335,12 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 		}
 
 		// ...and a pattern that covers only SOME of them is caught too, which is
-		// the shape a second `!race && !deadlock` test would create.
+		// the shape a second `!race && !deadlock` test would create. Written as a
+		// literal rather than `append(tests, ...)` so the slice is not grown in
+		// place for a one-off case (prealloc).
 		partial := parseGoTestInvocations(`run: go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/`)
-		if isConstraintCovered(expr, "admin", append(tests, "TestSecondPlainOnlyTest"), partial) {
+		twoTests := []string{"TestRingBuffer_WriteDoesNotAllocate", "TestSecondPlainOnlyTest"}
+		if isConstraintCovered(expr, "admin", twoTests, partial) {
 			t.Fatal("a -run pattern that covers some but not all of the file's tests must not count as coverage")
 		}
 
