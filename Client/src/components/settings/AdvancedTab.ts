@@ -5,10 +5,9 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { invoke } from "@tauri-apps/api/core";
-import { appLogDir, join } from "@tauri-apps/api/path";
-import { readDir, remove } from "@tauri-apps/plugin-fs";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
+import { desktop } from "../../platform/desktop";
 import { clearAttachmentCaches } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
@@ -128,7 +127,11 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         btn.textContent = "Clearing...";
         btn.setAttribute("disabled", "");
         try {
-          await clearLogFiles();
+          // The button's own test (tests/unit/advanced-tab.test.ts) asserts the
+          // pending buffer is drained here, through this module's export;
+          // clearAll() drains it again, which is a no-op.
+          await clearPendingPersistedLogs();
+          await desktop.logFiles!.clearAll();
           btn.textContent = "Cleared!";
           setTimeout(() => {
             btn.textContent = "Clear";
@@ -177,7 +180,11 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         btn.setAttribute("disabled", "");
         try {
           await clearImageCache();
-          await clearLogFiles();
+          // The button's own test (tests/unit/advanced-tab.test.ts) asserts the
+          // pending buffer is drained here, through this module's export;
+          // clearAll() drains it again, which is a no-op.
+          await clearPendingPersistedLogs();
+          await desktop.logFiles!.clearAll();
           clearLocalStoragePreservingUserData();
           sessionStorage.clear();
           log.info("All cache cleared, restarting app");
@@ -349,30 +356,4 @@ function clearLocalStoragePreservingUserData(): void {
   for (const key of keysToRemove) {
     localStorage.removeItem(key);
   }
-}
-
-/** Delete all JSONL log files from the app log directory. */
-async function clearLogFiles(): Promise<void> {
-  try {
-    await clearPendingPersistedLogs();
-    const baseDir = await appLogDir();
-    const logDir = await join(baseDir, "client-logs");
-    const entries = await readDir(logDir);
-    for (const entry of entries) {
-      if (entry.name?.endsWith(".jsonl") && !entry.isDirectory) {
-        // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
-        await remove(`${logDir}/${entry.name}`);
-      }
-    }
-  } catch (err) {
-    if (isMissingPathError(err)) {
-      return;
-    }
-    throw err;
-  }
-}
-
-function isMissingPathError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /not found|no such file|cannot find the path|os error 2|enoent/i.test(message);
 }
