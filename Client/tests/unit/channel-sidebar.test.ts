@@ -40,7 +40,7 @@ import {
   type Channel,
 } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
-import { uiStore, toggleCategory } from "../../src/stores/ui.store";
+import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";

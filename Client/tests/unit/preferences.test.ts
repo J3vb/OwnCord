@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loadPref, savePref, STORAGE_PREFIX } from "../../src/lib/preferences";
 import { expectConsole } from "../helpers/console";
 
