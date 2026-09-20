@@ -20,8 +20,103 @@ permissions:
   contents: read
 
 jobs:
+  # Decides which of the jobs below run. The rules — and the cross-boundary
+  # dependencies they were traced from — are documented in scripts/ci-select.mjs,
+  # and its unit suite runs inside the Repository Hygiene check.
+  #
+  # Two properties of this job are load-bearing. It has no `if:` of its own, and
+  # it is expected to succeed on every event: the jobs below take it as a
+  # `needs:`, and a job whose dependency did not succeed is skipped. The
+  # "not a pull request into dev" case is therefore answered inside the step
+  # (`--all`) rather than by skipping this job, so that "this job ran" and
+  # "these outputs exist" are the same statement.
+  #
+  # Selection is deliberately limited to a pull request INTO DEV. A PR into main
+  # and a push to main run every capability, because
+  # scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each context in
+  # docs/plans/b0-dev-branch-protection.sh to have concluded `success` on the
+  # tagged commit and counts `skipped` as NOT success. Releases are cut from
+  # main, so a check legitimately skipped there would block the release instead
+  # of saving anything. Day-to-day work happens on PRs into dev, which is where
+  # the long runs the audit measured came from.
+  changes:
+    name: Change selection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      server: ${{ steps.select.outputs.server }}
+      client: ${{ steps.select.outputs.client }}
+      rust: ${{ steps.select.outputs.rust }}
+      browser: ${{ steps.select.outputs.browser }}
+      integration: ${{ steps.select.outputs.integration }}
+      native: ${{ steps.select.outputs.native }}
+      harness: ${{ steps.select.outputs.harness }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The diff is taken from the merge base, so both ends of it have to be
+          # present. docs-consistency fetches full history for the same reason.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      # Every branch writes an answer, so this step cannot fail the job.
+      # `set -e` is deliberately NOT set: the guards below are explicit `if !`
+      # tests, because a git command that failed is a reason to select
+      # everything, never a reason to skip every job that follows.
+      - name: Select the jobs this change needs
+        id: select
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          out="$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "dev" ]; then
+            node scripts/ci-select.mjs --all --reason "not a pull request into dev" --out "$out"
+            exit 0
+          fi
+
+          base=""
+          base=$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null) || base=""
+          if [ -z "$base" ]; then
+            echo "::warning::no merge base against origin/$BASE_REF — running every check"
+            node scripts/ci-select.mjs --all --reason "no merge base" --out "$out"
+            exit 0
+          fi
+
+          changed="$RUNNER_TEMP/changed-paths.txt"
+          if ! git diff --name-status -M "$base" HEAD > "$changed"; then
+            echo "::warning::diff against $base failed — running every check"
+            node scripts/ci-select.mjs --all --reason "diff failed" --out "$out"
+            exit 0
+          fi
+
+          node scripts/ci-select.mjs --paths-file "$changed" --out "$out" || {
+            echo "::warning::selection failed — running every check"
+            node scripts/ci-select.mjs --all --reason "selection failed" --out "$out"
+          }
+
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
+    needs: changes
+    # The gate every job below repeats, so it is explained once here.
+    #
+    # `needs.changes.result != 'success'` is the fail-safe: if the selection job
+    # did not succeed — a runner failure, a checkout failure — this job RUNS.
+    # Testing only the output would read an absent output as "false" and skip,
+    # turning an infrastructure failure into a green PR that tested nothing.
+    #
+    # `!cancelled()` is what lets the expression be read at all: without a
+    # status function, a job whose `needs:` did not succeed is skipped before
+    # its `if:` is considered, so the fail-safe above could never fire. The
+    # `changes` job is written to always succeed, and this is the belt beside
+    # that's braces.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -247,6 +342,8 @@ jobs:
   # is covered where it exists: rust-tests and the tauri-build matrix.
   client-check:
     name: Client Static Checks
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -463,6 +560,8 @@ jobs:
 
   client-tests:
     name: Client Unit Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -500,6 +599,8 @@ jobs:
   # run with --all-targets here (tauri-build's lib-only clippy skips test code).
   rust-tests:
     name: Rust Unit Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     defaults:
@@ -545,6 +646,8 @@ jobs:
   # Mocked desktop boundary: unexpected IPC/page errors and flakes fail.
   client-e2e:
     name: Client E2E (Playwright)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -587,6 +690,8 @@ jobs:
   # Each admin attempt owns a fresh real server and database.
   admin-e2e:
     name: Admin Panel E2E (real server)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -629,6 +734,8 @@ jobs:
   # Keep the historical check name: live branch protection already requires it.
   client-e2e-parity:
     name: Client E2E (parity subset, blocking)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -799,6 +906,8 @@ jobs:
 
   client-fullstack:
     name: Client E2E (real server and media)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -833,6 +942,8 @@ jobs:
 
   client-native:
     name: Client E2E (Windows native)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 75
     defaults:
@@ -914,6 +1025,8 @@ jobs:
   # because of its trailing comment, so the two do not contradict each other.
   node-policy:
     name: Node policy (refused major)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
