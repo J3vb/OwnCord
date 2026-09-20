@@ -265,7 +265,9 @@ no file paths.
 
 ## Testing
 
-The client suite enforces **70% coverage thresholds** in `vitest.config.ts`.
+The client suite enforces a **90% statement** floor plus 70% branch, function
+and line thresholds in `vitest.config.ts`, mirrored by
+`Client/coverage-floor.json`.
 The Go suite has floors too, since B3-6: `Server/coverage-floor.json` names an
 aggregate and a per-package floor for the five core packages (`ws`, `service`,
 `permissions`, `auth`, `db`), and `Server/scripts/coverage-floor.sh` enforces
