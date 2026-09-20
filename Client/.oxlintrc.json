@@ -6,7 +6,21 @@
     "perf": "warn"
   },
   "rules": {
-    "no-map-spread": "off"
+    "no-map-spread": "off",
+    "no-underscore-dangle": [
+      "warn",
+      {
+        "allowAfterThis": true,
+        "allow": [
+          "_rnnoise_create",
+          "_rnnoise_process_frame",
+          "_rnnoise_destroy",
+          "_malloc",
+          "_free",
+          "__owncord"
+        ]
+      }
+    ]
   },
   "ignorePatterns": ["dist", "node_modules", "public"]
 }
