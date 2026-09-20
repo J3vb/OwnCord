@@ -228,6 +228,16 @@ node scripts/run.mjs check:client && npx prettier --check .      # exit 0
 | A comment trips the text-based count test                           | Medium     | Low    | Rule 2 and the `git grep` in Task 1's Validate                                                            |
 | Re-declared types drift from `src/lib` before B7-4                  | Low        | Low    | The legacy binding stops compiling the moment they drift                                                  |
 
+## Amendments during execution (2026-09-20)
+
+Recorded by the orchestrator after three adversarial review rounds and one targeted fix pass.
+
+- `WindowControl.isFocused()` was removed from the contract: production code calls `document.hasFocus()`, a web API, so there was no native seam to describe (review round 1).
+- Two of three review rounds found the same defect class — suite tests that cannot fail — so the class was closed mechanically: every `describe<Name>Suite` takes `{ expectEveryTestToFail }` and `Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs each suite against a null subject with `test.fails`. The probe found nine such tests, four more than the reviews had. Seven were strengthened with a caller-visible observable on the `native` handle; two (`SettingsStore.save` succeeds, `DeepLinks` unavailable) were deleted because nothing is observable at that seam, and are listed under "Suite coverage gaps" in `docs/architecture/platform-contracts.md`.
+- Design rule 5 gains one exception: the null subjects in `suites-are-falsifiable.test.ts` are the only casts under `tests/unit/platform/`. Legacy bindings stay cast-free.
+- Known limit of the probe: it nulls the subject and the `native` handle together, so a test that asserts only on the handle's own bookkeeping would still count as falsifiable. B7-4 should run the probe with its real desktop `native` handle once one exists.
+- Test totals are reported by vitest as `passed | expected fail`; the 58 expected failures are the probe, not skips.
+
 ## Out of scope
 
 - Moving any call site; implementing any desktop adapter; `platform/browser/`.
@@ -243,11 +253,11 @@ node scripts/run.mjs check:client && npx prettier --check .      # exit 0
 
 ## Acceptance
 
-- [ ] 17 contract files + `index.ts` with `Platform`; type-only; no `@tauri-apps`, `invoke("`, `@lib`, `@stores` text under `src/platform/`
-- [ ] No contract takes a protocol or domain type; `SettingsStore` and `PendingMessageStore` match the existing interfaces member for member
-- [ ] `desktop/index.ts` exports an empty `Partial<Platform>`
-- [ ] 8 suites, each a function of `{ subject, native }`, none naming a command; each legacy binding typed as its contract with no cast
-- [ ] Zero diff under `src/lib`, `src/components`, `src/stores`, `src/pages`, `src/main.ts`
-- [ ] Importer / invoke / handler counts unchanged (21 / 29 / 33)
-- [ ] `knip` clean; `platform-contracts.md` (incl. the "Thirteen" fix and the dev-tools cluster) and `Client/CLAUDE.md` updated
-- [ ] `check:client` and `prettier --check` exit 0; test count is 5524 + new, none skipped
+- [x] 17 contract files + `index.ts` with `Platform`; type-only; no `@tauri-apps`, `invoke("`, `@lib`, `@stores` text under `src/platform/`
+- [x] No contract takes a protocol or domain type; `SettingsStore` and `PendingMessageStore` match the existing interfaces member for member
+- [x] `desktop/index.ts` exports an empty `Partial<Platform>`
+- [x] 8 suites, each a function of `{ subject, native }`, none naming a command; each legacy binding typed as its contract with no cast
+- [x] Zero diff under `src/lib`, `src/components`, `src/stores`, `src/pages`, `src/main.ts`
+- [x] Importer / invoke / handler counts unchanged (21 / 29 / 33)
+- [x] `knip` clean; `platform-contracts.md` (incl. the "Thirteen" fix and the dev-tools cluster) and `Client/CLAUDE.md` updated
+- [x] `check:client` and `prettier --check` exit 0; test count is 5524 + new, none skipped
