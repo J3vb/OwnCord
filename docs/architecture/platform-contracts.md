@@ -194,6 +194,22 @@ before and after is the evidence the move changed nothing. The remaining
 rows (and the no-seam half of the two split rows above) are contract-only
 until the milestone that creates their seam writes the suite.
 
+**Suite coverage gaps.** A round-3 adversarial review found suite tests whose
+only assertion a completely inert, do-nothing subject also satisfies —
+`Client/tests/unit/platform/suites-are-falsifiable.test.ts` now runs every
+suite against exactly such a subject to catch this mechanically. Two methods
+have no caller-visible effect at their seam beyond "did not reject", which an
+inert subject also never does, and are left untested rather than pinned to a
+green that means nothing:
+
+- `SettingsStore.save()`'s success path — `save(): Promise<void>` gives the
+  caller nothing to observe beyond not rejecting; the rejection paths (native
+  error, native host unavailable) are still covered.
+- `DeepLinks.init()`'s native-host-unavailable path — resolving without
+  calling either callback is exactly what a subject that does nothing at all
+  also does; the cold-start paths (invite, message permalink) are still
+  covered.
+
 `Client/knip.json` ignores `src/platform/**` for now — every file under it is
 exported for a consumer that doesn't exist yet. B7-4 removes that ignore the
 moment the first production call site imports from `platform/desktop`.

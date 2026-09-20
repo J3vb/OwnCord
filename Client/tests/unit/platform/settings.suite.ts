@@ -68,11 +68,11 @@ export function describeSettingsStoreSuite(
     });
 
     describe("save", () => {
-      check("resolves when the native store accepts the write", async () => {
-        ctx.native.succeedWith(undefined);
-        await expect(ctx.subject.save(snapshot)).resolves.toBeUndefined();
-      });
-
+      // No test for the success path: `save(): Promise<void>` gives the
+      // caller nothing to observe on success beyond "did not reject", and an
+      // inert do-nothing subject resolves too — see
+      // docs/architecture/platform-contracts.md's "Contracts (B7-3)"
+      // section, "Suite coverage gaps".
       check("rejects when the native store errors", async () => {
         ctx.native.failWith(new Error("write failed"));
         await expect(ctx.subject.save(snapshot)).rejects.toThrow();
