@@ -55,7 +55,7 @@ jobs:
       # job installs no npm dependencies.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Build server
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
@@ -256,7 +256,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -343,7 +343,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Self-test the count matcher
         run: node --test scripts/check-doc-counts.test.mjs
@@ -427,7 +427,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
 
       # Root install only -- prettier is the sole dependency this job needs, and
       # the client's install is client-check's job.
@@ -469,7 +469,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -552,7 +552,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -599,7 +599,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -636,7 +636,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -742,7 +742,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
@@ -809,7 +809,7 @@ jobs:
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
@@ -843,7 +843,7 @@ jobs:
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - name: Check resolved Tauri npm and Rust versions
