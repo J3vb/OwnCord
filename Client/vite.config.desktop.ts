@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig, type Plugin } from "vite";
-import shared from "./vite.config";
+import shared from "./vite.config.ts";
 
 /**
  * Desktop (Tauri) overlay. Everything in this file exists because Tauri is the
