@@ -145,7 +145,37 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # The one place this leg reads the selection, and the FIRST thing it does
+      # after checkout: the decision has to precede tool setup, or a change with
+      # no server work still pays for a Go install, a Node install and a Go
+      # cache restore on both matrix legs.
+      #
+      # `shell: bash` is not optional here. This matrix includes
+      # windows-latest, whose default shell is pwsh, and `${SELECTED:-true}` is
+      # bash parameter expansion that PowerShell rejects as an invalid variable
+      # reference. Observed, not reasoned about: the Windows leg failed with
+      # `ParserError` in a .ps1 file, exit 1. The fail-safe below still did its
+      # job — the value was never written, so every later step ran rather than
+      # skipped — but the step itself failed the leg, so the fix is the shell.
+      #
+      # Written so that a MISSING value means "run": every step below tests
+      # `!= 'false'`, so if this step wrote nothing — or a later edit renamed the
+      # variable — the leg runs in full rather than silently skipping every gate.
+      # A gate that fails open is the failure this whole design exists to avoid,
+      # so the comparison is against the value that means SKIP, never against the
+      # one that means run.
+      - name: Decide whether this leg runs
+        shell: bash
+        env:
+          SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+        run: |
+          echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          if [ "${SELECTED:-true}" != "true" ]; then
+            echo "::notice::not selected for this change — this leg runs no server checks"
+          fi
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: env.RUN_SERVER != 'false'
         with:
           go-version: "1.26"
           cache-dependency-path: Server/go.sum
@@ -158,23 +188,9 @@ jobs:
       # "not a usable floor file", which is the wrong diagnosis. Not cached: the
       # job installs no npm dependencies.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: env.RUN_SERVER != 'false'
         with:
           node-version: 26
-
-      # The one place this leg reads the selection. Written so that a MISSING
-      # value means "run": every step below tests `!= 'false'`, so if this step
-      # wrote nothing — or a later edit renamed the variable — the leg runs in
-      # full rather than silently skipping every gate. A gate that fails open is
-      # the failure this whole design exists to avoid, so the comparison is
-      # against the value that means SKIP, never against the one that means run.
-      - name: Decide whether this leg runs
-        env:
-          SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
-        run: |
-          echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
-          if [ "${SELECTED:-true}" != "true" ]; then
-            echo "::notice::not selected for this change — this leg runs no server checks"
-          fi
 
       - name: Build server
         if: env.RUN_SERVER != 'false'

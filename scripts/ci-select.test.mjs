@@ -174,6 +174,35 @@ test("a server change also runs the native job, which builds and drives that ser
   assert.equal(sel.native, true, "the native journey builds this server and tests it");
 });
 
+test("the generated TypeScript protocol file selects the server job", () => {
+  // `make protocol-verify` regenerates Server/ws/message_types.go AND this file,
+  // then fails on drift — so a change here has to run the server job even though
+  // the path lives under Client/.
+  const sel = picked("M\tClient/src/lib/protocolTypes.ts");
+  assert.equal(sel.server, true, "protocol-verify regenerates and compares this file");
+  // ...and the client-side selections it already had are preserved.
+  assert.equal(sel.client, true);
+  assert.equal(sel.browser, true);
+  assert.equal(sel.native, true);
+});
+
+test("deleting the generated TypeScript protocol file selects the server job", () => {
+  assert.equal(runs("D\tClient/src/lib/protocolTypes.ts", "server"), true);
+});
+
+test("renaming the generated TypeScript protocol file away from that path selects the server job", () => {
+  // A rename reports BOTH paths, which is the point: the OLD path is the one
+  // protocol-verify still expects to regenerate.
+  const sel = picked("R100\tClient/src/lib/protocolTypes.ts\tClient/src/lib/protocolTypes.old.ts");
+  assert.equal(sel.server, true, "the file left the path protocol-verify writes");
+  assert.equal(sel.client, true);
+});
+
+test("renaming a file INTO the generated path selects the server job too", () => {
+  const sel = picked("R100\tClient/src/lib/other.ts\tClient/src/lib/protocolTypes.ts");
+  assert.equal(sel.server, true, "something now occupies the path protocol-verify writes");
+});
+
 test("a protocol schema change runs every component that consumes the generated types", () => {
   const sel = picked("M\tprotocol/schema.json");
   assert.equal(sel.server, true, "ws/message_types.go is generated from it");
