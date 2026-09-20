@@ -12,10 +12,22 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: !!process.env.CI,
-  workers: process.env.CI ? 1 : undefined,
+  // Two workers on CI. The mocked suites are isolated by construction — each
+  // test builds its own Tauri mock and the specs share no server or database —
+  // and a GitHub runner has 4 vCPUs, so a second worker buys wall-clock rather
+  // than contention. The production run measured 8.8 minutes at 1 worker.
+  //
+  // The real-server configs (admin, fullstack) and the native config keep
+  // workers: 1 of their own — they boot a Go server and a LiveKit process and
+  // are not isolated from each other. Only this base config, inherited by the
+  // dev, smoke and prod runs, is widened.
+  //
+  // failOnFlakyTests stays on, so two workers cannot hide a race behind a
+  // retry: a spec that needs its retry still fails the run.
+  workers: process.env.CI ? 2 : undefined,
   // CI fail-fast: a systemic breakage (e.g. the shared login helper) makes
-  // most of the 255 tests burn their full timeout × retries — hours of runner
-  // time at 1 worker. Abort after 20 failures instead so the job reports a
+  // most of the 292 tests burn their full timeout × retries — hours of runner
+  // time. Abort after 20 failures instead so the job reports a
   // usable red quickly. 0 = unlimited (local runs see every failure).
   maxFailures: process.env.CI ? 20 : 0,
   // Self-terminate before the workflow's timeout-minutes (25) SIGKILLs the
