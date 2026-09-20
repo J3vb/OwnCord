@@ -1,11 +1,12 @@
-// Legacy binding for the FileSaver suite: today's `downloadFile` save/write
-// pair from `message-list/attachments.ts`, wrapped with no cast against the
-// contract. B7-4 re-runs `fileSave.suite.ts` against `platform/desktop`
-// instead of this file.
+// Desktop binding for the FileSaver suite: `platform/desktop`'s save dialog
+// and file write. B7-4 ran the same suite file against the in-place seam in
+// `message-list/attachments.ts` first (proving it could fail and pinning
+// today's behaviour), then re-bound it here. The legacy binding is deleted
+// with this commit: its export is now internal.
 //
-// `attachments.ts` pulls in the icon/dom/media helpers at module load; the
-// mock block below is the same one `attachments-auth.test.ts` uses to keep
-// that import inert.
+// `attachments.ts` pulls in the icon/dom/media helpers at module load, but
+// this binding imports the desktop module directly, so only the two plugins
+// need mocking.
 import { vi } from "vitest";
 import type { FileSaver } from "../../../src/platform/contracts/fileSave";
 import { describeFileSaverSuite } from "./fileSave.suite";
@@ -15,20 +16,11 @@ const { saveMock, writeFileMock } = vi.hoisted(() => ({
   writeFileMock: vi.fn<(path: string, data: Uint8Array) => Promise<void>>(),
 }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
-vi.mock("@lib/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
-vi.mock("@stores/auth.store", () => ({ getToken: vi.fn() }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
-const mod = await import("../../../src/components/message-list/attachments");
-const legacy: FileSaver = mod.fileSaver;
+const mod = await import("../../../src/platform/desktop/fileSave");
+const desktopBinding: FileSaver = mod.fileSaver;
 
 const written: { path: string; data: Uint8Array }[] = [];
 
@@ -48,7 +40,7 @@ function reset(): void {
 describeFileSaverSuite(async () => {
   reset();
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       dialogResolves(path: string | null) {
         reset();
