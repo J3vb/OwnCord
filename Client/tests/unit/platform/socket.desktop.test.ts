@@ -1,6 +1,8 @@
-// Legacy binding for the SocketTransport suite: the transport `lib/ws.ts`
-// builds in place, wrapped with no cast against the contract. B7-4 re-runs
-// `socket.suite.ts` against `platform/desktop` instead of this file.
+// Desktop binding for the SocketTransport suite: `platform/desktop`'s socket
+// transport. B7-4 ran the same suite file against the in-place seam in
+// `lib/ws.ts` first (proving it could fail and pinning today's behaviour),
+// then re-bound it here. The legacy binding is deleted with this commit: its
+// export is now internal.
 //
 // The transport loads its native APIs lazily, so "there is no native host"
 // is expressed the way the transport sees it: the module's `invoke` accessor
@@ -25,8 +27,7 @@ const { invokeMock, listenMock, handlers } = vi.hoisted(() => {
 });
 
 // A getter, so toggling it is enough to move between "native host present"
-// and "no native host at all" with no module reset — the same trick
-// `credentials.legacy.test.ts` uses.
+// and "no native host at all" with no module reset.
 let hostAvailable = true;
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -45,7 +46,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-const mod = await import("../../../src/lib/ws");
+const mod = await import("../../../src/platform/desktop/socket");
 
 const sentFrames: string[] = [];
 const acceptedPins: { host: string; fingerprint: string }[] = [];

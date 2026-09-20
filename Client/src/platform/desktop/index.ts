@@ -8,6 +8,7 @@ import { identity } from "./identity";
 import { logFiles } from "./logFiles";
 import { pendingMessages } from "./pendingMessages";
 import { settings } from "./settings";
+import { socket } from "./socket";
 import type { Platform } from "../contracts";
 
 export const desktop: Partial<Platform> = {
@@ -18,4 +19,5 @@ export const desktop: Partial<Platform> = {
   logFiles,
   pendingMessages,
   settings,
+  socket,
 };
