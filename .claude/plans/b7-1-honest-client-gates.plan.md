@@ -268,6 +268,17 @@ npx prettier --check .                                # exit 0
 | `toSorted()` changes behaviour where in-place order was relied on                    | Low        | Medium | Read the following lines; if in doubt keep `sort()` with a justified disable                     |
 | Merge conflict with B7-2 in `Client/package.json` / `ci.yml`                         | High       | Low    | Scripts-only and `client-check`-only edits; orchestrator rebases after B7-2 merges               |
 
+## Amendments during execution (2026-09-20)
+
+Recorded by the orchestrator.
+
+- **A third authorised disable form, for one line.** `Client/src/lib/audioPipeline.ts:433` keeps `port.onmessage = null` and carries an `oxlint-disable-next-line` for `prefer-add-event-listener`. Task 2's "apply the rule's suggestion" was wrong for this site: on a `MessagePort`, assigning `onmessage` also starts the port, so `addEventListener` would need an explicit `port.start()` and a stored handler, and OC-0231's detach is that single null assignment. The coder raised it as BLOCKED rather than rewriting two test stubs to fit a lint rule.
+- **The console guard does not use a vitest spy.** Task 6 specified `vi.spyOn`; an adversarial review proved a test file's own `beforeEach(() => vi.restoreAllMocks())` removes such a recorder (and `resetAllMocks` swallows output silently), which left the guard off in at least five files. The recorder is now a plain function assigned in `beforeEach`; `Client/tests/unit/console-guard.test.ts` proves the defeats no longer work. With the guard back on, those five files provoked no unclaimed output — the defect was latent.
+- **Fix round 1** also corrected `docs/contributing.md:268` (the floor), the `lint:ox` row, one `no-await-in-loop` reason that was not a reason, and replaced a claim on vitest's own notice with a stub that no longer provokes it.
+- **`Client/eslint.config.js` was pasted by the owner**, because a local config-protection hook blocks agent edits to `eslint.config.*`; the coder applied the identical diff to the branch.
+- **The hook edit was never exercised by a real commit**: `core.hooksPath` points at the main checkout's `.githooks`, so commits from a worktree ran the old hook. The new block was validated by invoking the script directly and by review.
+- Test totals: 5524 → 5529 (the five guard tests). Nothing skipped.
+
 ## Out of scope
 
 - Removing any import cycle (B7-10). Renaming `this._x` members (B7-9 decides).
@@ -283,14 +294,14 @@ npx prettier --check .                                # exit 0
 
 ## Acceptance
 
-- [ ] `npx oxlint --deny-warnings src/` exits 0 with no rule switched off
-- [ ] Every new disable comment is one of the two forms in Task 2 and carries a reason
-- [ ] `npm run lint:cycles` exits 0 at 29 and 1 at 28
-- [ ] ESLint rejects a new static `@tauri-apps` importer; the allowlist is exactly the 12 static importers, with the rationale comment
-- [ ] Pre-commit denies warnings under `Client/src/` only; no commit on the branch used `--no-verify`
-- [ ] The console guard fails a probe `console.warn`; `vitest.config.ts` gained no `silent`/`onConsoleLog`
-- [ ] `docs/contributing.md` describes the gates as they now run
-- [ ] Floor is 90 in `coverage-floor.json` and `vitest.config.ts`; `*.d.ts` exclusion justified
-- [ ] `check:client` runs knip and coverage
-- [ ] Unit suite prints 0 console blocks; test count not lower than 5524
-- [ ] `node scripts/run.mjs check:client` and `npx prettier --check .` exit 0
+- [x] `npx oxlint --deny-warnings src/` exits 0 with no rule switched off
+- [x] Every new disable comment is one of the two forms in Task 2 and carries a reason
+- [x] `npm run lint:cycles` exits 0 at 29 and 1 at 28
+- [x] ESLint rejects a new static `@tauri-apps` importer; the allowlist is exactly the 12 static importers, with the rationale comment
+- [x] Pre-commit denies warnings under `Client/src/` only; no commit on the branch used `--no-verify`
+- [x] The console guard fails a probe `console.warn`; `vitest.config.ts` gained no `silent`/`onConsoleLog`
+- [x] `docs/contributing.md` describes the gates as they now run
+- [x] Floor is 90 in `coverage-floor.json` and `vitest.config.ts`; `*.d.ts` exclusion justified
+- [x] `check:client` runs knip and coverage
+- [x] Unit suite prints 0 console blocks; test count not lower than 5524
+- [x] `node scripts/run.mjs check:client` and `npx prettier --check .` exit 0
