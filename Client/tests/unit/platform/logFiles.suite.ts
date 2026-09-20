@@ -4,7 +4,7 @@
 // `settings/AdvancedTab.ts`) is no-seam — its suite lands with the seam in
 // B7-4, so this suite exercises only the four methods that already have an
 // exported seam in `lib/logPersistence.ts`.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { LogFiles } from "../../../src/platform/contracts/logFiles";
 
 export interface NativeControl {
@@ -20,7 +20,11 @@ export interface LogFilesSubject {
   readonly native: NativeControl;
 }
 
-export function describeLogFilesSuite(makeSubject: () => Promise<LogFilesSubject>): void {
+export function describeLogFilesSuite(
+  makeSubject: () => Promise<LogFilesSubject>,
+  options?: { expectEveryTestToFail?: boolean },
+): void {
+  const check = options?.expectEveryTestToFail ? test.fails : test;
   describe("LogFiles (logPersistence seam)", () => {
     let ctx: LogFilesSubject;
     beforeEach(async () => {
@@ -28,11 +32,11 @@ export function describeLogFilesSuite(makeSubject: () => Promise<LogFilesSubject
     });
 
     describe("getDir", () => {
-      it("returns null before init() has run", () => {
+      check("returns null before init() has run", () => {
         expect(ctx.subject.getDir()).toBeNull();
       });
 
-      it("returns the resolved log directory after a successful init()", async () => {
+      check("returns the resolved log directory after a successful init()", async () => {
         ctx.native.succeedWith();
         await ctx.subject.init();
         expect(ctx.subject.getDir()).not.toBeNull();
@@ -40,7 +44,7 @@ export function describeLogFilesSuite(makeSubject: () => Promise<LogFilesSubject
     });
 
     describe("init", () => {
-      it("resolves a cleanup function when the native filesystem is available", async () => {
+      check("resolves a cleanup function when the native filesystem is available", async () => {
         ctx.native.succeedWith();
         const cleanup = await ctx.subject.init();
         expect(typeof cleanup).toBe("function");
@@ -48,16 +52,19 @@ export function describeLogFilesSuite(makeSubject: () => Promise<LogFilesSubject
 
       // Pinned as-is (B7-3): init() never rejects — any native failure is
       // caught and logged, and the caller gets a harmless no-op cleanup.
-      it("resolves a no-op cleanup, not a rejection, when the native host is unavailable", async () => {
-        ctx.native.unavailable();
-        const cleanup = await ctx.subject.init();
-        expect(typeof cleanup).toBe("function");
-        expect(ctx.subject.getDir()).toBeNull();
-      });
+      check(
+        "resolves a no-op cleanup, not a rejection, when the native host is unavailable",
+        async () => {
+          ctx.native.unavailable();
+          const cleanup = await ctx.subject.init();
+          expect(typeof cleanup).toBe("function");
+          expect(ctx.subject.getDir()).toBeNull();
+        },
+      );
     });
 
     describe("flush", () => {
-      it("resolves after a successful init()", async () => {
+      check("resolves after a successful init()", async () => {
         ctx.native.succeedWith();
         await ctx.subject.init();
         await expect(ctx.subject.flush()).resolves.toBeUndefined();
@@ -65,7 +72,7 @@ export function describeLogFilesSuite(makeSubject: () => Promise<LogFilesSubject
     });
 
     describe("clearPending", () => {
-      it("resolves even with nothing buffered", async () => {
+      check("resolves even with nothing buffered", async () => {
         await expect(ctx.subject.clearPending()).resolves.toBeUndefined();
       });
     });

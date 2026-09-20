@@ -3,7 +3,7 @@
 // (`parseInviteLink`/`parseMessageLink`) is pure and already covered
 // elsewhere — this suite only asserts what `onInvite`/`onMessage` receive
 // for a cold-start link.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { DeepLinks } from "../../../src/platform/contracts/deepLinks";
 
 export interface NativeControl {
@@ -19,21 +19,25 @@ export interface DeepLinksSubject {
   readonly native: NativeControl;
 }
 
-export function describeDeepLinksSuite(makeSubject: () => Promise<DeepLinksSubject>): void {
+export function describeDeepLinksSuite(
+  makeSubject: () => Promise<DeepLinksSubject>,
+  options?: { expectEveryTestToFail?: boolean },
+): void {
+  const check = options?.expectEveryTestToFail ? test.fails : test;
   describe("DeepLinks", () => {
     let ctx: DeepLinksSubject;
     beforeEach(async () => {
       ctx = await makeSubject();
     });
 
-    it("delivers a cold-start invite link to onInvite", async () => {
+    check("delivers a cold-start invite link to onInvite", async () => {
       ctx.native.coldStartLinks(["owncord://invite/ABC123"]);
       const onInvite = vi.fn();
       await ctx.subject.init(onInvite);
       expect(onInvite).toHaveBeenCalledWith("ABC123", undefined);
     });
 
-    it("delivers a cold-start message permalink to onMessage", async () => {
+    check("delivers a cold-start message permalink to onMessage", async () => {
       ctx.native.coldStartLinks(["owncord://message/7/42"]);
       const onInvite = vi.fn();
       const onMessage = vi.fn();
@@ -42,13 +46,16 @@ export function describeDeepLinksSuite(makeSubject: () => Promise<DeepLinksSubje
       expect(onInvite).not.toHaveBeenCalled();
     });
 
-    it("resolves without calling either callback when the native host is unavailable", async () => {
-      ctx.native.unavailable();
-      const onInvite = vi.fn();
-      const onMessage = vi.fn();
-      await expect(ctx.subject.init(onInvite, onMessage)).resolves.toBeUndefined();
-      expect(onInvite).not.toHaveBeenCalled();
-      expect(onMessage).not.toHaveBeenCalled();
-    });
+    check(
+      "resolves without calling either callback when the native host is unavailable",
+      async () => {
+        ctx.native.unavailable();
+        const onInvite = vi.fn();
+        const onMessage = vi.fn();
+        await expect(ctx.subject.init(onInvite, onMessage)).resolves.toBeUndefined();
+        expect(onInvite).not.toHaveBeenCalled();
+        expect(onMessage).not.toHaveBeenCalled();
+      },
+    );
   });
 }

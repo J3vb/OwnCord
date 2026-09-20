@@ -7,7 +7,7 @@
 // Asserts only what the CALLER receives: no command name, no invoke
 // argument shape. That wiring already has its own coverage in
 // `tests/unit/credentials*.test.ts`.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { CredentialStore } from "../../../src/platform/contracts/credentials";
 
 /** A small control handle the legacy/desktop binding supplies so the suite
@@ -26,7 +26,9 @@ export interface CredentialStoreSubject {
 
 export function describeCredentialStoreSuite(
   makeSubject: () => Promise<CredentialStoreSubject>,
+  options?: { expectEveryTestToFail?: boolean },
 ): void {
+  const check = options?.expectEveryTestToFail ? test.fails : test;
   describe("CredentialStore", () => {
     let ctx: CredentialStoreSubject;
     beforeEach(async () => {
@@ -34,26 +36,26 @@ export function describeCredentialStoreSuite(
     });
 
     describe("save", () => {
-      it("resolves true when the native store accepts the credential", async () => {
+      check("resolves true when the native store accepts the credential", async () => {
         ctx.native.succeedWith(undefined);
         await expect(ctx.subject.save("host", "alice", "tok")).resolves.toBe(true);
       });
 
       // Pinned as-is (B7-3): a failed native write resolves false rather
       // than rejecting — the caller has no way to see the underlying error.
-      it("resolves false, not a rejection, when the native store errors", async () => {
+      check("resolves false, not a rejection, when the native store errors", async () => {
         ctx.native.failWith(new Error("keychain locked"));
         await expect(ctx.subject.save("host", "alice", "tok")).resolves.toBe(false);
       });
 
-      it("resolves false when the native host is unavailable", async () => {
+      check("resolves false when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.save("host", "alice", "tok")).resolves.toBe(false);
       });
     });
 
     describe("load", () => {
-      it("resolves the stored credential, mapping has_password to hasPassword", async () => {
+      check("resolves the stored credential, mapping has_password to hasPassword", async () => {
         ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
         await expect(ctx.subject.load("host")).resolves.toEqual({
           username: "alice",
@@ -62,43 +64,43 @@ export function describeCredentialStoreSuite(
         });
       });
 
-      it("resolves null when nothing is stored (a malformed/empty result)", async () => {
+      check("resolves null when nothing is stored (a malformed/empty result)", async () => {
         ctx.native.succeedWith(null);
         await expect(ctx.subject.load("host")).resolves.toBeNull();
       });
 
       // Pinned as-is (B7-3): a store-read failure is a real, unreadable
       // store — rethrown, not collapsed into "nothing stored".
-      it("rejects when the native store errors", async () => {
+      check("rejects when the native store errors", async () => {
         ctx.native.failWith(new Error("keychain locked"));
         await expect(ctx.subject.load("host")).rejects.toThrow();
       });
 
-      it("resolves null when the native host is unavailable", async () => {
+      check("resolves null when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.load("host")).resolves.toBeNull();
       });
     });
 
     describe("delete", () => {
-      it("resolves true when the native store accepts the deletion", async () => {
+      check("resolves true when the native store accepts the deletion", async () => {
         ctx.native.succeedWith(undefined);
         await expect(ctx.subject.delete("host")).resolves.toBe(true);
       });
 
-      it("resolves false, not a rejection, when the native store errors", async () => {
+      check("resolves false, not a rejection, when the native store errors", async () => {
         ctx.native.failWith(new Error("keychain locked"));
         await expect(ctx.subject.delete("host")).resolves.toBe(false);
       });
 
-      it("resolves false when the native host is unavailable", async () => {
+      check("resolves false when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.delete("host")).resolves.toBe(false);
       });
     });
 
     describe("loginWithSavedPassword", () => {
-      it("resolves the relayed status and body on success", async () => {
+      check("resolves the relayed status and body on success", async () => {
         ctx.native.succeedWith({ status: 200, body: '{"token":"tok"}' });
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toEqual({
           status: 200,
@@ -106,17 +108,17 @@ export function describeCredentialStoreSuite(
         });
       });
 
-      it("resolves null when the result has an unexpected shape", async () => {
+      check("resolves null when the result has an unexpected shape", async () => {
         ctx.native.succeedWith({ nonsense: true });
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
       });
 
-      it("rejects when the native command errors", async () => {
+      check("rejects when the native command errors", async () => {
         ctx.native.failWith(new Error("no saved password"));
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).rejects.toThrow();
       });
 
-      it("resolves null when the native host is unavailable", async () => {
+      check("resolves null when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
       });

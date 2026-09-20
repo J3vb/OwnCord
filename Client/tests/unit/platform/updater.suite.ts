@@ -1,7 +1,7 @@
 // Behaviour suite for the `AppUpdater` half of the `updater.ts` contract
 // (`src/platform/contracts/updater.ts`). `Autostart` is no-seam — its suite
 // lands with the seam in B7-5.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { AppUpdater, UpdateInstallState } from "../../../src/platform/contracts/updater";
 
 export interface NativeControl {
@@ -21,7 +21,11 @@ export interface AppUpdaterSubject {
   readonly native: NativeControl;
 }
 
-export function describeAppUpdaterSuite(makeSubject: () => Promise<AppUpdaterSubject>): void {
+export function describeAppUpdaterSuite(
+  makeSubject: () => Promise<AppUpdaterSubject>,
+  options?: { expectEveryTestToFail?: boolean },
+): void {
+  const check = options?.expectEveryTestToFail ? test.fails : test;
   describe("AppUpdater", () => {
     let ctx: AppUpdaterSubject;
     beforeEach(async () => {
@@ -29,7 +33,7 @@ export function describeAppUpdaterSuite(makeSubject: () => Promise<AppUpdaterSub
     });
 
     describe("checkForUpdate", () => {
-      it("resolves the native check result as-is", async () => {
+      check("resolves the native check result as-is", async () => {
         ctx.native.checkSucceedsWith({
           available: true,
           version: "1.2.1",
@@ -47,7 +51,7 @@ export function describeAppUpdaterSuite(makeSubject: () => Promise<AppUpdaterSub
       // Pinned as-is (B7-3): a failed check resolves the "nothing available"
       // default rather than rejecting — the caller cannot distinguish "no
       // update" from "couldn't check".
-      it("resolves the no-update default, not a rejection, when the check fails", async () => {
+      check("resolves the no-update default, not a rejection, when the check fails", async () => {
         ctx.native.checkFailsWith(new Error("network error"));
         await expect(ctx.subject.checkForUpdate("https://chat.example")).resolves.toEqual({
           available: false,
@@ -59,7 +63,7 @@ export function describeAppUpdaterSuite(makeSubject: () => Promise<AppUpdaterSub
     });
 
     describe("downloadAndInstallUpdate / subscribeToInstall", () => {
-      it("publishes a restarting state and resolves on success", async () => {
+      check("publishes a restarting state and resolves on success", async () => {
         ctx.native.installSucceeds();
         const states: UpdateInstallState[] = [];
         ctx.subject.subscribeToInstall((s) => states.push(s));
@@ -67,7 +71,7 @@ export function describeAppUpdaterSuite(makeSubject: () => Promise<AppUpdaterSub
         expect(states.at(-1)).toEqual({ status: "restarting" });
       });
 
-      it("publishes a failed state and rejects when the install fails", async () => {
+      check("publishes a failed state and rejects when the install fails", async () => {
         ctx.native.installFailsWith(new Error("download failed"));
         const states: UpdateInstallState[] = [];
         ctx.subject.subscribeToInstall((s) => states.push(s));

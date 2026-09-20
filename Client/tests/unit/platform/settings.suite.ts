@@ -2,7 +2,7 @@
 // (`src/platform/contracts/settings.ts`). Run now against the legacy binding
 // (`settings.legacy.test.ts`, today's `lib/profiles.ts` `createTauriBackend()`)
 // and again in B7-4 against `platform/desktop`.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { SettingsSnapshot, SettingsStore } from "../../../src/platform/contracts/settings";
 
 export interface NativeControl {
@@ -32,7 +32,11 @@ const snapshot: SettingsSnapshot = {
   ],
 };
 
-export function describeSettingsStoreSuite(makeSubject: () => Promise<SettingsStoreSubject>): void {
+export function describeSettingsStoreSuite(
+  makeSubject: () => Promise<SettingsStoreSubject>,
+  options?: { expectEveryTestToFail?: boolean },
+): void {
+  const check = options?.expectEveryTestToFail ? test.fails : test;
   describe("SettingsStore", () => {
     let ctx: SettingsStoreSubject;
     beforeEach(async () => {
@@ -40,41 +44,41 @@ export function describeSettingsStoreSuite(makeSubject: () => Promise<SettingsSt
     });
 
     describe("load", () => {
-      it("resolves the stored snapshot when the native store holds one", async () => {
+      check("resolves the stored snapshot when the native store holds one", async () => {
         ctx.native.succeedWith({ "owncord:profiles": snapshot });
         await expect(ctx.subject.load()).resolves.toEqual(snapshot);
       });
 
-      it("resolves null when nothing is stored under the settings key", async () => {
+      check("resolves null when nothing is stored under the settings key", async () => {
         ctx.native.succeedWith({});
         await expect(ctx.subject.load()).resolves.toBeNull();
       });
 
-      it("rejects when the native store errors", async () => {
+      check("rejects when the native store errors", async () => {
         ctx.native.failWith(new Error("read failed"));
         await expect(ctx.subject.load()).rejects.toThrow();
       });
 
       // Pinned as-is (B7-3): this seam has no not-native guard today —
       // calling it with no native host rejects, it does not fail open.
-      it("rejects when the native host is unavailable", async () => {
+      check("rejects when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.load()).rejects.toThrow();
       });
     });
 
     describe("save", () => {
-      it("resolves when the native store accepts the write", async () => {
+      check("resolves when the native store accepts the write", async () => {
         ctx.native.succeedWith(undefined);
         await expect(ctx.subject.save(snapshot)).resolves.toBeUndefined();
       });
 
-      it("rejects when the native store errors", async () => {
+      check("rejects when the native store errors", async () => {
         ctx.native.failWith(new Error("write failed"));
         await expect(ctx.subject.save(snapshot)).rejects.toThrow();
       });
 
-      it("rejects when the native host is unavailable", async () => {
+      check("rejects when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.save(snapshot)).rejects.toThrow();
       });
