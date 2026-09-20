@@ -15,11 +15,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   artifact belongs in `tests/contract`, not `tests/unit` — `src-tauri/` is
   part of this component, so reading it is an ordinary unit test. The rule
   is in [docs/contributing.md](../docs/contributing.md#testing)
-- `src/platform/` does **not** exist yet. Where the desktop/browser seam will
-  go, and which 21 files hold the native imports that must move behind it, is
-  recorded in
-  [docs/architecture/platform-contracts.md](../docs/architecture/platform-contracts.md).
-  Building it is B7 — do not start it as a side effect of another change.
+- `src/platform/contracts/` holds the type-only desktop/browser seam
+  interfaces (B7-3), and `src/platform/desktop/` is an empty, typed
+  registry B7-4/B7-5 fill in one capability at a time. **No call site has
+  moved yet** — every native import still lives exactly where
+  [docs/architecture/platform-contracts.md](../docs/architecture/platform-contracts.md)
+  says it does, and feature code must not import from `platform/desktop`
+  until its first capability lands there.
 
 ## Gotchas
 
