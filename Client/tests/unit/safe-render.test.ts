@@ -1,9 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   safeMount,
   installGlobalErrorHandlers,
   type MountableComponent,
 } from "../../src/lib/safe-render";
+import { setLogLevel } from "../../src/lib/logger";
+
+// The unhandledrejection test below asserts on the logger's debug line, so
+// this file raises the level the global setup lowered (C-04) and puts it back
+// afterwards.
+beforeEach(() => {
+  setLogLevel("debug");
+});
+afterEach(() => {
+  setLogLevel("warn");
+});
 
 describe("safeMount", () => {
   beforeEach(() => {

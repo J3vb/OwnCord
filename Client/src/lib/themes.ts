@@ -8,10 +8,10 @@
 const STORAGE_KEY_ACTIVE = "owncord:theme:active";
 const STORAGE_KEY_LEGACY = "owncord:settings:theme";
 
-const BUILT_IN_THEMES: readonly string[] = ["dark", "neon-glow", "midnight", "light"];
+const BUILT_IN_THEMES: ReadonlySet<string> = new Set(["dark", "neon-glow", "midnight", "light"]);
 
 function isKnownThemeName(name: string): boolean {
-  return BUILT_IN_THEMES.includes(name);
+  return BUILT_IN_THEMES.has(name);
 }
 
 /**
@@ -37,7 +37,7 @@ export function applyThemeByName(name: string): void {
     }
   }
 
-  if (BUILT_IN_THEMES.includes(name)) {
+  if (BUILT_IN_THEMES.has(name)) {
     document.body.classList.add(`theme-${name}`);
   }
 

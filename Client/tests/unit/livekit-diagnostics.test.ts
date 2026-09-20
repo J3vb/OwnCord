@@ -22,6 +22,7 @@ import {
 import type { SessionDebugDeps } from "@lib/livekitDiagnostics";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
+import { expectConsole } from "../helpers/console";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,8 @@ describe("attachDiagnosticListeners", () => {
       handlers.get(RoomEvent.ConnectionQualityChanged)?.("excellent", { isLocal: true });
       handlers.get(RoomEvent.ConnectionQualityChanged)?.("poor", { isLocal: false });
     }).not.toThrow();
+    expectConsole("warn", /\[livekitDiagnostics\] LiveKit room reconnecting/);
+    expectConsole("error", /\[livekitDiagnostics\] LiveKit media device error/);
   });
 });
 

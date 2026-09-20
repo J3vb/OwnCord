@@ -547,7 +547,7 @@ export class LiveKitSession {
       requestTokenRefresh: () => this.requestTokenRefresh(),
       leaveVoice: () => this.leaveVoice(true),
       onError: (msg) => this.onErrorCallback?.(msg),
-      isStateConnected: (channelId, room) => this.isStateConnected(channelId, room),
+      isStateConnected: (id, room) => this.isStateConnected(id, room),
       disconnectSupersededLocalRoom: (room) => this.disconnectSupersededLocalRoom(room),
       setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
       reapplyMuteGain: () => this.reapplyMuteGain(),

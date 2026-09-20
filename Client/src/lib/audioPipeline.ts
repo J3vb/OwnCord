@@ -430,6 +430,7 @@ export class AudioPipeline {
       // before it does. Leaving onmessage live would let that late message
       // re-gate the mic with no VAD left running to ever un-gate it again
       // (OC-0231).
+      // oxlint-disable-next-line prefer-add-event-listener -- the handler above is registered via onmessage, so removeEventListener cannot detach it
       this.vadWorkletNode.port.onmessage = null;
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       this.vadWorkletNode.port.postMessage({ type: "stop" });

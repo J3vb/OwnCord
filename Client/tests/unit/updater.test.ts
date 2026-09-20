@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { expectConsole } from "../helpers/console";
 
 const invoke = vi.fn();
 const relaunch = vi.fn();
@@ -31,6 +32,10 @@ beforeEach(async () => {
   vi.resetModules();
   ({ checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } =
     await import("@lib/updater"));
+  // vi.resetModules() hands the updater a *fresh* logger module, whose level
+  // defaults back to "debug" — undoing tests/setup.ts's floor for this file
+  // and printing every updater info line. Re-apply it to that instance.
+  (await import("@lib/logger")).setLogLevel("warn");
   invoke.mockReset().mockResolvedValue(undefined);
   relaunch.mockReset().mockResolvedValue(undefined);
   unlisten.mockReset();
@@ -88,6 +93,7 @@ describe("checkForUpdate", () => {
       body: null,
       manual_upgrade: false,
     });
+    expectConsole("error", /\[updater\] Update check failed/);
   });
 });
 
@@ -293,9 +299,12 @@ describe("downloadAndInstallUpdate", () => {
     const unsubscribeBroken = subscribeToUpdateInstall(() => {
       throw new Error("view destroyed");
     });
+    expectConsole("error", /\[updater\] Update observer failed/);
     const observer = vi.fn();
     const unsubscribe = subscribeToUpdateInstall(observer);
     await expect(downloadAndInstallUpdate("https://s.example")).resolves.toBeUndefined();
+    expectConsole("error", /\[updater\] Update observer failed/);
+    expectConsole("error", /\[updater\] Update observer failed/);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(relaunch).toHaveBeenCalledTimes(1);
     expect(observer).toHaveBeenLastCalledWith({ status: "restarting" });

@@ -1228,6 +1228,7 @@ export class E2EEManager {
         });
         return;
       }
+      // oxlint-disable-next-line no-await-in-loop -- sequential by design: each peer's staleness guard must observe the key state between wraps
       const { encryptedKey, iv } = await wrapRoomKey(
         keypair.privateKey,
         peerKey,
@@ -1240,6 +1241,7 @@ export class E2EEManager {
         });
         return;
       }
+      // oxlint-disable-next-line no-await-in-loop -- sequential by design: offers are rate-paced per peer, not fired in parallel
       const sent = await this.sendOfferPaced(
         peerId,
         encryptedKey,
@@ -1281,6 +1283,7 @@ export class E2EEManager {
    *  replaces the original snapshot while its provider write is pending. */
   private async applyCurrentRoomKey(isCurrent: () => boolean): Promise<void> {
     while (isCurrent() && this._roomKey) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential by design: re-reads the live room key after each provider write, retrying until it lands
       if (await this.applyRoomKey(this._roomKey, isCurrent)) return;
     }
   }

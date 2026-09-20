@@ -13,8 +13,10 @@ How to set up the development environment and contribute to OwnCord.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.26+** (server)
-- **Node.js 24+** (client) — pinned in `Client/.nvmrc`; `engine-strict` makes a
-  wrong major a hard failure, not a warning
+- **Node.js 26.x / npm 11.x** (client) — `Client/.nvmrc` is the source of truth;
+  `engine-strict` makes a different major a hard failure at `npm ci`, not a
+  warning, and `node scripts/check-node-policy.mjs` fails the Repository
+  Hygiene job when any other statement of the version disagrees with it
 - **Rust / Cargo** (Tauri client — not needed for server-only work)
 - **Docker + Compose v2** (optional — alternative to building the server locally)
 
@@ -26,18 +28,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command                       | Description                                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `npm run bootstrap`           | `npm ci` in all three package roots                                                               |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                      |
-| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                   |
-| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                                   |
-| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                     |
-| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render |
-| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                              |
-| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                            |
-| `npm run release:preflight`   | `check` plus a client production build                                                            |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                |
+| Command                       | Description                                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                                                           |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                                                  |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                               |
+| `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                 |
+| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render             |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                                          |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                                        |
+| `npm run release:preflight`   | `check` plus a client production build                                                                        |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                            |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.
@@ -106,16 +108,16 @@ next section, and using them directly is equally correct.
 
 **Type checking, linting & formatting**
 
-| Command                   | Description                           |
-| ------------------------- | ------------------------------------- |
-| `npm run typecheck`       | Full typecheck (all sources)          |
-| `npm run typecheck:build` | Typecheck build config only           |
-| `npm run lint`            | oxlint + ESLint check (src/)          |
-| `npm run lint:fix`        | ESLint auto-fix                       |
-| `npm run lint:ox`         | oxlint only (fast correctness checks) |
-| `npm run format`          | Prettier format (src/ + tests/)       |
-| `npm run format:check`    | Prettier check only (no writes)       |
-| `npm run knip`            | Dead code and unused export detection |
+| Command                   | Description                                                    |
+| ------------------------- | -------------------------------------------------------------- |
+| `npm run typecheck`       | Full typecheck (all sources)                                   |
+| `npm run typecheck:build` | Typecheck build config only                                    |
+| `npm run lint`            | oxlint (warnings denied) + import cycles + ESLint check (src/) |
+| `npm run lint:fix`        | ESLint auto-fix                                                |
+| `npm run lint:ox`         | oxlint only; fails on any warning under `Client/src/`          |
+| `npm run format`          | Prettier format (src/ + tests/)                                |
+| `npm run format:check`    | Prettier check only (no writes)                                |
+| `npm run knip`            | Dead code and unused export detection                          |
 
 ### Git hooks (recommended)
 
@@ -125,10 +127,10 @@ Committed hooks in `.githooks/` catch the most common CI failures locally. Enabl
 npm run hooks:install    # = git config core.hooksPath .githooks
 ```
 
-| Hook         | What it runs                                                                                                                                                      |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
-| `pre-push`   | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...`                     |
+| Hook         | What it runs                                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint (warnings denied under `Client/src/`) + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
+| `pre-push`   | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...`                                                           |
 
 Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` when needed — CI still enforces everything.
 
@@ -265,7 +267,9 @@ no file paths.
 
 ## Testing
 
-The client suite enforces **70% coverage thresholds** in `vitest.config.ts`.
+The client suite enforces a **90% statement** floor plus 70% branch, function
+and line thresholds in `vitest.config.ts`, mirrored by
+`Client/coverage-floor.json`.
 The Go suite has floors too, since B3-6: `Server/coverage-floor.json` names an
 aggregate and a per-package floor for the five core packages (`ws`, `service`,
 `permissions`, `auth`, `db`), and `Server/scripts/coverage-floor.sh` enforces
@@ -291,9 +295,9 @@ test-driven workflow and never lower a threshold to make a change fit.
 | `Server/**/*_test.go`        | `make test`                  | Server Build & Test                  | yes      |
 | `Client/src-tauri`           | `cargo test --lib`           | Rust Unit Tests                      | yes      |
 
-`npm test` — not `npm run test:unit` — is what CI runs and what
-`npm run check:client` invokes, so it is the command that covers
-`tests/contract`.
+`npm test` — not `npm run test:unit` — is the suite that covers
+`tests/contract`. CI runs it as `vitest run --coverage`, and
+`npm run check:client` invokes the same thing through `npm run test:coverage`.
 
 ### What belongs in `tests/contract`
 
@@ -358,8 +362,13 @@ closing audit findings 2026-04-07 #8 / DC-11):
   client dependencies outright.
 - **Version skew is pinned at the toolchain level** too: `Client/.nvmrc`, every
   `actions/setup-node` in CI, and an `engines` block in all three
-  `package.json` files say Node 24 — with `engine-strict=true` in each
-  package's `.npmrc`, so a wrong major fails the install instead of warning.
+  `package.json` files say Node 26 — with `engine-strict=true` in each
+  package's `.npmrc`, so a different major fails the install instead of
+  warning. Three things keep them from drifting apart: `Client/.nvmrc` is the
+  single source of truth, `node scripts/check-node-policy.mjs` fails the
+  Repository Hygiene job when any other statement disagrees with it, and the
+  `node-policy` CI job installs a wrong major on purpose to prove all three
+  roots really do refuse it.
   `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
   and GitHub Actions are SHA-pinned with Dependabot bumping the pins. The one
   deliberate exception is the plugin toolchain: TinyGo and Binaryen are

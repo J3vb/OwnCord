@@ -192,7 +192,7 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
       // server's position space is global, so a category can sit at
       // non-contiguous positions (interleaved with other categories), and
       // renumbering from 0 would stomp another category's slots.
-      const slots = drag.channels.map((c) => c.position).sort((a, b) => a - b);
+      const slots = drag.channels.map((c) => c.position).toSorted((a, b) => a - b);
       // The server does not enforce unique positions (newly created channels
       // commonly all sit at 0), and zipping tied slots onto the new order
       // would drop some or all of the moves. Nudge ties upward so every slot

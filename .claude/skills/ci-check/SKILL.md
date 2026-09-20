@@ -111,7 +111,7 @@ execArgv with its own list). jsdom's own `localStorage` and `Storage` are then
 the only ones present, and `tests/setup.ts` throws if the flag did not reach
 the worker (OC-0415). There is no shim; an earlier in-memory shim was
 removed because it left Node's `Storage` class shadowing jsdom's and twelve
-storage tests asserting nothing. CI runs Node 24 without setting the variable
+storage tests asserting nothing. CI runs Node 26 without setting the variable
 (`ci.yml`), and the full suite was measured passing that way — 192 files / 5257
 tests, identical to the flagged run.
 

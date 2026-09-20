@@ -4,6 +4,7 @@ const { mockFetch, mockProxy } = vi.hoisted(() => ({ mockFetch: vi.fn(), mockPro
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
 vi.mock("../../src/lib/httpProxy", () => ({ ensureHttpProxy: mockProxy }));
 import { createApiClient, type ApiClient } from "../../src/lib/api";
+import { expectConsole } from "../helpers/console";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,7 +43,7 @@ describe("API session ownership", () => {
     async (_label, send) => {
       const api = createApiClient({ host: "same.example", token: "alice" });
       await send(api);
-      const transport = (mockFetch.mock.calls[0]?.[1] as RequestInit).signal!;
+      const transport = (mockFetch.mock.calls[0]![1] as RequestInit).signal!;
       // A real plugin abort listener tries to close the already-removed native
       // response resource here. It must not run after completion or on logout.
       expect(transport.aborted).toBe(false);
@@ -57,8 +58,9 @@ describe("API session ownership", () => {
     api = createApiClient({ host: "same.example", token: "alice" }, unauthorized);
     mockFetch.mockResolvedValue(response({ error: "UNAUTHORIZED", message: "Expired" }, 401));
     await expect(api.getMe()).rejects.toMatchObject({ status: 401 });
+    expectConsole("warn", /\[api\] API error/);
     expect(unauthorized).toHaveBeenCalledOnce();
-    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(false);
   });
 
   it.each(["request", "health"])(
@@ -72,7 +74,7 @@ describe("API session ownership", () => {
       await expect(kind === "health" ? api.getHealth() : api.getMe()).rejects.toThrow(
         "Invalid JSON",
       );
-      expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+      expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(false);
     },
   );
 
@@ -80,7 +82,7 @@ describe("API session ownership", () => {
     const api = createApiClient({ host: "same.example" });
     mockFetch.mockResolvedValue(response(undefined, 204));
     await api.logout();
-    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(false);
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(false);
   });
 
   it("cancels an unread unsuccessful health response body", async () => {
@@ -89,7 +91,7 @@ describe("API session ownership", () => {
     mockFetch.mockResolvedValue({ ...response(undefined, 503), json });
     await expect(api.getHealth()).rejects.toMatchObject({ status: 503 });
     expect(json).not.toHaveBeenCalled();
-    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true);
   });
 
   it.each(["request", "health"])(
@@ -109,7 +111,7 @@ describe("API session ownership", () => {
       const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
       await started.promise;
       api.endSession();
-      expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+      expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true);
       await rejected;
       body.resolve({ old: true });
     },
@@ -148,7 +150,7 @@ describe("API session ownership", () => {
       const result = send(api);
       const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
       await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
-      const signal = (mockFetch.mock.calls[0]?.[1] as RequestInit).signal!;
+      const signal = (mockFetch.mock.calls[0]![1] as RequestInit).signal!;
       api.setConfig({ token: "bob" });
       expect(signal.aborted).toBe(true);
       await rejected;
@@ -219,7 +221,7 @@ describe("API session ownership", () => {
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
     caller.abort();
     await rejected;
-    expect((mockFetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true);
     expect(api.getSession().isCurrent()).toBe(true);
   });
 

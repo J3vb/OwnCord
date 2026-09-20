@@ -23,6 +23,9 @@
 //
 // What is left here is the assertion that the flag actually arrived. It fails
 // loudly instead of letting the suite go quietly vacuous again.
+import { setLogLevel } from "../src/lib/logger";
+import { installConsoleGuard } from "./helpers/console";
+
 if (typeof globalThis.localStorage === "undefined") {
   throw new Error(
     "tests/setup.ts: localStorage is missing. Node's Web Storage is shadowing " +
@@ -46,3 +49,16 @@ if (Object.getPrototypeOf(globalThis.localStorage) !== Storage.prototype) {
 if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
+
+// The app logger defaults to "debug" and writes every line to the console, so
+// the suite used to print hundreds of debug/info blocks a green run nobody
+// reads (C-04). Raising the floor here is what makes "a green run prints
+// nothing unexplained" checkable — a test that genuinely asserts on a
+// debug/info log entry (buffer entry, listener call) raises the level back for
+// itself and restores "warn" afterwards.
+setLogLevel("warn");
+
+// ...and that nothing else prints either: console.warn/console.error are
+// captured per test, and a test that provokes one must claim it with
+// expectConsole (tests/helpers/console.ts) or fail.
+installConsoleGuard();

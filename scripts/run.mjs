@@ -137,7 +137,8 @@ const CHECK_CLIENT = [
   step("node", ["scripts/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
   step("npm", ["run", "lint"], "Client"),
-  step("npm", ["test"], "Client"),
+  step("npm", ["run", "knip"], "Client"),
+  step("npm", ["run", "test:coverage"], "Client"),
 ];
 
 // Matches ci.yml's Rust Unit Tests job exactly: --lib for tests, --all-targets
@@ -208,6 +209,14 @@ const CHECK_HYGIENE = [
   // job instead of a new required check.
   step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
   step("node", ["scripts/check-release-environment.mjs"], "."),
+  // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
+  // not narrow it: `>=24` admitted the owner's Node 26 while CI ran 24 and
+  // nothing failed. `Client/.nvmrc` is the source of truth and this asserts
+  // every other statement of the version agrees with it. Same rationale as the
+  // two checks above: Node checking Node, run here so it rides the pinned
+  // Repository Hygiene job instead of a new required check.
+  step("node", ["--test", "scripts/check-node-policy.test.mjs"], "."),
+  step("node", ["scripts/check-node-policy.mjs"], "."),
 ];
 
 // Every check, in the order `check` has always run them. release:preflight

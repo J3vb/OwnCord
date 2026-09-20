@@ -188,6 +188,32 @@ export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
 // Actions
 // -----------------------------------------------------------------------------
 
+const unescapeOnce = (input: string): string =>
+  input
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+// Repeated rather than a single pass: a lone `replace` can in principle
+// splice a fresh `<...>` out of the text either side of what it removed.
+// echoNormalize's own fixpoint loop already absorbed that, so this is
+// output-identical -- it just puts the repetition where a reader (and
+// CodeQL's js/incomplete-multi-character-sanitization) can see it.
+const stripTags = (input: string): string => {
+  let out = input;
+  while (out.includes("<")) {
+    const next = out.replace(/<[^>]*>/g, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+};
+
 /**
  * Approximates one round of the server's `sanitizePass`
  * (Server/service/message.go): unescape HTML entities, strip tags (bluemonday's
@@ -199,31 +225,6 @@ export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
  * decide whether a replayed server echo is *our* sanitized send.
  */
 function sanitizePassApprox(s: string): string {
-  const unescapeOnce = (input: string): string =>
-    input
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-      .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/g, "'")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&");
-  // Repeated rather than a single pass: a lone `replace` can in principle
-  // splice a fresh `<...>` out of the text either side of what it removed.
-  // echoNormalize's own fixpoint loop already absorbed that, so this is
-  // output-identical -- it just puts the repetition where a reader (and
-  // CodeQL's js/incomplete-multi-character-sanitization) can see it.
-  const stripTags = (input: string): string => {
-    let out = input;
-    while (out.includes("<")) {
-      const next = out.replace(/<[^>]*>/g, "");
-      if (next === out) break;
-      out = next;
-    }
-    return out;
-  };
   return unescapeOnce(stripTags(unescapeOnce(s)));
 }
 

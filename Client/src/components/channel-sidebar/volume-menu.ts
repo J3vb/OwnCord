@@ -38,7 +38,7 @@ export function showUserVolumeMenu(
 ): void {
   // Remove any existing context menus and abort their dismiss controllers
   document.querySelectorAll(".user-vol-menu").forEach((el) => {
-    const prev = (el as HTMLElement & { _dismissAc?: AbortController })._dismissAc;
+    const prev = (el as HTMLElement & { dismissAc?: AbortController }).dismissAc;
     prev?.abort();
     el.remove();
   });
@@ -120,7 +120,7 @@ export function showUserVolumeMenu(
 
   // Close on click outside — store controller on element for cleanup on re-open
   const dismissAc = new AbortController();
-  (menu as HTMLElement & { _dismissAc?: AbortController })._dismissAc = dismissAc;
+  (menu as HTMLElement & { dismissAc?: AbortController }).dismissAc = dismissAc;
   setTimeout(() => {
     if (dismissAc.signal.aborted) return;
     document.addEventListener(

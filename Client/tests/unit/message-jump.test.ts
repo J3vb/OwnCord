@@ -51,6 +51,7 @@ import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
+import { expectConsole } from "../helpers/console";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -263,6 +264,7 @@ describe("createMessageJumper", () => {
     });
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
+    expectConsole("error", /\[message-jump\] Failed to fetch the message window/);
 
     expect(toastCalls.at(-1)?.type).toBe("error");
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
@@ -333,6 +335,7 @@ describe("createMessageJumper", () => {
     // B's response lands first (real network reordering).
     resolveB({ messages: [response(20)], has_more_before: true, has_more_after: true });
     await jumpB;
+    expectConsole("warn", /\[message-jump\] Around-window loaded but the row did not render/);
     expect(
       messagesStore
         .getState()

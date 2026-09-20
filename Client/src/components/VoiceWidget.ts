@@ -67,6 +67,12 @@ function formatElapsed(ms: number): string {
   return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+function swapIcon(btn: HTMLButtonElement, name: IconName): void {
+  const existing = btn.querySelector("svg");
+  if (existing) existing.remove();
+  btn.appendChild(createIcon(name, 18));
+}
+
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
@@ -104,12 +110,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let totalDownEl: HTMLSpanElement | null = null;
 
   const unsubs: Array<() => void> = [];
-
-  function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-    const existing = btn.querySelector("svg");
-    if (existing) existing.remove();
-    btn.appendChild(createIcon(name, 18));
-  }
 
   function updateSignalIcon(stats: ConnectionStats): void {
     if (signalWrap === null || pingLabel === null) return;
