@@ -132,7 +132,6 @@ export function normalizeHostForCertCompare(host: string): string {
 // module keeps everything above that seam: the connection state machine, the
 // reconnect policy, the heartbeat, frame parsing and the send-failure codes.
 export { bracketBareIPv6Host };
-export type { DesktopSocketTransport };
 
 export function createWsClient() {
   // One transport per client: the certificate listener it registers is
