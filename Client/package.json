@@ -45,7 +45,7 @@
     "@stryker-mutator/typescript-checker": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@tauri-apps/cli": "^2",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.6.2",
     "@vitest/browser-playwright": "^4.1.11",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.1",
