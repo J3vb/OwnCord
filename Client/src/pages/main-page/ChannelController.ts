@@ -108,7 +108,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     chatHeaderRefs,
   } = opts;
 
-  let _currentChannelId: number | null = null;
+  let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
@@ -218,16 +218,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // the next visit renders its pre-teardown snapshot as current (OC-0247).
     // Idempotent (no-ops once the flag is already gone), so this is safe
     // alongside mountChannel's existing invalidate of previousChannelId.
-    if (_currentChannelId !== null) invalidateChannelMessageWindow(_currentChannelId);
-    _currentChannelId = null;
+    if (currentChannelId !== null) invalidateChannelMessageWindow(currentChannelId);
+    currentChannelId = null;
   }
 
   function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
-    if (_currentChannelId === channelId) return;
+    if (currentChannelId === channelId) return;
 
-    const previousChannelId = _currentChannelId;
+    const previousChannelId = currentChannelId;
     destroyChannel();
-    _currentChannelId = channelId;
+    currentChannelId = channelId;
     // channel_focus (sent below) is the only thing that advances the *new*
     // channel's server-side read state; leaving one never does. Without this,
     // messages read while focused here restate as unread/mention badges on
@@ -879,7 +879,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     destroyChannel,
     openFilePicker: () => messageInput?.openFilePicker(),
     get currentChannelId() {
-      return _currentChannelId;
+      return currentChannelId;
     },
     get messageList() {
       return messageList;
