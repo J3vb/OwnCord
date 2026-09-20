@@ -119,6 +119,9 @@ export default tseslint.config(
   {
     files: ["src/**/*.ts"],
     ignores: [
+      // The seam itself: the desktop implementations are the only place a
+      // static native import belongs.
+      "src/platform/desktop/**",
       "src/components/message-list/attachments.ts",
       "src/components/message-list/embeds.ts",
       "src/components/message-list/media.ts",

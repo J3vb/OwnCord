@@ -1,45 +1,18 @@
 /**
- * Credential storage — wraps Tauri IPC commands for Windows Credential Manager.
- * Falls back to no-op in non-Tauri environments (tests, browser).
+ * Credential storage — the app-side half of the OS credential manager.
+ * The native calls live behind `platform/desktop` (B7-4); these exports stay
+ * where their callers already import them.
  */
 
-import { createLogger } from "./logger";
 import { ApiClientError } from "./api";
+import { desktop } from "../platform/desktop";
+import type { SavedCredential, SavedLoginResponse } from "../platform/contracts/credentials";
 import type { AuthResponse } from "./types";
 import { authStore } from "@stores/auth.store";
 
-const log = createLogger("credentials");
+export type { SavedCredential, SavedLoginResponse };
 
-export interface SavedCredential {
-  readonly username: string;
-  readonly token: string;
-  /** Whether a password is saved for this host. The plaintext itself never
-   *  crosses IPC — `loginWithSavedPassword` uses it inside the Rust backend. */
-  readonly hasPassword: boolean;
-}
-
-/** Raw relay of the server's /auth/login response from the Rust backend. */
-export interface SavedLoginResponse {
-  readonly status: number;
-  readonly body: string;
-}
-
-/** Dynamically import Tauri invoke to avoid errors in test/browser. */
-async function getInvoke(): Promise<
-  ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
-> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Save a credential to Windows Credential Manager.
- * Target: OwnCord/{host}
- */
+/** Save a credential to the OS credential store for `host`. */
 export async function saveCredential(
   host: string,
   username: string,
@@ -47,27 +20,7 @@ export async function saveCredential(
   password?: string,
   clearPassword = false,
 ): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    log.warn("Tauri not available — credential not saved");
-    return false;
-  }
-  try {
-    // Omitting `password` PRESERVES whatever is stored; only `clearPassword`
-    // erases it. Before that distinction existed, every re-save had to carry
-    // the plaintext back through IPC just to avoid wiping it.
-    await invoke("save_credential", {
-      host,
-      username,
-      token,
-      password: password ?? null,
-      clearPassword,
-    });
-    return true;
-  } catch (err) {
-    log.error("Failed to save credential", { host, error: String(err) });
-    return false;
-  }
+  return desktop.credentials!.save(host, username, token, password, clearPassword);
 }
 
 /**
@@ -133,90 +86,20 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
   return body as unknown as AuthResponse;
 }
 
-/**
- * Log in to `host` using the password saved in the OS credential store.
- *
- * The plaintext never reaches JavaScript: the Rust backend reads it, performs
- * the login through the same pinned loopback proxy a normal `fetch` would use,
- * and returns the server's raw status and body. Parse the body exactly as an
- * `api.login` response — the 2FA union and every error shape are relayed
- * untouched, so there is no second copy of the login contract.
- *
- * Returns null when Tauri is unavailable or the command resolves with an
- * unexpected shape. Any other failure — no password saved, a connect
- * failure, a timeout, a malformed response, etc. — rejects with an `Error`
- * carrying the backend's reason, so the caller can show it.
- */
+/** Log in to `host` using the password saved in the OS credential store. */
 export async function loginWithSavedPassword(
   host: string,
   username: string,
 ): Promise<SavedLoginResponse | null> {
-  const invoke = await getInvoke();
-  if (!invoke) return null;
-  try {
-    const result = await invoke("login_with_saved_password", { host, username });
-    if (result && typeof result === "object") {
-      const res = result as Record<string, unknown>;
-      if (typeof res.status === "number" && typeof res.body === "string") {
-        return { status: res.status, body: res.body };
-      }
-    }
-    log.error("login_with_saved_password returned an unexpected shape", { host });
-    return null;
-  } catch (err) {
-    log.error("Saved-password login failed", { host, error: String(err) });
-    throw err instanceof Error ? err : new Error(String(err));
-  }
+  return desktop.credentials!.loginWithSavedPassword(host, username);
 }
 
-/**
- * Load a credential from Windows Credential Manager.
- *
- * Returns null when nothing is stored for `host` or Tauri is unavailable.
- * Any other failure — the store can't be read, the OS keychain is locked,
- * etc. — rejects with an `Error` carrying the backend's reason instead of
- * being swallowed into `null`: the Rust side distinguishes "no credential"
- * from "couldn't read the credential store", and collapsing that here would
- * let callers (e.g. the remember-password opt-out) silently treat a read
- * failure as "nothing to delete".
- */
+/** Load the credential stored for `host`, or null when there is none. */
 export async function loadCredential(host: string): Promise<SavedCredential | null> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return null;
-  }
-  try {
-    const result = await invoke("load_credential", { host });
-    if (result && typeof result === "object") {
-      const cred = result as Record<string, unknown>;
-      if (typeof cred.username === "string" && typeof cred.token === "string") {
-        return {
-          username: cred.username,
-          token: cred.token,
-          hasPassword: cred.has_password === true,
-        };
-      }
-    }
-    return null;
-  } catch (err) {
-    log.error("Failed to load credential", { host, error: String(err) });
-    throw err instanceof Error ? err : new Error(String(err));
-  }
+  return desktop.credentials!.load(host);
 }
 
-/**
- * Delete a credential from Windows Credential Manager.
- */
+/** Delete the credential stored for `host`. */
 export async function deleteCredential(host: string): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return false;
-  }
-  try {
-    await invoke("delete_credential", { host });
-    return true;
-  } catch (err) {
-    log.error("Failed to delete credential", { host, error: String(err) });
-    return false;
-  }
+  return desktop.credentials!.delete(host);
 }

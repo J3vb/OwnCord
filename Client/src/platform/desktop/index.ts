@@ -1,7 +1,9 @@
-// The desktop platform implementation. Empty for now — B7-4 and B7-5 fill in
-// one capability at a time, moving call sites out of `src/lib` as each lands.
-// Feature code must not import from here yet: nothing outside this milestone
-// consumes `desktop/index.ts` until its first capability moves.
+// The desktop platform implementation. B7-4 and B7-5 fill it in one
+// capability at a time, moving call sites out of `src/lib` as each lands, so
+// the registry stays `Partial<Platform>` until B7-5 adds the last member.
+import { credentials } from "./credentials";
 import type { Platform } from "../contracts";
 
-export const desktop: Partial<Platform> = {};
+export const desktop: Partial<Platform> = {
+  credentials,
+};
