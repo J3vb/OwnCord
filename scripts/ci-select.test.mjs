@@ -36,6 +36,38 @@ test("a prose change still leaves the two always-on jobs alone", () => {
   assert.equal(CAPABILITIES.includes("docs"), false);
 });
 
+test("a plan-only change runs no application job", () => {
+  // The shape of most planning PRs here: a plan document under .claude/plans/.
+  // Before this rule it reached the unrecognised-path fallback and selected
+  // every job, which is the opposite of what the selection is for.
+  const sel = picked(
+    ["A\t.claude/plans/b7-7-something.plan.md", "M\tdocs/plans/README.md"].join("\n"),
+  );
+  for (const cap of CAPABILITIES) {
+    assert.equal(sel[cap], false, `${cap} must not run for a plan-only change`);
+  }
+});
+
+test("the agent and skill directories are note-keeping, not build inputs", () => {
+  for (const path of [
+    ".claude/skills/ci-check/SKILL.md",
+    ".claude/rules/gendocs.md",
+    ".codex/config.toml",
+    ".agents/skills/OwnCord/SKILL.md",
+  ]) {
+    const sel = picked(`M\t${path}`);
+    for (const cap of CAPABILITIES) assert.equal(sel[cap], false, `${cap} after ${path}`);
+  }
+});
+
+test(".github and .githooks are still CI inputs, not note-keeping", () => {
+  // The rule above must not swallow the two dot-directories that ARE inputs.
+  for (const path of [".github/workflows/ci.yml", ".githooks/pre-push"]) {
+    const sel = picked(`M\t${path}`);
+    for (const cap of CAPABILITIES) assert.equal(sel[cap], true, `${cap} after ${path}`);
+  }
+});
+
 test("an added server file runs the server job", () => {
   assert.equal(runs("A\tServer/service/new_thing.go", "server"), true);
 });

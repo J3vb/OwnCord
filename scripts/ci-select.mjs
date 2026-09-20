@@ -105,6 +105,17 @@ const ROOT_BUILD_FILES = new Set([
   ".gitattributes",
 ]);
 
+/**
+ * Directories holding this repository's own tooling and note-keeping: agent
+ * configuration, skills, and the planning documents under `.claude/plans/`.
+ * Nothing is built or tested from them — the only references from tracked code
+ * are three comments and a string in a failure message — so a change confined
+ * to them selects no capability. Without this, a plan-only PR (a common shape
+ * here) reached the "never been taught about" fallback and selected every job,
+ * which is the exact case the selection exists to make cheap.
+ */
+const TOOLING_PREFIXES = [".claude/", ".codex/", ".agents/", ".remember/"];
+
 /** Everything, for the paths whose blast radius cannot be bounded. */
 const EVERYTHING = [...CAPABILITIES];
 
@@ -202,6 +213,8 @@ export function classify(paths) {
       // humans and by the always-on documentation jobs.
       continue;
     }
+
+    if (TOOLING_PREFIXES.some((p) => path.startsWith(p))) continue;
 
     // Documentation at the repository root, and any path this classifier has
     // never been taught about.
