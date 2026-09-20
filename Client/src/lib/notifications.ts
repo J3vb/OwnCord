@@ -169,8 +169,8 @@ function fireDesktopNotification(title: string, body: string): void {
             void new Notification(title, { body });
           }
         }
-      } catch (err) {
-        log.debug("Notifications not available", err);
+      } catch (fallbackErr) {
+        log.debug("Notifications not available", fallbackErr);
       }
     }
   })();
