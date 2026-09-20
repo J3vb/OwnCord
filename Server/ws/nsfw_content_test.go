@@ -57,22 +57,28 @@ func TestNSFW_EveryServerFrameKindIsClassified(t *testing.T) {
 	}
 }
 
-// TestDeliverBroadcast_ContentFilterStillRateLimited is P2-5: a non-nil
-// contentFilter must not bypass the channel's topic rate limiter — it still
-// runs inside deliverBroadcast's default (topic-Publish) branch, ahead of the
-// contentFilter check and the seq allocation, exactly like an unfiltered
-// broadcast. Modelled on TestDeliverBroadcast_ShedFrameLeavesNoSeqGap.
-func TestDeliverBroadcast_ContentFilterStillRateLimited(t *testing.T) {
-	h := newEmitTestHub()
-	send := make(chan []byte, 4096)
-	c := NewTestClient(h, 1, send)
-	h.clients[1] = c
-	h.pubsub.Subscribe(c, ChannelTopic(5))
+// TestDeliverBroadcast_NSFWGateStillRateLimited is P2-5: the B5-7 content gate
+// must not bypass the channel's topic rate limiter — the limiter still runs
+// first inside deliverBroadcast's default (topic-Publish) branch, ahead of the
+// seq allocation, exactly like an unfiltered broadcast. Modelled on
+// TestDeliverBroadcast_ShedFrameLeavesNoSeqGap.
+//
+// The gate used to be a caller-supplied contentFilter, which this test could
+// hand a literal for. It is now a channel id resolved at dispatch time
+// (OC-0449), so the test drives a real labelled channel and a recipient who
+// actually holds an acknowledgement — the only shape that produces a non-nil
+// filter, and therefore the only one that proves anything about it.
+func TestDeliverBroadcast_NSFWGateStillRateLimited(t *testing.T) {
+	f := newNSFWGateFixture(t)
+	send := registerEmitTestClient(f.hub, f.aliceID, f.labelledID)
 
-	allowAll := func(int64) bool { return true }
 	total := topicRateLimitPerSecond + 20
 	for range total {
-		h.deliverBroadcast(broadcastMsg{channelID: 5, msg: []byte(`{"type":"chat_message"}`), contentFilter: allowAll})
+		f.hub.deliverBroadcast(broadcastMsg{
+			channelID:     f.labelledID,
+			msg:           []byte(`{"type":"chat_message"}`),
+			nsfwChannelID: f.labelledID,
+		})
 	}
 
 	delivered := 0
@@ -87,8 +93,8 @@ drain:
 	}
 
 	if delivered != topicRateLimitPerSecond {
-		t.Fatalf("delivered %d content-filtered frames out of %d sent, want exactly %d (the topic limiter) — "+
-			"a contentFilter must not bypass deliverBroadcast's per-channel rate limit",
+		t.Fatalf("delivered %d content-gated frames out of %d sent, want exactly %d (the topic limiter) — "+
+			"the NSFW gate must not bypass deliverBroadcast's per-channel rate limit",
 			delivered, total, topicRateLimitPerSecond)
 	}
 }

@@ -35,19 +35,25 @@ type broadcastMsg struct {
 	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
 	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
 	enqueuedAt time.Time
-	// skipPluginSink withholds this broadcast from the plugin event sink
-	// (B5-7 decision 13): set for a content-bearing frame from a labelled
-	// channel, because a plugin has no acknowledgement — treated as never
-	// acknowledged, regardless of who is in recipients. Every other
-	// broadcast still reaches the sink exactly as before.
-	skipPluginSink bool
-	// contentFilter narrows a channel-scoped topic Publish (recipients nil,
-	// channelID != 0) to the subset of the topic's subscribers it approves
-	// (B5-7): nil means unfiltered, the pre-B5-7 behaviour. Evaluated inside
-	// deliverBroadcast against the LIVE subscriber list, after the topic
-	// limiter and the seq allocation — see channelNSFWFilter for why it must
-	// not be a precomputed recipient list.
-	contentFilter func(userID int64) bool
+	// nsfwChannelID, when non-zero, marks this entry as a content-bearing
+	// channel event (chat_message, chat_edited, reaction_update,
+	// plugin_broadcast — see contentBearingKinds) whose B5-7 gate is resolved
+	// by deliverBroadcast at DISPATCH time rather than by the caller at
+	// enqueue time. It carries the channel identity and nothing else: the
+	// label and the recipient's acknowledgement are read when the event
+	// reaches the head of this queue, so a revocation or a relabelling that
+	// completed while it waited is honoured by the event itself (OC-0449).
+	//
+	// The alternative — resolving at enqueue and handing over a precomputed
+	// allow-list — is what this replaced, and it is unsound in both
+	// directions: a consent revocation landing after the enqueue was invisible
+	// to the queued frame, and a frame enqueued while the channel was still
+	// unlabelled carried no filter at all, so labelling the channel before it
+	// dispatched delivered it to every subscriber and to the plugin sink. A
+	// precomputed list is also stale by construction in a way a live one is
+	// not, because the enqueue happens on a request handler that can be
+	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
+	nsfwChannelID int64
 }
 
 // enqueue hands bm to the single hub dispatch loop, stamping it for the
@@ -361,6 +367,33 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		close(bm.barrier)
 		return
 	}
+
+	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
+	// head of the queue, before seqMu — rather than by whoever enqueued the
+	// frame. See nsfwChannelID for why the enqueue site's precomputed filter
+	// was unsound in both directions.
+	//
+	// Deliberately outside seqMu: this is a database round trip, and seqMu
+	// serializes EVERY broadcast, so holding it across one would tax every
+	// other publisher — including the voice_state fan-out OC-0445 is about —
+	// for a read only this frame needs. The ordering contract that buys is
+	// stated on nsfwDispatchResolveRaceHook: a revocation or relabelling that
+	// has completed by this point is honoured by this event; one landing after
+	// it cannot recall frames already authorized.
+	//
+	// Nothing is resolved for the overwhelmingly common case — a metadata kind
+	// or an ordinary broadcast — because nsfwChannelID is zero there.
+	var (
+		contentFilter func(userID int64) bool
+		labelled      bool
+	)
+	if bm.nsfwChannelID != 0 {
+		if nsfwDispatchResolveRaceHook != nil {
+			nsfwDispatchResolveRaceHook(bm.nsfwChannelID)
+		}
+		contentFilter, labelled = h.channelNSFWFilter(context.Background(), bm.nsfwChannelID)
+	}
+
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
@@ -411,7 +444,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// bm.recipients. No production Subscribe call exists yet (see
 		// EventSink.Dispatch's own doc), so this is a proof against the sink's
 		// decision, not yet an observable guest-delivery effect.
-		if sink := h.pluginSink.Load(); sink != nil && !bm.skipPluginSink {
+		if sink := h.pluginSink.Load(); sink != nil && !labelled {
 			eventType := extractEventType(msg)
 			if eventType == "" {
 				eventType = "broadcast"
@@ -436,12 +469,13 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq
 			// was allocated. contentFilter (B5-7) narrows delivery to the
-			// subset of THIS LIVE subscriber list it approves, resolved here
-			// rather than by the caller so a concurrent reconnect's
-			// registration (also under seqMu) can never land in a gap
-			// between "who was asked" and "who actually got it".
-			if bm.contentFilter != nil {
-				delivered = h.pubsub.PublishFiltered(ChannelTopic(bm.channelID), msg, bm.contentFilter)
+			// subset of THIS LIVE subscriber list it approves, resolved
+			// against the label and acknowledgements read immediately before
+			// seqMu was taken rather than by the caller — so a concurrent
+			// reconnect's registration (also under seqMu) can never land in a
+			// gap between "who was asked" and "who actually got it".
+			if contentFilter != nil {
+				delivered = h.pubsub.PublishFiltered(ChannelTopic(bm.channelID), msg, contentFilter)
 			} else {
 				delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
 			}
