@@ -5,9 +5,9 @@
 
 import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "@lib/logger";
 import { isSafeUrl, isTrustedServerUrl } from "./attachments";
+import { desktop } from "../../platform/desktop";
 
 const log = createLogger("embeds");
 
@@ -181,7 +181,7 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       // URLs, TLS validation should not be bypassed as it enables MITM attacks.
       // Self-signed servers are handled by the Rust TLS proxy for WebSocket;
       // OG preview fetches should respect standard certificate validation.
-      const res = await tauriFetch(url, fetchOpts);
+      const res = await desktop.http!.fetch(url, fetchOpts);
 
       if (!res.ok) {
         if (generation !== embedCacheGeneration) {

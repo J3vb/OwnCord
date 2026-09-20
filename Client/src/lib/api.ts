@@ -1,7 +1,7 @@
 // Step 2.13 — REST API Client
 // Uses Tauri's HTTP plugin fetch to bypass self-signed cert rejection in webview.
 
-import { fetch } from "@tauri-apps/plugin-http";
+import { desktop } from "../platform/desktop";
 import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
 import { isValidHost } from "./hostValidation";
@@ -126,7 +126,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       log.debug(`${label} →`, { method, path });
       let res: Response;
       try {
-        res = await owner.run(fetch(`${origin}${prefix}${path}`, init));
+        res = await owner.run(desktop.http!.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
@@ -650,7 +650,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
         owner.assertCurrent();
-        const res = await owner.run(fetch(`${origin}/api/v1/health`, { signal: transport.signal }));
+        const res = await owner.run(
+          desktop.http!.fetch(`${origin}/api/v1/health`, { signal: transport.signal }),
+        );
         owner.assertCurrent();
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");

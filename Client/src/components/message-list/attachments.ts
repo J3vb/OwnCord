@@ -9,14 +9,12 @@ import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { formatByteSize } from "@lib/connectionStats";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
-import { save } from "@tauri-apps/plugin-dialog";
+import { desktop } from "../../platform/desktop";
 
 const log = createLogger("attachments");
-import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
 import { openImageLightbox } from "./media";
 
@@ -201,7 +199,7 @@ export function isTrustedServerUrl(url: string): boolean {
  * no credentials.
  */
 async function fetchServerFile(url: string): Promise<Response> {
-  if (!isServerUrl(url)) return tauriFetch(url);
+  if (!isServerUrl(url)) return desktop.http!.fetch(url);
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
@@ -209,7 +207,7 @@ async function fetchServerFile(url: string): Promise<Response> {
   if (token !== null) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return tauriFetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
+  return desktop.http!.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
@@ -647,7 +645,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
-    const filePath = await save({ defaultPath: filename });
+    const filePath = await desktop.fileSaver!.pickSaveLocation(filename);
     if (filePath === null) return; // User cancelled
 
     // Fetch file data — server downloads go through the cert-pinned HTTP proxy
@@ -660,7 +658,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     }
 
     const buffer = await res.arrayBuffer();
-    await writeFile(filePath, new Uint8Array(buffer));
+    await desktop.fileSaver!.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
     alert(`Download failed for ${filename} — check logs for details`);

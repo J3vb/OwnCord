@@ -7,14 +7,14 @@
  */
 
 import { createStore, type Store } from "./store";
-import { fetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "./httpProxy";
+import { desktop } from "../platform/desktop";
+import type { SettingsStore, SettingsSnapshot } from "../platform/contracts/settings";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "owncord:profiles";
 const CURRENT_SCHEMA_VERSION = 1;
 const HEALTH_TIMEOUT_MS = 3000;
 const SLOW_THRESHOLD_MS = 1500;
@@ -57,16 +57,6 @@ interface StoredData {
 }
 
 /**
- * Persistence backend abstraction.
- * In production, wraps Tauri `invoke("save_settings", ...)` / `invoke("get_settings")`.
- * In tests, can be replaced with a synchronous Map-backed implementation.
- */
-export interface PersistenceBackend {
-  load(): Promise<StoredData | null>;
-  save(data: StoredData): Promise<void>;
-}
-
-/**
  * Fetch function type matching the Tauri HTTP plugin signature.
  * Allows injection of a mock in tests.
  */
@@ -76,7 +66,12 @@ export type FetchFn = typeof globalThis.fetch;
 // Validation
 // ---------------------------------------------------------------------------
 
-function isValidProfileShape(item: unknown): item is ServerProfile {
+/**
+ * Validates one profile entry of the stored envelope. A pure type guard over a
+ * plain object: it belongs to the app, not behind the desktop seam, where a
+ * different target's settings store could not reach it.
+ */
+export function isValidProfileShape(item: unknown): item is ServerProfile {
   if (typeof item !== "object" || item === null) return false;
   const obj = item as Record<string, unknown>;
   return (
@@ -93,6 +88,21 @@ function isValidProfileShape(item: unknown): item is ServerProfile {
   );
 }
 
+/**
+ * Validates only the persistence envelope shape (schema version + a profiles
+ * array), without requiring every individual profile inside it to be
+ * well-formed. Used to tell "nothing/garbage was stored" apart from "a valid
+ * envelope containing some malformed entries" — the latter should have only the
+ * bad entries dropped, not the whole envelope discarded.
+ */
+function isValidStoredEnvelope(
+  data: unknown,
+): data is { schemaVersion: number; profiles: unknown[] } {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.schemaVersion === "number" && Array.isArray(obj.profiles);
+}
+
 function isValidStoredData(data: unknown): data is StoredData {
   if (typeof data !== "object" || data === null) return false;
   const obj = data as Record<string, unknown>;
@@ -103,32 +113,28 @@ function isValidStoredData(data: unknown): data is StoredData {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Default persistence backend
+// ---------------------------------------------------------------------------
+
+// The persistence-backend shape is the `SettingsStore` contract
+// (`src/platform/contracts/settings.ts`), re-exported under the name this
+// module's callers already import.
+export type { SettingsStore as PersistenceBackend };
+
 /**
- * Validates only the persistence envelope shape (schema version + a
- * profiles array), without requiring every individual profile inside it to
- * be well-formed. Used to tell "nothing/garbage was stored" apart from "a
- * valid envelope containing some malformed entries" — the latter should
- * have only the bad entries dropped, not the whole envelope discarded.
+ * The settings backend. Its native half is `platform/desktop/settings.ts`
+ * (B7-4) — the same `get_settings` / `save_settings` pair — and the validation
+ * of what comes back stays here, with the profile shape it is about and with
+ * the file-import path that applies the same rule. Kept as a factory because
+ * both call sites construct it that way.
  */
-function isValidStoredEnvelope(
-  data: unknown,
-): data is { schemaVersion: number; profiles: unknown[] } {
-  if (typeof data !== "object" || data === null) return false;
-  const obj = data as Record<string, unknown>;
-  return typeof obj.schemaVersion === "number" && Array.isArray(obj.profiles);
-}
-
-// ---------------------------------------------------------------------------
-// Default Tauri persistence backend
-// ---------------------------------------------------------------------------
-
-export function createTauriBackend(): PersistenceBackend {
+export function createTauriBackend(): SettingsStore {
+  const store = desktop.settings!;
   return {
-    async load(): Promise<StoredData | null> {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const settings = await invoke<Record<string, unknown>>("get_settings");
-      const raw = settings[STORAGE_KEY];
-      if (raw === undefined || raw === null) return null;
+    async load(): Promise<SettingsSnapshot | null> {
+      const raw = await store.load();
+      if (raw === null) return null;
       if (!isValidStoredEnvelope(raw)) return null;
       // The envelope itself is well-formed; salvage whichever individual
       // profiles are valid rather than discarding the entire stored list
@@ -139,10 +145,7 @@ export function createTauriBackend(): PersistenceBackend {
         profiles: raw.profiles.filter(isValidProfileShape),
       };
     },
-    async save(data: StoredData): Promise<void> {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("save_settings", { key: STORAGE_KEY, value: data });
-    },
+    save: (data: SettingsSnapshot): Promise<void> => store.save(data),
   };
 }
 
@@ -201,10 +204,7 @@ export interface ProfileManager {
   importProfiles(json: string): { imported: number; skipped: number };
 }
 
-export function createProfileManager(
-  backend: PersistenceBackend,
-  fetchFn?: FetchFn,
-): ProfileManager {
+export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn): ProfileManager {
   const initialState: ProfilesState = {
     profiles: [],
     healthStatuses: new Map(),
@@ -212,8 +212,16 @@ export function createProfileManager(
 
   const store = createStore<ProfilesState>(initialState);
 
-  // Resolve which fetch to use: injected mock, Tauri plugin, or global
-  const doFetch: FetchFn = fetchFn ?? fetch;
+  // Resolve which fetch to use: an injected mock, or the platform's HTTP
+  // client. The contract takes a URL string, so a non-string input is resolved
+  // to its URL rather than stringified — both call sites below build strings,
+  // but a Request that reached here must not become "[object Request]".
+  const doFetch: FetchFn =
+    fetchFn ??
+    ((input, init) => {
+      if (typeof input === "string") return desktop.http!.fetch(input, init);
+      return desktop.http!.fetch(input instanceof URL ? input.href : input.url, init);
+    });
 
   // Resolve the origin for a health check. With an injected fetch (tests) we
   // keep the direct https URL the mock expects; otherwise we route through the

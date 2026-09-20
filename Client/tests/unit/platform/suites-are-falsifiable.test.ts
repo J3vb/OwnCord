@@ -12,14 +12,23 @@
 // legacy binding must type-check against its contract with no cast.
 import type { CredentialStore } from "../../../src/platform/contracts/credentials";
 import type { DeepLinks } from "../../../src/platform/contracts/deepLinks";
+import type { FileSaver } from "../../../src/platform/contracts/fileSave";
+import type { HttpClient } from "../../../src/platform/contracts/http";
 import type { IdentityStore } from "../../../src/platform/contracts/identityStore";
+import type { PendingMessageStore } from "../../../src/platform/contracts/pendingMessages";
 import type { PushToTalk } from "../../../src/platform/contracts/pushToTalk";
+import type { SocketConnection } from "../../../src/platform/contracts/socket";
+import type { SocketTransport } from "../../../src/platform/contracts/socket";
 import type { AppUpdater } from "../../../src/platform/contracts/updater";
 import type { SettingsStore } from "../../../src/platform/contracts/settings";
 import { describeCredentialStoreSuite } from "./credentials.suite";
 import type { NativeControl as CredentialsNativeControl } from "./credentials.suite";
 import { describeDeepLinksSuite } from "./deepLinks.suite";
 import type { NativeControl as DeepLinksNativeControl } from "./deepLinks.suite";
+import { describeFileSaverSuite } from "./fileSave.suite";
+import type { NativeControl as FileSaverNativeControl } from "./fileSave.suite";
+import { describeHttpClientSuite } from "./http.suite";
+import type { NativeControl as HttpClientNativeControl } from "./http.suite";
 import { describeIdentityStoreSuite } from "./identityStore.suite";
 import type { NativeControl as IdentityStoreNativeControl } from "./identityStore.suite";
 import { describeLogFilesSuite } from "./logFiles.suite";
@@ -29,10 +38,14 @@ import type {
   NativeControl as NativeProxiesNativeControl,
   NativeProxiesSeam,
 } from "./nativeProxies.suite";
+import { describePendingMessagesSuite } from "./pendingMessages.suite";
+import type { NativeControl as PendingMessagesNativeControl } from "./pendingMessages.suite";
 import { describePushToTalkSuite } from "./pushToTalk.suite";
 import type { NativeControl as PushToTalkNativeControl } from "./pushToTalk.suite";
 import { describeSettingsStoreSuite } from "./settings.suite";
 import type { NativeControl as SettingsNativeControl } from "./settings.suite";
+import { describeSocketTransportSuite } from "./socket.suite";
+import type { NativeControl as SocketTransportNativeControl } from "./socket.suite";
 import { describeAppUpdaterSuite } from "./updater.suite";
 import type { NativeControl as AppUpdaterNativeControl } from "./updater.suite";
 
@@ -146,6 +159,77 @@ describeDeepLinksSuite(async () => {
   } as unknown as DeepLinks;
   const native: DeepLinksNativeControl = {
     coldStartLinks: () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeHttpClientSuite(async () => {
+  const subject = {
+    fetch: async () => undefined,
+  } as unknown as HttpClient;
+  const native: HttpClientNativeControl = {
+    respondsWith: () => undefined,
+    failsWith: () => undefined,
+    requested: () => [],
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeSocketTransportSuite(async () => {
+  const subject = {
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    send: async () => undefined,
+    acceptCertificate: async () => undefined,
+    onStateChange: () => () => undefined,
+    onMessage: () => () => undefined,
+    onCertFirstUse: () => () => undefined,
+    onCertMismatch: () => () => undefined,
+    startCertListener: async () => undefined,
+  } as unknown as SocketConnection;
+  // A capability that hands the same inert transport to every caller: `create`
+  // must return an independent one, and this must fail that.
+  const transport = { create: () => subject } as unknown as SocketTransport;
+  const native: SocketTransportNativeControl = {
+    opens: async () => undefined,
+    closes: async () => undefined,
+    delivers: async () => undefined,
+    emitsCert: async () => undefined,
+    connectFailsWith: () => undefined,
+    sendFailsWith: () => undefined,
+    unavailable: () => undefined,
+    sent: () => [],
+    accepted: () => [],
+  };
+  return { transport, subject, native };
+}, failEveryTest);
+
+describePendingMessagesSuite(async () => {
+  const subject = {
+    load: async () => undefined,
+    save: async () => undefined,
+    delete: async () => undefined,
+  } as unknown as PendingMessageStore;
+  const native: PendingMessagesNativeControl = {
+    loadReturns: () => undefined,
+    failWith: () => undefined,
+    unavailable: () => undefined,
+    saved: () => [],
+    deleted: () => [],
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeFileSaverSuite(async () => {
+  const subject = {
+    pickSaveLocation: async () => undefined,
+    writeFile: async () => undefined,
+  } as unknown as FileSaver;
+  const native: FileSaverNativeControl = {
+    dialogResolves: () => undefined,
+    dialogFailsWith: () => undefined,
+    written: () => [],
+    writeFailsWith: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);

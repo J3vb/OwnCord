@@ -2,7 +2,10 @@
 
 **Kind:** target-state map. **Status:** design record only — the seam described
 here **does not exist in the code yet**.
-**Measured against:** `dev` @ `a3a0a49b`, 2026-09-18.
+**Measured against:** B7-4 (branch `feat/b7-4-adapter-connectivity-identity`,
+2026-09-20), which moved twelve of the twenty-one native importers behind
+the seam; the three counts above are re-derived from the tree by
+`Client/tests/unit/platform-contracts-counts.test.ts`.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
 OwnCord is a Tauri desktop app whose frontend talks to native APIs directly.
@@ -48,13 +51,13 @@ Measured with `git grep`, not estimated:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 21    |
-| Distinct `invoke` command names called from `Client/src/`  | 29    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 19    |
+| Distinct `invoke` command names called from `Client/src/`  | 28    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 33    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
-| Files under `Client/src/platform/`                         | 0     |
+| Files under `Client/src/platform/`                         | 27    |
 
 The handler count covers both attribute spellings — 21 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
@@ -76,6 +79,11 @@ Note the alias: `Client/src/lib/ws.ts` binds `core.invoke` to a local
 undercounts by four (`ws_connect`, `ws_send`, `ws_disconnect`,
 `accept_cert_fingerprint`). Any future lint rule enforcing the seam must match
 the binding, not the call site.
+
+A second blind spot, found while B7-4 moved these call sites: the recipe cannot
+see a **nested** generic. `invoke<Record<string, unknown>>("get_settings")` in
+`platform/desktop/settings.ts` does not match, so the table's 28 counts
+distinct names _the recipe finds_; the tree calls 29.
 
 One registered Rust handler is never invoked from `Client/src/`:
 `get_cert_fingerprint`, which the native E2E harness calls directly
@@ -152,9 +160,23 @@ behaviour.
 B7-3 implemented this design. `Client/src/platform/contracts/` holds one
 type-only file per row of the map above (17 files, `index.ts` re-exporting
 each and a `Platform` interface with one readonly member per interface), and
-`Client/src/platform/desktop/index.ts` is an empty, typed `Partial<Platform>`
-that B7-4/B7-5 fill in one capability at a time. Nothing moved: every call
-site still lives where the "Files today" column above says it does.
+`Client/src/platform/desktop/index.ts` is a typed `Partial<Platform>` that
+B7-4/B7-5 fill in one capability at a time.
+
+**B7-4 moved eight of them** (`Client/src/lib/`, `Client/src/components/`):
+HTTP, WebSocket, credentials, identity, pending messages, settings,
+logs/files, and file save/pick. Each has an implementation file under
+`platform/desktop/`, is registered on `desktop`, and every call site that used
+to reach a native package directly now reaches it through that implementation —
+the four in this list that had a behaviour suite ran it against the in-place
+seam first, then again against the desktop binding, and the four that had none
+got one written the same way. The rows still on `lib/` are the ones B7-5 owns
+(media, LiveKit's proxies, push-to-talk, notifications, window state, deep
+links, updater, app metadata, dev tools, the shell opener), plus the LiveKit
+half of `NativeProxies`. `Client/eslint.config.js` carries the seam as a rule:
+`src/platform/desktop/**` is the only path under `src/` allowed a static
+`@tauri-apps` import, and the eleven files that still have one are listed there
+by name.
 
 Six rules the reviewer checked, kept here because they hold for every future
 addition to `contracts/`, not just B7-3's:
@@ -181,18 +203,38 @@ addition to `contracts/`, not just B7-3's:
    `{ subject, native }` and never a command name; command/argument
    assertions stay in the modules' existing unit tests.
 
-Eight of the 17 rows already sit behind an exported function today (`seam`
-in the responsibility map this milestone worked from) and got a behaviour
-suite now, run against a legacy binding of today's `src/lib` exports:
-`CredentialStore`, `IdentityStore`, `SettingsStore`, `LogFiles` (the
+**One contract was amended in B7-4:** `contracts/socket.ts`. B7-3 declared
+`SocketTransport` as the transport object itself, which the app cannot use — it
+needs one transport _per client_ (a fresh login, and every test, must not
+inherit the previous connection's listeners or its certificate registration),
+and it needs the dial and the send to settle as promises so a failure can be
+classified. `SocketTransport` is now the capability (`create(): SocketConnection`)
+and `SocketConnection` is the transport it hands back. `Platform.socket`'s
+declared type did not change; its meaning did. The registry member is the
+factory `lib/ws.ts` calls, so nothing is registered that no one uses.
+
+Eight of the 17 rows already sat behind an exported function when B7-3 wrote
+their behaviour suites (`seam` in the responsibility map that milestone worked
+from): `CredentialStore`, `IdentityStore`, `SettingsStore`, `LogFiles` (the
 `logPersistence` half only), `NativeProxies` (`ensureHttpProxy` only),
 `AppUpdater`, `PushToTalk`, `DeepLinks`. Those suites live in
-`Client/tests/unit/platform/*.suite.ts`, run today against
-`*.legacy.test.ts`; B7-4/B7-5 re-run the same suite files against
-`platform/desktop` once each capability's call sites move — a green run
-before and after is the evidence the move changed nothing. The remaining
-rows (and the no-seam half of the two split rows above) are contract-only
-until the milestone that creates their seam writes the suite.
+`Client/tests/unit/platform/*.suite.ts`, run against a binding — today's
+`src/lib` exports, or `platform/desktop` once the capability moves.
+
+Four rows had no seam at all when B7-4 started (`HTTP`, `WebSocket`,
+`PendingMessageStore`, `FileSaver`): nothing exported to bind a legacy suite
+against, so each seam was lifted in place first, verbatim, and the suite was
+written against that — the code the app actually ran — before the move. Where
+the move then made the `lib/` export internal, the legacy binding was deleted
+in the same commit rather than left asserting what the desktop binding already
+covers. `LogFiles.clearAll` is the same story inside a row that already had a
+suite: no exported seam until B7-4, so its coverage lands with the move.
+
+`Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs all twelve
+suites against a null subject; the twelve are the eight rows above plus the
+four B7-4 created. The remaining rows (and the no-seam half of the two split
+rows) are contract-only until the milestone that creates their seam writes the
+suite.
 
 **Suite coverage gaps.** A round-3 adversarial review found suite tests whose
 only assertion a completely inert, do-nothing subject also satisfies —
@@ -210,9 +252,15 @@ green that means nothing:
   also does; the cold-start paths (invite, message permalink) are still
   covered.
 
-`Client/knip.json` ignores `src/platform/**` for now — every file under it is
-exported for a consumer that doesn't exist yet. B7-4 removes that ignore the
-moment the first production call site imports from `platform/desktop`.
+`Client/knip.json` still ignores `src/platform/**`. B7-3's note said B7-4
+would remove that ignore the moment the first production call site imports
+from `platform/desktop`; B7-4 did not, because `Client/knip.json` is outside
+its file table, and it is not needed: knip runs green with the ignore in
+place, and it still reports a genuine dead export from the files that _consume_
+the seam (that is how an unused re-export of the desktop socket transport was
+caught during B7-4). Removing the ignore now means auditing the exports under
+`platform/` that exist for B7-5's consumers; that belongs to B7-5, which adds
+them.
 
 ## Ownership
 

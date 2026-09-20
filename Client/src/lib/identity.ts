@@ -13,6 +13,11 @@
  */
 
 import { createLogger } from "./logger";
+import { desktop } from "../platform/desktop";
+import type {
+  IdentityPinLookup,
+  StoreIdentityPinResult,
+} from "../platform/contracts/identityStore";
 import {
   exportIdentityKeyPair,
   exportPublicKey,
@@ -23,34 +28,16 @@ import { authStore } from "@stores/auth.store";
 
 const log = createLogger("identity");
 
-/** Dynamically import Tauri invoke to avoid errors in test/browser. */
-async function getInvoke(): Promise<
-  ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
-> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke;
-  } catch {
-    return null;
-  }
-}
+// The five primitives below are the `IdentityStore` contract, implemented in
+// `platform/desktop/identity.ts` (B7-4). Their names and signatures stay here
+// because their callers import them from this module.
+export type { IdentityPinLookup, StoreIdentityPinResult };
 
 // ── Identity private key (OS keyring) ──────────────────────────────────────
 
 /** Save the identity private-key blob for a host to the OS keyring. */
 export async function saveIdentityKey(host: string, key: string): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    log.warn("Tauri not available — identity key not saved");
-    return false;
-  }
-  try {
-    await invoke("save_identity_key", { host, key });
-    return true;
-  } catch (err) {
-    log.error("Failed to save identity key", { host, error: String(err) });
-    return false;
-  }
+  return desktop.identity!.saveKey(host, key);
 }
 
 /**
@@ -67,50 +54,15 @@ export async function saveIdentityKey(host: string, key: string): Promise<boolea
  * TOFU pin.
  */
 export async function loadIdentityKey(host: string): Promise<string | null> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return null;
-  }
-  try {
-    const result = await invoke("load_identity_key", { host });
-    return typeof result === "string" ? result : null;
-  } catch (err) {
-    log.error(
-      "Failed to load identity key — propagating so the caller does not treat an unreadable " +
-        'store as "no key stored"',
-      { host, error: String(err) },
-    );
-    throw err;
-  }
+  return desktop.identity!.loadKey(host);
 }
 
 /** Delete the identity private key for a host from the OS keyring. */
 export async function deleteIdentityKey(host: string): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return false;
-  }
-  try {
-    await invoke("delete_identity_key", { host });
-    return true;
-  } catch (err) {
-    log.error("Failed to delete identity key", { host, error: String(err) });
-    return false;
-  }
+  return desktop.identity!.deleteKey(host);
 }
 
 // ── Peer identity pins (identity_pins.json, TOFU) ──────────────────────────
-
-/**
- * Result of a peer identity-pin write. Mirrors IdentityPinLookup's tri-state
- * split: "no-store" (non-Tauri environment, no pin store by design) and
- * "failed" (a real write error, e.g. disk full / unwritable pins file) are
- * both falsy under a plain boolean, but callers that display a "verified"
- * state on the strength of a pin write must be able to tell them apart —
- * collapsing them let a write failure be silently treated the same as the
- * no-store case and still show "verified" with no pin ever persisted.
- */
-export type StoreIdentityPinResult = "stored" | "no-store" | "failed";
 
 /** Pin a peer's identity public key (base64) under `{host}:{userId}`. */
 export async function storeIdentityPin(
@@ -118,31 +70,8 @@ export async function storeIdentityPin(
   userId: string,
   pin: string,
 ): Promise<StoreIdentityPinResult> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    log.warn("Tauri not available — identity pin not stored");
-    return "no-store";
-  }
-  try {
-    await invoke("store_identity_pin", { host, userId, pin });
-    return "stored";
-  } catch (err) {
-    log.error("Failed to store identity pin", { host, userId, error: String(err) });
-    return "failed";
-  }
+  return desktop.identity!.storePin(host, userId, pin);
 }
-
-/**
- * Result of a peer identity-pin lookup. "unpinned" is a trust statement —
- * the store was read and holds nothing for this peer (TOFU first sight) —
- * while "unavailable" means the store could not be read at all, so NO trust
- * statement can be made. Mirrors the Rust TLS-TOFU split (tofu.rs), where
- * `load_stored_fingerprint` returns `Err` distinctly from `Ok(None)`.
- */
-export type IdentityPinLookup =
-  | { readonly status: "pinned"; readonly pin: string }
-  | { readonly status: "unpinned" }
-  | { readonly status: "unavailable" };
 
 /**
  * Look up a peer's pinned identity public key.
@@ -156,21 +85,7 @@ export type IdentityPinLookup =
  * every other wrapper in this module no-oping there.
  */
 export async function getIdentityPin(host: string, userId: string): Promise<IdentityPinLookup> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return { status: "unpinned" };
-  }
-  try {
-    const result = await invoke("get_identity_pin", { host, userId });
-    return typeof result === "string" ? { status: "pinned", pin: result } : { status: "unpinned" };
-  } catch (err) {
-    log.error("Failed to load identity pin — treating as unavailable, not unpinned", {
-      host,
-      userId,
-      error: String(err),
-    });
-    return { status: "unavailable" };
-  }
+  return desktop.identity!.getPin(host, userId);
 }
 
 // ── High-level lifecycle ───────────────────────────────────────────────────

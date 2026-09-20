@@ -2,8 +2,12 @@
  * Native persistence uses the same verified encrypted store as credentials;
  * browser builds keep drafts in memory and never write message text to Web Storage.
  */
-import { isTauri, invoke } from "@tauri-apps/api/core";
 import { addOptimisticMessage, markSendFailed } from "@stores/messages.store";
+import { desktop } from "../platform/desktop";
+import type {
+  PendingMessageOwner,
+  PendingMessageStore,
+} from "../platform/contracts/pendingMessages";
 import type { MessageUser } from "./types";
 import { createLogger } from "./logger";
 
@@ -13,36 +17,18 @@ export const PENDING_MESSAGE_MAX_COUNT = 64;
 export const PENDING_MESSAGE_MAX_BYTES = 128 * 1024;
 const ID_PATTERN = /^\d{13}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export interface PendingMessageOwner {
-  readonly host: string;
-  readonly userId: number;
-}
 export interface PendingTextMessage {
   readonly clientMessageId: string;
   readonly channelId: number;
   readonly content: string;
   readonly createdAt: number;
 }
-export interface PendingMessagePersistence {
-  load(owner: PendingMessageOwner): Promise<string | null>;
-  save(owner: PendingMessageOwner, value: string): Promise<void>;
-  delete(owner: PendingMessageOwner): Promise<void>;
-}
-
-const nativePersistence: PendingMessagePersistence = {
-  async load(owner) {
-    if (!isTauri()) return null;
-    return invoke<string | null>("load_pending_messages", { ...owner });
-  },
-  async save(owner, value) {
-    if (!isTauri()) return;
-    await invoke("save_pending_messages", { ...owner, value });
-  },
-  async delete(owner) {
-    if (!isTauri()) return;
-    await invoke("delete_pending_messages", { ...owner });
-  },
-};
+// The owner and persistence shapes are the `PendingMessageStore` contract
+// (`src/platform/contracts/pendingMessages.ts`), whose desktop implementation
+// is `platform/desktop/pendingMessages.ts` (B7-4). Re-exported under the names
+// this module's callers already import, so the move stayed a pure rename.
+export type { PendingMessageOwner, PendingMessageStore };
+export type { PendingMessageStore as PendingMessagePersistence };
 
 function sameOwner(a: PendingMessageOwner, b: PendingMessageOwner): boolean {
   return a.host === b.host && a.userId === b.userId;
@@ -109,7 +95,7 @@ export class PendingMessageQueue {
 
   constructor(
     readonly owner: PendingMessageOwner,
-    private readonly persistence: PendingMessagePersistence,
+    private readonly persistence: PendingMessageStore,
     private readonly serialize: (operation: () => Promise<void>) => Promise<void>,
     onRecovered: (draft: PendingTextMessage) => void,
     private retryFloor = 0,
@@ -219,7 +205,7 @@ export function activatePendingMessages(
   void activeQueue?.deactivate(false);
   activeQueue = new PendingMessageQueue(
     owner,
-    nativePersistence,
+    desktop.pendingMessages!,
     serializePendingWrites,
     (draft) => {
       addOptimisticMessage({

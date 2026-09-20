@@ -110,25 +110,21 @@ export default tseslint.config(
     },
   },
   // --- Native imports stay behind the desktop seam (B7-1) ---
-  // The 12 files below are the ones that import @tauri-apps statically today;
+  // The files below are the ones that still import @tauri-apps statically;
   // B7-4/B7-5 delete entries as their call sites move behind src/platform/.
-  // The other 9 of the 21 native importers use dynamic `import()`, which this
-  // rule cannot see — tests/unit/platform-contracts-counts.test.ts guards
-  // those, and leaving them out of `ignores` means a new *static* import in
-  // them is still rejected.
+  // The other native importers use dynamic `import()`, which this rule cannot
+  // see — tests/unit/platform-contracts-counts.test.ts guards those, and
+  // leaving them out of `ignores` means a new *static* import in them is still
+  // rejected.
   {
     files: ["src/**/*.ts"],
     ignores: [
-      "src/components/message-list/attachments.ts",
-      "src/components/message-list/embeds.ts",
-      "src/components/message-list/media.ts",
+      // The seam itself: the desktop implementations are the only place a
+      // static native import belongs.
+      "src/platform/desktop/**",
       "src/components/settings/AdvancedTab.ts",
-      "src/lib/api.ts",
       "src/lib/httpProxy.ts",
       "src/lib/livekitUrlResolver.ts",
-      "src/lib/logPersistence.ts",
-      "src/lib/pendingMessages.ts",
-      "src/lib/profiles.ts",
       "src/lib/updater.ts",
       "src/main.ts",
     ],
