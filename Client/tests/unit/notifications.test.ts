@@ -7,6 +7,17 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
+import { setLogLevel } from "../../src/lib/logger";
+
+// Several tests below assert on the logger's debug lines through a
+// console.debug spy, so this file raises the level the global setup lowered
+// (C-04) and puts it back afterwards.
+beforeEach(() => {
+  setLogLevel("debug");
+});
+afterEach(() => {
+  setLogLevel("warn");
+});
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
 const { testPrefs } = vi.hoisted(() => ({
