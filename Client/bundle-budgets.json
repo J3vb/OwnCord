@@ -1,0 +1,24 @@
+{
+  "method": "Node zlib.gzipSync level 9 (owner decision 2026-09-20, amends decision 10's 'gzip -9' by pinning the implementation, not the level or format). Budgets are per-manifest-chunk gzip bytes.",
+  "startup": {
+    "budget": 90000,
+    "note": "Entry's static closure: the index.html entry file, its static imports, and their linked CSS. Not a fixed file list — a new eagerly-imported chunk joins the closure automatically. Measured 87,982 B at dev 4c45d26a (B7-7); headroom ~2 kB."
+  },
+  "chunks": {
+    "MainPage": {
+      "budget": 60000
+    },
+    "livekit": {
+      "budget": 135000,
+      "lazy": true
+    },
+    "livekitSession": {
+      "budget": 800000,
+      "lazy": true
+    }
+  },
+  "forbidEmbeddedWasm": {
+    "marker": "AGFzbQ",
+    "note": "No emitted JS chunk may contain the base64 WASM magic. Generalises decision 10's forbidWasmInStartup: the RNNoise barrel regression (C-07) embeds 1.9 MB of sync WASM in whatever chunk pulls it, which is exactly this marker."
+  }
+}
