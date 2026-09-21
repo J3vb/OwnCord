@@ -167,8 +167,8 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 Peer identity state lives in `voice.store` (per-participant
 `status: verified | unverified | mismatch` + `safetyNumber`), written by
-`lib/livekitE2EE.ts` as announces are verified against the pinned identity
-keys (`lib/identity.ts`).
+`features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
+announces are verified against the pinned identity keys (`lib/identity.ts`).
 
 | State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)       | Interaction                              |
 | ------------ | --------------------------------------------------------------------------- | ---------------------------------------- |

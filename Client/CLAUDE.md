@@ -7,7 +7,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
   `src/pages/`, `src/components/` UI · `src/features/voice/` modules
-  extracted from `lib/livekitSession.ts` (the facade), with colocated
+  extracted from `lib/livekitSession.ts` and `lib/livekitE2EE.ts` (the
+  facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; new or extracted code uses `src/features/`, relative imports
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
@@ -50,8 +51,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   anything down, so cleanup in an aborted path must be scoped to that attempt's
   own room — a global `leaveVoice()` there kills the live session.
 - Voice E2EE is key-holder based with TOFU identity pinning. Anything touching
-  `livekitE2EE.ts` or `identity.ts` must preserve the epoch/keypair staleness
-  guards and must never report an unverified peer as verified.
+  `livekitE2EE.ts`, its `features/voice/e2ee*.ts` modules or `identity.ts`
+  must preserve the epoch/keypair staleness guards and must never report an
+  unverified peer as verified.
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.
