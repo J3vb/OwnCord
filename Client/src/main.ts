@@ -141,8 +141,8 @@ const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 configureConnectionDiagnostics(api, ws);
 onAuthCleared((reason) => {
-  // Server switches also use clearAuth("user"); retain their account-scoped
-  // drafts. Explicit logout and invalid credentials discard pending sends.
+  // Server switches retain their account-scoped drafts. Explicit logout and
+  // invalid credentials discard pending sends.
   try {
     deactivatePendingMessages({
       discard: reason === "user" && sessionStorage.getItem("owncord:quick-switch-target") === null,
@@ -769,6 +769,63 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     let autoLoginCancelled = false;
 
+    // Resume a profile's session from its stored token — startup auto-login
+    // and a quick switch back to a server share this path. No-op when the
+    // host has no stored token.
+    async function resumeStoredSession(profile: {
+      readonly name: string;
+      readonly host: string;
+      readonly autoConnect: boolean;
+      readonly rememberPassword: boolean;
+    }): Promise<void> {
+      const attempt = api.getSession();
+      try {
+        const cred = await loadCredential(profile.host);
+        if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
+        if (cred?.username && cred?.token && !autoLoginCancelled) {
+          // Pass autoConnect so the checkbox still reads correctly if the
+          // user cancels and lands back on the form.
+          connectPage.selectServer(profile.host, cred.username, profile.autoConnect);
+          connectPage.showAutoConnecting(profile.name);
+
+          if (autoLoginCancelled) return;
+
+          // Use stored token directly for reconnection, preserving the
+          // profile's existing rememberPassword (autoConnect profiles always
+          // have it true — see setAutoLogin).
+          //
+          // The credential re-save no longer has to be suppressed here.
+          // save_credential used to treat an absent password as "erase it",
+          // so re-saving without one destroyed the password the user opted
+          // to remember; it now preserves the stored password unless asked
+          // to clear it, so this path can refresh the token normally.
+          api.setConfig({ host: profile.host });
+          ensureProfileExists(
+            profile.host,
+            cred.username,
+            profile.rememberPassword,
+            profile.autoConnect,
+          );
+          wirePostAuth(
+            profile.host,
+            cred.token,
+            cred.username,
+            undefined,
+            profile.rememberPassword,
+          );
+        }
+      } catch (err) {
+        // A superseded attempt (e.g. a manual login started while this
+        // credential read was still pending) must not paint an error over
+        // the login that superseded it.
+        if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
+          const message = err instanceof Error ? err.message : "Auto-login failed";
+          log.warn("Auto-login failed", { host: profile.host, error: message });
+          connectPage.showError(`Auto-login failed: ${message}`);
+        }
+      }
+    }
+
     safeMount(connectPage, appEl!);
 
     // A server refused this client's protocol epoch as too old: offer the
@@ -860,6 +917,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           targetProfile?.username ?? undefined,
           targetProfile?.autoConnect === true,
         );
+        // A quick switch keeps each server's saved sign-in (B7-13), so
+        // switching back resumes with the stored token exactly as auto-login
+        // does. Without a stored credential the prefilled form stays up.
+        if (targetProfile !== undefined) await resumeStoredSession(targetProfile);
         return; // Skip auto-login when switching servers
       }
 
@@ -879,55 +940,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // using the stored token (password is no longer returned from the
       // credential store over IPC for security).
       const autoProfile = profileManager.getAutoConnectProfile();
-      if (autoProfile) {
-        const attempt = api.getSession();
-        try {
-          const cred = await loadCredential(autoProfile.host);
-          if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
-          if (cred?.username && cred?.token && !autoLoginCancelled) {
-            // Pass autoConnect so the checkbox still reads correctly if the
-            // user cancels and lands back on the form.
-            connectPage.selectServer(autoProfile.host, cred.username, autoProfile.autoConnect);
-            connectPage.showAutoConnecting(autoProfile.name);
-
-            if (autoLoginCancelled) return;
-
-            // Use stored token directly for reconnection, preserving the
-            // profile's existing rememberPassword (autoConnect profiles always
-            // have it true — see setAutoLogin).
-            //
-            // The credential re-save no longer has to be suppressed here.
-            // save_credential used to treat an absent password as "erase it",
-            // so re-saving without one destroyed the password the user opted
-            // to remember; it now preserves the stored password unless asked
-            // to clear it, so this path can refresh the token normally.
-            api.setConfig({ host: autoProfile.host });
-            ensureProfileExists(
-              autoProfile.host,
-              cred.username,
-              autoProfile.rememberPassword,
-              autoProfile.autoConnect,
-            );
-            wirePostAuth(
-              autoProfile.host,
-              cred.token,
-              cred.username,
-              undefined,
-              autoProfile.rememberPassword,
-            );
-            return;
-          }
-        } catch (err) {
-          // A superseded attempt (e.g. a manual login started while this
-          // credential read was still pending) must not paint an error over
-          // the login that superseded it.
-          if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-            const message = err instanceof Error ? err.message : "Auto-login failed";
-            log.warn("Auto-login failed", { host: autoProfile.host, error: message });
-            connectPage.showError(`Auto-login failed: ${message}`);
-          }
-        }
-      }
+      if (autoProfile) await resumeStoredSession(autoProfile);
     })();
   } else {
     // MainPage (and the LiveKit voice stack it statically imports) loads
@@ -992,7 +1005,9 @@ authStore.subscribeSelector(
         // still valid, and the update the connect page offers relaunches
         // straight into auto-login with it (sessionStorage — and so the
         // skip flag below — does not survive that relaunch).
-        if (reason !== "protocol_epoch") void deleteCredential(host);
+        // A quick switch keeps it as well: switching back resumes with it
+        // (B7-13), and the departed session is left for that return.
+        if (reason !== "protocol_epoch" && reason !== "server_switch") void deleteCredential(host);
         // Whenever this session must not turn around and auto-login with the
         // credential (removed, or just refused), say so. A server_shutdown
         // keeps the credential precisely so auto-login still works on

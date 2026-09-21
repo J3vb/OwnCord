@@ -6,6 +6,52 @@
 > **Worktree:** `.claude/worktrees/b7-13`.
 > **Drafted:** 2026-09-21. **Base commit:** `639d5bb3` (`dev`).
 
+## Amendments (2026-09-21, applied in the implementing PR)
+
+This plan merged before the review of all five B7 plans finished. The
+review's corrections and the owner's quick-switch decision override the text
+below wherever they differ; the sections below are edited to match.
+
+1. **Quick switch keeps the departed sign-in.** Owner decision: switching
+   keeps the departed server's saved credential and its server session, so
+   switching back is instant. Before this PR the switch went through
+   `clearAuth()` with reason `"user"`, which deleted the credential
+   (`main.ts` logout subscriber) and left the server session alive. The switch
+   now has its own `LogoutReason`, `"server_switch"`, which skips
+   `deleteCredential` as `"protocol_epoch"` already did; it never calls
+   `POST /auth/logout`; and the connect page resumes a quick-switch target
+   from its stored token through the same `resumeStoredSession` path startup
+   auto-login uses. Without a stored credential (remember-password declined)
+   the prefilled form still waits for a password.
+2. **Credential isolation keeps host keying.** There is one profile per host
+   (`ensureProfileExists` in `main.ts`), so "two profiles on the same server"
+   is not a real scenario and Open Question 1 is closed at Option A.
+   Sequential accounts on one host do exist and share that host's credential
+   slot; the evidence row says so.
+3. **The cache defect is per-account, not per-host.** Every cache key already
+   contained the host (`fetchServerFile` serves only the configured server),
+   so the originally planned red test was green at the base. The two real
+   failures: (i) the previous server's entries stayed in IndexedDB after a
+   switch; (ii) a different account on the same host was served the previous
+   account's cached bytes. The scope is `host#userId`.
+4. **`auth.store.ts` gains no cache logic.** Importing `attachments` from it
+   creates a new cycle and breaks `lint:cycles --max-warnings=29`. Expiry is
+   registered through the existing `onAuthCleared` hook, from `MainPage` (which
+   already imports both modules). The only `auth.store.ts` change is the
+   `"server_switch"` member of the `LogoutReason` union that item 1 needs —
+   a type, with no import.
+5. **`community-services.md` item 17 is updated too**, not only the S2-f cells.
+   Known residual: the _current_ account's cached images still outlive
+   server-side erasure and retention; no milestone owns their TTL yet.
+6. **B7-13 writes its own BPR-034 row now** (Open Question 3, Option A),
+   including notification isolation: per-channel mutes are host-scoped,
+   notification preferences are device settings, and role-derived permission
+   state is reset by `clearAuth`.
+7. **`livekit-session.test.ts` is not touched** — B7-9a uses it as a frozen
+   oracle. The media case lives in the new `session-isolation-media.test.ts`.
+8. No new file lands under `Client/src/lib/**` or `Client/src/stores/**`, so
+   `stryker.shard.config.mjs` needs no line.
+
 ## Summary
 
 The PRD outcome has three clauses
@@ -45,10 +91,10 @@ in the tree and simply unproven; one has a real gap.
 3. **"Isolates the new one's credentials and cache."** Credentials are keyed by
    host alone (`Client/src-tauri/src/credentials.rs:144`) and identity keys by
    `userId@host` (`lib/identity.ts:136-138`), so two _different servers_ are
-   isolated. The **cache is not**: `memoryCache`, the durable IndexedDB store
-   `owncord-image-cache` and `mediaObjectUrls` are keyed by bare URL
-   (`message-list/attachments.ts:141`, `:235`/`:279`/`:298`, `:394`), the
-   durable store is never evicted by the app — the only delete is the manual
+   isolated. The **cache is not isolated per account**: `memoryCache`, the
+   durable IndexedDB store `owncord-image-cache` and `mediaObjectUrls` are
+   keyed by the server URL — which names the host, but not the account
+   (Amendment 3) — the durable store is never evicted by the app — the only delete is the manual
    Settings action (`settings/AdvancedTab.ts:304`) — and `clearAuth` clears no
    image cache at all. `community-services.md` states the consequence outright:
    "IndexedDB survives app restart, account switch and server switch, and
@@ -90,7 +136,7 @@ at your HEAD, **stop that task and record it**; do not improvise around it.
 | 7   | Voice teardown exists and `MainPage` calls the deep `cleanupAll`                                                                     | `lib/livekitSession.ts:1257` (`leaveVoice`), `:1310` (`cleanupAll`); `MainPage.ts:32`,`:950` (`voiceCleanupAll()`)                                        | yes       |
 | 8   | Quick switch sets a sessionStorage target and calls `clearAuth()`; the target is consumed on the connect page                        | `pages/main-page/SidebarArea.ts:793-795`; `main.ts:854-864`                                                                                               | yes       |
 | 9   | `clearAuth` resets voice/messages/channels/blocks stores and the notification AudioContext, and imports no image cache               | `stores/auth.store.ts:109-149`; `git grep -n "attachments" Client/src/stores/auth.store.ts` → none                                                        | yes       |
-| 10  | The image caches are keyed by bare URL, not by profile, account or server                                                            | `message-list/attachments.ts:141` (`memoryCache`), `:235` (`IDB_NAME`), `:279`/`:298` (get/put by url), `:394`/`:427` (`mediaObjectUrls`)                 | yes       |
+| 10  | The image caches are keyed by the server URL (host-bearing), not by account — Amendment 3                                            | `message-list/attachments.ts:141` (`memoryCache`), `:235` (`IDB_NAME`), `:279`/`:298` (get/put by url), `:394`/`:427` (`mediaObjectUrls`)                 | yes       |
 | 11  | The durable IndexedDB store is never evicted by the app; the only delete is the manual Settings action                               | `settings/AdvancedTab.ts:304` (`indexedDB.deleteDatabase("owncord-image-cache")`); `docs/architecture/community-services.md:296`,`:315` (data class S2-f) | yes       |
 | 12  | External content is already broker-owned at this base; the server caches cannot receive external bytes                               | `attachments.ts:321-322` (`isExternalUrl` → broker), `:219-220` (`fetchServerFile` throws for external), `:501` (`clearExternalImageCache`)               | yes       |
 | 13  | Credentials are keyed by host alone; identity keys by `userId@host`                                                                  | `Client/src-tauri/src/credentials.rs:144`; `lib/identity.ts:136-138`                                                                                      | yes       |
@@ -137,17 +183,19 @@ a single-connection mechanism that already exists.
 
 Touch only these. Anything else → record **BLOCKED**.
 
-| Path                                                      | Change                                                                                      |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `Client/tests/unit/session-isolation.test.ts`             | new: transport invariant, switch-teardown evidence, credential isolation                    |
-| `Client/tests/unit/livekit-session.test.ts`               | extend: at most one live room across a profile switch                                       |
-| `Client/tests/unit/attachments-cache.test.ts`             | extend: cross-profile cache isolation (written red in Task 3, green in Task 4)              |
-| `Client/src/components/message-list/attachments.ts`       | scope `memoryCache`, the IndexedDB key and `mediaObjectUrls` by profile/server; prune scope |
-| `Client/src/pages/MainPage.ts`                            | set the cache scope on mount beside the existing host setters (`:159-169`)                  |
-| `Client/src/stores/auth.store.ts`                         | expire/clear the previous scope in `clearAuth` so isolation survives a page-teardown gap    |
-| `Client/tests/e2e/profile-switch.spec.ts`                 | new: one scenario — switch tears down A, isolates B, preserves the profile list             |
-| `docs/architecture/community-services.md`                 | the S2-f "Delete"/"Retention" cells (`:296`,`:315`): the store is now scoped and pruned     |
-| `docs/plans/beta-requirements-traceability-2026-08-23.md` | the BPR-034 evidence row (`:83`) — subject to Open Question 3                               |
+| Path                                                      | Change                                                                                     |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `Client/tests/unit/session-isolation.test.ts`             | new: transport invariant, switch teardown, quick switch keeps and resumes the credential   |
+| `Client/tests/unit/session-isolation-media.test.ts`       | new: at most one live room across a profile switch (Amendment 7)                           |
+| `Client/tests/unit/attachments-cache.test.ts`             | extend: prune on switch, same-host account isolation (red in Task 3, green in Task 4)      |
+| `Client/src/components/message-list/attachments.ts`       | scope the durable key by `host#userId`, clear memory on a scope change, prune other scopes |
+| `Client/src/pages/MainPage.ts`                            | set the cache scope on mount; expire it through `onAuthCleared`                            |
+| `Client/src/main.ts`                                      | keep the credential on `"server_switch"`; resume a switch target from its stored token     |
+| `Client/src/pages/main-page/SidebarArea.ts`               | the quick switch calls `clearAuth("server_switch")`                                        |
+| `Client/src/stores/auth.store.ts`                         | the `"server_switch"` `LogoutReason` member only (Amendment 4)                             |
+| `Client/tests/e2e/profile-switch.spec.ts`                 | new: one scenario — switch tears down A, keeps A's sign-in, preserves the profile list     |
+| `docs/architecture/community-services.md`                 | the S2-f "Delete"/"Retention" cells and item 17: the store is scoped and pruned            |
+| `docs/plans/beta-requirements-traceability-2026-08-23.md` | the BPR-034 evidence row                                                                   |
 
 **Never** edit `Server/db/dbgen/`, `Server/ws/message_types.go`,
 `Client/src/lib/protocolTypes.ts`, `gendocs:*` blocks, the PRD, the register,
@@ -193,7 +241,8 @@ commit, no `Co-Authored-By` trailer.
 
 ### Task 2: The one-live-media-session invariant
 
-- **Action:** extend `tests/unit/livekit-session.test.ts` (it already mocks
+- **Action:** (Amendment 7: in the new `tests/unit/session-isolation-media.test.ts`,
+  reusing the harness of) `tests/unit/livekit-session.test.ts` (it already mocks
   `livekit-client`'s `Room` and asserts `leaveVoice`/`cleanupAll` behaviour,
   `:30-56`, `:671-701`, `:1901`) with a cross-session case: join voice, tear
   down the session the way a profile switch does (`cleanupAll`, the same call
@@ -219,11 +268,13 @@ commit, no `Co-Authored-By` trailer.
   `channels`, `blocks`, `voice` — the resets `clearAuth` performs at
   `auth.store.ts:133-136`), the notification AudioContext was cleaned up, no
   transport and no room remain, and the credential for the old host was not
-  readable for the new host. Then extend `tests/unit/attachments-cache.test.ts`
-  with the assertion this milestone exists to fix: a second profile on a
-  _different server_ must not be served the first profile's cached server image
-  from `memoryCache` or IndexedDB, and the durable store must not retain the
-  first profile's entries after a switch.
+  readable for the new host; and (Amendment 1) that a quick switch keeps the
+  departed credential, never calls `POST /auth/logout`, and switching back
+  resumes with the stored token without a password. Then extend
+  `tests/unit/attachments-cache.test.ts` with the two real cache failures
+  (Amendment 3): the previous server's entries are still in IndexedDB after a
+  switch, and a different account on the same host is served the previous
+  account's cached bytes.
 - **Why:** the second and third BPR-034 clauses. The cache half is expected to
   be **RED** at this commit: the caches are keyed by bare URL
   (`attachments.ts:141`,`:235`,`:394`) and `clearAuth` clears none of them
@@ -239,13 +290,11 @@ commit, no `Co-Authored-By` trailer.
 ### Task 4: Scope the server-content caches by profile
 
 - **Action:** give `memoryCache`, the IndexedDB key and `mediaObjectUrls` a
-  profile/server scope — host plus account, the thing that actually differs
-  between two profiles — mirroring `externalPartition()`'s scope-plus-epoch
-  shape (`attachments.ts:481-485`). Set the scope on `MainPage` mount beside the
-  existing host setters (`MainPage.ts:159-169`) and expire/clear the previous
-  scope in `clearAuth` (`auth.store.ts:109`) so isolation does not depend on
-  `MainPage.destroy` running. Prune the previous profile's durable entries on a
-  scope change.
+  `host#userId` scope — the account, the thing a host key cannot tell apart.
+  Set the scope on `MainPage` mount beside the existing host setters and expire
+  it through `onAuthCleared` (Amendment 4), so isolation does not depend on
+  `MainPage.destroy` running. A scope change clears the in-memory caches and
+  prunes every durable entry outside the new scope.
 - **Why:** closes the red from Task 3 and the third BPR-034 clause. It is the
   server-content half of B7-16's Decision 4 hand-off
   (`.claude/plans/b7-16-external-content-broker.plan.md:104-111`).
@@ -329,7 +378,7 @@ npx prettier --check .claude/plans/b7-13-one-connection-isolated-profiles.plan.m
 | Editing `community-services.md` trips `TestCommunityServicesDocIsCurrent`              | Low        | Medium | Keep the table headers and a concrete `Tested at` cell; run the test before committing                          |
 | `MainPage.ts` / `auth.store.ts` are also B7-11's lifecycle territory                   | Medium     | Low    | Different functions in the same files; keep both edits and re-run on rebase                                     |
 | The traceability row conflicts with B7-12/14/15's parallel evidence rows               | Medium     | Low    | One row only, or defer to B7-18 — Open Question 3                                                               |
-| The credential store is host-keyed, so two profiles on one host share a secret         | Low        | Medium | Prove cross-server isolation only; record the caveat — Open Question 1                                          |
+| The credential store is host-keyed, so sequential accounts on one host share a slot    | Low        | Medium | One profile per host; prove cross-server isolation and record the shared slot in the evidence (Amendment 2)     |
 
 ## Out of scope
 
@@ -351,17 +400,19 @@ npx prettier --check .claude/plans/b7-13-one-connection-isolated-profiles.plan.m
 
 ## Open questions for the owner
 
-- [ ] **Credential isolation across two profiles on one host.** Credentials are
-      keyed by host alone (`Client/src-tauri/src/credentials.rs:144`), so two
-      profiles for the same server (different accounts) share one stored secret,
-      while two servers are isolated. Option A (recommended): keep host-keying,
+- [x] **Credential isolation on one host** — resolved: Option A, and the
+      two-profiles-on-one-host scenario does not exist (Amendment 2). Credentials
+      are keyed by host alone (`Client/src-tauri/src/credentials.rs:144`);
+      sequential accounts on one server share one stored secret, while two
+      servers are isolated. Option A (recommended): keep host-keying,
       prove cross-**server** isolation, and record the same-host caveat — the
       BPR-034 clause is "credentials never cross", which host-keying already meets
       for different servers, and re-keying is a Rust credential-store change with
       a migration and its own security review. Option B: re-key to host +
       username now, migrating stored secrets, which changes the `CredentialStore`
       contract and both credential suites. **Recommendation: A.**
-- [ ] **What happens to the durable store on a profile switch.** It is data
+- [x] **What happens to the durable store on a profile switch** — resolved:
+      Option A, scoped to `host#userId` (Amendment 3). It is data
       class S2-f and never evicted today (`community-services.md:315`). Option A
       (recommended): scope the key by profile/server and prune the _previous_
       profile's entries on a switch, keeping the current profile's entries across
@@ -370,7 +421,8 @@ npx prettier --check .claude/plans/b7-13-one-connection-isolated-profiles.plan.m
       let old scopes persist — isolated on read but the old server's bytes stay
       on disk, which is the privacy defect the doc records. **Recommendation:
       A.**
-- [ ] **Where the BPR-034 evidence row is written.** The PRD records B7-13 as
+- [x] **Where the BPR-034 evidence row is written** — resolved: Option A,
+      B7-13 writes its own row (Amendment 6). The PRD records B7-13 as
       closing "BPR-034 evidence" (`prd.md:374`), but B7-12, B7-14 and B7-15 are
       being planned in parallel and their traceability rows
       (`beta-requirements-traceability-2026-08-23.md:82-84`) are adjacent, so all
@@ -386,7 +438,9 @@ npx prettier --check .claude/plans/b7-13-one-connection-isolated-profiles.plan.m
       voice, exactly one live `Room`, across a login → quick-switch → login
       sequence; each assertion observed red before green
 - [ ] A test proves a profile switch resets the domain stores and notification
-      audio and leaves no transport, room or credential from the prior profile
+      audio and leaves no transport or room from the prior profile, keeps the
+      departed server's credential, and resumes it on switching back without a
+      password (Amendment 1)
 - [ ] The server-content caches (`memoryCache`, the durable IndexedDB store,
       `mediaObjectUrls`) are scoped to the profile/server, the previous scope is
       pruned on a switch, and a second profile is never served the first's

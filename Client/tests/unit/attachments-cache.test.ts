@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, putSpy, brokerImageMock } = vi.hoisted(() => ({
+const { fetchMock, putSpy, brokerImageMock, idbData } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
   putSpy: vi.fn<(value: string, key: string) => void>(),
   brokerImageMock: vi.fn<any>(),
+  /** The stub's durable store: what survives an app restart. */
+  idbData: new Map<string, string>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -41,23 +43,27 @@ vi.stubGlobal("indexedDB", {
           oncomplete: null,
           onabort: null,
           onerror: null,
-          objectStore: () => ({
-            get: () => {
-              const req: Record<string, unknown> = {
-                onsuccess: null,
-                onerror: null,
-                result: undefined,
-              };
+          objectStore: () => {
+            const request = (result: unknown): Record<string, unknown> => {
+              const req: Record<string, unknown> = { onsuccess: null, onerror: null, result };
               Promise.resolve().then(() => {
                 const fn = req.onsuccess as ((ev: Event) => void) | null;
                 fn?.(new Event("success"));
               });
               return req;
-            },
-            put: (value: string, key: string) => {
-              putSpy(value, key);
-            },
-          }),
+            };
+            return {
+              get: (key: string) => request(idbData.get(key)),
+              getAllKeys: () => request([...idbData.keys()]),
+              put: (value: string, key: string) => {
+                putSpy(value, key);
+                idbData.set(key, value);
+              },
+              delete: (key: string) => {
+                idbData.delete(key);
+              },
+            };
+          },
         };
         Promise.resolve().then(() => {
           const fn = tx.oncomplete as ((ev: Event) => void) | null;
@@ -91,6 +97,7 @@ import {
   fetchImageAsDataUrl,
   recoverEvictedImage,
   renderAttachment,
+  setAttachmentCacheScope,
   setServerHost,
 } from "../../src/components/message-list/attachments";
 import { createAvatarElement } from "../../src/lib/avatar";
@@ -107,8 +114,10 @@ describe("attachment cache clearing", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     putSpy.mockReset();
+    idbData.clear();
     clearAttachmentCaches();
     setServerHost("example.com");
+    setAttachmentCacheScope("example.com#1");
     document.body.innerHTML = "";
   });
 
@@ -338,5 +347,73 @@ describe("attachment cache clearing", () => {
 
     img.dispatchEvent(new Event("error"));
     await vi.waitFor(() => expect(img.src).toBe(`blob:avatar-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
+  });
+});
+
+// B7-13: the server-content caches belong to one signed-in account. Every key
+// already names the host, so the failures are the ones a host key cannot
+// catch: a departed server's bytes left on disk, and a second account on the
+// same host served the first account's bytes.
+describe("attachment cache profile isolation (B7-13)", () => {
+  function bytesResponse(bytes: number[]) {
+    return {
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: vi.fn().mockResolvedValue(Uint8Array.from(bytes).buffer),
+    };
+  }
+
+  /** What a profile switch does: auth clears, then the next page mounts. */
+  function switchTo(host: string, scope: string): void {
+    setAttachmentCacheScope(null);
+    setServerHost(host);
+    setAttachmentCacheScope(scope);
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    idbData.clear();
+    setAttachmentCacheScope(null);
+  });
+
+  it("prunes the previous server's entries from the durable store on a switch", async () => {
+    switchTo("a.example", "a.example#1");
+    fetchMock.mockResolvedValueOnce(bytesResponse([1]));
+    await fetchImageAsDataUrl("https://a.example/api/v1/files/1");
+    await vi.waitFor(() => expect(idbData.size).toBe(1));
+
+    switchTo("b.example", "b.example#1");
+
+    await vi.waitFor(() => expect([...idbData.keys()]).toEqual([]));
+  });
+
+  it("does not serve a different account on the same host the previous account's bytes", async () => {
+    const url = "https://example.com/api/v1/files/7";
+    switchTo("example.com", "example.com#1");
+    fetchMock.mockResolvedValueOnce(bytesResponse([1]));
+    const first = await fetchImageAsDataUrl(url);
+    await vi.waitFor(() => expect(idbData.size).toBe(1));
+
+    switchTo("example.com", "example.com#2");
+    fetchMock.mockResolvedValueOnce(bytesResponse([2]));
+    const second = await fetchImageAsDataUrl(url);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(second).not.toBe(first);
+    await vi.waitFor(() => expect(idbData.size).toBe(1));
+    expect([...idbData.values()]).toEqual([second]);
+  });
+
+  it("keeps the same account's entries across a sign-out and back in", async () => {
+    const url = "https://example.com/api/v1/files/9";
+    switchTo("example.com", "example.com#1");
+    fetchMock.mockResolvedValueOnce(bytesResponse([9]));
+    const first = await fetchImageAsDataUrl(url);
+    await vi.waitFor(() => expect(idbData.size).toBe(1));
+
+    switchTo("example.com", "example.com#1");
+
+    await expect(fetchImageAsDataUrl(url)).resolves.toBe(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -142,6 +142,29 @@ const memoryCache = new Map<string, string>();
 const CACHE_MAX = 200;
 let attachmentCacheGeneration = 0;
 
+/** `host#userId` of the account whose server content these caches hold
+ *  (B7-13). null while signed out: the durable store is neither read nor
+ *  written, so nothing crosses from one profile or account to the next. */
+let cacheScope: string | null = null;
+
+/**
+ * Point the server-content caches at the signed-in account. A change drops
+ * the in-memory caches and prunes every durable entry outside the new scope,
+ * so a switch leaves no previous server's or account's bytes on disk while
+ * the same account keeps its entries across restarts.
+ */
+export function setAttachmentCacheScope(scope: string | null): void {
+  if (scope === cacheScope) return;
+  cacheScope = scope;
+  clearAttachmentCaches();
+  if (scope !== null) void idbPruneOutside(scope);
+}
+
+/** Durable-store key: the scope, then the URL. */
+function idbKey(scope: string, url: string): string {
+  return `${scope}|${url}`;
+}
+
 export function clearAttachmentCaches(): void {
   attachmentCacheGeneration += 1;
   memoryCache.clear();
@@ -267,8 +290,29 @@ function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
   tx.onerror = close;
 }
 
-/** Read a cached data URL from IndexedDB. */
-async function idbGet(url: string): Promise<string | null> {
+/** Delete every durable entry outside `scope`, including pre-B7-13 keys. */
+async function idbPruneOutside(scope: string): Promise<void> {
+  const db = await openCacheDb();
+  if (db === null) return;
+  try {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    closeDbAfterTransaction(tx, db);
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.getAllKeys();
+    const prefix = idbKey(scope, "");
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+    req.onsuccess = () => {
+      for (const key of req.result) {
+        if (typeof key !== "string" || !key.startsWith(prefix)) store.delete(key);
+      }
+    };
+  } catch {
+    db.close();
+  }
+}
+
+/** Read a cached data URL from IndexedDB by its scoped key. */
+async function idbGet(key: string): Promise<string | null> {
   const db = await openCacheDb();
   if (db === null) return null;
   return new Promise((resolve) => {
@@ -276,7 +320,7 @@ async function idbGet(url: string): Promise<string | null> {
       const tx = db.transaction(IDB_STORE, "readonly");
       closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
-      const req = store.get(url);
+      const req = store.get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
@@ -288,14 +332,19 @@ async function idbGet(url: string): Promise<string | null> {
   });
 }
 
-/** Write a data URL to IndexedDB. */
-async function idbPut(url: string, dataUrl: string): Promise<void> {
+/** Write a data URL to IndexedDB under `scope`, unless the scope moved on
+ *  while the database opened — a late write would outlive the prune. */
+async function idbPut(scope: string, url: string, dataUrl: string): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
+  if (scope !== cacheScope) {
+    db.close();
+    return;
+  }
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
     closeDbAfterTransaction(tx, db);
-    tx.objectStore(IDB_STORE).put(dataUrl, url);
+    tx.objectStore(IDB_STORE).put(dataUrl, idbKey(scope, url));
   } catch {
     db.close();
     // IndexedDB full or unavailable — ignore
@@ -321,6 +370,7 @@ export function uint8ToBase64(bytes: Uint8Array): string {
 export function fetchImageAsDataUrl(url: string): Promise<string | null> {
   if (isExternalUrl(url)) return fetchExternalImage({ url });
   const generation = attachmentCacheGeneration;
+  const scope = cacheScope;
 
   // 1. Memory cache (instant)
   const cached = memoryCache.get(url);
@@ -332,7 +382,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
 
   const promise = (async (): Promise<string | null> => {
     // 3. IndexedDB cache (persists across restarts)
-    const idbCached = await idbGet(url);
+    const idbCached = scope === null ? null : await idbGet(idbKey(scope, url));
     if (idbCached !== null) {
       if (generation !== attachmentCacheGeneration) return null;
       if (memoryCache.size >= CACHE_MAX) {
@@ -366,7 +416,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
         if (firstKey !== undefined) memoryCache.delete(firstKey);
       }
       memoryCache.set(url, dataUrl);
-      void idbPut(url, dataUrl);
+      if (scope !== null) void idbPut(scope, url, dataUrl);
 
       return dataUrl;
     } catch (err) {
