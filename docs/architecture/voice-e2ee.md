@@ -4,7 +4,8 @@
 
 Voice/video runs on LiveKit. The Go server issues short-lived scoped tokens and
 relays E2EE key-exchange messages; media flows client↔LiveKit directly. On the
-client, everything funnels through `src/lib/livekitSession.ts`, and — because
+client, everything funnels through `src/lib/livekitSession.ts` (a facade over
+the `src/features/voice/` modules), and — because
 self-hosted servers commonly use self-signed certificates — the LiveKit
 connection is tunneled through a local Rust TLS proxy pinned to the same TOFU
 fingerprint as the main WebSocket.
@@ -56,9 +57,12 @@ Supporting pieces:
   (optional managed `livekit-server` subprocess),
   `Server/ws/livekit_webhook.go` (webhook validated by LiveKit JWT and
   admin-IP-restricted), `Server/api/livekit_proxy.go` (HTTP reverse proxy).
-- **Client:** `src/lib/livekitSession.ts` (state machine: idle/connecting/
-  connected/reconnecting with a monotonic `joinGeneration` to discard
-  superseded joins), `src/lib/livekitE2EE.ts` (key-holder election, room-key
+- **Client:** `src/lib/livekitSession.ts` (facade owning the state machine:
+  idle/connecting/connected/reconnecting), `src/features/voice/`
+  (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
+  superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
+  teardown; `mediaControl.ts` mute/deafen/devices; `remoteTracks.ts`;
+  `sessionState.ts` state types), `src/lib/livekitE2EE.ts` (key-holder election, room-key
   wrap/unwrap, peer verification state), `src/lib/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
   `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
@@ -74,6 +78,6 @@ and surface a blocking mismatch modal if it later changes (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/src/lib/livekitSession.ts`,
+`Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/lib/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.

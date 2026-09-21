@@ -17,7 +17,8 @@ indicators.
 Internally there are **two** FSMs:
 
 - The **WS connection** FSM (`ws.ts`: `disconnected…connected`) — the socket.
-- The **voice session** FSM (`livekitSession.ts`: `idle | connecting |
+- The **voice session** FSM (`livekitSession.ts`, types in
+  `features/voice/sessionState.ts`: `idle | connecting |
 connected | reconnecting`) — the LiveKit room.
 
 Plus the user-facing booleans in `voice.store` (`localMuted`, `localDeafened`,
@@ -30,7 +31,8 @@ inferring it from `isVoiceConnected()` alone.
 
 > **✓ Implemented (2026-07).** `voice.store.voiceStatus`
 > (`idle | joining | securing | connected | reconnecting`) is now the observable
-> voice-session status. `livekitSession.ts` is the single writer: `joining` at the
+> voice-session status. The voice session (`livekitSession.ts` and its
+> `features/voice/` modules) is the single writer: `joining` at the
 > start of `connectAndSetup`, `securing` when the ECDH key exchange begins,
 > `connected` on the atomic `connected` transition (both the initial join and a
 > successful auto-reconnect), `reconnecting` when the room drops and the reconnect
@@ -59,13 +61,13 @@ stateDiagram-v2
     failed --> idle: auto-leave + error
 ```
 
-| Status         | Presentation                                                           | Notes                                                                                                                                                                                                            |
-| -------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                           |
-| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`lib/livekitSession.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`)) |
-| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                 |
-| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`)                                                                                         |
-| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                          |
+| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                          |
+| -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                         |
+| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`)) |
+| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                               |
+| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`)                                                                                                       |
+| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                        |
 
 **Target rules:**
 
@@ -81,7 +83,7 @@ stateDiagram-v2
 > connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
 > badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves
-> (`livekitSession.ts` `connectAndSetup`). **Code vs. diagram note:** the client
+> (`features/voice/joinOrchestration.ts` `connectAndSetup`). **Code vs. diagram note:** the client
 > actually runs the ECDH key exchange _before_ `room.connect()`, so `securing`
 > spans the key wait and the media connect; the state diagram below draws them in
 > the reverse order for readability. The distinction users see is unchanged:
@@ -93,12 +95,12 @@ stateDiagram-v2
 
 All four are optimistic with rollback; each also emits a WS control message.
 
-| Control         | Local state                                                                                                                                                                                                                                                                                                                  | WS message                    | Rollback                  |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
-| **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `lib/livekitSession.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative) |
-| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                        | `voice_deafen` + `voice_mute` | implies mute              |
-| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                   | `voice_camera{enabled}`       | revert on failure + toast |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                             | `voice_screenshare{enabled}`  | revert + toast            |
+| Control         | Local state                                                                                                                                                                                                                                                                                                                           | WS message                    | Rollback                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
+| **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative) |
+| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                                 | `voice_deafen` + `voice_mute` | implies mute              |
+| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                            | `voice_camera{enabled}`       | revert on failure + toast |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                                      | `voice_screenshare{enabled}`  | revert + toast            |
 
 `stopMicTrackOnMute` carries the SDK's own documented tradeoff: with a Bluetooth
 headset connected, stopping and re-acquiring the capture track makes the device
@@ -220,7 +222,7 @@ not dispatcher handlers (see [README §4](README.md)).
 
 ## Source of truth
 
-`src/lib/livekitSession.ts`, `src/lib/livekitE2EE.ts`,
+`src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
 `src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
 `src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
