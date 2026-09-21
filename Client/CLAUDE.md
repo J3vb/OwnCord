@@ -18,8 +18,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 - `src/platform/contracts/` holds the type-only desktop/browser seam
   interfaces (B7-3), and `src/platform/desktop/` implements every one of
   them (B7-4/B7-5). It is the only place under `src/` a `@tauri-apps` import
-  may appear — eslint enforces the static ones and
-  `tests/unit/platform-contracts-counts.test.ts` counts the rest. Feature
+  may appear — eslint enforces it for static and dynamic imports. Feature
   code reaches native APIs through the `desktop` registry
   (`platform/desktop/index.ts`), which is statically reachable from the
   entry: keep a native module that is lazy today a dynamic `import()` inside

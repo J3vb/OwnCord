@@ -6,8 +6,8 @@ wrote the contracts and B7-4/B7-5 moved every native call behind
 **Measured against:** B7-5 (branch `fm/b7-5-impl`, 2026-09-21), which moved
 the last native importers behind the seam, so all twenty now live under
 `platform/desktop/`; the three counts below are re-derived from the tree by
-`Client/tests/unit/platform-contracts-counts.test.ts`, which also fails if a
-native import appears anywhere else.
+`Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
+static or dynamic native import anywhere else.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
 OwnCord is a Tauri desktop app whose frontend talks to native APIs directly.

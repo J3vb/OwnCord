@@ -111,14 +111,13 @@ export default tseslint.config(
   },
   // --- Native imports stay behind the desktop seam (B7-1) ---
   // B7-5 moved the last call site behind src/platform/, so the seam is the only
-  // exemption. The rule sees static imports only; a dynamic `import()` of a
-  // native module outside the seam is caught by
-  // tests/unit/platform-contracts-counts.test.ts instead.
+  // exemption. no-restricted-imports covers static imports and
+  // no-restricted-syntax covers a dynamic `import()`.
   {
     files: ["src/**/*.ts"],
     ignores: [
       // The seam itself: the desktop implementations are the only place a
-      // static native import belongs.
+      // native import belongs.
       "src/platform/desktop/**",
     ],
     rules: {
@@ -132,6 +131,14 @@ export default tseslint.config(
                 "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
             },
           ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportExpression[source.value=/^@tauri-apps\\//]",
+          message:
+            "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
         },
       ],
     },
