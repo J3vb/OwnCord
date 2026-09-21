@@ -878,6 +878,22 @@ export interface HealthResponse {
   readonly online_users: number;
 }
 
+/**
+ * GET /api/v1/server-info response (B6-7).
+ *
+ * `protocol_epoch` is the wire epoch this server speaks; the client compares it
+ * with `PROTOCOL_EPOCH` to know whether it can connect before opening a
+ * WebSocket. There is deliberately no version field (C-2).
+ *
+ * B7-15 adds `registration_mode` and a retention summary; unknown fields are
+ * ignored by consumers, so extending this type is safe.
+ */
+export interface ServerInfoResponse {
+  readonly name: string;
+  readonly protocol_epoch: number;
+  readonly browser_client_enabled: boolean;
+}
+
 /** Single channel object from REST API. */
 export interface ChannelResponse {
   readonly id: number;

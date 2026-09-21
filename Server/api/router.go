@@ -727,6 +727,13 @@ func handleInfo(cfg *config.Config) http.HandlerFunc {
 }
 
 func handleServerInfo(cfg *config.Config) http.HandlerFunc {
+	// The preflight client probe runs this for every saved profile every 15 s,
+	// so derive the response at most once per healthCacheTTL — the same
+	// unauthenticated, rate-limit-exempt amplification guard as handleHealth.
+	// The response shape is static, so a cached struct is safe to share.
+	var mu syncutil.Mutex
+	var cachedAt time.Time
+	var cached serverInfoResponse
 	return func(w http.ResponseWriter, r *http.Request) {
 		// C-2: no version, build or commit on an unauthenticated endpoint —
 		// that is what lets a scanner match this server to a CVE list. If you
@@ -739,11 +746,19 @@ func handleServerInfo(cfg *config.Config) http.HandlerFunc {
 		//
 		// Reporting BrowserClientEnabled is not hosting: no route is mounted
 		// and no asset is served either way (browser_hosting_posture_test.go).
-		writeJSON(w, http.StatusOK, serverInfoResponse{
-			Name:                 cfg.Server.Name,
-			ProtocolEpoch:        ws.ProtocolEpoch,
-			BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
-		})
+		mu.Lock()
+		if time.Since(cachedAt) >= healthCacheTTL {
+			cached = serverInfoResponse{
+				Name:                 cfg.Server.Name,
+				ProtocolEpoch:        ws.ProtocolEpoch,
+				BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
+			}
+			cachedAt = time.Now()
+		}
+		resp := cached
+		mu.Unlock()
+
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
