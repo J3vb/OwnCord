@@ -55,6 +55,7 @@ export const shards = {
     "src/lib/sessionScope.ts",
     "src/lib/session-notice.ts",
     "src/lib/pendingMessages.ts",
+    "src/features/connection/dispatchContext.ts",
   ], // 3103 mutants
   "lib-rest": [
     "src/lib/a11y.ts",
