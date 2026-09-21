@@ -65,7 +65,6 @@ describe("platform-contracts count table matches the tree", () => {
     expect(documentedCount("handlers in `Client/src-tauri/`")).toBe(commandHandlers);
   });
 
-
   it("pins the measurement to a commit", () => {
     expect(doc.match(/^\*\*Measured against:\*\* (.+)$/m)?.[1]?.trim()).toBeTruthy();
   });
