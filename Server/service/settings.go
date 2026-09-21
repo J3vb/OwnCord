@@ -57,6 +57,12 @@ func (s *SettingsService) Setting(ctx context.Context, key string) (string, erro
 	return s.st.GetSetting(ctx, key)
 }
 
+// RegistrationMode returns the live registration policy, defaulting to invite
+// for a missing setting and failing closed for an unparseable value.
+func (s *SettingsService) RegistrationMode(ctx context.Context) (RegistrationMode, error) {
+	return RegistrationModeOf(ctx, s.st)
+}
+
 // Patch validates, normalizes and atomically applies updates, then writes
 // one audit row per changed key attributed to actorID. The returned map is
 // the full settings table after the apply (the admin panel re-renders from

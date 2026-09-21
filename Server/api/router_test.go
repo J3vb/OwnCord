@@ -2,22 +2,32 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/internal/app"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // setupRouter creates a test router with an in-memory database.
 func setupRouter(t *testing.T) http.Handler {
+	t.Helper()
+	return setupRouterWithServices(t, nil)
+}
+
+func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db.DB)) http.Handler {
 	t.Helper()
 
 	database, err := db.Open(":memory:")
@@ -39,6 +49,9 @@ func setupRouter(t *testing.T) http.Handler {
 	rt, rtErr := app.StartRuntime(cfg, database, nil)
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
+	}
+	if configure != nil {
+		configure(rt.Services, database)
 	}
 	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
@@ -199,6 +212,210 @@ func TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag(t *testing.T) {
 	// also the shipped default (BG-01: hosting is owner opt-in).
 	if got, exists := body["browser_client_enabled"]; !exists || got != false {
 		t.Errorf("browser_client_enabled = %v (present=%t), want false", got, exists)
+	}
+	if got := body["registration_mode"]; got != "invite" {
+		t.Errorf("registration_mode = %v, want invite", got)
+	}
+	assertServerInfoRetention(t, body, 0)
+}
+
+func assertServerInfoRetention(t *testing.T, body map[string]any, days int) {
+	t.Helper()
+	retention, ok := body["retention"].(map[string]any)
+	if !ok {
+		t.Fatalf("retention = %#v, want an object", body["retention"])
+	}
+	if len(retention) != 1 || retention["messages_days"] != float64(days) {
+		t.Errorf("retention = %#v, want only messages_days: %d", retention, days)
+	}
+}
+
+func TestAPIV1ServerInfoRegistrationModes(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  string
+	}{
+		{"closed", "closed"},
+		{"invite", "invite"},
+		{"approval", "approval"},
+		{"open", "open"},
+		{" OPEN ", "open"},
+		{"invalid", "closed"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
+				if err := database.SetSetting(t.Context(), "registration_mode", tc.value); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if got := serverInfoBody(t, router)["registration_mode"]; got != tc.want {
+				t.Errorf("registration_mode = %v, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPIV1ServerInfoRetentionWindow(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  int
+	}{
+		{"0", 0},
+		{"30", 30},
+		{"3650", 3650},
+		{"invalid", 0},
+		{"-1", 0},
+		{"3651", 0},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
+				if err := database.SetSetting(t.Context(), db.RetentionDaysKey, tc.value); err != nil {
+					t.Fatal(err)
+				}
+			})
+			assertServerInfoRetention(t, serverInfoBody(t, router), tc.want)
+		})
+	}
+}
+
+// Embed the real store so service parsing and routing are exercised, while
+// counting only this endpoint's reads and injecting hard storage failures.
+type serverInfoStore struct {
+	*db.DB
+	registrationReads atomic.Int32
+	retentionReads    atomic.Int32
+	registrationErr   error
+	retentionErr      error
+	missingMode       bool
+}
+
+func (s *serverInfoStore) GetSetting(ctx context.Context, key string) (string, error) {
+	if key == "registration_mode" {
+		s.registrationReads.Add(1)
+		if s.registrationErr != nil {
+			return "", s.registrationErr
+		}
+		if s.missingMode {
+			return "", db.ErrNotFound
+		}
+	}
+	return s.DB.GetSetting(ctx, key)
+}
+
+func (s *serverInfoStore) ServerRetentionDays(ctx context.Context) (int, error) {
+	s.retentionReads.Add(1)
+	if s.retentionErr != nil {
+		return 0, s.retentionErr
+	}
+	return s.DB.ServerRetentionDays(ctx)
+}
+
+func (s *serverInfoStore) ListChannelRetention(context.Context) ([]db.ChannelRetention, error) {
+	return nil, errors.New("server-info must not read channel overrides")
+}
+
+func setupServerInfoStore(t *testing.T, store *serverInfoStore) http.Handler {
+	t.Helper()
+	return setupRouterWithServices(t, func(svc *service.Services, database *db.DB) {
+		store.DB = database
+		svc.Settings = service.NewSettingsService(store)
+		svc.Retention = service.NewRetentionService(store)
+	})
+}
+
+func TestAPIV1ServerInfoMissingRegistrationMode(t *testing.T) {
+	router := setupServerInfoStore(t, &serverInfoStore{missingMode: true})
+	if got := serverInfoBody(t, router)["registration_mode"]; got != "invite" {
+		t.Errorf("registration_mode = %v, want invite for a missing setting", got)
+	}
+}
+
+func TestAPIV1ServerInfoCachesSettings(t *testing.T) {
+	store := &serverInfoStore{}
+	router := setupServerInfoStore(t, store)
+	first := serverInfoBody(t, router)
+	if err := store.SetSetting(t.Context(), "registration_mode", "open"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(t.Context(), db.RetentionDaysKey, "30"); err != nil {
+		t.Fatal(err)
+	}
+	second := serverInfoBody(t, router)
+	if second["registration_mode"] != first["registration_mode"] {
+		t.Fatal("response changed within the five-second cache TTL")
+	}
+	assertServerInfoRetention(t, second, 0)
+	if got := store.registrationReads.Load(); got != 1 {
+		t.Errorf("registration reads = %d, want 1 for two requests", got)
+	}
+	if got := store.retentionReads.Load(); got != 1 {
+		t.Errorf("retention reads = %d, want 1 for two requests", got)
+	}
+
+	time.Sleep(5 * time.Second)
+	third := serverInfoBody(t, router)
+	if third["registration_mode"] != "open" {
+		t.Errorf("registration_mode = %v after expiry, want open", third["registration_mode"])
+	}
+	assertServerInfoRetention(t, third, 30)
+	if store.registrationReads.Load() != 2 || store.retentionReads.Load() != 2 {
+		t.Fatal("expired cache must refresh both settings exactly once")
+	}
+}
+
+func TestAPIV1ServerInfoConcurrentRequestsShareCache(t *testing.T) {
+	store := &serverInfoStore{}
+	router := setupServerInfoStore(t, store)
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 16)
+	for range cap(responses) {
+		go func() {
+			<-start
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil))
+			responses <- rec
+		}()
+	}
+	close(start)
+	for range cap(responses) {
+		rec := <-responses
+		if rec.Code != http.StatusOK {
+			t.Errorf("concurrent request status = %d, want 200", rec.Code)
+		}
+	}
+	if store.registrationReads.Load() != 1 || store.retentionReads.Load() != 1 {
+		t.Fatal("concurrent requests must share one settings read per field")
+	}
+}
+
+func TestAPIV1ServerInfoReadErrors(t *testing.T) {
+	for _, field := range []string{"registration", "retention"} {
+		t.Run(field, func(t *testing.T) {
+			store := &serverInfoStore{}
+			readErr := errors.New("private storage failure")
+			if field == "registration" {
+				store.registrationErr = readErr
+			} else {
+				store.retentionErr = readErr
+			}
+			router := setupServerInfoStore(t, store)
+			for range 2 {
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil))
+				if rec.Code != http.StatusInternalServerError {
+					t.Fatalf("status = %d, want 500", rec.Code)
+				}
+				if strings.Contains(rec.Body.String(), readErr.Error()) {
+					t.Fatal("public error response leaked storage details")
+				}
+			}
+			if got := store.registrationReads.Load(); got != 1 {
+				t.Errorf("registration reads = %d, want 1 even on failure", got)
+			}
+			if field == "retention" && store.retentionReads.Load() != 1 {
+				t.Error("retention failure was not cached")
+			}
+		})
 	}
 }
 

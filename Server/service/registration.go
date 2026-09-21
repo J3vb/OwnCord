@@ -32,6 +32,12 @@ const DefaultRegistrationMode = RegistrationInvite
 
 const registrationModeKey = "registration_mode"
 
+// RegistrationModeOf reads the live registration mode with the service's
+// default and fail-closed parsing. Storage errors are returned to the caller.
+func RegistrationModeOf(ctx context.Context, st Store) (RegistrationMode, error) {
+	return registrationModeSetting(ctx, st)
+}
+
 // ParseRegistrationMode reads a setting value; ok is false for anything but
 // the four modes.
 func ParseRegistrationMode(v string) (RegistrationMode, bool) {
