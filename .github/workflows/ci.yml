@@ -51,13 +51,15 @@ jobs:
       integration: ${{ steps.select.outputs.integration }}
       native: ${{ steps.select.outputs.native }}
       harness: ${{ steps.select.outputs.harness }}
+      workflows: ${{ steps.select.outputs.workflows }}
+      deps: ${{ steps.select.outputs.deps }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The diff is taken from the merge base, so both ends of it have to be
           # present. docs-consistency fetches full history for the same reason.
           fetch-depth: 0
-
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
@@ -200,6 +202,8 @@ jobs:
         working-directory: Server/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # The one place this leg reads the selection, and the FIRST thing it does
       # after checkout: the decision has to precede tool setup, or a change with
@@ -472,6 +476,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -578,7 +584,7 @@ jobs:
           # fetch has no such ref, and the script fails closed rather than
           # passing blind, so this job needs the full history.
           fetch-depth: 0
-
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
@@ -678,6 +684,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -712,6 +720,131 @@ jobs:
       - name: Formatting, shell and workflow gates
         run: npm run check:hygiene
 
+  # RL-19's second half: actionlint validates expression syntax and action
+  # inputs, and has no concept of who a trigger admits, what a run can persist,
+  # or whether a release restores a poisoned cache. zizmor audits exactly that,
+  # and it is the check for the class of defect that review missed in #1634.
+  #
+  # Gated on `workflows` (a `.github/**` change; `scripts/` also selects it,
+  # because ci.yml is itself a shared input). Cheap: no npm ci, no Go, no Rust
+  # — one pinned binary and a text pass, seconds not minutes.
+  #
+  # OFFLINE on purpose. The online audits (impostor-commit, ref-version-mismatch)
+  # would fire on every deliberately branch-pinned `uses:` — dtolnay/rust-toolchain
+  # and anthropics/claude-code-action both pin a moving branch — so enabling them
+  # buys a permanent exception list and a network dependency, not signal. The
+  # audits that catch real defects (template-injection, artipacked,
+  # cache-poisoning, excessive-permissions) all run offline. zizmor exits
+  # non-zero on any finding, so this check blocks on a NEW one with no baseline.
+  workflow-lint:
+    name: Workflow Security Lint
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.workflows == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Pinned by version and checked by digest, the same convention the
+      # actionlint install in Repository Hygiene follows: an unpinned installer
+      # would be the one unverified download in a file that pins every action by
+      # commit SHA.
+      - name: Install zizmor
+        env:
+          ZIZMOR_VERSION: 1.30.1
+          ZIZMOR_SHA256: e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a
+        run: |
+          set -euo pipefail
+          url="https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/zizmor.tar.gz" "$url"
+          echo "$ZIZMOR_SHA256  $RUNNER_TEMP/zizmor.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/zizmor.tar.gz" -C "$RUNNER_TEMP" zizmor
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Report tool version
+        run: zizmor --version
+
+      - name: Audit the workflows (zizmor, offline)
+        run: zizmor --offline --no-progress .github/workflows/
+
+  # One vulnerability scan across every lockfile, plus cargo-deny for the
+  # licence and source policy osv-scanner does not carry. Gated on `deps`: a
+  # manifest, a lockfile, osv-scanner.toml or deny.toml. A source-only change
+  # cannot move a version, so it does not pay for this.
+  #
+  # Both tools are clean at HEAD with the reviewed baselines committed at
+  # osv-scanner.toml and Client/src-tauri/deny.toml; each exception names its
+  # advisory and reason, so the jobs fail on anything NEW. Neither uses
+  # `continue-on-error`, `|| true`, or any other fail-open path.
+  #
+  # The overlap with the existing gates is deliberate and named:
+  #   - govulncheck (Server Build & Test) is call-aware and stays the Go
+  #     authority; osv-scanner covers the module graph and the other ecosystems.
+  #   - the npm audit step in Client Static Checks is scoped to shipped deps;
+  #     osv-scanner covers the dev tree too, with dev-only findings baselined.
+  #   - cargo audit in tauri-build runs only on PRs to main; this runs on every
+  #     relevant change.
+  supply-chain:
+    name: Supply-chain Scan
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.deps == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install osv-scanner
+        env:
+          OSV_VERSION: 2.6.0
+          OSV_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        run: |
+          set -euo pipefail
+          url="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/osv-scanner" "$url"
+          echo "$OSV_SHA256  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # Every lockfile in the repository, named rather than globbed: a new
+      # component's lockfile must be added here and to scripts/ci-select.mjs's
+      # DEPS_FILES, so it cannot be silently unscanned.
+      - name: Scan the dependency manifests (osv-scanner)
+        run: |
+          osv-scanner scan source --config osv-scanner.toml \
+            -L Server/go.mod \
+            -L Client/package-lock.json \
+            -L Client/src-tauri/Cargo.lock \
+            -L tools/mcp-introspect/package-lock.json \
+            -L package-lock.json
+
+      # cargo-deny reads the resolved graph through `cargo metadata`, so cargo
+      # has to be on PATH. Pinned the same way rust-tests pins it.
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Install cargo-deny
+        env:
+          CARGO_DENY_VERSION: 0.20.2
+          CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+        run: |
+          set -euo pipefail
+          url="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/cargo-deny.tar.gz" "$url"
+          echo "$CARGO_DENY_SHA256  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP" \
+            --strip-components=1 "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Report tool versions
+        run: osv-scanner --version && cargo-deny --version
+
+      # Advisories, licences and sources under Client/src-tauri/deny.toml.
+      - name: Check the Rust dependency policy (cargo-deny)
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+
   client-tests:
     name: Client Unit Tests
     needs: changes
@@ -722,6 +855,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -762,6 +897,8 @@ jobs:
         working-directory: Client/src-tauri/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install Linux system dependencies
         run: |
@@ -809,6 +946,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -870,6 +1009,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -914,6 +1055,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -961,6 +1104,8 @@ jobs:
             arch: arm64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -1020,6 +1165,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -1086,6 +1233,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
@@ -1122,6 +1271,8 @@ jobs:
         working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
@@ -1201,6 +1352,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:

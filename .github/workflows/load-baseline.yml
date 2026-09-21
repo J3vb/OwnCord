@@ -148,6 +148,8 @@ jobs:
         tls: ${{ fromJSON(inputs.profile == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -415,10 +417,10 @@ jobs:
           {
             echo "profile: $PROFILE"
             echo "tls_mode: $TLS_MODE"
-            echo "leg: ${{ matrix.leg }}"
+            echo "leg: ${MATRIX_LEG}"
             echo "host_nproc: $(nproc)"
             echo "host_mem_kb: $(awk '/MemTotal/{print $2}' /proc/meminfo)"
-            if [ "${{ matrix.leg }}" = "constrained" ]; then
+            if [ "${MATRIX_LEG}" = "constrained" ]; then
               echo "container_nproc: $(docker exec owncord-sut nproc)"
               echo "container_cpu_max: $(docker exec owncord-sut cat /sys/fs/cgroup/cpu.max)"
               echo "container_cpuset: $(docker exec owncord-sut cat /sys/fs/cgroup/cpuset.cpus.effective)"
@@ -428,6 +430,8 @@ jobs:
             echo "livekit_server: $LIVEKIT_VERSION"
             echo "lk_cli: $LK_CLI_VERSION"
           } | tee "$WORK/limits.txt"
+        env:
+          MATRIX_LEG: ${{ matrix.leg }}
 
       # Seeding is not measured; it only has to produce the population the
       # profile describes. No registration-mode change: a fresh install is
@@ -546,6 +550,8 @@ jobs:
           K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
+          INPUTS_VOICE: ${{ inputs.voice }}
+          MATRIX_LEG: ${{ matrix.leg }}
         run: |
           mkdir -p Server/scripts/k6/reports
 
@@ -573,7 +579,7 @@ jobs:
           # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
           if [ "$PROFILE" = "capacity" ]; then
-            PUBLISHERS="${{ inputs.voice }}" SUBSCRIBERS="${{ inputs.voice }}" \
+            PUBLISHERS="${INPUTS_VOICE}" SUBSCRIBERS="${INPUTS_VOICE}" \
             DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
             LIVEKIT_URL=http://127.0.0.1:7880 \
             REPORT="$WORK/voice-load.txt" \
@@ -624,7 +630,7 @@ jobs:
           fi
 
           echo "k6_rc=$k6_rc voice_rc=$voice_rc"
-          if [ "${{ matrix.leg }}" != "constrained" ]; then
+          if [ "${MATRIX_LEG}" != "constrained" ]; then
             # The ceiling leg is informational: a breach here says "the big box
             # is also busy", which is context, not a capacity result.
             echo "::notice::ceiling leg finished with k6=$k6_rc voice=$voice_rc (not gating)"
@@ -667,7 +673,7 @@ jobs:
       - name: Stop server
         if: always()
         run: |
-          if [ "${{ matrix.leg }}" = "constrained" ]; then
+          if [ "${MATRIX_LEG}" = "constrained" ]; then
             docker logs owncord-sut >"$WORK/server.log" 2>&1 || true
             docker stop -t 20 owncord-sut || true
             docker rm -f owncord-sut || true
@@ -675,6 +681,8 @@ jobs:
             kill "$(cat "$WORK/server.pid")" 2>/dev/null || true
             sleep 3
           fi
+        env:
+          MATRIX_LEG: ${{ matrix.leg }}
 
       # A cap in the code must never be published as the hardware ceiling
       # (OC-0447). The search now spreads its cohort over enough channels to
