@@ -48,6 +48,7 @@ import {
   type Compatibility,
 } from "@lib/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import { parseRegistrationMode } from "@lib/types";
 import type { ServerInfoResponse } from "@lib/types";
 import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
@@ -375,6 +376,7 @@ function runHealthChecks(
           compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
         } catch (infoErr) {
           if (!owner.isCurrent()) return;
+          serverInfoByHost.delete(profile.host);
           log.debug("server-info preflight failed", {
             host: profile.host,
             error: String(infoErr),
@@ -383,6 +385,7 @@ function runHealthChecks(
         connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
       } catch (err) {
         if (!owner.isCurrent()) return;
+        serverInfoByHost.delete(profile.host);
         // Record why the check failed (TLS/cert-pin/network) — otherwise a
         // "can't connect" report has no logged cause to diagnose.
         log.warn("health check failed", { host: profile.host, error: String(err) });
@@ -392,6 +395,7 @@ function runHealthChecks(
           version: null,
           onlineUsers: null,
         });
+        connectPage.updateCompatibility(profile.host, "unreachable", null);
       }
     })();
   }
@@ -664,6 +668,13 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     const connectPage = createConnectPage(
       {
+        // The mode is read from the per-host snapshot `runHealthChecks` fills
+        // beside the health probe. Unknown (no snapshot / unrecognised value)
+        // returns null, which LoginForm treats as invite-required.
+        getRegistrationMode(host) {
+          const info = serverInfoByHost.get(host);
+          return parseRegistrationMode(info?.registration_mode);
+        },
         async onLogin(host, username, password) {
           api.endSession();
           api.setConfig({ host });

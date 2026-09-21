@@ -67,7 +67,8 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
@@ -101,6 +102,12 @@ vi.mock("@lib/updater", () => ({
   }),
 }));
 const mockApiState = { host: "" };
+// server-info payload returned by the mocked client, so a test can drive the
+// registration-mode snapshot `runHealthChecks` stores per host (B7-15a).
+const mockServerInfo: { value: unknown } = {
+  value: { name: "Test Server", protocol_epoch: 1, browser_client_enabled: false },
+};
+const mockHealthFails = { value: false };
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
@@ -114,12 +121,12 @@ vi.mock("@lib/api", async (importOriginal) => {
           api.setConfig(cfg);
         }),
         login: (...args: unknown[]) => mockLogin(...args),
-        getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
-        getServerInfo: vi.fn().mockResolvedValue({
-          name: "Test Server",
-          protocol_epoch: 1,
-          browser_client_enabled: false,
-        }),
+        getHealth: vi.fn(() =>
+          mockHealthFails.value
+            ? Promise.reject(new Error("offline"))
+            : Promise.resolve({ version: null, online_users: null }),
+        ),
+        getServerInfo: vi.fn(() => Promise.resolve(mockServerInfo.value)),
       };
     }),
   };
@@ -130,6 +137,7 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  getRegistrationMode?: (host: string) => string | null;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -597,6 +605,64 @@ describe("main.ts session ownership", () => {
     } finally {
       sessionStorage.removeItem("owncord:quick-switch-target");
     }
+  });
+
+  it("reads the registration mode from the per-host server-info snapshot (B7-15a)", async () => {
+    // The startup health/health-check path fills serverInfoByHost; the connect
+    // page's getRegistrationMode callback reads it. An unavailable snapshot
+    // (fetch failed / older server) must yield null, never a widened mode.
+    expect(capturedConnectCallbacks.getRegistrationMode).toBeTypeOf("function");
+    expect(capturedConnectCallbacks.getRegistrationMode!("never-probed.example")).toBeNull();
+
+    // Reach the main page so a later clearAuth() is a real transition back to
+    // the connect page, which re-runs the health probe on mount.
+    mockServerInfo.value = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: "approval",
+    };
+    await loginAndReachAuthOk("snapshot.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Snapshot Co",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBe("approval");
+
+    // A failed health probe drops the snapshot and refreshes the form through
+    // updateCompatibility, so the stale "approval" form cannot outlive it.
+    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    connectPage.updateCompatibility.mockClear();
+    mockHealthFails.value = true;
+    await vi.advanceTimersByTimeAsync(15_000);
+    mockHealthFails.value = false;
+    expectConsole("warn", /health check failed/);
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+    expect(connectPage.updateCompatibility).toHaveBeenCalledWith(
+      "localhost:8443",
+      "unreachable",
+      null,
+    );
+
+    // An unrecognised mode string is unavailable, not "open".
+    mockServerInfo.value = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: "banana",
+    };
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
   });
 
   it("does not let an older same-host login overwrite the newer attempt", async () => {
