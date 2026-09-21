@@ -34,7 +34,6 @@ import {
   parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { initDeepLinks } from "@lib/deep-link";
 import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
@@ -44,6 +43,7 @@ import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 
+import { desktop } from "./platform/desktop";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 
@@ -1084,7 +1084,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
 function handleMessageDeepLink(channelId: number, messageId: number): void {
   jumpToMessage(channelId, messageId);
 }
-void initDeepLinks(handleInviteDeepLink, handleMessageDeepLink);
+void desktop.deepLinks!.init(handleInviteDeepLink, handleMessageDeepLink);
 
 // Initialize log persistence to disk (fire-and-forget)
 void initLogPersistence();

@@ -54,7 +54,11 @@ vi.mock("@lib/credentials", () => ({
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
 vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@lib/deep-link", () => ({ initDeepLinks: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/plugin-deep-link", () => ({
+  register: vi.fn().mockResolvedValue(undefined),
+  getCurrent: vi.fn().mockResolvedValue(null),
+  onOpenUrl: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
