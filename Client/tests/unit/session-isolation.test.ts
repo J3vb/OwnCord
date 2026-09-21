@@ -376,6 +376,29 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     expect(peakLiveTransports()).toBe(1);
   });
 
+  it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
+    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
+      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
+    );
+    await loginWithPassword(A, 1);
+
+    // SidebarArea's Add server: end the session with no switch target.
+    clearAuth("server_switch");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(deleteCredential).not.toHaveBeenCalled();
+
+    await loginWithPassword(B, 2);
+    const passwordLogins = mockLogin.mock.calls.length;
+
+    await quickSwitchTo(A);
+    await completeHandshake(1, A);
+
+    expect(mockLogin.mock.calls.length).toBe(passwordLogins);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().token).toBe("stored-token-a");
+    expect(peakLiveTransports()).toBe(1);
+  });
+
   it("still deletes the credential on an explicit logout", async () => {
     await loginWithPassword(A, 1);
 

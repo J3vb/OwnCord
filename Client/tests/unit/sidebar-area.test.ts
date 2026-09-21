@@ -2385,6 +2385,27 @@ describe("SidebarArea", () => {
       // No overlay should have been created for a page that no longer exists.
       expect((createQuickSwitchOverlay as MockedFn).mock.calls.length).toBe(callsBefore);
     });
+
+    it("leaves through Add server as a switch, keeping the departed sign-in", async () => {
+      const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      result.openQuickSwitch();
+      await vi.waitFor(() =>
+        expect((createQuickSwitchOverlay as MockedFn).mock.calls.length).toBe(callsBefore + 1),
+      );
+      const { onAddServer } = (createQuickSwitchOverlay as MockedFn).mock.calls.at(-1)![0] as {
+        onAddServer: () => void;
+      };
+
+      onAddServer();
+
+      expect(authStore.getState().isAuthenticated).toBe(false);
+      expect(authStore.getState().logoutReason).toBe("server_switch");
+
+      cleanup(result);
+    });
   });
 
   // -------------------------------------------------------------------------

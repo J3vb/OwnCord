@@ -797,8 +797,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           },
           onAddServer: () => {
             closeQuickSwitch();
-            // Navigate to ConnectPage so the user can add a new server
-            clearAuth();
+            // Navigate to ConnectPage so the user can add a new server,
+            // keeping this server's saved sign-in like a switch (B7-13).
+            clearAuth("server_switch");
           },
           onClose: closeQuickSwitch,
         });
