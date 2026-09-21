@@ -86,11 +86,14 @@ now — you won't see them again" and a copy affordance.
 
 ### 2.4 Sessions & delete account
 
-| Action           | Reaction                                                                                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| List sessions    | `GET /users/me/sessions`; show device/IP/last-used; current session marked                                                        |
-| Revoke a session | `DELETE /users/me/sessions/{id}`; optimistic removal + toast                                                                      |
-| Delete account   | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page |
+| Action                   | Reaction                                                                                                                                                                                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                |
+| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device                                                                                                        |
+| Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                 |
+| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`) |
+| Signed in elsewhere      | A second device connecting displaces this socket; the server sends `SESSION_REPLACED` first. The client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects (last connect wins)               |
+| Delete account           | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page                                                                                                                                          |
 
 ---
 
