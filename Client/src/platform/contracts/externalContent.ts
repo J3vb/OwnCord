@@ -50,8 +50,7 @@ export interface ExternalPreview {
 /** What `image()` accepts: a handle from `preview()`, or a URL the caller
  *  already holds (a YouTube thumbnail, an inline image, a GIF). */
 export type ExternalImageSource =
-  | { readonly handle: ExternalImageHandle }
-  | { readonly url: string };
+  { readonly handle: ExternalImageHandle } | { readonly url: string };
 
 export interface ExternalContentBroker {
   /** Fetch `url` and reduce it to its preview metadata (Open Graph for HTML,
