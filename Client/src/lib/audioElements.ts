@@ -13,7 +13,7 @@ import {
 import { loadPref, savePref, STORAGE_PREFIX } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
-import { parseUserId } from "@lib/livekitSession";
+import { parseUserId } from "../features/voice/sessionState";
 import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");

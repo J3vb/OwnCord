@@ -49,6 +49,11 @@ import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventH
 import { VoiceTokenManager } from "@lib/voiceTokenManager";
 import { LiveKitUrlResolver } from "@lib/livekitUrlResolver";
 import { attemptAutoReconnect } from "@lib/livekitReconnect";
+import type {
+  RemoteVideoCallback,
+  RemoteVideoRemovedCallback,
+  SessionState,
+} from "../features/voice/sessionState";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -62,59 +67,13 @@ const log = createLogger("livekitSession");
  *  SDK behind it). See `voice.store.ts` for the platform-capability contract. */
 export { setPttPollingLive } from "@stores/voice.store";
 
-// --- Pure helpers (no instance state) ---
+// --- Session state types + pure helpers (leaf module) ---
 
-/** Parse userId from LiveKit participant identity "user-{id}" or "user-{id}:{token}". Returns 0 if unparseable. */
-export function parseUserId(identity: string): number {
-  const match = identity.match(/^user-(\d+)(?::|$)/);
-  if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
-  return 0;
-}
-
-// --- Types ---
-
-export type RemoteVideoCallback = (
-  userId: number,
-  stream: MediaStream,
-  isScreenshare: boolean,
-) => void;
-export type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean) => void;
-type PendingVoiceJoin = {
-  readonly token: string;
-  readonly url: string;
-  readonly channelId: number;
-  readonly directUrl?: string;
-  readonly isKeyHolder?: boolean;
-};
-
-// --- State machine ---
-
-/** Discriminated-union session state. All connection-lifecycle fields live here.
- *  The "connecting" variant also carries the BUG-142 monotonic generation counter
- *  (joinGeneration) so superseded-join detection is co-located with the state. */
-type SessionState =
-  | { readonly type: "idle" }
-  | {
-      readonly type: "connecting";
-      readonly pendingJoin: PendingVoiceJoin | null;
-      readonly joinGeneration: number;
-    }
-  | {
-      readonly type: "connected";
-      readonly room: Room;
-      readonly channelId: number;
-      readonly latestToken: string;
-      readonly lastUrl: string;
-      readonly lastDirectUrl: string | undefined;
-    }
-  | {
-      readonly type: "reconnecting";
-      readonly channelId: number;
-      readonly latestToken: string;
-      readonly lastUrl: string;
-      readonly lastDirectUrl: string | undefined;
-      readonly ac: AbortController;
-    };
+export { parseUserId } from "../features/voice/sessionState";
+export type {
+  RemoteVideoCallback,
+  RemoteVideoRemovedCallback,
+} from "../features/voice/sessionState";
 
 // --- LiveKitSession class ---
 
