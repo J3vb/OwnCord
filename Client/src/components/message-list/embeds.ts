@@ -8,8 +8,8 @@ import { observeMedia } from "@lib/media-visibility";
 import { createLogger } from "@lib/logger";
 import {
   externalPartition,
-  fetchExternalImage,
   isExternalGif,
+  loadExternalImage,
   recoverEvictedImage,
 } from "./attachments";
 import { desktop } from "../../platform/desktop";
@@ -36,12 +36,16 @@ export interface OgMeta {
 const ogCache = new Map<string, OgMeta>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
 const ogInFlight = new Map<string, Promise<OgMeta>>();
+/** URLs whose preview was re-asked for after the broker forgot its image
+ *  handle — at most once per URL until the next cache clear. */
+const ogReasked = new Set<string>();
 let embedCacheGeneration = 0;
 
 export function clearEmbedCaches(): void {
   embedCacheGeneration += 1;
   ogCache.clear();
   ogInFlight.clear();
+  ogReasked.clear();
 }
 
 // -- OG fetch -----------------------------------------------------------------
@@ -163,45 +167,48 @@ export function applyOgMeta(
     descEl.style.display = "none";
   }
   if (meta.image !== null) {
-    showOgImage(meta, meta.image, imageWrap, url, true);
+    showOgImage(meta, meta.image, imageWrap, url);
   }
 }
 
-/** Show a preview's image. The broker forgets old handles, so when one no
- *  longer resolves the preview is asked for again — once — for a fresh one. */
+/** Show a preview's image. The broker forgets old handles, so when one has
+ *  expired the preview is asked for again — once per URL — for a fresh one. */
 function showOgImage(
   meta: OgMeta,
   handle: ExternalImageHandle,
   imageWrap: HTMLElement,
   url: string,
-  reask: boolean,
 ): void {
   const reaskPreview = (): void => {
-    if (!reask) return;
+    if (ogReasked.has(url)) return;
+    ogReasked.add(url);
     if (ogCache.get(url) === meta) ogCache.delete(url);
     void fetchOgMeta(url).then((fresh) => {
-      if (fresh.image !== null) showOgImage(fresh, fresh.image, imageWrap, url, false);
+      if (fresh.image !== null) showOgImage(fresh, fresh.image, imageWrap, url);
     });
   };
   // The image arrives as broker-fetched bytes (a same-origin blob: URL),
   // never as an og:image URL the webview would load behind the broker.
   const source = { handle };
-  void fetchExternalImage(source).then((src) => {
-    if (src === null) {
-      reaskPreview();
+  void loadExternalImage(source).then((result) => {
+    if (!result.ok) {
+      if (result.failure === "expired-handle") reaskPreview();
       return;
     }
+    const src = result.value;
     const img = createElement("img", {
       class: "msg-embed-link-img",
       src,
       alt: meta.title ?? "",
       loading: "lazy",
     });
-    recoverEvictedImage(img, source);
-    img.addEventListener("error", () => {
+    recoverEvictedImage(img, source, () => {
       img.remove();
       imageWrap.style.display = "none";
       reaskPreview();
+    });
+    img.addEventListener("error", () => {
+      imageWrap.style.display = "none";
     });
     // A GIF gets the freeze/play control; its blob: source is same-origin,
     // so the freeze canvas stays untainted.

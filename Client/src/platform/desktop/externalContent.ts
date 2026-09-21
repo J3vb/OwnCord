@@ -20,6 +20,7 @@ const FAILURES: readonly string[] = [
   "too-many-redirects",
   "oversized",
   "wrong-type",
+  "expired-handle",
   "unavailable",
 ] satisfies readonly ExternalContentFailure[];
 

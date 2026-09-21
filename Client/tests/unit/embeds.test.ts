@@ -404,30 +404,49 @@ describe("applyOgMeta", () => {
     expect(imageWrap.style.display).toBe("");
   });
 
-  it("adds no image when the broker refuses it", async () => {
-    imageMock.mockResolvedValue(refused("blocked-destination"));
+  for (const failure of [
+    "blocked-destination",
+    "oversized",
+    "wrong-type",
+    "unavailable",
+  ] as const) {
+    it(`adds no image and does not re-ask for the preview on a ${failure} refusal`, async () => {
+      imageMock.mockResolvedValue(refused(failure));
 
-    const { imageWrap } = apply(withImage());
+      const { imageWrap } = apply(withImage());
 
-    await vi.waitFor(() => {
-      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { handle: "h1" });
+      await vi.waitFor(() => {
+        expect(imageMock).toHaveBeenCalledWith(expect.any(String), { handle: "h1" });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(imageWrap.querySelector("img")).toBeNull();
+      expect(previewMock).not.toHaveBeenCalled();
     });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(imageWrap.querySelector("img")).toBeNull();
-  });
+  }
 
-  it("re-asks for the preview once when the broker has forgotten the handle", async () => {
-    const fresh = "h2" as ExternalImageHandle;
+  function previewWith(image: string): void {
     previewMock.mockResolvedValue({
       ok: true,
-      value: { title: "Title", description: null, siteName: null, image: fresh },
+      value: {
+        title: "Title",
+        description: null,
+        siteName: null,
+        image: image as ExternalImageHandle,
+      },
     });
+  }
+
+  function onlyHandleAnswers(live: string): void {
     imageMock.mockImplementation(async (_partition, source) =>
-      "handle" in source && source.handle === fresh
+      "handle" in source && source.handle === live
         ? { ok: true, value: new Blob(["x"], { type: "image/jpeg" }) }
-        : refused("unavailable"),
+        : refused("expired-handle"),
     );
+  }
+
+  it("re-asks for the preview once when the broker has forgotten the handle", async () => {
+    previewWith("h2");
+    onlyHandleAnswers("h2");
 
     const { imageWrap } = apply(withImage());
 
@@ -439,27 +458,42 @@ describe("applyOgMeta", () => {
     expect(imageWrap.style.display).toBe("");
   });
 
-  it("re-asks for the preview only once when the fresh handle fails too", async () => {
-    previewMock.mockResolvedValue({
-      ok: true,
-      value: {
-        title: "Title",
-        description: null,
-        siteName: null,
-        image: "h2" as ExternalImageHandle,
-      },
-    });
-    imageMock.mockResolvedValue(refused("unavailable"));
+  it("re-asks for a URL's preview only once per cache epoch", async () => {
+    previewWith("h2");
+    imageMock.mockResolvedValue(refused("expired-handle"));
 
-    const { imageWrap } = apply(withImage());
-
+    const first = apply(withImage());
     await vi.waitFor(() => {
       expect(imageMock).toHaveBeenCalledWith(expect.any(String), { handle: "h2" });
     });
+    const second = apply(withImage());
     await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(previewMock).toHaveBeenCalledTimes(1);
-    expect(imageMock).toHaveBeenCalledTimes(2);
-    expect(imageWrap.querySelector("img")).toBeNull();
+    expect(imageMock).toHaveBeenCalledTimes(3);
+    expect(first.imageWrap.querySelector("img")).toBeNull();
+    expect(second.imageWrap.querySelector("img")).toBeNull();
+  });
+
+  it("re-asks for the preview when an evicted image's handle has expired", async () => {
+    onlyHandleAnswers("h1");
+    const { imageWrap } = apply(withImage());
+    const stale = await appendedImg(imageWrap);
+
+    previewMock.mockResolvedValue(refused("unavailable"));
+    clearExternalImageCache();
+    previewMock.mockReset();
+    previewWith("h2");
+    onlyHandleAnswers("h2");
+    stale.dispatchEvent(new Event("error"));
+
+    await vi.waitFor(() => {
+      expect(imageWrap.querySelector("img")?.getAttribute("src")).toBe("blob:test/2");
+    });
+    expect(imageWrap.querySelectorAll("img")).toHaveLength(1);
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(previewMock).toHaveBeenCalledWith(expect.any(String), "https://example.com/page");
+    expect(imageWrap.style.display).toBe("");
   });
 
   it("hides image on error", async () => {

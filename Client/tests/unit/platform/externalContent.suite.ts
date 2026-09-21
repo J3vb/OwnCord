@@ -47,6 +47,7 @@ const failures: readonly ExternalContentFailure[] = [
   "too-many-redirects",
   "oversized",
   "wrong-type",
+  "expired-handle",
   "unavailable",
 ];
 
@@ -128,6 +129,14 @@ export function describeExternalContentSuite(
         await expect(ctx.subject.image(partition, { handle })).resolves.toEqual({
           ok: false,
           failure: "oversized",
+        });
+      });
+
+      check("resolves a forgotten handle as expired-handle", async () => {
+        ctx.native.refuses("expired-handle");
+        await expect(ctx.subject.image(partition, { handle })).resolves.toEqual({
+          ok: false,
+          failure: "expired-handle",
         });
       });
 

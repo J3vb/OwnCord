@@ -13,7 +13,10 @@ import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
-import type { ExternalImageSource } from "../../platform/contracts/externalContent";
+import type {
+  ExternalContentResult,
+  ExternalImageSource,
+} from "../../platform/contracts/externalContent";
 
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
@@ -487,7 +490,7 @@ const externalObjectUrls = new Map<string, string>();
 /** The subset of those URLs whose bytes are a GIF — the ones that get the
  *  freeze/play control. */
 const externalGifUrls = new Set<string>();
-const externalInFlight = new Map<string, Promise<string | null>>();
+const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>();
 /** FIFO cap: these copies live in the webview, outside the broker's byte
  *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
  *  because an image is far smaller than a clip. */
@@ -518,18 +521,26 @@ export function isExternalGif(objectUrl: string): boolean {
  *  was revoked — by the FIFO cap or a cache clear — and a GIF unfreeze or a
  *  lazy load after scrolling back reloads the stale URL. Register it before any other
  *  error listener: a recovered load stops the error from reaching them. */
-export function recoverEvictedImage(img: HTMLImageElement, source: ExternalImageSource): void {
+export function recoverEvictedImage(
+  img: HTMLImageElement,
+  source: ExternalImageSource,
+  onExpired?: () => void,
+): void {
   const recover = (event: Event): void => {
     if (!img.src.startsWith("blob:") || [...externalObjectUrls.values()].includes(img.src)) {
       return;
     }
     event.stopImmediatePropagation();
-    void fetchExternalImage(source).then((src) => {
-      if (src !== null) {
-        img.src = src;
+    void loadExternalImage(source).then((result) => {
+      if (result.ok) {
+        img.src = result.value;
         return;
       }
       img.removeEventListener("error", recover);
+      if (result.failure === "expired-handle" && onExpired !== undefined) {
+        onExpired();
+        return;
+      }
       img.dispatchEvent(new Event("error"));
     });
   };
@@ -540,24 +551,31 @@ export function recoverEvictedImage(img: HTMLImageElement, source: ExternalImage
  *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
  *  broker refused it or could not fetch it. */
 export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
+  return loadExternalImage(source).then((result) => (result.ok ? result.value : null));
+}
+
+/** `fetchExternalImage`, keeping the broker's failure class. */
+export function loadExternalImage(
+  source: ExternalImageSource,
+): Promise<ExternalContentResult<string>> {
   const key = "handle" in source ? `handle:${source.handle}` : `url:${source.url}`;
   const cached = externalObjectUrls.get(key);
-  if (cached !== undefined) return Promise.resolve(cached);
+  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached });
   const existing = externalInFlight.get(key);
   if (existing !== undefined) return existing;
 
   const epoch = externalEpoch;
-  const promise = (async (): Promise<string | null> => {
+  const promise = (async (): Promise<ExternalContentResult<string>> => {
     const result = await desktop.externalContent.image(externalPartition(), source);
     if (!result.ok) {
       log.debug("External image refused", { failure: result.failure });
-      return null;
+      return result;
     }
     const objectUrl = createObjectUrl(result.value);
-    if (objectUrl === null) return null;
+    if (objectUrl === null) return { ok: false, failure: "unavailable" };
     if (epoch !== externalEpoch) {
       revokeObjectUrl(objectUrl);
-      return null;
+      return { ok: false, failure: "unavailable" };
     }
     if (externalObjectUrls.size >= EXTERNAL_IMAGE_CACHE_MAX) {
       const firstKey = externalObjectUrls.keys().next().value;
@@ -572,7 +590,7 @@ export function fetchExternalImage(source: ExternalImageSource): Promise<string 
     }
     externalObjectUrls.set(key, objectUrl);
     if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
-    return objectUrl;
+    return { ok: true, value: objectUrl };
   })();
 
   externalInFlight.set(key, promise);

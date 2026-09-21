@@ -109,6 +109,7 @@ pub enum Failure {
     TooManyRedirects,
     Oversized,
     WrongType,
+    ExpiredHandle,
     Unavailable,
 }
 
@@ -121,6 +122,7 @@ impl Failure {
             Failure::TooManyRedirects => "too-many-redirects",
             Failure::Oversized => "oversized",
             Failure::WrongType => "wrong-type",
+            Failure::ExpiredHandle => "expired-handle",
             Failure::Unavailable => "unavailable",
         }
     }
@@ -530,7 +532,7 @@ struct Handles {
 }
 
 /// Handles kept before the oldest is forgotten; a forgotten handle's image
-/// is simply unavailable, and the renderer re-asks once for the preview.
+/// is refused as expired, and the renderer re-asks once for the preview.
 const MAX_HANDLES: usize = 4096;
 
 impl Handles {
@@ -687,7 +689,7 @@ impl ExternalContentState {
                 .by_id
                 .get(h)
                 .cloned()
-                .ok_or(Failure::Unavailable)?,
+                .ok_or(Failure::ExpiredHandle)?,
             (None, Some(u)) => u.to_string(),
             _ => return Err(Failure::BlockedDestination),
         };
@@ -1351,7 +1353,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             b.image("b", Some(&handle), None).await.err(),
-            Some(Failure::Unavailable)
+            Some(Failure::ExpiredHandle)
         );
     }
 

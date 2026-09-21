@@ -25,6 +25,9 @@ export type ExternalContentFailure =
   | "oversized"
   /** The response is not a type the broker hands to the renderer. */
   | "wrong-type"
+  /** The image handle is not (or no longer) known in this partition; a fresh
+   *  `preview()` mints a new one. */
+  | "expired-handle"
   /** Network, TLS, status or deadline failure, or no native host. */
   | "unavailable";
 
