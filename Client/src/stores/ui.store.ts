@@ -10,14 +10,28 @@ export interface UiState {
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   /**
-   * Host of a server that refused this client's protocol epoch as too old.
-   * main.ts consumes it when the connect page mounts, to offer the update
-   * there — the main page's own notifier never mounts on a refusal.
+   * A server that refused this client's protocol epoch. `host` is the server;
+   * the two epochs say which side updates. main.ts consumes it when the
+   * connect page mounts, to offer the update there — the main page's own
+   * notifier never mounts on a refusal.
    */
-  readonly updateRequiredHost: string | null;
+  readonly updateRequiredHost: UpdateRequired | null;
   readonly collapsedCategories: ReadonlySet<string>;
   readonly sidebarMode: "channels" | "dms";
   readonly activeDmUserId: number | null;
+}
+
+/**
+ * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
+ * the host plus the two epoch numbers, so the incompatible notice can name
+ * which side updates without a second store flag.
+ */
+export interface UpdateRequired {
+  readonly host: string;
+  /** The server's epoch, when the refusal carried one. */
+  readonly serverEpoch: number | null;
+  /** This build's epoch at refusal time. */
+  readonly clientEpoch: number;
 }
 
 const INITIAL_STATE: UiState = {
@@ -64,9 +78,9 @@ export function setTransientError(msg: string | null): void {
   }));
 }
 
-/** Set a persistent error message that requires user action. */
-export function setUpdateRequiredHost(host: string | null): void {
-  uiStore.setState((prev) => ({ ...prev, updateRequiredHost: host }));
+/** Set the server whose protocol epoch refused this client, with both epochs. */
+export function setUpdateRequiredHost(required: UpdateRequired | null): void {
+  uiStore.setState((prev) => ({ ...prev, updateRequiredHost: required }));
 }
 
 // ---------------------------------------------------------------------------

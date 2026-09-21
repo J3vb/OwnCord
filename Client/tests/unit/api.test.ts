@@ -1050,6 +1050,56 @@ describe("API Client", () => {
     });
   });
 
+  describe("server-info endpoint", () => {
+    const SERVER_INFO = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+    };
+
+    it("getServerInfo reads name, protocol_epoch and browser_client_enabled", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(SERVER_INFO));
+      await expect(api.getServerInfo("other-host:9443")).resolves.toEqual(SERVER_INFO);
+      expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/server-info");
+    });
+
+    it("getServerInfo tolerates unknown fields so later additions do not break it", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...SERVER_INFO, registration_mode: "open", retention: { days: 7 } }),
+      );
+      const info = await api.getServerInfo();
+      expect(info.protocol_epoch).toBe(1);
+      expect(info.name).toBe("Test Server");
+    });
+
+    it("getServerInfo throws ApiClientError on non-ok response", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        json: () => Promise.resolve({}),
+        headers: new Headers(),
+      } as unknown as Response);
+      await expect(api.getServerInfo()).rejects.toMatchObject({
+        status: 503,
+        code: "SERVER_INFO_FAILED",
+      });
+    });
+
+    it("getServerInfo rejects when the probe is aborted or times out", async () => {
+      mockFetch.mockRejectedValue(new DOMException("Aborted", "AbortError"));
+      await expect(api.getServerInfo("other-host:9443", 50)).rejects.toThrow(/Aborted/);
+    });
+
+    it("getServerInfo sets abort timeout with provided timeoutMs", async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      mockFetch.mockResolvedValue(jsonResponse(SERVER_INFO));
+      await api.getServerInfo(undefined, 5000);
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
+      setTimeoutSpy.mockRestore();
+    });
+  });
+
   describe("admin channel endpoints", () => {
     it("adminCreateChannel calls POST /admin/api/channels", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));

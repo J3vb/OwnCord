@@ -61,6 +61,8 @@ export const CAPABILITIES = [
   "integration", // Client E2E (real server and media) + Admin Panel E2E
   "native", // Client E2E (Windows native)
   "harness", // widen the development browser run from smoke to full
+  "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
+  "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
 ];
 
 /** Server paths outside the Client/Server pair that a Server test reads. */
@@ -100,6 +102,29 @@ const RUST_READS_OUTSIDE = new Set([
   // vector added in a server-only PR must still run the Rust suite, or the
   // corpus looks like a shared gate and only one side is ever checked.
   "Server/safefetch/testdata/classify_vectors.json",
+]);
+
+/**
+ * Dependency manifests and lockfiles, and the two policy files the scanners
+ * read. A change to any of these can add, remove or re-pin a dependency, so it
+ * is the set that selects the Supply-chain Scan job. Source-only changes under
+ * the same components are deliberately absent: they cannot move a version.
+ *
+ * Kept explicit rather than "any *.lock" because a new lockfile in a new
+ * component must not be scanned silently — the scanner's file list is written
+ * in ci.yml, and this table is where a fifth one has to be added.
+ */
+const DEPS_FILES = new Set([
+  "Server/go.mod",
+  "Server/go.sum",
+  "Client/package.json",
+  "Client/package-lock.json",
+  "Client/src-tauri/Cargo.toml",
+  "Client/src-tauri/Cargo.lock",
+  "tools/mcp-introspect/package.json",
+  "tools/mcp-introspect/package-lock.json",
+  "osv-scanner.toml", // the scan's ignore baseline
+  "Client/src-tauri/deny.toml", // cargo-deny's policy
 ]);
 
 /**
@@ -182,6 +207,7 @@ export function classify(paths) {
     if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
+    if (DEPS_FILES.has(path)) add("deps");
     if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
       add("harness");
     }
@@ -246,6 +272,12 @@ export function classify(paths) {
     }
 
     if (TOOLING_PREFIXES.some((p) => path.startsWith(p))) continue;
+
+    // A dependency or scanner-policy file that matched no component prefix
+    // above (osv-scanner.toml, the root manifests). `deps` was already added;
+    // there is nothing else to select and it must not reach the fallback, which
+    // would run every job for a one-line ignore-list edit.
+    if (DEPS_FILES.has(path)) continue;
 
     // Documentation at the repository root, and any path this classifier has
     // never been taught about.
