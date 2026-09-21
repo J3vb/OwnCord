@@ -1,6 +1,12 @@
 // Step 2.26 — WebSocket Dispatcher
 // Wires WS client events to store updates.
 // Each server message type maps to one or more store actions.
+//
+// This file is the composition: it holds every socket registration (the
+// only door server events enter the stores through — see
+// local/no-store-write-in-ws-on and features/dispatcherDoor.test.ts) and the
+// order of the two cross-domain handlers, `ready` and `error`. The handler
+// bodies live in features/*/wsHandlers.ts as plain functions.
 
 import type { WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
@@ -120,25 +126,22 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.READY, (payload) => {
+      // The order is behavior: pending messages -> voice snapshot (before
+      // setVoiceStates overwrites it) -> channels/roles/members -> voice
+      // restate + reconcile -> identity publish -> active channel -> message
+      // resync (reads the active channel just chosen) -> DMs -> mark read ->
+      // blocks -> emoji.
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
-
       applyReadyChannels(payload);
       applyReadyVoice(ws, payload);
-
       publishReadyIdentity(api, payload);
-
       const readyActive = applyReadyActiveChannel(payload);
-
       applyReadyMessageResync(api, clock);
-
       const dmPayloads = payload.dm_channels ?? [];
       applyReadyDms(payload);
-
       markReadyActiveChannelRead(readyActive);
-
       applyReadyBlocks(api);
-
       applyReadyEmoji(api);
 
       log.info("Ready payload applied", {
@@ -245,6 +248,11 @@ export function wireDispatcher(
         message: payload.message,
         id,
       });
+      // An ordered chain with early returns, and the order is behavior:
+      // connection (BANNED, SESSION_REPLACED) -> pending send/reaction ->
+      // the voice-join rollback, which deliberately runs before every
+      // code-specific branch and never consumes the frame -> capacity
+      // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
       if (handleMessagingError(payload, id)) return;
       handleVoiceJoinRollback();
