@@ -34,11 +34,14 @@ describe("handleAuthOk", () => {
 
 describe("handleAuthError", () => {
   it("names the refused host on a protocol-epoch refusal", () => {
-    handleAuthError({ listBlocks: vi.fn(), getConfig: () => ({ host: "h:1" }) }, {
-      message: "update the server",
-      code: "protocol_epoch_unsupported",
-      server_epoch: 9,
-    });
+    handleAuthError(
+      { listBlocks: vi.fn(), getConfig: () => ({ host: "h:1" }) },
+      {
+        message: "update the server",
+        code: "protocol_epoch_unsupported",
+        server_epoch: 9,
+      },
+    );
     expectConsole("error", /\[dispatcher\] Auth failed/);
 
     expect(uiStore.getState().updateRequiredHost).toMatchObject({ host: "h:1", serverEpoch: 9 });

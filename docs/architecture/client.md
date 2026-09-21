@@ -38,7 +38,7 @@ flowchart TB
     subgraph comm ["Communication layer (src/lib)"]
         API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
-        DISP["dispatcher.ts<br/>34 msg types → store mutators"]
+        DISP["dispatcher.ts<br/>34 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
         LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
         LKE["livekitE2EE.ts (1.0k LOC facade)<br/>+ features/voice/e2ee*<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
@@ -129,6 +129,6 @@ script), Stryker mutation testing
 strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.
 
-**Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
+**Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts`,
 `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`.

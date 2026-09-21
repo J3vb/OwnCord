@@ -9,7 +9,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `src/pages/`, `src/components/` UI · `src/features/voice/` modules
   extracted from `lib/livekitSession.ts` and `lib/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
-  `*.test.ts`; new or extracted code uses `src/features/`, relative imports
+  `*.test.ts`; `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
+  hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`; new or
+  extracted code uses `src/features/`, relative imports
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
@@ -40,7 +42,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   pins Node 26.
 - `src/lib/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
-  subscription registered there. Other modules do register their own
+  subscription registered there. The handler bodies live in
+  `src/features/*/wsHandlers.ts` as plain functions that only `dispatcher.ts`
+  may import and that never subscribe themselves
+  (`src/features/dispatcherDoor.test.ts` enforces both). Other modules do register their own
   `ws.on(...)` handlers for page-local UI (`main.ts`, `MainPage.ts`,
   `ChannelController.ts` — ringing, overlays, slow-mode timers); that is fine
   as long as they only _read_ store state. Writing a store from one of those
