@@ -67,7 +67,8 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
@@ -106,6 +107,7 @@ const mockApiState = { host: "" };
 const mockServerInfo: { value: unknown } = {
   value: { name: "Test Server", protocol_epoch: 1, browser_client_enabled: false },
 };
+const mockHealthFails = { value: false };
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
@@ -119,7 +121,11 @@ vi.mock("@lib/api", async (importOriginal) => {
           api.setConfig(cfg);
         }),
         login: (...args: unknown[]) => mockLogin(...args),
-        getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
+        getHealth: vi.fn(() =>
+          mockHealthFails.value
+            ? Promise.reject(new Error("offline"))
+            : Promise.resolve({ version: null, online_users: null }),
+        ),
         getServerInfo: vi.fn(() => Promise.resolve(mockServerInfo.value)),
       };
     }),
@@ -632,6 +638,21 @@ describe("main.ts session ownership", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBe("approval");
+
+    // A failed health probe drops the snapshot and refreshes the form through
+    // updateCompatibility, so the stale "approval" form cannot outlive it.
+    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    connectPage.updateCompatibility.mockClear();
+    mockHealthFails.value = true;
+    await vi.advanceTimersByTimeAsync(15_000);
+    mockHealthFails.value = false;
+    expectConsole("warn", /health check failed/);
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+    expect(connectPage.updateCompatibility).toHaveBeenCalledWith(
+      "localhost:8443",
+      "unreachable",
+      null,
+    );
 
     // An unrecognised mode string is unavailable, not "open".
     mockServerInfo.value = {

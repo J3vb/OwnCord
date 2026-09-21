@@ -395,6 +395,7 @@ function runHealthChecks(
           version: null,
           onlineUsers: null,
         });
+        connectPage.updateCompatibility(profile.host, "unreachable", null);
       }
     })();
   }
