@@ -52,7 +52,10 @@ const gz = (file) => gzipSync(readFileSync(`${DIST}/${file}`), { level: 9 }).len
 
 // --- startup closure -------------------------------------------------------
 const closure = new Set([entry.file]);
+const visited = new Set();
 const walk = (key) => {
+  if (visited.has(key)) return;
+  visited.add(key);
   const node = manifest[key];
   if (!node) return;
   for (const imp of node.imports ?? []) {

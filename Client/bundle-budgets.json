@@ -6,15 +6,18 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 60000
+      "budget": 60000,
+      "note": "Measured 56,855 B at dev 4c45d26a (B7-7)."
     },
     "livekit": {
       "budget": 135000,
-      "lazy": true
+      "lazy": true,
+      "note": "Measured 132,225 B at dev 4c45d26a (B7-7)."
     },
     "livekitSession": {
       "budget": 800000,
-      "lazy": true
+      "lazy": true,
+      "note": "Measured 20,192 B at dev 4c45d26a (B7-7), after the RNNoise deep import; the budget is decision 10's post-decomposition figure, left for B7-9 to ratchet."
     }
   },
   "forbidEmbeddedWasm": {
