@@ -1,7 +1,7 @@
 /**
- * owncord:// deep links. Seam: `initDeepLinks` is an exported function in
- * `lib/deep-link.ts` already, so the contract method below has that
- * function's exact signature. Parsing (`parseInviteLink`, `parseMessageLink`)
+ * owncord:// deep links. The contract method below has the exact signature of
+ * `lib/deep-link.ts`'s former `initDeepLinks`, which B7-5 moved to
+ * `platform/desktop/deepLinks.ts`. Parsing (`parseInviteLink`, `parseMessageLink`)
  * is pure and stays in `lib/deep-link.ts` — it needs no native seam at all.
  */
 export interface DeepLinks {

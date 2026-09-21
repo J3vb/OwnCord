@@ -1,7 +1,8 @@
 /**
- * No-seam: both call sites (`main.ts:86-89`, `settings/AdvancedTab.ts:70`)
- * invoke the native command inline inside an event listener — neither is
- * itself the seam function. The suite lands with the seam in B7-5.
+ * The webview's developer tools. Both call sites (`main.ts`'s dev-build
+ * shortcut, `settings/AdvancedTab.ts`'s button) invoked the native command
+ * inline; B7-5 lifted it in place, pinned it with `devTools.suite.ts`, then
+ * moved it to `platform/desktop/devTools.ts`.
  */
 export interface DevTools {
   open(): Promise<void>;

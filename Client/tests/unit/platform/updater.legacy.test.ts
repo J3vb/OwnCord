@@ -1,6 +1,7 @@
-// Legacy binding for the AppUpdater suite: today's `lib/updater.ts` exports,
-// wrapped with no cast against the contract. B7-5 re-runs
-// `updater.suite.ts` against `platform/desktop` instead of this file.
+// Legacy binding for the AppUpdater suite: the `lib/updater.ts` exports,
+// wrapped with no cast against the contract. B7-5 moved the install behind
+// `platform/desktop` and kept these exports as its callers' names, so the
+// suite runs here and in `updater.desktop.test.ts`.
 //
 // `updater.ts` keeps module-level install state across calls, so each test
 // needs a fresh module instance (mirrors

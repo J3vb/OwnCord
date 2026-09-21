@@ -130,7 +130,7 @@ export type { SettingsStore as PersistenceBackend };
  * both call sites construct it that way.
  */
 export function createTauriBackend(): SettingsStore {
-  const store = desktop.settings!;
+  const store = desktop.settings;
   return {
     async load(): Promise<SettingsSnapshot | null> {
       const raw = await store.load();
@@ -219,8 +219,8 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
   const doFetch: FetchFn =
     fetchFn ??
     ((input, init) => {
-      if (typeof input === "string") return desktop.http!.fetch(input, init);
-      return desktop.http!.fetch(input instanceof URL ? input.href : input.url, init);
+      if (typeof input === "string") return desktop.http.fetch(input, init);
+      return desktop.http.fetch(input instanceof URL ? input.href : input.url, init);
     });
 
   // Resolve the origin for a health check. With an injected fetch (tests) we

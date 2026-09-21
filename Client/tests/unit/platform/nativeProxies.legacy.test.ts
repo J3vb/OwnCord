@@ -1,9 +1,10 @@
 // Legacy binding for the NativeProxies (ensureHttpProxy) suite: today's
 // `lib/httpProxy.ts` export, wrapped with no cast against the seam subset of
-// the contract. B7-5 re-runs `nativeProxies.suite.ts` against
-// `platform/desktop` instead of this file.
+// the contract. B7-5 moved the tunnel behind `platform/desktop` and kept this
+// export as its callers' name, so the suite runs here and in
+// `nativeProxies.desktop.test.ts`.
 //
-// `httpProxy.ts` keeps a module-level `pending` map to de-duplicate
+// The tunnel keeps a module-level `pending` map to de-duplicate
 // concurrent starts, so each test needs a fresh module instance.
 import { vi } from "vitest";
 import type { NativeProxiesSeam } from "./nativeProxies.suite";

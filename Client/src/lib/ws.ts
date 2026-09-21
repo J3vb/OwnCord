@@ -164,7 +164,7 @@ export function createWsClient() {
   // One transport per client: the certificate listener it registers is
   // app-lifetime state, and a second client (a fresh login, a test) must not
   // inherit a registration the first one made.
-  const transport: SocketConnection = desktop.socket!.create();
+  const transport: SocketConnection = desktop.socket.create();
   let config: WsClientConfig | null = null;
   let state: ConnectionState = "disconnected";
   let reconnectAttempt = 0;

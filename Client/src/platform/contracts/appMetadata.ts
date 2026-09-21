@@ -1,7 +1,7 @@
 /**
- * No-seam: the one call site (`settings/LogsTab.ts:135-137`) reads the
- * version inline inside a DOM builder — there is no exported function to
- * bind a legacy suite against yet. The suite lands with the seam in B7-5.
+ * The app's own metadata. The one call site (`settings/LogsTab.ts`) read the
+ * version inline inside a DOM builder; B7-5 lifted it in place, pinned it with
+ * `appMetadata.suite.ts`, then moved it to `platform/desktop/appMetadata.ts`.
  */
 export interface AppMetadata {
   getVersion(): Promise<string>;
