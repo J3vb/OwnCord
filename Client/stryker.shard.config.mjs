@@ -16,6 +16,7 @@ export const shards = {
     "src/lib/roomEventHandlers.ts",
     "src/lib/screenShare.ts",
     "src/features/voice/sessionState.ts",
+    "src/features/voice/joinOrchestration.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",
