@@ -12,13 +12,12 @@ import {
   roomKeyToBase64,
   wrapRoomKey,
   unwrapRoomKey,
-  signEphemeralKey,
   verifyEphemeralKeySignature,
   importIdentityPublicKey,
   computeKeyFingerprint,
   computeRawKeyFingerprint,
 } from "@lib/e2eeCrypto";
-import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
+import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import {
@@ -29,6 +28,7 @@ import {
   setLocalSessionFingerprint,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { E2EEIdentity, rawFromBase64 } from "../features/voice/e2eeIdentity";
 
 const log = createLogger("livekitE2EE");
 
@@ -48,8 +48,15 @@ export class E2EEManager {
   readonly keyProvider = new ExternalE2EEKeyProvider();
 
   // ── Client-side E2EE state (ECDH key exchange) ───────────────────────────
+  /** Identity signing (F3 TOFU) and the ephemeral ECDH keypair. See e2eeIdentity.ts. */
+  private _identity = new E2EEIdentity({ getServerHost: () => this.deps.getServerHost() });
   /** Ephemeral ECDH P-256 keypair for the current voice session. */
-  private _ecdhKeyPair: CryptoKeyPair | null = null;
+  private get _ecdhKeyPair(): CryptoKeyPair | null {
+    return this._identity.ecdhKeyPair;
+  }
+  private set _ecdhKeyPair(value: CryptoKeyPair | null) {
+    this._identity.ecdhKeyPair = value;
+  }
   /** The 256-bit symmetric room key (plaintext). Only held by the key holder
    *  initially; other participants receive it via ECDH-wrapped offers. */
   private _roomKey: Uint8Array | null = null;
@@ -68,11 +75,6 @@ export class E2EEManager {
    *  superseded key and is discarded. Per sender because each client's epoch
    *  counter is local; reset when that sender's ephemeral key is replaced. */
   private _peerOfferEpochs: Map<number, number> = new Map();
-  /** This client's long-term ECDSA identity keypair (F3 TOFU), used to sign our
-   *  ephemeral announces. Loaded lazily from the OS keyring, cached per session. */
-  private _identityKeyPair: CryptoKeyPair | null = null;
-  private _identityScope: string | null = null;
-  private _identityGeneration = 0;
   /** True if this client is the key holder (longest-present participant). */
   private _isKeyHolder = false;
   /** Channel this exchange runs in, set at setupKeyExchange entry. The session
@@ -191,11 +193,11 @@ export class E2EEManager {
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
     const myPubKeyBase64 = await exportPublicKey(ecdhKeyPair.publicKey);
-    const myFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(myPubKeyBase64));
+    const myFingerprint = await computeRawKeyFingerprint(rawFromBase64(myPubKeyBase64));
     // Build the signed announce up front — this loads the identity key from
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
-    const announcePayload = await this.buildAnnouncePayload(myPubKeyBase64);
+    const announcePayload = await this._identity.buildAnnouncePayload(myPubKeyBase64);
 
     // Same check again after the keyring round trip — the widest window of
     // the three, and the next statements install OUR role and room key over
@@ -401,13 +403,11 @@ export class E2EEManager {
     await this.applyCurrentRoomKey(() => this._ecdhKeyPair === pair);
     if (this._ecdhKeyPair !== pair) return;
     const reconnectPubKey = await exportPublicKey(pair.publicKey);
-    const reconnectFingerprint = await computeRawKeyFingerprint(
-      this.rawFromBase64(reconnectPubKey),
-    );
+    const reconnectFingerprint = await computeRawKeyFingerprint(rawFromBase64(reconnectPubKey));
     if (this._ecdhKeyPair === pair) {
       setLocalSessionFingerprint(reconnectFingerprint);
     }
-    const reconnectAnnounce = await this.buildAnnouncePayload(reconnectPubKey);
+    const reconnectAnnounce = await this._identity.buildAnnouncePayload(reconnectPubKey);
     // Re-check ownership right before the send too: buildAnnouncePayload can
     // itself await a keyring round trip, another window for clearState() (or
     // a fresh setupKeyExchange) to have superseded this attempt.
@@ -464,77 +464,10 @@ export class E2EEManager {
 
   // ── Identity signing (F3 TOFU) ──────────────────────────────────────────
 
-  /** Decode a base64 raw-key string to bytes for sign/verify. Throws on bad
-   *  input (callers verifying a peer key already run inside try/catch). */
-  private rawFromBase64(base64: string): Uint8Array {
-    return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  }
-
-  /** Load (once per session) this client's long-term identity keypair from the
-   *  OS keyring so we can sign ephemeral announces. Returns null when there is
-   *  no server host (identity is host-scoped) OR no authenticated user id yet
-   *  (identity is host+user scoped, B3-3) — the announce then goes out
-   *  unsigned and peers treat us as a legacy/unverified client. A missing user
-   *  id must never fall back to a placeholder scope like `?? 0`:
-   *  `getOrCreateIdentityKeyPair` would mint (or migrate-and-DELETE the real
-   *  legacy key into) a bogus `host:0` keyring account, and a later
-   *  authenticated call would then mint a second, different keypair under
-   *  `host:<realId>` — so the published key and the announce signing key
-   *  permanently disagree and every peer's verifyPeerAnnounce reports a false
-   *  MITM "mismatch" (see identity.ts's `identityKeyPairCache` doc). */
-  private async ensureIdentityKeyPair(): Promise<CryptoKeyPair | null> {
-    const host = this.deps.getServerHost();
-    if (host === null) return null;
-    const myUserId = authStore.getState().user?.id;
-    if (myUserId === undefined) {
-      log.warn(
-        "E2EE: no authenticated user id yet — announcing unsigned instead of scoping under a placeholder id",
-      );
-      return null;
-    }
-    const scope = `${myUserId}@${host}`;
-    if (this._identityKeyPair && this._identityScope === scope) return this._identityKeyPair;
-    const generation = this._identityGeneration;
-    const pair = await getOrCreateIdentityKeyPair(host, myUserId);
-    if (
-      generation !== this._identityGeneration ||
-      host !== this.deps.getServerHost() ||
-      myUserId !== authStore.getState().user?.id
-    ) {
-      return null;
-    }
-    this._identityKeyPair = pair;
-    this._identityScope = scope;
-    return pair;
-  }
-
   /** Identity keys are host-scoped — the session drops the cached keypair when
-   *  the host changes (and on cleanupAll) so we never sign an announce with
-   *  another host's identity key. */
+   *  the host changes (and on cleanupAll). See E2EEIdentity.clearIdentityKeyPair. */
   clearIdentityKeyPair(): void {
-    this._identityGeneration++;
-    this._identityKeyPair = null;
-    this._identityScope = null;
-  }
-
-  /** Build the voice_e2ee_announce payload, signing the ephemeral public key
-   *  with our identity key (F3). Signing failures degrade to an unsigned
-   *  announce rather than blocking the join. */
-  private async buildAnnouncePayload(
-    ephemeralPubBase64: string,
-  ): Promise<{ public_key: string; signature?: string }> {
-    try {
-      const idKeyPair = await this.ensureIdentityKeyPair();
-      if (idKeyPair) {
-        const myUserId = authStore.getState().user?.id ?? 0;
-        const ephemeralRaw = this.rawFromBase64(ephemeralPubBase64);
-        const signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
-        return { public_key: ephemeralPubBase64, signature };
-      }
-    } catch (err) {
-      log.error("E2EE: failed to sign announce — sending unsigned", err);
-    }
-    return { public_key: ephemeralPubBase64 };
+    this._identity.clearIdentityKeyPair();
   }
 
   /**
@@ -612,7 +545,7 @@ export class E2EEManager {
     // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
     // accepted peer gets one — for an unverified peer it is the only value
     // that can be compared out of band, since there is no identity key.
-    const sessionFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(publicKeyBase64));
+    const sessionFingerprint = await computeRawKeyFingerprint(rawFromBase64(publicKeyBase64));
 
     // Genuine legacy peer: never pinned AND no published identity key — accept
     // but mark unverified (pin-pending). This is the only case the compatibility
@@ -632,7 +565,7 @@ export class E2EEManager {
     // (the pin when we have one, else the first-sight published key).
     const anchorBase64 = pin ?? publishedIdentity;
     const identityKey = await importIdentityPublicKey(anchorBase64);
-    const ephemeralRaw = this.rawFromBase64(publicKeyBase64);
+    const ephemeralRaw = rawFromBase64(publicKeyBase64);
     const ok = signatureBase64
       ? await verifyEphemeralKeySignature(identityKey, userId, ephemeralRaw, signatureBase64)
       : false;

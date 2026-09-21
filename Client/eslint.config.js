@@ -90,7 +90,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/lib/livekitE2EE.ts"],
+    // E2EEManager (livekitE2EE.ts) delegates to ownership modules extracted
+    // under src/features/voice/ — the epoch/keypair, verified-status and
+    // identity-scope invariants travelled with that code, so every one of
+    // those files is listed or the moved guards go unchecked.
+    files: ["src/lib/livekitE2EE.ts", "src/features/voice/e2eeIdentity.ts"],
     plugins: { local: localRules },
     rules: {
       "local/e2ee-epoch-needs-keypair-check": "error",

@@ -20,6 +20,7 @@ export const shards = {
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/remoteTracks.ts",
+    "src/features/voice/e2eeIdentity.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",
