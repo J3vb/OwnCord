@@ -6,7 +6,12 @@
 import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
 import { createLogger } from "@lib/logger";
-import { externalPartition, fetchExternalImage, isExternalGif } from "./attachments";
+import {
+  externalPartition,
+  fetchExternalImage,
+  isExternalGif,
+  recoverEvictedImage,
+} from "./attachments";
 import { desktop } from "../../platform/desktop";
 import type { ExternalImageHandle } from "../../platform/contracts/externalContent";
 
@@ -160,7 +165,8 @@ export function applyOgMeta(
   if (meta.image !== null) {
     // The image arrives as broker-fetched bytes (a same-origin blob: URL),
     // never as an og:image URL the webview would load behind the broker.
-    void fetchExternalImage({ handle: meta.image }).then((src) => {
+    const source = { handle: meta.image };
+    void fetchExternalImage(source).then((src) => {
       if (src === null) return;
       const img = createElement("img", {
         class: "msg-embed-link-img",
@@ -168,6 +174,7 @@ export function applyOgMeta(
         alt: meta.title ?? "",
         loading: "lazy",
       });
+      recoverEvictedImage(img, source);
       img.addEventListener("error", () => {
         imageWrap.style.display = "none";
       });

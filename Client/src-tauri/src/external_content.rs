@@ -636,6 +636,14 @@ impl ExternalContentState {
         inner
     }
 
+    /// Lock the partitioned state only if `partition` is still the live one.
+    /// A request that awaited the network may find a newer partition named in
+    /// the meantime; it must drop its result, never switch back and evict it.
+    fn current(&self, partition: &str) -> Option<std::sync::MutexGuard<'_, Partitioned>> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        (inner.partition == partition).then_some(inner)
+    }
+
     pub async fn preview(&self, partition: &str, url: &str) -> Result<ExternalPreview, Failure> {
         let key = format!("preview:{url}");
         let cached = self.enter(partition).cache.get(partition, &key);
@@ -644,14 +652,18 @@ impl ExternalContentState {
             _ => {
                 let fetched = self.fetch(url, Want::Page).await?;
                 let data = reduce_page(&fetched)?;
-                self.enter(partition)
-                    .cache
-                    .put(partition, &key, Cached::Preview(data.clone()));
+                if let Some(mut inner) = self.current(partition) {
+                    inner
+                        .cache
+                        .put(partition, &key, Cached::Preview(data.clone()));
+                }
                 data
             }
         };
-        let mut inner = self.enter(partition);
-        let image = data.image_url.map(|u| inner.handles.mint(u));
+        let image = match (data.image_url, self.current(partition)) {
+            (Some(u), Some(mut inner)) => Some(inner.handles.mint(u)),
+            _ => None,
+        };
         Ok(ExternalPreview {
             title: data.title,
             description: data.description,
@@ -685,9 +697,11 @@ impl ExternalContentState {
         }
         let fetched = self.fetch(&target, Want::Image).await?;
         let bytes = Arc::new(fetched.body);
-        self.enter(partition)
-            .cache
-            .put(partition, &key, Cached::Image(bytes.clone()));
+        if let Some(mut inner) = self.current(partition) {
+            inner
+                .cache
+                .put(partition, &key, Cached::Image(bytes.clone()));
+        }
         Ok(bytes)
     }
 
@@ -1226,7 +1240,11 @@ mod tests {
                     let mut buf = vec![0u8; 4096];
                     let n = sock.read(&mut buf).await.unwrap_or(0);
                     let head = String::from_utf8_lossy(&buf[..n]);
-                    let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    let mut path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    if let Some(rest) = path.strip_prefix("/slow") {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        path = rest.to_string();
+                    }
                     match route(&path) {
                         Some(resp) => {
                             let _ = sock.write_all(&resp).await;
@@ -1334,6 +1352,49 @@ mod tests {
         assert_eq!(
             b.image("b", Some(&handle), None).await.err(),
             Some(Failure::Unavailable)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_slow_fetch_for_an_old_partition_leaves_the_new_one_intact() {
+        let base = serve(routes).await;
+        let b = broker();
+        let (page, gif) = (format!("{base}/slow/page"), format!("{base}/slow/i.gif"));
+        let old = async { tokio::join!(b.preview("old", &page), b.image("old", None, Some(&gif))) };
+        let new = async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            b.preview("new", &format!("{base}/page"))
+                .await
+                .unwrap()
+                .image
+                .unwrap()
+        };
+        let ((old_preview, old_image), handle) = tokio::join!(old, new);
+        let old_preview = old_preview.unwrap();
+        assert_eq!(old_preview.title.as_deref(), Some("T"), "still returned");
+        assert_eq!(
+            old_preview.image, None,
+            "no handle minted for a stale partition"
+        );
+        assert_eq!(old_image.unwrap().as_slice(), GIF, "still returned");
+        {
+            let mut inner = b.current("new").expect("the new partition stays live");
+            assert_eq!(
+                inner.cache.entries.len(),
+                1,
+                "only the new preview is cached"
+            );
+            assert!(inner
+                .cache
+                .get("new", &format!("preview:{base}/page"))
+                .is_some());
+        }
+        assert_eq!(
+            b.image("new", Some(&handle), None)
+                .await
+                .unwrap()
+                .as_slice(),
+            GIF
         );
     }
 

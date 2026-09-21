@@ -89,6 +89,7 @@ import {
   clearExternalImageCache,
   fetchExternalImage,
   fetchImageAsDataUrl,
+  recoverEvictedImage,
   renderAttachment,
   setServerHost,
 } from "../../src/components/message-list/attachments";
@@ -249,5 +250,44 @@ describe("attachment cache clearing", () => {
     expect(brokerImageMock.mock.calls.length).toBe(calls);
     await fetchExternalImage({ url: url(1) }); // evicted: asked for again
     expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
+  });
+
+  it("re-requests an on-screen image whose blob: URL the FIFO cap evicted", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:live-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const img = document.createElement("img");
+    const otherError = vi.fn();
+    recoverEvictedImage(img, { url: url(0) });
+    img.addEventListener("error", otherError);
+    img.src = (await fetchExternalImage({ url: url(0) }))!;
+    expect(img.src).toBe("blob:live-1");
+
+    // A still-live URL that fails is a real failure: nothing to recover.
+    img.dispatchEvent(new Event("error"));
+    expect(otherError).toHaveBeenCalledTimes(1);
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:live-1");
+
+    // The element reloads its revoked URL (a GIF unfreeze, a lazy load).
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe(`blob:live-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
+    expect(otherError).toHaveBeenCalledTimes(1); // recovered, not reported
+
+    // When the broker can no longer serve it, the failure reaches the element.
+    for (let i = EXTERNAL_IMAGE_CACHE_MAX + 1; i <= 2 * EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    brokerImageMock.mockResolvedValue({ ok: false, failure: "unavailable" });
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(otherError).toHaveBeenCalledTimes(2));
   });
 });

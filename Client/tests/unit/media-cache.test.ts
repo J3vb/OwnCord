@@ -17,6 +17,7 @@ vi.mock("../../src/components/message-list/attachments", () => ({
   isSafeUrl: () => true,
   externalPartition: () => "test#0",
   fetchExternalImage: () => Promise.resolve(null),
+  recoverEvictedImage: () => {},
 }));
 
 vi.mock("../../src/components/message-list/embeds", () => ({
