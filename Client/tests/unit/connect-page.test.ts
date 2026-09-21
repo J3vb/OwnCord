@@ -1157,6 +1157,18 @@ describe("ConnectPage", () => {
       page.destroy?.();
     });
 
+    it("mounts the notice inside the form panel, directly above the form", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      // A direct child of the flex-row .connect-page would claim its own column.
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.parentElement!.classList.contains("form-container")).toBe(true);
+      expect(notice.nextElementSibling!.classList.contains("connect-form")).toBe(true);
+
+      page.destroy?.();
+    });
+
     it("keeps the notice hidden for a compatible server", () => {
       const page = createConnectPage(makeCallbacks(), testProfiles);
       page.mount(container);

@@ -75,6 +75,24 @@ test.describe("Incompatible protocol epoch", () => {
     await expect(page.locator("#host")).toHaveValue("localhost:8443");
   });
 
+  test("at the 940px minimum window the notice sits above the form without squeezing it", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 940, height: 600 });
+    await mockConnect(page, ROUTE_SERVER_INFO_NEWER);
+    await page.goto("/");
+    await expect(badge(page).first()).toHaveText("Client update needed", { timeout: 10_000 });
+    const hostBefore = (await page.locator("#host").boundingBox())!;
+
+    await page.locator(".server-item").first().click();
+    await expect(notice(page)).toHaveClass(/visible/);
+
+    const box = (await notice(page).boundingBox())!;
+    const host = (await page.locator("#host").boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(host.y);
+    expect(host.width).toBe(hostBefore.width);
+  });
+
   test("a compatible server raises no badge and no notice", async ({ page }) => {
     await mockConnect(page, ROUTE_SERVER_INFO_COMPATIBLE);
     await page.goto("/");

@@ -237,8 +237,11 @@ export function createConnectPage(
     appendChildren(root, serverPanel.element, loginForm.element);
 
     // The incompatible-epoch notice sits above the form so it is seen before
-    // another attempt; hidden until a mismatch is selected or refused.
-    root.insertBefore(incompatibleNotice.element, loginForm.element);
+    // another attempt; hidden until a mismatch is selected or refused. It goes
+    // inside the form panel: .connect-page is a flex row, so a direct child
+    // would claim its own column and squeeze the form.
+    const connectForm = loginForm.element.querySelector(".connect-form")!;
+    connectForm.parentElement!.insertBefore(incompatibleNotice.element, connectForm);
 
     // Status bar at bottom
     root.appendChild(loginForm.statusBarElement);
