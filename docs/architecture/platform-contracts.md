@@ -53,18 +53,18 @@ Measured with `git grep`, not estimated:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 19    |
 | Distinct `invoke` command names called from `Client/src/`  | 28    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 33    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 35    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
 | Files under `Client/src/platform/`                         | 27    |
 
-The handler count covers both attribute spellings — 21 `#[tauri::command]` plus
+The handler count covers both attribute spellings — 23 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
-brackets undercounts to 21. Attributes and registrations are two different
-counts: of the 33 attributed functions, 31 appear in `generate_handler!`
+brackets undercounts to 23. Attributes and registrations are two different
+counts: of the 35 attributed functions, 33 appear in `generate_handler!`
 (`Client/src-tauri/src/lib.rs`), and one of those, `open_devtools`, sits behind
-`#[cfg(feature = "devtools")]`, so a default build registers 30.
+`#[cfg(feature = "devtools")]`, so a default build registers 32.
 
 Reproduce:
 
