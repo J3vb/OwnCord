@@ -1,6 +1,8 @@
-// Legacy binding for the WindowControl suite: the in-place seam in
-// `lib/window-state.ts` (`nativeWindow`), bound with no cast. B7-5 re-runs
-// `window.suite.ts` against `platform/desktop` once the operations move there.
+// Desktop binding for the WindowControl suite: `platform/desktop`'s window
+// operations. B7-5 ran the same suite file against the in-place seam in
+// `lib/window-state.ts` first (proving it could fail and pinning today's
+// behaviour), then re-bound it here. The legacy binding is deleted with this
+// commit: its export is gone.
 import { vi } from "vitest";
 import type { MonitorRect, WindowControl } from "../../../src/platform/contracts/window";
 import { describeWindowControlSuite } from "./window.suite";
@@ -40,10 +42,10 @@ describeWindowControlSuite(async () => {
     size: { width: 0, height: 0 },
     centered: 0,
   });
-  const mod = await import("../../../src/lib/window-state");
-  const legacy: WindowControl = mod.nativeWindow;
+  const mod = await import("../../../src/platform/desktop/window");
+  const desktopBinding: WindowControl = mod.windowControl;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       maximized(value: boolean) {
         h.maximized = value;

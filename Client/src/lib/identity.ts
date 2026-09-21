@@ -37,7 +37,7 @@ export type { IdentityPinLookup, StoreIdentityPinResult };
 
 /** Save the identity private-key blob for a host to the OS keyring. */
 export async function saveIdentityKey(host: string, key: string): Promise<boolean> {
-  return desktop.identity!.saveKey(host, key);
+  return desktop.identity.saveKey(host, key);
 }
 
 /**
@@ -54,12 +54,12 @@ export async function saveIdentityKey(host: string, key: string): Promise<boolea
  * TOFU pin.
  */
 export async function loadIdentityKey(host: string): Promise<string | null> {
-  return desktop.identity!.loadKey(host);
+  return desktop.identity.loadKey(host);
 }
 
 /** Delete the identity private key for a host from the OS keyring. */
 export async function deleteIdentityKey(host: string): Promise<boolean> {
-  return desktop.identity!.deleteKey(host);
+  return desktop.identity.deleteKey(host);
 }
 
 // ── Peer identity pins (identity_pins.json, TOFU) ──────────────────────────
@@ -70,7 +70,7 @@ export async function storeIdentityPin(
   userId: string,
   pin: string,
 ): Promise<StoreIdentityPinResult> {
-  return desktop.identity!.storePin(host, userId, pin);
+  return desktop.identity.storePin(host, userId, pin);
 }
 
 /**
@@ -85,7 +85,7 @@ export async function storeIdentityPin(
  * every other wrapper in this module no-oping there.
  */
 export async function getIdentityPin(host: string, userId: string): Promise<IdentityPinLookup> {
-  return desktop.identity!.getPin(host, userId);
+  return desktop.identity.getPin(host, userId);
 }
 
 // ── High-level lifecycle ───────────────────────────────────────────────────

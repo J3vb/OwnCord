@@ -12,5 +12,5 @@ import { desktop } from "../platform/desktop";
  * (no trailing slash). Concurrency-safe per host.
  */
 export async function ensureHttpProxy(host: string): Promise<string> {
-  return desktop.nativeProxies!.ensureHttpProxy(host);
+  return desktop.nativeProxies.ensureHttpProxy(host);
 }

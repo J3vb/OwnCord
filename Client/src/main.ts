@@ -43,8 +43,6 @@ import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 
 import { desktop } from "./platform/desktop";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { listen } from "@tauri-apps/api/event";
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -82,9 +80,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
     e.preventDefault();
-    void import("@tauri-apps/api/core").then(({ invoke }) => {
-      void invoke("open_devtools");
-    });
+    void desktop.devTools.open();
   }
 });
 
@@ -95,7 +91,7 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   const href = (link as HTMLAnchorElement).href;
   if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    void openUrl(href);
+    void desktop.urlOpener.open(href);
   }
 });
 
@@ -106,7 +102,7 @@ installGlobalErrorHandlers();
 applyStoredAppearance();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming)
-void desktop.pushToTalk!.init();
+void desktop.pushToTalk.init();
 
 const appEl = document.getElementById("app");
 if (!appEl) {
@@ -291,8 +287,7 @@ void ws.startCertListener();
 // session is mounted the optional call is a no-op, matching the old raw
 // ws.send's "safe no-op when disconnected" behavior, so no auth guard is
 // needed here.
-void listen<string>("status-change", (e) => {
-  const status = e.payload;
+desktop.trayStatus.onStatusChange((status) => {
   if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
     // The tray's legacy "offline" spelling maps to "invisible" the same way
     // userStatus.ts migrates an old client's stored "offline" value (see its
@@ -1083,7 +1078,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
 function handleMessageDeepLink(channelId: number, messageId: number): void {
   jumpToMessage(channelId, messageId);
 }
-void desktop.deepLinks!.init(handleInviteDeepLink, handleMessageDeepLink);
+void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
 // Initialize log persistence to disk (fire-and-forget)
 void initLogPersistence();

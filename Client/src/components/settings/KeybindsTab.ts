@@ -49,8 +49,8 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
 
       // Use Rust-side key detection (supports mouse buttons, works globally).
       // Returns 0 on timeout (10s) if the user didn't press anything.
-      void desktop
-        .pushToTalk!.captureKeyPress()
+      void desktop.pushToTalk
+        .captureKeyPress()
         .then((vk) => {
           if (signal.aborted || attempt !== captureGeneration) return;
           capturing = false;
@@ -64,7 +64,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           currentVk = vk;
           setText(pttValue, vkName(vk));
           pttClear.style.display = "";
-          void desktop.pushToTalk!.updateKey(vk);
+          void desktop.pushToTalk.updateKey(vk);
         })
         .catch(() => {
           if (signal.aborted || attempt !== captureGeneration) return;
@@ -89,7 +89,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       pttValue.style.color = "";
       setText(pttValue, "Not set");
       pttClear.style.display = "none";
-      void desktop.pushToTalk!.updateKey(0);
+      void desktop.pushToTalk.updateKey(0);
     },
     { signal },
   );

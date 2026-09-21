@@ -51,7 +51,7 @@ Measured with `git grep`, not estimated:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 18    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 20    |
 | Distinct `invoke` command names called from `Client/src/`  | 28    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 33    |
 | TS calls with no matching Rust handler                     | 0     |

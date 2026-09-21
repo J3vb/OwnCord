@@ -54,7 +54,7 @@ function documentedCount(label: string): number | undefined {
 
 describe("platform-contracts count table matches the tree", () => {
   it("counts what the table says it counts", () => {
-    expect(tauriImporters).toBe(18);
+    expect(tauriImporters).toBe(20);
     expect(invokeNames).toBe(28);
     expect(commandHandlers).toBe(33);
   });

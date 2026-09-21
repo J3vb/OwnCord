@@ -1,6 +1,8 @@
-// Legacy binding for the UrlOpener suite: the in-place seam in
-// `lib/admin-panel.ts` (`nativeUrlOpener`), bound with no cast. B7-5 re-runs
-// `opener.suite.ts` against `platform/desktop` once the opener moves there.
+// Desktop binding for the UrlOpener suite: `platform/desktop`'s shell opener.
+// B7-5 ran the same suite file against the in-place seam in
+// `lib/admin-panel.ts` first (proving it could fail and pinning today's
+// behaviour), then re-bound it here. The legacy binding is deleted with this
+// commit: its export is gone.
 import { vi } from "vitest";
 import type { UrlOpener } from "../../../src/platform/contracts/opener";
 import { describeUrlOpenerSuite } from "./opener.suite";
@@ -10,10 +12,10 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 
 describeUrlOpenerSuite(async () => {
   openUrl.mockReset().mockResolvedValue(undefined);
-  const mod = await import("../../../src/lib/admin-panel");
-  const legacy: UrlOpener = mod.nativeUrlOpener;
+  const mod = await import("../../../src/platform/desktop/urlOpener");
+  const desktopBinding: UrlOpener = mod.urlOpener;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       failWith(error: unknown) {
         openUrl.mockRejectedValue(error);

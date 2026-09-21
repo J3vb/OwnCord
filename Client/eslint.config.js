@@ -110,20 +110,16 @@ export default tseslint.config(
     },
   },
   // --- Native imports stay behind the desktop seam (B7-1) ---
-  // The files below are the ones that still import @tauri-apps statically;
-  // B7-4/B7-5 delete entries as their call sites move behind src/platform/.
-  // The other native importers use dynamic `import()`, which this rule cannot
-  // see — tests/unit/platform-contracts-counts.test.ts guards those, and
-  // leaving them out of `ignores` means a new *static* import in them is still
-  // rejected.
+  // B7-5 moved the last call site behind src/platform/, so the seam is the only
+  // exemption. The rule sees static imports only; a dynamic `import()` of a
+  // native module outside the seam is caught by
+  // tests/unit/platform-contracts-counts.test.ts instead.
   {
     files: ["src/**/*.ts"],
     ignores: [
       // The seam itself: the desktop implementations are the only place a
       // static native import belongs.
       "src/platform/desktop/**",
-      "src/components/settings/AdvancedTab.ts",
-      "src/main.ts",
     ],
     rules: {
       "no-restricted-imports": [

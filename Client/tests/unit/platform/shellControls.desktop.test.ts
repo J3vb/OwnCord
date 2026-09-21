@@ -1,7 +1,9 @@
-// Legacy bindings for the DevTools, AppProcess and Autostart suites: the
-// in-place seams in `settings/AdvancedTab.ts` (`nativeDevTools`,
-// `nativeAppProcess`, `nativeAutostart`), bound with no cast. B7-5 re-runs
-// each suite against `platform/desktop` once its capability moves there.
+// Desktop bindings for the DevTools, AppProcess and Autostart suites:
+// `platform/desktop`'s `devTools`, `appProcess` and `autostart`. B7-5 ran the
+// same suite files against the in-place seams in `settings/AdvancedTab.ts`
+// first (proving they could fail and pinning today's behaviour), then re-bound
+// them here. The legacy bindings are deleted with this commit: their exports
+// are gone.
 import { vi } from "vitest";
 import type { AppProcess } from "../../../src/platform/contracts/appProcess";
 import type { DevTools } from "../../../src/platform/contracts/devTools";
@@ -32,17 +34,12 @@ vi.mock("@tauri-apps/plugin-autostart", () => {
   };
 });
 
-async function advancedTab(): Promise<
-  typeof import("../../../src/components/settings/AdvancedTab")
-> {
-  return import("../../../src/components/settings/AdvancedTab");
-}
-
 describeDevToolsSuite(async () => {
   invoke.mockReset().mockResolvedValue(undefined);
-  const legacy: DevTools = (await advancedTab()).nativeDevTools;
+  const desktopBinding: DevTools = (await import("../../../src/platform/desktop/devTools"))
+    .devTools;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       failWith(error: unknown) {
         invoke.mockRejectedValue(error);
@@ -54,9 +51,10 @@ describeDevToolsSuite(async () => {
 
 describeAppProcessSuite(async () => {
   relaunch.mockReset().mockResolvedValue(undefined);
-  const legacy: AppProcess = (await advancedTab()).nativeAppProcess;
+  const desktopBinding: AppProcess = (await import("../../../src/platform/desktop/appProcess"))
+    .appProcess;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       failWith(error: unknown) {
         relaunch.mockRejectedValue(error);
@@ -69,9 +67,10 @@ describeAppProcessSuite(async () => {
 describeAutostartSuite(async () => {
   autostart.enabled = false;
   autostart.error = null;
-  const legacy: Autostart = (await advancedTab()).nativeAutostart;
+  const desktopBinding: Autostart = (await import("../../../src/platform/desktop/autostart"))
+    .autostart;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       enabledIs(value: boolean) {
         autostart.enabled = value;

@@ -34,12 +34,12 @@ export type UpdateInstallState =
 export function subscribeToUpdateInstall(
   listener: (state: UpdateInstallState) => void,
 ): () => void {
-  return desktop.updater!.subscribeToInstall(listener);
+  return desktop.updater.subscribeToInstall(listener);
 }
 
 /** Check if a newer client version is available on the connected server. */
 export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
-  return desktop.updater!.checkForUpdate(serverUrl);
+  return desktop.updater.checkForUpdate(serverUrl);
 }
 
 /**
@@ -47,5 +47,5 @@ export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResu
  * All callers join the same operation, even across page changes.
  */
 export function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
-  return desktop.updater!.downloadAndInstallUpdate(serverUrl);
+  return desktop.updater.downloadAndInstallUpdate(serverUrl);
 }

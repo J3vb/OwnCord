@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const openUrl = vi.fn(async () => {});
+// Hoisted: the opener plugin is a static import of the desktop adapter, so the
+// mock factory runs before this module's own top-level code.
+const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl,
 }));
