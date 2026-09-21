@@ -7,18 +7,25 @@ import {
   handleVoiceState,
   snapshotReadyVoice,
 } from "./wsHandlers";
-import { voiceStore, resetVoiceStore, joinVoiceChannel } from "../../stores/voice.store";
+import {
+  voiceStore,
+  resetVoiceStore,
+  joinVoiceChannel,
+  setVoiceStatus,
+} from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
+import { expectConsole } from "../../../tests/helpers/console";
 
 vi.mock("../../lib/livekitSession", () => ({
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   leaveVoice: vi.fn(),
+  handleParticipantLeft: vi.fn(async () => {}),
   isVoiceSessionActive: vi.fn(() => false),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-import { setMuted, setDeafened } from "../../lib/livekitSession";
+import { setMuted, setDeafened, handleParticipantLeft } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
 
 function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> {
@@ -32,6 +39,10 @@ function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_
     ...overrides,
   } as Payload<"voice_state">;
 }
+
+const socketStub = () => ({ send: vi.fn(), disconnect: vi.fn() });
+const readyWith = (voiceStates: Payload<"voice_state">[]) =>
+  ({ voice_states: voiceStates }) as unknown as Payload<"ready">;
 
 beforeEach(() => {
   resetVoiceStore();
@@ -58,24 +69,49 @@ describe("bundle hygiene", () => {
 });
 
 describe("snapshotReadyVoice", () => {
-  it("captures the current channel's roster and the moderator flags", () => {
-    joinVoiceChannel(4);
-    voiceStore.setState((prev) => ({
-      ...prev,
-      voiceUsers: new Map([[4, new Map([[7, {} as never]])]]),
-      localServerMuted: true,
-    }));
+  it("sends voice_leave for a stale self voice state with no live session", () => {
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
 
-    expect(snapshotReadyVoice()).toEqual({
-      prevVoiceChannelId: 4,
-      prevVoicePeerIds: new Set([7]),
-      prevSelfServerMuted: true,
-      prevSelfServerDeafened: false,
-    });
+    apply(socket, readyWith([voiceState({})]));
+    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
+
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
-  it("captures an empty roster when not in voice", () => {
-    expect(snapshotReadyVoice().prevVoicePeerIds).toEqual(new Set());
+  it("reconciles only the peers who left the snapshotted channel during the outage", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          4,
+          new Map([
+            [7, {} as never],
+            [8, {} as never],
+          ]),
+        ],
+      ]),
+    }));
+    const apply = snapshotReadyVoice();
+
+    apply(socketStub(), readyWith([voiceState({}), voiceState({ user_id: 8 })]));
+
+    await vi.waitFor(() => expect(handleParticipantLeft).toHaveBeenCalledWith(7));
+    expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a moderator mute lifted while disconnected, using the pre-ready flags", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true, localMuted: true }));
+    const apply = snapshotReadyVoice();
+
+    apply(socketStub(), readyWith([voiceState({ server_muted: false })]));
+
+    await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
   });
 });
 

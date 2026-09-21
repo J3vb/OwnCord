@@ -4,8 +4,7 @@ import { dmStore } from "../../stores/dm.store";
 import { channelsStore, resetChannelsStore } from "../../stores/channels.store";
 import type { Channel } from "../../stores/channels.store";
 import { blocksStore, resetBlocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
-import { createReconnectClock } from "../connection/dispatchContext";
+import type { Payload } from "../connection/dispatchContext";
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -32,10 +31,6 @@ function dmRow(id: number, unreadCount: number, mentionCount: number): Channel {
 
 function ready(dmChannels: Payload<"ready">["dm_channels"]): Payload<"ready"> {
   return { dm_channels: dmChannels } as Payload<"ready">;
-}
-
-function ctxWith(api: DispatchContext["api"]): DispatchContext {
-  return { ws: { send: vi.fn(), disconnect: vi.fn() }, api, clock: createReconnectClock() };
 }
 
 beforeEach(() => {
@@ -150,7 +145,7 @@ describe("applyReadyBlocks", () => {
   it("clears blocked-by-them even without an api", () => {
     setUserBlockedByThem(7, true);
 
-    applyReadyBlocks(ctxWith(undefined));
+    applyReadyBlocks(undefined);
 
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
   });
@@ -158,7 +153,7 @@ describe("applyReadyBlocks", () => {
   it("applies the fetched block list", async () => {
     const listBlocks = vi.fn(async () => ({ blocked_user_ids: [3, 4] }));
 
-    applyReadyBlocks(ctxWith({ listBlocks }));
+    applyReadyBlocks({ listBlocks });
     await vi.waitFor(() => expect(blocksStore.getState().blockedByMe).toEqual(new Set([3, 4])));
   });
 });

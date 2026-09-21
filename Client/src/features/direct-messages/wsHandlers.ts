@@ -13,16 +13,13 @@ import type { DmChannel } from "../../stores/dm.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
 import { isTextLikeChannel } from "../../lib/types";
-import { createLogger } from "../../lib/logger";
 // SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
 // place the DM->channelsStore mirror row is synthesized (selectDmConversation
 // on open); the dm_channel_close fallback below needs the same synthesis for
 // a DM it is activating that was never opened this session.
 import { addDmToChannelsStore } from "../../pages/main-page/SidebarDmHelpers";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
-
-// Same logger tag as before the extraction, so the log lines are unchanged.
-const log = createLogger("dispatcher");
+import type { DispatchApi, Payload } from "../connection/dispatchContext";
+import { log } from "../connection/dispatchContext";
 
 /** Map one DM participant from the wire shape to the store's. */
 function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
@@ -97,8 +94,7 @@ export function applyReadyDms(payload: Payload<"ready">): void {
 }
 
 /** The block slice of `ready`: forget "blocked by them" and re-fetch our own blocks. */
-export function applyReadyBlocks(ctx: DispatchContext): void {
-  const { api } = ctx;
+export function applyReadyBlocks(api: DispatchApi | undefined): void {
   // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
   // is only known from a refused send, so it's stale after a reconnect —
   // clear it and re-fetch our own outgoing blocks authoritatively.

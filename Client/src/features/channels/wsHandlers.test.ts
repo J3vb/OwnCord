@@ -39,43 +39,42 @@ beforeEach(() => {
 });
 
 describe("applyReadyActiveChannel", () => {
-  it("auto-selects the first text channel when none is active", () => {
+  it("auto-selects the first text channel when none is active, and marks nothing read", () => {
     const seen = applyReadyActiveChannel(ready([channel(1, "voice", 0), channel(2, "text", 1)]));
 
     expect(channelsStore.getState().activeChannelId).toBe(2);
-    expect(seen).toEqual({ currentActive: null, activeChannelCleared: false });
+    expect(seen).toBeNull();
   });
 
-  it("clears an active channel the snapshot no longer has", () => {
+  it("clears an active channel the snapshot no longer has, and marks nothing read", () => {
     setChannels([channel(3, "text", 0)]);
     setActiveChannel(3);
 
     const seen = applyReadyActiveChannel(ready([channel(4, "text", 0)]));
 
     expect(channelsStore.getState().activeChannelId).toBeNull();
-    expect(seen).toEqual({ currentActive: 3, activeChannelCleared: true });
+    expect(seen).toBeNull();
   });
 
-  it("keeps an active DM that is still open even though it is not a server channel", () => {
+  it("keeps an active DM that is still open, and marks it read", () => {
     setChannels([channel(3, "text", 0)]);
     setActiveChannel(3);
 
     const seen = applyReadyActiveChannel(ready([channel(4, "text", 0)], [3]));
 
     expect(channelsStore.getState().activeChannelId).toBe(3);
-    expect(seen).toEqual({ currentActive: 3, activeChannelCleared: false });
+    expect(seen).toBe(3);
   });
 });
 
 describe("markReadyActiveChannelRead", () => {
   it("marks the channel the user was reading", () => {
-    markReadyActiveChannelRead({ currentActive: 5, activeChannelCleared: false });
+    markReadyActiveChannelRead(5);
     expect(markChannelRead).toHaveBeenCalledWith(5);
   });
 
-  it("marks nothing on a first connect or after the active channel was cleared", () => {
-    markReadyActiveChannelRead({ currentActive: null, activeChannelCleared: false });
-    markReadyActiveChannelRead({ currentActive: 5, activeChannelCleared: true });
+  it("marks nothing when there is no channel to mark", () => {
+    markReadyActiveChannelRead(null);
     expect(markChannelRead).not.toHaveBeenCalled();
   });
 });

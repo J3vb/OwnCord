@@ -7,9 +7,9 @@ import {
   setChannels,
   setRoles,
   setActiveChannel,
+  removeChannel,
   addChannel,
   updateChannel,
-  removeChannel,
 } from "../../stores/channels.store";
 import {
   setMembers,
@@ -24,12 +24,9 @@ import { updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { markChannelRead } from "../../lib/read-state";
-import { createLogger } from "../../lib/logger";
 import { showToast } from "../../lib/toast";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
-
-// Same logger tag as before the extraction, so the log lines are unchanged.
-const log = createLogger("dispatcher");
+import type { DispatchApi, Payload } from "../connection/dispatchContext";
+import { log } from "../connection/dispatchContext";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -38,14 +35,11 @@ export function applyReadyChannels(payload: Payload<"ready">): void {
   setMembers(payload.members);
 }
 
-/** What applyReadyActiveChannel saw, for markReadyActiveChannelRead. */
-export interface ReadyActiveChannel {
-  readonly currentActive: number | null;
-  readonly activeChannelCleared: boolean;
-}
-
-/** The active-channel slice of `ready`: auto-select, or clear a channel that is gone. */
-export function applyReadyActiveChannel(payload: Payload<"ready">): ReadyActiveChannel {
+/**
+ * The active-channel slice of `ready`: auto-select, or clear a channel that is
+ * gone. Returns the channel markReadyActiveChannelRead should mark read.
+ */
+export function applyReadyActiveChannel(payload: Payload<"ready">): number | null {
   // Auto-select the first text channel if none is active; clear it when
   // the channel this session was viewing is gone from the fresh snapshot
   // (deleted, or a DM closed elsewhere while this client was offline) so
@@ -74,29 +68,26 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): ReadyActiveC
       activeChannelCleared = true;
     }
   }
-  return { currentActive, activeChannelCleared };
+  return activeChannelCleared ? null : currentActive;
 }
 
 /** Mark the channel the user was already reading as read after `ready`. */
-export function markReadyActiveChannelRead({
-  currentActive,
-  activeChannelCleared,
-}: ReadyActiveChannel): void {
+export function markReadyActiveChannelRead(currentActive: number | null): void {
   // The server's read_states go stale while a channel stays focused
   // (channel_focus is sent once per mount, mark_read only from the context
   // menu), so a full-ready resync restates non-zero unread/mention counts
   // for the very channel the user is reading. Mark it read: this advances
   // the server read state and clears the local badges, for server channels
   // and DMs alike. Skipped on first connect (nothing was active yet) and
-  // when the block above just cleared a channel that's gone.
-  if (currentActive !== null && !activeChannelCleared) {
+  // when applyReadyActiveChannel just cleared a channel that's gone — it
+  // returns null for both.
+  if (currentActive !== null) {
     markChannelRead(currentActive);
   }
 }
 
 /** The custom-emoji slice of `ready`. */
-export function applyReadyEmoji(ctx: DispatchContext): void {
-  const { api } = ctx;
+export function applyReadyEmoji(api: DispatchApi | undefined): void {
   // Custom emoji are not in the ready payload (they are server-wide and
   // change rarely, so they do not belong in the per-session dump). Load
   // them once here; `emoji_update` keeps them fresh from then on. A

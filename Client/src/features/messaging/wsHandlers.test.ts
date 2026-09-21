@@ -11,18 +11,10 @@ import {
   resetMessagesStore,
 } from "../../stores/messages.store";
 import { createReconnectClock } from "../connection/dispatchContext";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
+import type { Payload } from "../connection/dispatchContext";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
-
-function ctx(): DispatchContext {
-  return {
-    ws: { send: vi.fn(), disconnect: vi.fn() },
-    api: undefined,
-    clock: createReconnectClock(),
-  };
-}
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
   return {
@@ -59,42 +51,42 @@ afterEach(() => {
 describe("handleChatMessage replay gate", () => {
   it("suppresses the notification for a frame timestamped before the reconnect handshake", () => {
     vi.useFakeTimers({ now: new Date("2026-03-15T10:00:10Z") });
-    const c = ctx();
-    c.clock.lastReconnectHandshakeAt = Date.now();
+    const clock = createReconnectClock();
+    clock.lastReconnectHandshakeAt = Date.now();
 
-    handleChatMessage(c, chat(1, "2026-03-15T10:00:05Z"));
+    handleChatMessage(clock, chat(1, "2026-03-15T10:00:05Z"));
 
     expect(notifyIncomingMessage).not.toHaveBeenCalled();
-    expect(c.clock.serverClockSkewMs).toBe(0);
+    expect(clock.serverClockSkewMs).toBe(0);
   });
 
   it("notifies a live frame and samples the server clock skew from it", () => {
     vi.useFakeTimers({ now: new Date("2026-03-15T10:00:10Z") });
-    const c = ctx();
-    c.clock.lastReconnectHandshakeAt = Date.now() - 1_000;
+    const clock = createReconnectClock();
+    clock.lastReconnectHandshakeAt = Date.now() - 1_000;
 
-    handleChatMessage(c, chat(1, "2026-03-15T10:00:12Z"));
+    handleChatMessage(clock, chat(1, "2026-03-15T10:00:12Z"));
 
     expect(notifyIncomingMessage).toHaveBeenCalledTimes(1);
-    expect(c.clock.serverClockSkewMs).toBe(-2_000);
+    expect(clock.serverClockSkewMs).toBe(-2_000);
   });
 
   it("stops classifying frames as replay once the gate window has passed", () => {
     vi.useFakeTimers({ now: new Date("2026-03-15T10:00:10Z") });
-    const c = ctx();
-    c.clock.lastReconnectHandshakeAt = Date.now() - 5_000;
+    const clock = createReconnectClock();
+    clock.lastReconnectHandshakeAt = Date.now() - 5_000;
 
-    handleChatMessage(c, chat(1, "2026-03-15T10:00:00Z"));
+    handleChatMessage(clock, chat(1, "2026-03-15T10:00:00Z"));
 
     expect(notifyIncomingMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("reads only its own context's clock", () => {
+  it("reads only the clock it is given", () => {
     vi.useFakeTimers({ now: new Date("2026-03-15T10:00:10Z") });
-    const stale = ctx();
-    stale.clock.lastReconnectHandshakeAt = Date.now();
+    const stale = createReconnectClock();
+    stale.lastReconnectHandshakeAt = Date.now();
 
-    handleChatMessage(ctx(), chat(1, "2026-03-15T10:00:05Z"));
+    handleChatMessage(createReconnectClock(), chat(1, "2026-03-15T10:00:05Z"));
 
     expect(notifyIncomingMessage).toHaveBeenCalledTimes(1);
   });

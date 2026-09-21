@@ -8,18 +8,15 @@ import {
   setVoiceStates,
   updateVoiceState,
   removeVoiceUser,
-  setVoiceConfig,
   joinVoiceChannel,
   leaveVoiceChannel,
+  setVoiceConfig,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
-import { createLogger } from "../../lib/logger";
 import { showToast } from "../../lib/toast";
 import { livekitSession } from "../connection/dispatchContext";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
-
-// Same logger tag as before the extraction, so the log lines are unchanged.
-const log = createLogger("dispatcher");
+import type { DispatchApi, DispatchWs, Payload } from "../connection/dispatchContext";
+import { log } from "../connection/dispatchContext";
 
 /**
  * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
@@ -77,16 +74,13 @@ function enforceModeratorAudioState(
   }
 }
 
-/** Pre-`ready` voice state, taken before setVoiceStates() overwrites it. */
-export interface ReadyVoiceSnapshot {
-  readonly prevVoiceChannelId: number | null;
-  readonly prevVoicePeerIds: ReadonlySet<number>;
-  readonly prevSelfServerMuted: boolean;
-  readonly prevSelfServerDeafened: boolean;
-}
-
-/** Snapshot the voice state `ready` is about to replace. */
-export function snapshotReadyVoice(): ReadyVoiceSnapshot {
+/**
+ * The voice slice of `ready`, in two steps. Call this first: it snapshots the
+ * voice state `ready` is about to replace, and returns the function that
+ * restates the voice states and reconciles a surviving session against that
+ * snapshot.
+ */
+export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">) => void {
   // OC-0201: snapshot the current voice channel's peer roster BEFORE the
   // wholesale replace below, so the reconciliation branch further down
   // can tell who left while the socket was down. Must run before
@@ -102,86 +96,78 @@ export function snapshotReadyVoice(): ReadyVoiceSnapshot {
   // still applied locally from before the drop) is released here too.
   const prevSelfServerMuted = voiceStore.getState().localServerMuted ?? false;
   const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
-  return { prevVoiceChannelId, prevVoicePeerIds, prevSelfServerMuted, prevSelfServerDeafened };
-}
+  return (ws, payload) => {
+    setVoiceStates(payload.voice_states);
 
-/** The voice slice of `ready`: restate voice states and reconcile a surviving session. */
-export function applyReadyVoice(
-  ctx: DispatchContext,
-  payload: Payload<"ready">,
-  snapshot: ReadyVoiceSnapshot,
-): void {
-  const { ws } = ctx;
-  const { prevVoiceChannelId, prevVoicePeerIds, prevSelfServerMuted, prevSelfServerDeafened } =
-    snapshot;
-  setVoiceStates(payload.voice_states);
-
-  // Defense-in-depth: if the ready payload shows us in a voice channel
-  // but we have no LiveKit session (e.g. after F5 reload), send
-  // voice_leave to clean up the stale state. The server should have
-  // already cleaned this up, but this handles edge cases.
-  //
-  // livekitSession is lazily imported, so instead of the synchronous
-  // isVoiceConnected() the check reads the voice store's lifecycle
-  // status: "idle" means no live or pending LiveKit session (a fresh
-  // reload always starts idle — exactly the stale case), while any other
-  // status means livekitSession is driving a session right now.
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  const selfVoiceState =
-    currentUserId !== 0
-      ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
-      : undefined;
-  const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
-  if (selfVoiceState !== undefined && !voiceSessionActive) {
-    log.warn("Stale voice state detected in ready payload — sending voice_leave");
-    ws.send({ type: "voice_leave", payload: {} });
-    leaveVoiceChannel();
-  } else if (selfVoiceState !== undefined) {
-    // A LiveKit session survived a WS drop that outlived it (nothing
-    // tears voice down on a socket drop alone) — OC-0014: this full
-    // resync is the only place a moderator mute/deafen issued while we
-    // were disconnected ever reaches us, since the mustFullResync tier
-    // that produced this `ready` never replays the voice_state that
-    // would otherwise have carried it.
-    enforceModeratorAudioState(
-      selfVoiceState.server_muted === true,
-      selfVoiceState.server_deafened === true,
-      prevSelfServerMuted,
-      prevSelfServerDeafened,
-      selfVoiceState.muted,
-      selfVoiceState.deafened,
-    );
-
-    // OC-0201: same gap, for E2EE. A full resync never replays the
-    // voice_leave for anyone who departed our voice channel during the
-    // outage — handleParticipantLeft (the only path that prunes a
-    // departed peer's key, rotates for membership forward secrecy, and
-    // re-runs the lowest-uid key-holder election) is otherwise only ever
-    // driven by a live voice_leave frame. Without this, a departed peer
-    // keeps a working room key indefinitely, and a client the server
-    // just elected key holder on reconnect (Server/ws hub.go
-    // registerNow -> updateKeyHolder) never self-elects. Only reconcile
-    // when the resync's self voice state is for the SAME channel the
-    // snapshot above was taken from — a channel change is out of scope
-    // here and comparing rosters across two different channels would
-    // misfire.
-    if (prevVoiceChannelId === selfVoiceState.channel_id) {
-      const currentVoicePeerIds = new Set(
-        payload.voice_states
-          .filter((vs) => vs.channel_id === selfVoiceState.channel_id)
-          .map((vs) => vs.user_id),
+    // Defense-in-depth: if the ready payload shows us in a voice channel
+    // but we have no LiveKit session (e.g. after F5 reload), send
+    // voice_leave to clean up the stale state. The server should have
+    // already cleaned this up, but this handles edge cases.
+    //
+    // livekitSession is lazily imported, so instead of the synchronous
+    // isVoiceConnected() the check reads the voice store's lifecycle
+    // status: "idle" means no live or pending LiveKit session (a fresh
+    // reload always starts idle — exactly the stale case), while any other
+    // status means livekitSession is driving a session right now.
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    const selfVoiceState =
+      currentUserId !== 0
+        ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
+        : undefined;
+    const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
+    if (selfVoiceState !== undefined && !voiceSessionActive) {
+      log.warn("Stale voice state detected in ready payload — sending voice_leave");
+      ws.send({ type: "voice_leave", payload: {} });
+      leaveVoiceChannel();
+    } else if (selfVoiceState !== undefined) {
+      // A LiveKit session survived a WS drop that outlived it (nothing
+      // tears voice down on a socket drop alone) — OC-0014: this full
+      // resync is the only place a moderator mute/deafen issued while we
+      // were disconnected ever reaches us, since the mustFullResync tier
+      // that produced this `ready` never replays the voice_state that
+      // would otherwise have carried it.
+      enforceModeratorAudioState(
+        selfVoiceState.server_muted === true,
+        selfVoiceState.server_deafened === true,
+        prevSelfServerMuted,
+        prevSelfServerDeafened,
+        selfVoiceState.muted,
+        selfVoiceState.deafened,
       );
-      for (const uid of prevVoicePeerIds) {
-        if (uid === currentUserId || currentVoicePeerIds.has(uid)) continue;
-        void livekitSession().then(({ handleParticipantLeft }) => handleParticipantLeft(uid));
+
+      // OC-0201: same gap, for E2EE. A full resync never replays the
+      // voice_leave for anyone who departed our voice channel during the
+      // outage — handleParticipantLeft (the only path that prunes a
+      // departed peer's key, rotates for membership forward secrecy, and
+      // re-runs the lowest-uid key-holder election) is otherwise only ever
+      // driven by a live voice_leave frame. Without this, a departed peer
+      // keeps a working room key indefinitely, and a client the server
+      // just elected key holder on reconnect (Server/ws hub.go
+      // registerNow -> updateKeyHolder) never self-elects. Only reconcile
+      // when the resync's self voice state is for the SAME channel the
+      // snapshot above was taken from — a channel change is out of scope
+      // here and comparing rosters across two different channels would
+      // misfire.
+      if (prevVoiceChannelId === selfVoiceState.channel_id) {
+        const currentVoicePeerIds = new Set(
+          payload.voice_states
+            .filter((vs) => vs.channel_id === selfVoiceState.channel_id)
+            .map((vs) => vs.user_id),
+        );
+        for (const uid of prevVoicePeerIds) {
+          if (uid === currentUserId || currentVoicePeerIds.has(uid)) continue;
+          void livekitSession().then(({ handleParticipantLeft }) => handleParticipantLeft(uid));
+        }
       }
     }
-  }
+  };
 }
 
 /** The identity slice of `ready` (F3): publish our identity public key. */
-export function publishReadyIdentity(ctx: DispatchContext, payload: Payload<"ready">): void {
-  const { api } = ctx;
+export function publishReadyIdentity(
+  api: DispatchApi | undefined,
+  payload: Payload<"ready">,
+): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
   // F3: publish our long-term identity public key so peers can pin+verify
   // us in voice. Idempotent (no PATCH when the server copy already matches)
@@ -223,8 +209,7 @@ export function handleVoiceState(payload: Payload<"voice_state">): void {
 // A moderator moved this client: tear the media session down and re-join the
 // destination through the ordinary join path (the server already removed us
 // from the old room and broadcast voice_leave).
-export function handleVoiceMoved(ctx: DispatchContext, payload: Payload<"voice_moved">): void {
-  const { ws } = ctx;
+export function handleVoiceMoved(ws: DispatchWs, payload: Payload<"voice_moved">): void {
   log.info("Moved to another voice channel by a moderator", {
     toChannelId: payload.to_channel_id,
   });

@@ -5,9 +5,6 @@ import { authStore } from "../../stores/auth.store";
 import { channelsStore, noteChannelMessage } from "../../stores/channels.store";
 import {
   addMessage,
-  editMessage,
-  deleteMessage,
-  bulkDeleteMessages,
   updateReaction,
   rollbackReaction,
   confirmSend,
@@ -20,6 +17,9 @@ import {
   setChannelLoading,
   setChannelLoadError,
   isWindowDetached,
+  editMessage,
+  deleteMessage,
+  bulkDeleteMessages,
 } from "../../stores/messages.store";
 import { setTyping } from "../../stores/members.store";
 import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "../../stores/dm.store";
@@ -29,12 +29,9 @@ import { invalidateReactionUsers } from "../../components/message-list/reaction-
 import { parseTimestamp } from "../../components/message-list/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
-import { createLogger } from "../../lib/logger";
 import { activatePendingMessages, acknowledgePendingMessage } from "../../lib/pendingMessages";
-import type { DispatchContext, Payload } from "../connection/dispatchContext";
-
-// Same logger tag as before the extraction, so the log lines are unchanged.
-const log = createLogger("dispatcher");
+import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
+import { log } from "../connection/dispatchContext";
 
 /**
  * OC-0024: serverClockSkewMs (see createReconnectClock) starts at 0 and is only
@@ -51,8 +48,7 @@ const log = createLogger("dispatcher");
  */
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
-export function handleChatMessage(ctx: DispatchContext, payload: Payload<"chat_message">): void {
-  const { clock } = ctx;
+export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
   if (payload.user.id === authStore.getState().user?.id) {
     acknowledgePendingMessage(payload.client_message_id);
   }
@@ -188,11 +184,10 @@ export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): vo
 }
 
 export function handleChatSendOk(
-  ctx: DispatchContext,
+  api: DispatchApi | undefined,
   payload: Payload<"chat_send_ok">,
   id: string | undefined,
 ): void {
-  const { api } = ctx;
   acknowledgePendingMessage(payload.client_message_id);
   if (id) {
     // Resolve the channel before confirmSend: that call drops the
@@ -280,10 +275,9 @@ export function handleSendFailure(id: string, code: string): void {
 
 /** The pending-message slice of `ready`: resume this user's queued sends. */
 export function activateReadyPendingMessages(
-  ctx: DispatchContext,
+  api: DispatchApi | undefined,
   payload: Payload<"ready">,
 ): void {
-  const { api } = ctx;
   const pendingUser = authStore.getState().user;
   if (api?.getConfig && pendingUser) {
     activatePendingMessages(
@@ -296,8 +290,7 @@ export function activateReadyPendingMessages(
 }
 
 /** The message-window slice of `ready`: after a full-ready resync, refetch the active channel. */
-export function applyReadyMessageResync(ctx: DispatchContext): void {
-  const { api, clock } = ctx;
+export function applyReadyMessageResync(api: DispatchApi | undefined, clock: ReconnectClock): void {
   // A second (or later) `ready` in this dispatcher's lifetime only ever
   // arrives from a full-ready resync (Server/ws/serve.go: a fresh connect
   // and a full resync are the only paths that send `ready` at all — a

@@ -14,7 +14,6 @@ import {
 import { channelsStore } from "@stores/channels.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import type { ApiClient } from "./api";
-import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { ServerMessageType as S, PROTOCOL_EPOCH } from "./protocolTypes";
 import {
@@ -54,7 +53,6 @@ import {
   handleDmChannelOpen,
 } from "../features/direct-messages/wsHandlers";
 import {
-  applyReadyVoice,
   handleVoiceConfig,
   handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
@@ -69,10 +67,7 @@ import {
   rollbackVideoOnError,
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
-import { createReconnectClock, livekitSession } from "../features/connection/dispatchContext";
-import type { DispatchContext } from "../features/connection/dispatchContext";
-
-const log = createLogger("dispatcher");
+import { createReconnectClock, livekitSession, log } from "../features/connection/dispatchContext";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -106,7 +101,7 @@ export function wireDispatcher(
     >,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
-  const ctx: DispatchContext = { ws, api, clock: createReconnectClock() };
+  const clock = createReconnectClock();
 
   // ── Auth ──────────────────────────────────────────────
 
@@ -120,10 +115,10 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
-      if (ctx.clock.hasAuthenticatedBefore) {
-        ctx.clock.lastReconnectHandshakeAt = Date.now();
+      if (clock.hasAuthenticatedBefore) {
+        clock.lastReconnectHandshakeAt = Date.now();
       }
-      ctx.clock.hasAuthenticatedBefore = true;
+      clock.hasAuthenticatedBefore = true;
       setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
 
       // The resume path can land with no ChannelTopic subscription: the hub
@@ -166,26 +161,26 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.READY, (payload) => {
-      activateReadyPendingMessages(ctx, payload);
-      const voiceSnapshot = snapshotReadyVoice();
+      activateReadyPendingMessages(api, payload);
+      const applyReadyVoice = snapshotReadyVoice();
 
       applyReadyChannels(payload);
-      applyReadyVoice(ctx, payload, voiceSnapshot);
+      applyReadyVoice(ws, payload);
 
-      publishReadyIdentity(ctx, payload);
+      publishReadyIdentity(api, payload);
 
       const readyActive = applyReadyActiveChannel(payload);
 
-      applyReadyMessageResync(ctx);
+      applyReadyMessageResync(api, clock);
 
       const dmPayloads = payload.dm_channels ?? [];
       applyReadyDms(payload);
 
       markReadyActiveChannelRead(readyActive);
 
-      applyReadyBlocks(ctx);
+      applyReadyBlocks(api);
 
-      applyReadyEmoji(ctx);
+      applyReadyEmoji(api);
 
       log.info("Ready payload applied", {
         channels: payload.channels.length,
@@ -204,7 +199,7 @@ export function wireDispatcher(
 
   // ── Chat Messages ─────────────────────────────────────
 
-  unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(ctx, payload)));
+  unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
 
   unsubs.push(ws.on(S.CHAT_EDITED, handleChatEdited));
 
@@ -212,7 +207,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_BULK_DELETED, handleChatBulkDeleted));
 
-  unsubs.push(ws.on(S.CHAT_SEND_OK, (payload, id) => handleChatSendOk(ctx, payload, id)));
+  unsubs.push(ws.on(S.CHAT_SEND_OK, (payload, id) => handleChatSendOk(api, payload, id)));
 
   // ── Reactions ───────────────────────────────────────────
 
@@ -252,7 +247,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.VOICE_STATE, handleVoiceState));
 
-  unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ctx, payload)));
+  unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload)));
 
   unsubs.push(ws.on(S.VOICE_DISCONNECTED, handleVoiceDisconnected));
 

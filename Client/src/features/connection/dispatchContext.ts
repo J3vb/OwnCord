@@ -4,8 +4,12 @@
 // export plain functions it calls with this context. Built once per
 // wireDispatcher call, so a fresh login always starts with a fresh clock.
 import type { WsClient } from "../../lib/ws";
+import { createLogger } from "../../lib/logger";
 import type { ApiClient } from "../../lib/api";
 import type { ServerMessage } from "../../lib/types";
+
+/** The dispatcher's logger, shared by every handler module so their lines keep the `[dispatcher]` tag. */
+export const log = createLogger("dispatcher");
 
 /** The payload type of one server message type. */
 export type Payload<T extends ServerMessage["type"]> = Extract<
@@ -34,11 +38,8 @@ export interface ReconnectClock {
   serverClockSkewMs: number;
 }
 
-export interface DispatchContext {
-  readonly ws: Pick<WsClient, "send" | "disconnect">;
-  readonly api: DispatchApi | undefined;
-  readonly clock: ReconnectClock;
-}
+/** The socket surface a handler may use: send and disconnect, never subscribe. */
+export type DispatchWs = Pick<WsClient, "send" | "disconnect">;
 
 /**
  * A fresh reconnect clock. Called inside wireDispatcher, never at module
