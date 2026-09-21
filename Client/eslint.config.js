@@ -125,7 +125,6 @@ export default tseslint.config(
       "src/components/settings/AdvancedTab.ts",
       "src/lib/httpProxy.ts",
       "src/lib/livekitUrlResolver.ts",
-      "src/lib/updater.ts",
       "src/main.ts",
     ],
     rules: {

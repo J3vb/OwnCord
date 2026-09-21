@@ -1,9 +1,9 @@
-// Legacy binding for the AppUpdater suite: the `lib/updater.ts` exports,
-// wrapped with no cast against the contract. B7-5 moved the install behind
-// `platform/desktop` and kept these exports as its callers' names, so the
-// suite runs here and in `updater.desktop.test.ts`.
+// Desktop binding for the AppUpdater suite: `platform/desktop`'s updater.
+// B7-5 runs the same suite file here and in `updater.legacy.test.ts`, whose
+// `lib/updater.ts` exports still exist; green in both is the evidence the
+// move changed nothing.
 //
-// `updater.ts` keeps module-level install state across calls, so each test
+// The updater keeps module-level install state across calls, so each test
 // needs a fresh module instance (mirrors
 // tests/integration/client-updater-lifecycle.test.ts).
 import { vi } from "vitest";
@@ -28,15 +28,11 @@ describeAppUpdaterSuite(async () => {
   relaunch.mockReset().mockResolvedValue(undefined);
   listen.mockReset().mockResolvedValue(unlisten);
 
-  const mod = await import("../../../src/lib/updater");
-  const legacy: AppUpdater = {
-    checkForUpdate: mod.checkForUpdate,
-    downloadAndInstallUpdate: mod.downloadAndInstallUpdate,
-    subscribeToInstall: mod.subscribeToUpdateInstall,
-  };
+  const mod = await import("../../../src/platform/desktop/updater");
+  const desktopBinding: AppUpdater = mod.updater;
 
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       checkSucceedsWith(result) {
         invoke.mockImplementation((cmd: string) =>

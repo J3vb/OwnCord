@@ -11,6 +11,7 @@ import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
 import { settings } from "./settings";
 import { socket } from "./socket";
+import { updater } from "./updater";
 import type { Platform } from "../contracts";
 
 export const desktop: Partial<Platform> = {
@@ -24,4 +25,5 @@ export const desktop: Partial<Platform> = {
   pushToTalk,
   settings,
   socket,
+  updater,
 };
