@@ -553,7 +553,7 @@ export function fetchExternalImage(source: ExternalImageSource): Promise<string 
 
   const epoch = externalEpoch;
   const promise = (async (): Promise<string | null> => {
-    const result = await desktop.externalContent!.image(externalPartition(), source);
+    const result = await desktop.externalContent.image(externalPartition(), source);
     if (!result.ok) {
       log.debug("External image refused", { failure: result.failure });
       return null;

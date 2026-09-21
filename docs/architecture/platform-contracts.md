@@ -4,9 +4,10 @@
 wrote the contracts and B7-4/B7-5 moved every native call behind
 `Client/src/platform/desktop/`; the `browser/` half is B8, deferred.
 **Measured against:** B7-5 (branch `fm/b7-5-impl`, 2026-09-21), which moved
-the last native importers behind the seam, so all twenty now live under
-`platform/desktop/`, and B7-16 (branch `fm/b7-16-impl`, 2026-09-21), which
-added the external-content broker contract and its two native commands; the
+the last native importers behind the seam, and B7-16 (branch `fm/b7-16-impl`,
+2026-09-21), which added the external-content broker contract, its two native
+commands and a twenty-first importer, so all twenty-one live under
+`platform/desktop/`; the
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -55,7 +56,7 @@ Measured with `git grep`, not estimated:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 20    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 21    |
 | Distinct `invoke` command names called from `Client/src/`  | 30    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 35    |
 | TS calls with no matching Rust handler                     | 0     |

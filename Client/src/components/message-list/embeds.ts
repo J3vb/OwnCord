@@ -64,7 +64,7 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
 
   log.debug("fetchOgMeta START", url.slice(0, 100));
   const promise = (async (): Promise<OgMeta> => {
-    const result = await desktop.externalContent!.preview(externalPartition(), url);
+    const result = await desktop.externalContent.preview(externalPartition(), url);
     if (!result.ok) log.debug("fetchOgMeta refused", { failure: result.failure });
     const meta: OgMeta = result.ok
       ? {

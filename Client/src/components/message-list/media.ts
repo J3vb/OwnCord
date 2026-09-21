@@ -179,7 +179,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
     // The broker fetches and parses the oEmbed document and hands back only
     // its title — the renderer never reads the JSON.
-    void desktop.externalContent!.preview(externalPartition(), oembedUrl).then((result) => {
+    void desktop.externalContent.preview(externalPartition(), oembedUrl).then((result) => {
       if (generation !== mediaCacheGeneration) {
         setText(titleLink, "YouTube Video");
         return;
