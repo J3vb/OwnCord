@@ -515,8 +515,8 @@ export function isExternalGif(objectUrl: string): boolean {
 }
 
 /** Re-request `img`'s image through the broker when the blob: URL it shows
- *  was evicted by the FIFO cap and revoked — a GIF unfreeze or a lazy load
- *  after scrolling back reloads the stale URL. Register it before any other
+ *  was revoked — by the FIFO cap or a cache clear — and a GIF unfreeze or a
+ *  lazy load after scrolling back reloads the stale URL. Register it before any other
  *  error listener: a recovered load stops the error from reaching them. */
 export function recoverEvictedImage(img: HTMLImageElement, source: ExternalImageSource): void {
   const recover = (event: Event): void => {
