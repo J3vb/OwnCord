@@ -65,6 +65,16 @@ describe("platform-contracts count table matches the tree", () => {
     expect(documentedCount("handlers in `Client/src-tauri/`")).toBe(commandHandlers);
   });
 
+  // B7-5 moved the last one: the desktop adapter is the only native importer.
+  // eslint only sees static imports; this also catches a dynamic `import()`.
+  it("finds every native importer inside platform/desktop", () => {
+    const outside = readdirSync(clientSrc, { recursive: true, encoding: "utf8" })
+      .filter((entry) => /\.(ts|tsx)$/.test(entry))
+      .filter((entry) => !entry.startsWith(path.join("platform", "desktop") + path.sep))
+      .filter((entry) => readFileSync(path.join(clientSrc, entry), "utf8").includes("@tauri-apps"));
+    expect(outside).toEqual([]);
+  });
+
   it("pins the measurement to a commit", () => {
     expect(doc.match(/^\*\*Measured against:\*\* (.+)$/m)?.[1]?.trim()).toBeTruthy();
   });

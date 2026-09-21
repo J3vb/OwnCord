@@ -16,12 +16,15 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   part of this component, so reading it is an ordinary unit test. The rule
   is in [docs/contributing.md](../docs/contributing.md#testing)
 - `src/platform/contracts/` holds the type-only desktop/browser seam
-  interfaces (B7-3), and `src/platform/desktop/` is an empty, typed
-  registry B7-4/B7-5 fill in one capability at a time. **No call site has
-  moved yet** — every native import still lives exactly where
+  interfaces (B7-3), and `src/platform/desktop/` implements every one of
+  them (B7-4/B7-5). It is the only place under `src/` a `@tauri-apps` import
+  may appear — eslint enforces the static ones and
+  `tests/unit/platform-contracts-counts.test.ts` counts the rest. Feature
+  code reaches native APIs through the `desktop` registry
+  (`platform/desktop/index.ts`), which is statically reachable from the
+  entry: keep a native module that is lazy today a dynamic `import()` inside
+  its desktop method, or it lands in the startup chunk. Map and rules:
   [docs/architecture/platform-contracts.md](../docs/architecture/platform-contracts.md)
-  says it does, and feature code must not import from `platform/desktop`
-  until its first capability lands there.
 
 ## Gotchas
 

@@ -1,6 +1,6 @@
 /**
  * The tray's presence picker. Added in B7-5: the tray menu emits the chosen
- * status (`src-tauri/src/tray.rs`) and `main.ts` applies it. The payload is
+ * status from the native host and `main.ts` applies it. The payload is
  * handed over unvalidated, exactly as the native host sent it — checking it
  * and mapping the tray's legacy "offline" to "invisible" is behaviour, and
  * stays in `main.ts`.

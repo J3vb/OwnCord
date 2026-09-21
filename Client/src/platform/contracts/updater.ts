@@ -3,9 +3,13 @@
  * `downloadAndInstallUpdate` and `subscribeToUpdateInstall` are exported
  * functions in `lib/updater.ts` already, so each contract method below has
  * that function's exact signature (progress is still delivered through a
- * subscribed listener, not a return value). `Autostart` is no-seam: today it
- * is inline dynamic-import calls inside the private `buildAutostartRow`
- * (`settings/AdvancedTab.ts`) — its suite lands with the seam in B7-5.
+ * subscribed listener, not a return value). Both halves live in
+ * `platform/desktop` since B7-5 (`updater.ts`, `autostart.ts`); the
+ * `lib/updater.ts` names stay as their callers' imports. `Autostart` was
+ * inline in the private `buildAutostartRow` (`settings/AdvancedTab.ts`), which
+ * keeps the toggle's read-back race guard. The updater's relaunch after an
+ * install is internal to `downloadAndInstallUpdate`; the one public relaunch
+ * is `AppProcess` (`appProcess.ts`).
  */
 
 /** Re-declared, structurally identical to `UpdateCheckResult` (`lib/updater.ts`). */

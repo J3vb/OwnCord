@@ -1,22 +1,14 @@
 /**
- * No-seam: `lib/window-state.ts` exports only `initWindowState`, a
- * fire-and-forget orchestrator that calls several native window operations
- * internally. It is not an exported seam function on its own, so there is
- * nothing to bind a legacy suite against yet — it lands with the seam in
- * B7-5.
+ * The window operations `lib/window-state.ts`'s off-screen guard needs. The
+ * seam is the operations, not the guard: `initWindowState` is a
+ * fire-and-forget orchestrator over them, and it stays in `lib/` as behaviour.
+ * B7-5 lifted the operations in place, pinned them with `window.suite.ts`,
+ * then moved them to `platform/desktop/window.ts`.
  *
  * `notifications.ts`'s focus check (`isWindowFocused`) is `document.hasFocus()`
  * — a synchronous DOM API with no native dependency — so it is not part of
  * this contract at all; it needs no platform adapter.
  */
-
-/** Re-declared, structurally identical to `WindowRect` (`lib/window-state.ts`). */
-export interface WindowRect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
 
 /** A monitor's position and size, physical pixels. */
 export interface MonitorRect {

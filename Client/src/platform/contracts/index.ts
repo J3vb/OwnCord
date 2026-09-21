@@ -1,30 +1,21 @@
-// Re-exports every platform contract plus the `Platform` shape that groups
-// them — one readonly member per interface above. Type-only: `isolatedModules`
-// requires `export type` for every re-export here, or the build fails.
+// Re-exports every platform contract interface plus the `Platform` shape that
+// groups them — one readonly member per interface above. A contract's
+// auxiliary types (options, results, events) are imported from its own file.
+// Type-only: `isolatedModules` requires `export type` for every re-export
+// here, or the build fails.
 
 export type { HttpClient } from "./http";
-export type {
-  SocketTransport,
-  SocketConnectOptions,
-  SocketConnectionState,
-  SocketCertEvent,
-} from "./socket";
-export type { CredentialStore, SavedCredential, SavedLoginResponse } from "./credentials";
-export type { IdentityStore, StoreIdentityPinResult, IdentityPinLookup } from "./identityStore";
-export type { PendingMessageStore, PendingMessageOwner } from "./pendingMessages";
-export type { SettingsStore, SettingsSnapshot, SettingsProfile } from "./settings";
+export type { SocketTransport } from "./socket";
+export type { CredentialStore } from "./credentials";
+export type { IdentityStore } from "./identityStore";
+export type { PendingMessageStore } from "./pendingMessages";
+export type { SettingsStore } from "./settings";
 export type { LogFiles } from "./logFiles";
 export type { FileSaver } from "./fileSave";
 export type { NativeProxies } from "./nativeProxies";
-export type { Notifier, NotifierShowOptions } from "./notifications";
-export type { WindowControl, WindowRect, MonitorRect } from "./window";
-export type {
-  AppUpdater,
-  Autostart,
-  UpdateCheckResult,
-  DownloadProgress,
-  UpdateInstallState,
-} from "./updater";
+export type { Notifier } from "./notifications";
+export type { WindowControl } from "./window";
+export type { AppUpdater, Autostart } from "./updater";
 export type { UrlOpener } from "./opener";
 export type { PushToTalk } from "./pushToTalk";
 export type { DeepLinks } from "./deepLinks";

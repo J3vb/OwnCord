@@ -1,8 +1,9 @@
 /**
- * No-seam: every capability lives inside private helpers in
- * `lib/notifications.ts` (`fireDesktopNotification`, `flashTaskbar`) — there
- * is no exported function to bind a legacy suite against yet. The suite
- * lands with the seam in B7-5.
+ * Desktop notifications and the taskbar flash. Which notification fires, and
+ * the Web Notification fallback when this seam rejects, are the caller's
+ * (`lib/notifications.ts`). B7-5 lifted the native calls out of its private
+ * helpers in place, pinned them with `notifier.suite.ts`, then moved them to
+ * `platform/desktop/notifications.ts`.
  */
 export interface NotifierShowOptions {
   readonly icon?: string;

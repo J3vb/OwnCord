@@ -49,7 +49,29 @@ B7-3's plan recorded the correction (`b7-3-platform-contracts-desktop-shell.plan
 is the Web API `navigator.mediaDevices` (`lib/deviceManager.ts:102`,
 `components/settings/VoiceAudioTab.ts:367,468,515`,
 `lib/connectionDiagnostics.ts:42`), which needs no Tauri seam. This milestone
-records that finding; it does not invent a contract for it. See Open Question 2.
+records that finding; it does not invent a contract for it (Open Question 2,
+resolved: no contract — none of the 11 native importers outside the seam is
+media-related, all 9 `mediaDevices` references are `navigator.mediaDevices`,
+and no Rust command touches devices).
+
+**Two rules that bind every task below** (owner-accepted, added after merge):
+
+1. **Keep dynamic imports dynamic.** `plugin-deep-link`, `plugin-notification`,
+   `api/window`, `plugin-process`, `plugin-autostart` and `api/app` are dynamic
+   `import()`s today and build as lazy chunks. The eslint rule permits static
+   native imports inside `platform/desktop/`, and the `desktop` registry is
+   statically reachable from the entry, so a lift that turns one of them static
+   lands it in the startup closure — which B7-7's startup budget (about 2 kB of
+   headroom) fails. This is a hard rule: such a module stays a dynamic
+   `import()` inside the desktop method, even where the `lib/` original was a
+   static import of a lazy module (`lib/updater.ts`'s `plugin-process`).
+2. **Pinned counts are recounted, never merged.** Acceptance says "all
+   `Platform` members", not a number: B7-16 adds at least one more, and this
+   milestone adds two (`appProcess`, `trayStatus`). If a later branch conflicts
+   on the pinned counts in `platform-contracts-counts.test.ts`,
+   `platform-contracts.md`, `contracts/index.ts`, `desktop/index.ts` or
+   `suites-are-falsifiable.test.ts`, resolve by recounting from the tree, never
+   by picking one side of the conflict.
 
 ## Verify before you implement
 
@@ -93,8 +115,15 @@ seam".
   B7-3 alone (`b7-3….plan.md:236`).
 - **Re-bind, do not rewrite:** for a capability whose suite already exists,
   copy the legacy binding's `NativeControl` half into a `.desktop.test.ts` that
-  imports `platform/desktop/<name>` and drop the legacy file when the `lib/`
-  export becomes internal (`deepLinks.legacy.test.ts:2-4`).
+  imports `platform/desktop/<name>` and drop the legacy file **in the same
+  commit** the `lib/` export becomes internal (`deepLinks.legacy.test.ts:2-4`;
+  Q5). Rule 5 forbids casts in a legacy binding, so once the export is gone
+  there is nothing to bind without re-exporting a dead function, which knip
+  flags once Task 15 removes the `src/platform/**` ignore. Where the `lib/`
+  export survives as a thin delegate its callers still import, the legacy file
+  stays (B7-4's `credentials`, `identityStore`, `logFiles`, `settings`).
+  "Test count never drops" is measured against the Task 0 baseline, not commit
+  to commit.
 - **Counts maintenance:** `docs/architecture/platform-contracts.md` counts and
   `platform-contracts-counts.test.ts`'s hard-coded numbers are guarded by the
   test; update both in the same commit that changes the tree.
@@ -107,26 +136,32 @@ seam".
 
 Touch only these. Anything else → record **BLOCKED**.
 
-| Path                                                                                                               | Change                                      |
-| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| `Client/src/platform/desktop/index.ts`                                                                             | grows to the full 18-member `Platform`      |
-| `Client/src/platform/desktop/*.ts`                                                                                 | new: one implementation file per capability |
-| `Client/src/platform/contracts/{updater,notifications,window,opener,devTools}.ts`                                  | amend only where a seam needs one method    |
-| `Client/src/lib/deep-link.ts`, `ptt.ts`, `updater.ts`, `httpProxy.ts`                                              | → contract                                  |
-| `Client/src/lib/livekitUrlResolver.ts`, `notifications.ts`, `window-state.ts`                                      | → contract                                  |
-| `Client/src/lib/admin-panel.ts`                                                                                    | → contract                                  |
-| `Client/src/components/settings/AdvancedTab.ts`                                                                    | autostart + devtools + relaunch halves      |
-| `Client/src/components/settings/LogsTab.ts`                                                                        | app metadata half only                      |
-| `Client/src/main.ts`                                                                                               | opener, tray `status-change`, devtools      |
-| `Client/tests/unit/platform/{deepLinks,pushToTalk,updater,nativeProxies}.desktop.test.ts`                          | new: the re-bound runs                      |
-| `Client/tests/unit/platform/{notifier,window,opener,appMetadata,devTools,autostart,livekitProxies}.suite.ts`       | new                                         |
-| `Client/tests/unit/platform/{notifier,window,opener,appMetadata,devTools,autostart,livekitProxies}.legacy.test.ts` | new                                         |
-| `Client/tests/unit/platform/suites-are-falsifiable.test.ts`                                                        | new null subjects                           |
-| `Client/tests/unit/platform-contracts-counts.test.ts`                                                              | recount the pinned numbers                  |
-| `Client/eslint.config.js`                                                                                          | shrink the `ignores` list as imports move   |
-| `Client/knip.json`                                                                                                 | remove the `src/platform/**` ignore         |
-| `docs/architecture/platform-contracts.md`                                                                          | counts + the moved rows                     |
-| `Client/CLAUDE.md`                                                                                                 | the stale "no call site has moved" bullet   |
+| Path                                                                                                                | Change                                      |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `Client/src/platform/desktop/index.ts`                                                                              | grows to the full `Platform`                |
+| `Client/src/platform/desktop/*.ts`                                                                                  | new: one implementation file per capability |
+| `Client/src/platform/contracts/{updater,notifications,window,opener,devTools}.ts`                                   | amend only where a seam needs one method    |
+| `Client/src/platform/contracts/{appProcess,trayStatus}.ts`, `contracts/index.ts`                                    | new (Q3, Q4); two new `Platform` members    |
+| `Client/src/platform/contracts/*.ts` doc comments                                                                   | the "no-seam … lands in B7-5" notes         |
+| `Client/src/lib/deep-link.ts`, `ptt.ts`, `updater.ts`, `httpProxy.ts`                                               | → contract                                  |
+| `Client/src/lib/livekitUrlResolver.ts`, `notifications.ts`, `window-state.ts`                                       | → contract                                  |
+| `Client/src/lib/admin-panel.ts`                                                                                     | → contract                                  |
+| `Client/src/components/settings/AdvancedTab.ts`                                                                     | autostart + devtools + relaunch halves      |
+| `Client/src/components/settings/KeybindsTab.ts`                                                                     | consumes `desktop.pushToTalk` (export gone) |
+| `Client/src/{lib,components}/**` using `desktop.<member>!`                                                          | drop the `!` once `desktop` is `Platform`   |
+| `Client/src/components/settings/LogsTab.ts`                                                                         | app metadata half only                      |
+| `Client/src/main.ts`                                                                                                | opener, tray `status-change`, devtools (Q1) |
+| `Client/tests/unit/platform/*.desktop.test.ts`                                                                      | new: the re-bound runs (and `trayStatus`'s) |
+| `Client/tests/unit/platform/{notifier,window,opener,appMetadata,devTools,autostart,appProcess,trayStatus}.suite.ts` | new                                         |
+| `Client/tests/unit/platform/livekitProxies.suite.ts`                                                                | new                                         |
+| `Client/tests/unit/platform/*.legacy.test.ts`                                                                       | new, then deleted with each export (Q5)     |
+| `Client/tests/unit/{main,ptt,keybinds-tab,deep-link-init,livekit-session,admin-panel}.test.ts`                      | repoint a mock or import at the moved code  |
+| `Client/tests/unit/platform/suites-are-falsifiable.test.ts`                                                         | new null subjects                           |
+| `Client/tests/unit/platform-contracts-counts.test.ts`                                                               | recount the pinned numbers                  |
+| `Client/eslint.config.js`                                                                                           | shrink the `ignores` list as imports move   |
+| `Client/knip.json`                                                                                                  | remove the `src/platform/**` ignore         |
+| `docs/architecture/platform-contracts.md`                                                                           | counts + the moved rows                     |
+| `Client/CLAUDE.md`                                                                                                  | the stale "no call site has moved" bullet   |
 
 **Never** edit `Server/db/dbgen/`, `Server/ws/message_types.go`,
 `Client/src/lib/protocolTypes.ts`, `gendocs:*` blocks, `docs/plans/*`,
@@ -170,8 +205,14 @@ For each capability:
   `tests/integration/client-updater-lifecycle.test.ts` green.
 - **Gotcha (`nativeProxies`):** `ensureHttpProxy` re-invokes
   `start_http_proxy` on every call deliberately (`httpProxy.ts:25-31`); the
-  contract half moves, the module-level `pending` map moves with it, and the
-  LiveKit half stays until Task 8.
+  contract half moves and the module-level `pending` map moves with it.
+  `desktop.nativeProxies` must be a whole `NativeProxies`, so write the LiveKit
+  half's suite first (Task 5–7's pattern) and move both halves in one commit.
+- **Gotcha (`pushToTalk`):** the suite binds `init()` to the persisted key, so
+  the whole `lib/ptt.ts` service moves, not just its native calls. It imports
+  the voice store, whose graph reaches back into the registry, so register a
+  facade that loads the service lazily — a static import adds import cycles
+  past the ceiling of 29.
 - **Validate, every task:** the capability's suite green against **both**
   bindings; `npm --prefix Client run typecheck` and `typecheck:build` clean;
   `npm --prefix Client run lint` exits 0 with no new cycle. Commit.
@@ -194,14 +235,19 @@ For each capability:
 - **Gotcha (`devTools`):** `open_devtools` is invoked inline in two event
   listeners (`main.ts:86-88`, `AdvancedTab.ts:69`); the seam is
   `DevTools.open()` and both call sites consume it.
+- **`AppProcess` (Q3)** is lifted in place the same way (`AdvancedTab.ts`'s
+  "Clear & Restart"). **`TrayStatus` (Q4)** has no legacy binding — the
+  subscription is inline in `main.ts`, which cannot be imported on its own —
+  so its suite binds `desktop` only and `tests/unit/main.test.ts`'s tray tests
+  (OC-0037, OC-0176) are the before-and-after oracle.
 - **Validate:** `npm --prefix Client test -- tests/unit/platform` green, and
   `suites-are-falsifiable` green — which is what proves the new suites can fail.
   Commit per capability or per small group.
 
 ### Tasks 8–14: Move the remaining capabilities
 
-In this order — LiveKit proxies, notifications, window state, autostart,
-opener, app metadata, dev tools.
+In this order — LiveKit proxies (with Task 4), notifications, window state,
+autostart, opener, app metadata, dev tools, then `appProcess` and `trayStatus`.
 
 For each capability:
 
@@ -265,72 +311,71 @@ npm run check:hygiene
 | The LiveKit proxy's cert pin or the updater's install guard is "improved" during the lift | Lift verbatim; any change is a separate, reviewed commit                                                             |
 | Import cycles appear as `desktop/` grows                                                  | `lint` enforces the ceiling of 29; it must not rise                                                                  |
 | The counts test's hard-coded numbers block the tree change                                | Update the doc and the test in the same commit (Task 15)                                                             |
-| `main.ts` cannot reach zero native imports without a contract for `relaunch`/tray events  | Open Questions 1, 3 and 4 must be answered before Task 15, not during it                                             |
+| `main.ts` cannot reach zero native imports without a contract for `relaunch`/tray events  | Resolved: `AppProcess` (Q3) and `TrayStatus` (Q4); `main.ts` has no bootstrap exception (Q1)                         |
 
 ## Out of scope
 
 - Any `browser/` implementation, `build:web`, PWA or mobile — B8, deferred
   post-beta (`prd.md:247-248`).
 - A `MediaDevices` contract: there is no `@tauri-apps` surface for media devices
-  (`b7-3….plan.md:59`); see Open Question 2.
+  (`b7-3….plan.md:59`); Open Question 2, resolved.
+- A generic by-name `AppEvents.listen(name, …)` bus through the seam — the
+  event equivalent of the general-purpose client B7-16 exists to remove (Q4).
 - Decomposing any `lib/` file beyond what moving its native calls requires.
 - Bundle budgets (B7-7), the Vite split (B7-6), and decomposition (B7-9/B7-10).
 - An `isDesktop()` environment helper.
 
-## Open questions for the owner
+## Open questions for the owner — resolved
 
-- [ ] **`main.ts` bootstrap boundary.** The success metric allows "native
-      imports outside `platform/desktop` **+ bootstrap**" (`prd.md:217`), but
-      `main.ts` still imports `plugin-opener` and `api/event` statically
-      (`main.ts:47-48`) and invokes `open_devtools` inline (`:86`). Does
-      `main.ts` keep those three, or move all three behind the seam and remain
-      only the composition root? **Proposed default:** move all three
-      (`urlOpener.open`, a tray-event subscription, `devTools.open()`) so the
-      `@tauri-apps` count outside `platform/desktop` is genuinely zero, and
-      record `main.ts` as a consumer of the registry rather than an exception.
-- [ ] **Media/devices.** The PRD outcome names it; no `@tauri-apps` surface
-      exists (`b7-3….plan.md:59`) and every call site is
-      `navigator.mediaDevices` (`deviceManager.ts:102`, `VoiceAudioTab.ts:367`).
-      **Proposed default:** record in `platform-contracts.md` that media devices
-      need no adapter (web API), and close the PRD's "media/devices" clause with
-      that note rather than inventing a contract. Confirm, or ask for a thin
-      `MediaDevices` contract.
-- [ ] **`relaunch` has no contract.** `lib/updater.ts:6,111` and
-      `AdvancedTab.ts:191-192` both call `plugin-process`'s `relaunch`; the
-      `AppUpdater` contract delivers the updater path's relaunch internally but
-      exposes no method (`contracts/updater.ts`). **Proposed default:** add
-      `relaunch(): Promise<void>` to `AppUpdater`, which already owns the process
-      plugin, rather than a new `ProcessControl` contract — a one-method
-      amendment B7-5 may make as the milestone creating the seam.
-- [ ] **The tray `status-change` event has no contract.** `main.ts:295`
-      subscribes with `listen<string>("status-change", …)`; the tray emits it
-      (`Client/src-tauri/src/tray.rs:90`). **Proposed default:** add a minimal
-      `AppEvents` contract (or a `subscribeStatusChange` member) so `main.ts`
-      reaches it through the seam; the alternative is to leave this one static
-      import in `main.ts` under the bootstrap exception. Owner call, because it
-      decides whether the bootstrap exception exists at all.
-- [ ] **Legacy bindings after a move.** Keep `*.legacy.test.ts` once a
-      capability's `lib/` export is internal? **Proposed default:** delete it in
-      the same commit that makes the export internal, mirroring B7-4
-      (`b7-4….plan.md:223-226`), since it then tests nothing the desktop binding
-      does not.
+A separate review answered all five and the owner accepted the answers; they
+supersede the proposed defaults this section first carried.
+
+- [x] **`main.ts` bootstrap boundary.** There is no bootstrap exception: move
+      all three — `plugin-opener` (`urlOpener.open`), `api/event` (the tray
+      subscription) and the inline `open_devtools` (`devTools.open()`) — and
+      remove `main.ts` from the eslint native-import `ignores`
+      (`Client/eslint.config.js:125-129`). Leaving it there switches the rule
+      off for a 1,000-line file. `main.ts` is a consumer of the registry.
+- [x] **Media/devices.** No contract. Recorded in `platform-contracts.md` as
+      a web API that needs no adapter.
+- [x] **`relaunch`.** Its own one-method contract,
+      `AppProcess { relaunch(): Promise<void> }`
+      (`contracts/appProcess.ts`), with its own `Platform` member, suite and null subject — not an `AppUpdater` method. The
+      updater's relaunch is internal to `downloadAndInstallUpdate` and moves
+      verbatim with no contract method; the only public caller is "Clear &
+      Restart" (`AdvancedTab.ts:191-192`), which has nothing to do with
+      updating. A B8 browser adapter has a real `relaunch`
+      (`location.reload()`) and no updater, and the `AppUpdater` route would
+      force a stub updater just to offer a reload.
+- [x] **The tray `status-change` event.** A contract shaped narrowly on the
+      `socket.ts` subscription pattern:
+      `trayStatus.onStatusChange(handler: (status: string) => void): () => void`
+      (`contracts/trayStatus.ts`). Not
+      a generic `AppEvents` bus. The payload check and the `"offline"` →
+      `"invisible"` mapping (`main.ts:295-305`) stay in `main.ts` — behaviour,
+      not wiring.
+- [x] **Legacy bindings after a move.** Delete in the same commit the export
+      goes internal (see "Re-bind, do not rewrite" above).
 
 ## Acceptance
 
-- [ ] The ten remaining `Platform` members (across nine contract files) reach
-      native APIs through `platform/desktop`: deep links, push-to-talk, updater
-      (AppUpdater and Autostart), LiveKit proxies (HTTP half already moved in
-      B7-4, LiveKit half here), notifications, window state, opener, app
-      metadata, dev tools
-- [ ] Seven new suites exist, each written against the legacy binding first and
-      each with a null subject in `suites-are-falsifiable.test.ts` (four
-      further capabilities re-bind the suite they already have)
+- [ ] Every remaining `Platform` member reaches native APIs through
+      `platform/desktop`: deep links, push-to-talk, updater (AppUpdater and
+      Autostart), both halves of the native proxies, notifications, window
+      state, opener, app metadata, dev tools, and the two new members,
+      `appProcess` and `trayStatus`
+- [ ] Nine new suites exist, each with a null subject in
+      `suites-are-falsifiable.test.ts`; every one but `trayStatus` was written
+      against a legacy binding first (four further capabilities re-bind the
+      suite they already have)
 - [ ] Every suite runs green against **both** the legacy and the desktop
       binding; total test count never dropped
-- [ ] `desktop/index.ts` registers all 18 `Platform` members, or the bootstrap
-      exception is recorded and every remaining import is named
+- [ ] `desktop/index.ts` registers all `Platform` members (typed `Platform`,
+      no longer `Partial<Platform>`)
 - [ ] `git grep -l "@tauri-apps" -- 'Client/src/**' | grep -v platform/desktop`
-      is empty, or every surviving line is the recorded bootstrap exception
+      is empty — no bootstrap exception
+- [ ] No native module that was a lazy `import()` before the move is static
+      after it; the startup closure does not grow
 - [ ] Every static native import moved is gone from `Client/eslint.config.js`'s
       `ignores`; `Client/knip.json`'s `src/platform/**` ignore is removed
 - [ ] `platform-contracts.md` counts and `platform-contracts-counts.test.ts`
