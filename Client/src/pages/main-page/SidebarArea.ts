@@ -791,8 +791,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             closeQuickSwitch();
             // Store target for ConnectPage to auto-select after navigation
             sessionStorage.setItem("owncord:quick-switch-target", host);
-            // Trigger normal logout flow (clears auth -> ws disconnect -> navigate to connect)
-            clearAuth();
+            // Tear the session down (clears auth -> ws disconnect -> navigate
+            // to connect) but keep this server's saved sign-in (B7-13).
+            clearAuth("server_switch");
           },
           onAddServer: () => {
             closeQuickSwitch();
