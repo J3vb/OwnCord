@@ -229,12 +229,13 @@ locks it.
 
 ## 6. Logout & session lifecycle
 
-| Trigger      | Target behavior                                                                                                                                       |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page |
-| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                          |
-| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                          |
-| Cert reject  | Disconnect → connect page                                                                                                                             |
+| Trigger      | Target behavior                                                                                                                                                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page                                                                             |
+| Quick switch | `clearAuth("server_switch")` from the server overlay (switch or Add server) → leave voice, disconnect WS, **keep** the host's stored credential and server session, → connect page; a switch target resumes from its stored token |
+| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                                                                                                      |
+| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                                                                                                      |
+| Cert reject  | Disconnect → connect page                                                                                                                                                                                                         |
 
 > **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
 > logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper
