@@ -211,3 +211,75 @@ Score uses `(killed + timeout) / (total − errors)`; "no cov" is Stryker's
 | `src/stores/messages.store.ts`     |   83.64 |   788 |    451 |       4 |       89 |      0 |    244 |
 | `src/stores/ui.store.ts`           |   89.19 |    79 |     33 |       0 |        4 |      0 |     42 |
 | `src/stores/voice.store.ts`        |  100.00 |   244 |    143 |       0 |        0 |      0 |    101 |
+
+## B7-9a post-split measurement (evidence append, 2026-09-21)
+
+B7-9a (plan `.claude/plans/b7-9-decompose-voice.plan.md`, Tasks 0–6) split
+`src/lib/livekitSession.ts` into a facade plus five ownership modules under
+`src/features/voice/`: `sessionState.ts`, `joinOrchestration.ts`,
+`roomLifecycle.ts`, `mediaControl.ts` and `remoteTracks.ts`. The before and
+after runs were made one after the other on the same machine (16 vCPU,
+shared with other work), Node 26.9.0 and Stryker 10.0.0, from `Client/`:
+
+```bash
+# before: dev at 4d4e0153 (39 m 04 s)
+npx stryker run --mutate "src/lib/livekitSession.ts,src/lib/livekitE2EE.ts" --reporters clear-text,json
+# after: fm/b7-9a-impl at 1c6abef2 (40 m 53 s)
+npx stryker run --mutate "src/lib/livekitSession.ts,src/lib/livekitE2EE.ts,src/features/voice/**/*.ts,!src/features/voice/**/*.test.ts" --reporters clear-text,json
+```
+
+| Scope                                       | Before: mutants / errors / score | After: mutants / errors / score |
+| ------------------------------------------- | -------------------------------: | ------------------------------: |
+| `livekitSession` (facade + extracted files) |            1 024 / 392 / 54.43 % |           1 198 / 486 / 58.29 % |
+| `livekitE2EE.ts` (untouched in 9a)          |              896 / 229 / 57.27 % |             896 / 229 / 57.27 % |
+| **Two-module total**                        |        **1 920 / 621 / 55.89 %** |       **2 094 / 715 / 57.80 %** |
+
+The before run matches the plan's re-measurement exactly (55.89 %, 54.43 %,
+57.27 %, 621 errors). **The pass rule holds:** the after-score over the facade
+and the extracted `livekitSession` files is 58.29 %, which is 3.86 points above
+54.43 %, not more than 1 point below it. The two-module total is 1.91 points
+up. `livekitE2EE.ts` is byte-identical and scores identically, which puts
+run-to-run noise at zero for that file.
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file (the before-run's mutants bucketed by the original line ranges):
+
+| Module (after)                     | Before, same code |    After |     Δ |
+| ---------------------------------- | ----------------: | -------: | ----: |
+| `features/voice/sessionState`      |           75.00 % | 100.00 % | +25.0 |
+| `features/voice/joinOrchestration` |           39.73 % |  45.61 % |  +5.9 |
+| `features/voice/roomLifecycle`     |           49.38 % |  56.18 % |  +6.8 |
+| `features/voice/mediaControl`      |           67.65 % |  69.06 % |  +1.4 |
+| `features/voice/remoteTracks`      |            0.00 % | 100.00 % |  +100 |
+| `lib/livekitSession` (facade)      |           65.22 % |  64.29 % | −0.93 |
+
+- **The rises are the colocated tests.** `livekit-session.test.ts` is
+  unchanged. Every gain comes from the new `src/features/voice/*.test.ts`
+  files, which kill mutants the frozen suite never reached, for example
+  `parseUserId`'s anchor mutant and the remote-track stream lookups.
+- **The one drop is the facade's −0.93, and none of it is lost coverage.**
+  The facade gained 105 mutants (346 → 451) from the new host wiring (the
+  `JoinHost`, `RoomLifecycleHost` and `MediaControlHost` object literals) and
+  the one-line delegate methods. The mutation class is `ArrowFunction` /
+  `BlockStatement` on wiring closures: `syncModuleRooms: () => …`,
+  `reapplyMuteGain: () => …`, `setPendingMicrophoneRoom: (room) => {…}` and
+  `clearPendingReconnectFields: () => {…}`. These mutants did not exist before,
+  because Stryker has no call-removal mutator for the direct `this.x()` calls
+  those closures replace. So the extraction added survivable mutants rather
+  than un-killing old ones. The one `UpdateOperator` survivor on the wiring
+  (`++this._joinGenerationCounter` → `--`) is the same mutant, surviving the
+  same way, as before the split (line 793): a decreasing counter still hands
+  every attempt a unique generation.
+- **The errored count rises by 94** (621 → 715): the host getters and typed
+  delegates are rejected by the TypeScript checker when mutated, the same
+  `CompileError` class as caveat 2 above. Errors stay excluded from the
+  denominator.
+
+The oracle named before the move and unchanged after it:
+`tests/unit/livekit-session.test.ts` (217 `it`s, 227 test cases) was not
+edited. It passes at every commit. Its supersession/staleness cases are at
+lines 403, 434, 495, 1031, 1116, 1291, 2442, 2808, 2887, 2998, 3330, 3389,
+3555 and 4065. `local/no-leave-voice-when-superseded` covers the new
+`joinOrchestration.ts`; a deliberately re-introduced `leaveVoice()` inside its
+`!isStateConnected()` checkpoint was reported red, then reverted. The
+`livekitE2EE` oracle and its three rules are 9b's.

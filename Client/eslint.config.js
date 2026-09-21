@@ -75,10 +75,15 @@ export default tseslint.config(
   // shape it catches. Each is scoped to only the module(s) its invariant
   // governs.
   {
-    // livekitReconnect.ts owns the reconnect loop extracted out of
-    // livekitSession.ts — the supersession invariant travelled with it, so the
-    // rule must cover both files or the give-up path goes unguarded.
-    files: ["src/lib/livekitSession.ts", "src/lib/livekitReconnect.ts"],
+    // livekitReconnect.ts owns the reconnect loop and joinOrchestration.ts the
+    // connect/supersession checkpoints, both extracted out of
+    // livekitSession.ts — the supersession invariant travelled with them, so
+    // the rule must cover every file or those paths go unguarded.
+    files: [
+      "src/lib/livekitSession.ts",
+      "src/lib/livekitReconnect.ts",
+      "src/features/voice/joinOrchestration.ts",
+    ],
     plugins: { local: localRules },
     rules: {
       "local/no-leave-voice-when-superseded": "error",

@@ -2,7 +2,7 @@
 import type { Room } from "livekit-client";
 import { RoomEvent, Track } from "livekit-client";
 import { createLogger } from "@lib/logger";
-import { parseUserId } from "@lib/livekitSession";
+import { parseUserId } from "../features/voice/sessionState";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
 
