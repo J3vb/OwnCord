@@ -2,7 +2,7 @@
 // Proves the union of the mutation shards equals the base config's configured
 // surface, so no file silently drops out of the nightly baseline (B7-8 Task 3).
 import { globSync } from "node:fs";
-import { join } from "node:path";
+import { join, matchesGlob } from "node:path";
 
 const clientDir = new URL("..", import.meta.url).pathname;
 process.env.STRYKER_SHARD ||= "livekit"; // satisfy the config's own validation on import
@@ -13,7 +13,7 @@ const globs = base.mutate;
 const positive = globs.filter((g) => !g.startsWith("!"));
 const negative = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1));
 
-const excluded = (p) => negative.some((g) => p === g);
+const excluded = (p) => negative.some((g) => matchesGlob(p, g));
 const expected = new Set();
 for (const g of positive) {
   for (const p of globSync(g, { cwd: clientDir })) {
