@@ -45,6 +45,10 @@ function importsOf(file: string): string[] {
 }
 
 describe("the dispatcher door", () => {
+  it("finds the handler modules it guards", () => {
+    expect(handlerFiles.length).toBeGreaterThan(0);
+  });
+
   it("every wsHandlers module is imported by lib/dispatcher.ts and by nothing else", () => {
     for (const handler of handlerFiles) {
       const importers = sourceFiles.filter((file) => importsOf(file).includes(handler));

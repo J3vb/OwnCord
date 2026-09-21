@@ -60,24 +60,12 @@ import {
 } from "@stores/voice.store";
 import {
   dmStore,
-  setDmChannels,
-  addDmChannel,
-  closeDmLocally,
-  clearDmUnread,
   updateDmLastMessage,
   updateDmLastMessagePreview,
-  dmDisplayName,
   updateDmParticipant,
 } from "@stores/dm.store";
-import type { DmChannel } from "@stores/dm.store";
-import {
-  blocksStore,
-  setBlockedByMe,
-  setUserBlockedByThem,
-  clearBlockedByThem,
-} from "@stores/blocks.store";
+import { setUserBlockedByThem } from "@stores/blocks.store";
 import { emojiStore, setCustomEmoji } from "@stores/emoji.store";
-import type { DmChannelPayload } from "./types";
 import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
@@ -90,11 +78,14 @@ import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { activatePendingMessages, acknowledgePendingMessage } from "./pendingMessages";
 import { ServerMessageType as S, PROTOCOL_EPOCH } from "./protocolTypes";
-// SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
-// place the DM->channelsStore mirror row is synthesized (selectDmConversation
-// on open); the dm_channel_close fallback below needs the same synthesis for
-// a DM it is activating that was never opened this session.
-import { addDmToChannelsStore } from "@pages/main-page/SidebarDmHelpers";
+import {
+  applyReadyBlocks,
+  applyReadyDms,
+  handleDmChannelClose,
+  handleDmChannelOpen,
+} from "../features/direct-messages/wsHandlers";
+import { createReconnectClock } from "../features/connection/dispatchContext";
+import type { DispatchContext } from "../features/connection/dispatchContext";
 
 const log = createLogger("dispatcher");
 
@@ -176,37 +167,6 @@ function enforceModeratorAudioState(
   }
 }
 
-/** Map one DM participant from the wire shape to the store's. */
-function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
-  return {
-    id: u.id,
-    username: u.username,
-    avatar: u.avatar,
-    status: u.status,
-    displayName: u.display_name ?? "",
-  };
-}
-
-/** Map a server DM channel payload to the client DmChannel type. */
-function mapDmPayload(p: DmChannelPayload): DmChannel {
-  // A pre-group server sends only `recipient`, which for it *is* the whole
-  // membership — so the fallback is a one-element list rather than an empty
-  // one, and every group-aware call site keeps working against an old server.
-  const participants = (p.recipients ?? [p.recipient]).map(mapDmUser);
-  return {
-    channelId: p.channel_id,
-    recipient: participants[0] ?? mapDmUser(p.recipient),
-    participants,
-    name: p.name ?? "",
-    isGroup: p.is_group ?? false,
-    lastMessageId: p.last_message_id,
-    lastMessage: p.last_message,
-    lastMessageAt: p.last_message_at,
-    unreadCount: p.unread_count,
-    mentionCount: p.mention_count ?? 0,
-  };
-}
-
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
 
@@ -239,6 +199,7 @@ export function wireDispatcher(
     >,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
+  const ctx: DispatchContext = { ws, api, clock: createReconnectClock() };
 
   // A second (or later) auth_ok/ready in this call's lifetime is always a
   // reconnect: wireDispatcher is called once per login (main.ts's
@@ -524,43 +485,8 @@ export function wireDispatcher(
       }
       hasReceivedReadyBefore = true;
 
-      // Populate DM channels from the ready payload. The server always sends
-      // the field, so an empty array is an authoritative "no open DMs" (all
-      // closed/left on another device) and must clear ghosts from dmStore —
-      // skipping it would let a stale DM survive every reconnect.
       const dmPayloads = payload.dm_channels ?? [];
-      setDmChannels(dmPayloads.map(mapDmPayload));
-
-      // The channels-store mirror row for a DM (synthesized on open by
-      // addDmToChannelsStore) is deliberately carried across setChannels'
-      // rebuild above, because the ready payload never includes DM rows at
-      // all — but that means a DM closed elsewhere while this client was
-      // offline keeps a phantom row here (closeDmLocally fixes this exact
-      // shape for the live dm_channel_close path; this is its ready-time
-      // equivalent), and a DM read elsewhere keeps a stale unread/mention
-      // count (noteChannelMessage bumps the mirror in parallel with dmStore
-      // once it exists, but only dmStore is restated above).
-      // Reconcile every dm-typed row against the just-restated payload.
-      channelsStore.setState((prev) => {
-        const dmById = new Map(dmPayloads.map((d) => [d.channel_id, d]));
-        const nextChannels = new Map(prev.channels);
-        let changed = false;
-        for (const [id, ch] of prev.channels) {
-          if (ch.type !== "dm") continue;
-          const dm = dmById.get(id);
-          if (dm === undefined) {
-            nextChannels.delete(id);
-            changed = true;
-            continue;
-          }
-          const mentionCount = dm.mention_count ?? 0;
-          if (ch.unreadCount !== dm.unread_count || ch.mentionCount !== mentionCount) {
-            nextChannels.set(id, { ...ch, unreadCount: dm.unread_count, mentionCount });
-            changed = true;
-          }
-        }
-        return changed ? { ...prev, channels: nextChannels } : prev;
-      });
+      applyReadyDms(payload);
 
       // The server's read_states go stale while a channel stays focused
       // (channel_focus is sent once per mount, mark_read only from the context
@@ -573,24 +499,7 @@ export function wireDispatcher(
         markChannelRead(currentActive);
       }
 
-      // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
-      // is only known from a refused send, so it's stale after a reconnect —
-      // clear it and re-fetch our own outgoing blocks authoritatively.
-      clearBlockedByThem();
-      if (api !== undefined) {
-        // OC-0218: snapshot the revision blocksStore was at right before
-        // issuing this fetch. If the user blocks/unblocks someone (via
-        // SidebarMemberSection's onToggleBlock -> setUserBlockedByMe) while
-        // this GET is in flight, that per-user delta bumps the revision;
-        // setBlockedByMe then sees the mismatch and skips applying this
-        // reply instead of clobbering the fresher local truth with a stale
-        // full-set snapshot.
-        const blockedByMeRevAtFetch = blocksStore.getState().blockedByMeRev ?? 0;
-        api
-          .listBlocks()
-          .then((r) => setBlockedByMe(r.blocked_user_ids, blockedByMeRevAtFetch))
-          .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
-      }
+      applyReadyBlocks(ctx);
 
       // Custom emoji are not in the ready payload (they are server-wide and
       // change rarely, so they do not belong in the per-session dump). Load
@@ -623,62 +532,9 @@ export function wireDispatcher(
 
   // ── DM Channels ─────────────────────────────────────
 
-  unsubs.push(
-    ws.on(S.DM_CHANNEL_OPEN, (payload) => {
-      log.info("DM channel opened", { channelId: payload.channel_id });
-      const dm = mapDmPayload(payload);
-      addDmChannel(dm);
+  unsubs.push(ws.on(S.DM_CHANNEL_OPEN, handleDmChannelOpen));
 
-      // A DM's channels-store row is synthesised from the DM store, and this
-      // event is also how a *membership* change arrives (group renamed, member
-      // left). Without this the chat header would keep the name the DM had
-      // when it was first opened, until the user navigated away and back.
-      channelsStore.setState((prev) => {
-        const existing = prev.channels.get(dm.channelId);
-        const name = dmDisplayName(dm);
-        if (existing === undefined || existing.name === name) return prev;
-        const next = new Map(prev.channels);
-        next.set(dm.channelId, { ...existing, name });
-        return { ...prev, channels: next };
-      });
-    }),
-  );
-
-  unsubs.push(
-    ws.on(S.DM_CHANNEL_CLOSE, (payload) => {
-      log.info("DM channel closed", { channelId: payload.channel_id });
-      // Delivered to a device that never ran the local close flow (closed
-      // from another signed-in device) — unlike the sidebar's closeOrLeaveDm,
-      // there is no "channel visited before this DM" to restore, so fall
-      // back to another open DM, else the first text channel.
-      closeDmLocally(payload.channel_id, () => {
-        const remaining = dmStore.getState().channels;
-        if (remaining.length > 0) {
-          // Synthesize the channelsStore mirror row before activating: it is
-          // only ever created by addDmToChannelsStore (on open, via
-          // selectDmConversation), so a DM present in dmStore from `ready`
-          // but never opened this session has none — without this,
-          // activating it lands on an id ChannelController can't resolve and
-          // blanks the chat area with no way to recover.
-          addDmToChannelsStore(remaining[0]!);
-          // A DM's unread badge lives in dmStore, not the channelsStore
-          // mirror — setActiveChannel only zeroes the latter. Every other
-          // "open this DM" path (selectDmConversation, navigateToChannel,
-          // markChannelRead) pairs activation with clearDmUnread for exactly
-          // this reason; without it here the badge on the DM we're about to
-          // treat as active survives forever (new messages take the
-          // isDmActive branch below and never increment it back).
-          clearDmUnread(remaining[0]!.channelId);
-          setActiveChannel(remaining[0]!.channelId);
-          return;
-        }
-        const firstText = [...channelsStore.getState().channels.values()]
-          .filter((ch) => isTextLikeChannel(ch))
-          .toSorted((a, b) => a.position - b.position)[0];
-        setActiveChannel(firstText?.id ?? null);
-      });
-    }),
-  );
+  unsubs.push(ws.on(S.DM_CHANNEL_CLOSE, handleDmChannelClose));
 
   // ── Chat Messages ─────────────────────────────────────
 
