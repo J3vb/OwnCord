@@ -786,6 +786,11 @@ export function buildTauriMockScript(opts: {
              "open_devtools"].includes(cmd)) return null;
         if (cmd === "ptt_polling_supported") return false;
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
+        // ---- External-content broker (B7-16) ----
+        // No external network here: refuse the way the native broker does,
+        // with a bare failure-class string. Teardown also names a fresh
+        // partition with an empty-URL preview, which the broker refuses.
+        if (cmd === "external_preview" || cmd === "external_image") throw "unavailable";
         const error = new Error("Unexpected IPC command: " + cmd);
         console.error("[tauri-mock]", error.message);
         throw error;

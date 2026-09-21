@@ -193,6 +193,11 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "plugin:window|outer_position":
         case "plugin:notification|is_permission_granted":
           return null;
+        case "external_preview":
+        case "external_image":
+          // No external network in this stack: the broker refuses. Teardown
+          // also names a fresh partition with an empty-URL preview.
+          throw new Error("unavailable");
         default: {
           const message = `Unexpected real-stack IPC: ${command}`;
           errors.push(message);
