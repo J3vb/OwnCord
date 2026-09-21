@@ -163,34 +163,58 @@ export function applyOgMeta(
     descEl.style.display = "none";
   }
   if (meta.image !== null) {
-    // The image arrives as broker-fetched bytes (a same-origin blob: URL),
-    // never as an og:image URL the webview would load behind the broker.
-    const source = { handle: meta.image };
-    void fetchExternalImage(source).then((src) => {
-      if (src === null) return;
-      const img = createElement("img", {
-        class: "msg-embed-link-img",
-        src,
-        alt: meta.title ?? "",
-        loading: "lazy",
-      });
-      recoverEvictedImage(img, source);
-      img.addEventListener("error", () => {
-        imageWrap.style.display = "none";
-      });
-      // A GIF gets the freeze/play control; its blob: source is same-origin,
-      // so the freeze canvas stays untainted.
-      if (isExternalGif(src)) {
-        img.addEventListener(
-          "load",
-          () => {
-            observeMedia(img, src, imageWrap);
-          },
-          { once: true },
-        );
-      }
-      imageWrap.appendChild(img);
-      imageWrap.style.display = "";
-    });
+    showOgImage(meta, meta.image, imageWrap, url, true);
   }
+}
+
+/** Show a preview's image. The broker forgets old handles, so when one no
+ *  longer resolves the preview is asked for again — once — for a fresh one. */
+function showOgImage(
+  meta: OgMeta,
+  handle: ExternalImageHandle,
+  imageWrap: HTMLElement,
+  url: string,
+  reask: boolean,
+): void {
+  const reaskPreview = (): void => {
+    if (!reask) return;
+    if (ogCache.get(url) === meta) ogCache.delete(url);
+    void fetchOgMeta(url).then((fresh) => {
+      if (fresh.image !== null) showOgImage(fresh, fresh.image, imageWrap, url, false);
+    });
+  };
+  // The image arrives as broker-fetched bytes (a same-origin blob: URL),
+  // never as an og:image URL the webview would load behind the broker.
+  const source = { handle };
+  void fetchExternalImage(source).then((src) => {
+    if (src === null) {
+      reaskPreview();
+      return;
+    }
+    const img = createElement("img", {
+      class: "msg-embed-link-img",
+      src,
+      alt: meta.title ?? "",
+      loading: "lazy",
+    });
+    recoverEvictedImage(img, source);
+    img.addEventListener("error", () => {
+      img.remove();
+      imageWrap.style.display = "none";
+      reaskPreview();
+    });
+    // A GIF gets the freeze/play control; its blob: source is same-origin,
+    // so the freeze canvas stays untainted.
+    if (isExternalGif(src)) {
+      img.addEventListener(
+        "load",
+        () => {
+          observeMedia(img, src, imageWrap);
+        },
+        { once: true },
+      );
+    }
+    imageWrap.appendChild(img);
+    imageWrap.style.display = "";
+  });
 }

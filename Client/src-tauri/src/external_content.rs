@@ -530,7 +530,7 @@ struct Handles {
 }
 
 /// Handles kept before the oldest is forgotten; a forgotten handle's image
-/// is simply unavailable, and the renderer re-asks for the preview.
+/// is simply unavailable, and the renderer re-asks once for the preview.
 const MAX_HANDLES: usize = 4096;
 
 impl Handles {

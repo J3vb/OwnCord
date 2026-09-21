@@ -299,6 +299,7 @@ describe("applyOgMeta", () => {
   beforeEach(() => {
     setServerHost("example.com");
     resetBroker();
+    previewMock.mockResolvedValue(refused("unavailable"));
   });
 
   function elements() {
@@ -413,6 +414,51 @@ describe("applyOgMeta", () => {
     });
     await Promise.resolve();
     await Promise.resolve();
+    expect(imageWrap.querySelector("img")).toBeNull();
+  });
+
+  it("re-asks for the preview once when the broker has forgotten the handle", async () => {
+    const fresh = "h2" as ExternalImageHandle;
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "Title", description: null, siteName: null, image: fresh },
+    });
+    imageMock.mockImplementation(async (_partition, source) =>
+      "handle" in source && source.handle === fresh
+        ? { ok: true, value: new Blob(["x"], { type: "image/jpeg" }) }
+        : refused("unavailable"),
+    );
+
+    const { imageWrap } = apply(withImage());
+
+    const img = await appendedImg(imageWrap);
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(previewMock).toHaveBeenCalledWith(expect.any(String), "https://example.com/page");
+    expect(imageMock).toHaveBeenLastCalledWith(expect.any(String), { handle: "h2" });
+    expect(img.getAttribute("src")).toBe("blob:test/1");
+    expect(imageWrap.style.display).toBe("");
+  });
+
+  it("re-asks for the preview only once when the fresh handle fails too", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: {
+        title: "Title",
+        description: null,
+        siteName: null,
+        image: "h2" as ExternalImageHandle,
+      },
+    });
+    imageMock.mockResolvedValue(refused("unavailable"));
+
+    const { imageWrap } = apply(withImage());
+
+    await vi.waitFor(() => {
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { handle: "h2" });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(imageMock).toHaveBeenCalledTimes(2);
     expect(imageWrap.querySelector("img")).toBeNull();
   });
 
