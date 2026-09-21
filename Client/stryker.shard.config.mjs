@@ -56,6 +56,7 @@ export const shards = {
     "src/lib/session-notice.ts",
     "src/lib/pendingMessages.ts",
     "src/features/connection/dispatchContext.ts",
+    "src/features/connection/wsHandlers.ts",
     "src/features/direct-messages/wsHandlers.ts",
     "src/features/channels/wsHandlers.ts",
     "src/features/messaging/wsHandlers.ts",
