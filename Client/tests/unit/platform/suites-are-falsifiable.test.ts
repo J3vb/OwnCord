@@ -12,6 +12,7 @@
 // legacy binding must type-check against its contract with no cast.
 import type { CredentialStore } from "../../../src/platform/contracts/credentials";
 import type { DeepLinks } from "../../../src/platform/contracts/deepLinks";
+import type { ExternalContentBroker } from "../../../src/platform/contracts/externalContent";
 import type { FileSaver } from "../../../src/platform/contracts/fileSave";
 import type { HttpClient } from "../../../src/platform/contracts/http";
 import type { IdentityStore } from "../../../src/platform/contracts/identityStore";
@@ -25,6 +26,8 @@ import { describeCredentialStoreSuite } from "./credentials.suite";
 import type { NativeControl as CredentialsNativeControl } from "./credentials.suite";
 import { describeDeepLinksSuite } from "./deepLinks.suite";
 import type { NativeControl as DeepLinksNativeControl } from "./deepLinks.suite";
+import { describeExternalContentSuite } from "./externalContent.suite";
+import type { NativeControl as ExternalContentNativeControl } from "./externalContent.suite";
 import { describeFileSaverSuite } from "./fileSave.suite";
 import type { NativeControl as FileSaverNativeControl } from "./fileSave.suite";
 import { describeHttpClientSuite } from "./http.suite";
@@ -230,6 +233,20 @@ describeFileSaverSuite(async () => {
     dialogFailsWith: () => undefined,
     written: () => [],
     writeFailsWith: () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeExternalContentSuite(async () => {
+  const subject = {
+    preview: async () => undefined,
+    image: async () => undefined,
+  } as unknown as ExternalContentBroker;
+  const native: ExternalContentNativeControl = {
+    answers: () => undefined,
+    refuses: () => undefined,
+    unavailable: () => undefined,
+    asked: () => [],
   };
   return { subject, native };
 }, failEveryTest);
