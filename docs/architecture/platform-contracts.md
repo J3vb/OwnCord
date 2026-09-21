@@ -54,12 +54,12 @@ Measured with `git grep`, not estimated:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 20    |
-| Distinct `invoke` command names called from `Client/src/`  | 28    |
+| Distinct `invoke` command names called from `Client/src/`  | 30    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 35    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
-| Files under `Client/src/platform/`                         | 42    |
+| Files under `Client/src/platform/`                         | 44    |
 
 The handler count covers both attribute spellings — 23 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
@@ -84,8 +84,8 @@ the binding, not the call site.
 
 A second blind spot, found while B7-4 moved these call sites: the recipe cannot
 see a **nested** generic. `invoke<Record<string, unknown>>("get_settings")` in
-`platform/desktop/settings.ts` does not match, so the table's 28 counts
-distinct names _the recipe finds_; the tree calls 29.
+`platform/desktop/settings.ts` does not match, so the table's 30 counts
+distinct names _the recipe finds_; the tree calls 31.
 
 One registered Rust handler is never invoked from `Client/src/`:
 `get_cert_fingerprint`, which the native E2E harness calls directly
