@@ -8,7 +8,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
-import { clearAttachmentCaches } from "@components/message-list/attachments";
+import {
+  clearAttachmentCaches,
+  clearExternalImageCache,
+} from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
@@ -333,6 +336,9 @@ async function clearImageCache(): Promise<void> {
   clearAttachmentCaches();
   clearEmbedCaches();
   clearMediaCaches();
+  // Also moves the external-content broker to a fresh partition, which drops
+  // the native cache of the previous one on its next request.
+  clearExternalImageCache();
 }
 
 /**

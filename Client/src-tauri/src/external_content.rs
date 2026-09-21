@@ -1501,6 +1501,22 @@ mod tests {
         assert!(inner.cache.entries.is_empty());
     }
 
+    /// How the renderer's teardown clears this cache without a third command:
+    /// it names its fresh partition with an empty preview request, refused
+    /// before any network work.
+    #[tokio::test]
+    async fn an_empty_preview_under_a_new_partition_clears_the_old_one() {
+        let b = broker();
+        b.enter("old").cache.put("old", "k", image(8));
+        assert_eq!(
+            b.preview("new", "").await.err(),
+            Some(Failure::BlockedDestination)
+        );
+        let inner = b.enter("new");
+        assert_eq!(inner.cache.used, 0);
+        assert!(inner.cache.entries.is_empty());
+    }
+
     // --- The User-Agent (Decision 2) ---------------------------------------------
 
     #[test]
