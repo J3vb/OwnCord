@@ -5,6 +5,7 @@ vi.mock("@lib/toast", () => ({ showToast: (...args: unknown[]) => mockShowToast(
 
 import { buildAccountTab } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
+import { setSessionReplaced } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 import type { SessionInfo } from "@lib/api";
 
@@ -59,9 +60,10 @@ describe("Account tab — devices", () => {
   beforeEach(() => {
     ac = new AbortController();
     mockShowToast.mockClear();
+    setSessionReplaced(false);
     authStore.setState(() => ({
       token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" } as never,
+      user: { id: 1, username: "alice", avatar: null, role: "member" },
       serverName: "s",
       motd: null,
       isAuthenticated: true,
@@ -131,6 +133,40 @@ describe("Account tab — devices", () => {
       String(OTHER.id),
       String(CURRENT.id),
     ]);
+  });
+
+  it("says the connection closes shortly when a device signed in elsewhere revokes", async () => {
+    setSessionReplaced(true);
+    const tab = await render(makeOptions());
+    rows(tab)[0]!.querySelector<HTMLButtonElement>('[data-testid="session-revoke"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds.",
+        "success",
+      );
+    });
+  });
+
+  it("puts both rows back when two sign-outs in a row both fail", async () => {
+    const SECOND: SessionInfo = { ...OTHER, id: 11, ip: "198.51.100.3" };
+    const options = makeOptions({
+      onListSessions: vi.fn().mockResolvedValue([OTHER, SECOND, CURRENT]),
+      onRevokeSession: vi.fn().mockRejectedValue(new Error("offline")),
+    });
+    const tab = await render(options);
+    rows(tab)[0]!.querySelector<HTMLButtonElement>('[data-testid="session-revoke"]')!.click();
+    rows(tab)[0]!.querySelector<HTMLButtonElement>('[data-testid="session-revoke"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledTimes(2);
+    });
+    expect(mockShowToast).toHaveBeenCalledWith("offline", "error");
+    expect(
+      rows(tab)
+        .map((r) => r.dataset["sessionId"])
+        .sort(),
+    ).toEqual([String(OTHER.id), String(SECOND.id), String(CURRENT.id)].sort());
   });
 
   it("signs out everywhere only after a confirmation that says this device is included", async () => {

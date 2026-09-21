@@ -22,7 +22,12 @@
   device cannot also hold a live socket while you revoke from a connected one,
   and calling `DisconnectRevokedUser` would kick the caller's own device. REST
   enforcement is immediate, so the UI says plainly that the device is signed
-  out and can no longer connect — no ~30 s caveat.
+  out and can no longer connect — no ~30 s caveat. The exception is a device
+  showing "Signed in elsewhere" revoking the device that holds the live
+  socket: that socket stays up until the hub's 30 s session sweep or the
+  per-message recheck, so from that state the toast says its connection
+  closes within about 30 seconds (owner decision in review: accepted, wording
+  made honest, no server change).
 - **The notice** is a main-page toast naming the sign-in (device, IP, time),
   pointing to Settings > Account, and worded as a sign-in **not yet reviewed**
   rather than "new": `MarkSessionsSeen` excludes the caller, so a device may be

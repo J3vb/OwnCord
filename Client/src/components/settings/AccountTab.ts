@@ -12,6 +12,7 @@ import { showToast } from "@lib/toast";
 import { sessionDeviceLabel } from "@lib/session-notice";
 import { formatMessageTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
+import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import {
@@ -988,11 +989,17 @@ function buildSessionRow(
       void options
         .onRevokeSession(s.id)
         .then(() => {
-          showToast("Device signed out. It can no longer connect.", "success");
+          showToast(
+            uiStore.getState().sessionReplaced
+              ? "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds."
+              : "Device signed out. It can no longer connect.",
+            "success",
+          );
         })
         .catch((err: unknown) => {
           // The server kept the session, so the row comes back.
-          list?.insertBefore(row, next);
+          if (next?.parentNode === list) list?.insertBefore(row, next);
+          else list?.appendChild(row);
           showToast(err instanceof Error ? err.message : "Failed to sign out the device.", "error");
         });
     },
