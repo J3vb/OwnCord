@@ -290,6 +290,9 @@ export function createConnectPage(
         onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
         onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
         onRefreshTotpStatus: () => Promise.resolve(),
+        onListSessions: () => Promise.resolve([]),
+        onRevokeSession: () => Promise.reject(new Error("Not authenticated")),
+        onRevokeAllSessions: () => Promise.reject(new Error("Not authenticated")),
       });
       settingsOverlay.mount(root);
     });

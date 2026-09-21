@@ -6,7 +6,11 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
+import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
+import { sessionDeviceLabel } from "@lib/session-notice";
+import { formatMessageTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
@@ -941,6 +945,177 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
 }
 
 // ---------------------------------------------------------------------------
+// Devices (sessions) builder
+// ---------------------------------------------------------------------------
+
+function buildSessionRow(
+  s: SessionInfo,
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const row = createElement("div", {
+    class: "session-row",
+    "data-testid": "session-row",
+    "data-session-id": String(s.id),
+  });
+  const info = createElement("div", { class: "session-info" });
+  const name = createElement("div", { class: "session-device" }, sessionDeviceLabel(s.device));
+  if (s.is_current) {
+    name.appendChild(createElement("span", { class: "session-current" }, "This device"));
+  }
+  const detail = createElement(
+    "div",
+    { class: "session-detail" },
+    `${s.ip === "" ? "Unknown IP" : s.ip} \u00b7 Last used ${formatMessageTimestamp(s.last_used)}`,
+  );
+  appendChildren(info, name, detail);
+  row.appendChild(info);
+
+  // The current device has no per-row action: "Sign out everywhere" covers it.
+  if (s.is_current) return row;
+
+  const revokeBtn = createElement(
+    "button",
+    { class: "ac-btn", "data-testid": "session-revoke" },
+    "Sign out",
+  );
+  revokeBtn.addEventListener(
+    "click",
+    () => {
+      const list = row.parentElement;
+      const next = row.nextSibling;
+      row.remove();
+      void options
+        .onRevokeSession(s.id)
+        .then(() => {
+          showToast("Device signed out. It can no longer connect.", "success");
+        })
+        .catch((err: unknown) => {
+          // The server kept the session, so the row comes back.
+          list?.insertBefore(row, next);
+          showToast(err instanceof Error ? err.message : "Failed to sign out the device.", "error");
+        });
+    },
+    { signal },
+  );
+  row.appendChild(revokeBtn);
+  return row;
+}
+
+function buildSessionsSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "sessions-section" });
+  const separator = createElement("div", { class: "settings-separator" });
+  const header = createElement("div", { class: "settings-section-title" }, "Devices");
+  const description = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
+    "Every device signed in to your account. A device you sign out can no longer connect.",
+  );
+  const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
+  const status = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px" },
+    "Loading devices...",
+  );
+
+  function load(): void {
+    list.replaceChildren(status);
+    setText(status, "Loading devices...");
+    void options
+      .onListSessions()
+      .then((sessions) => {
+        if (signal.aborted) return;
+        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        log.warn("Failed to list sessions", err);
+        setText(status, "Could not load your devices.");
+      });
+  }
+
+  const revokeAllBtn = createElement(
+    "button",
+    {
+      class: "ac-btn account-delete-btn",
+      style: "margin-top:12px",
+      "data-testid": "sessions-revoke-all",
+    },
+    "Sign out everywhere",
+  );
+  const confirmArea = createElement("div", {
+    style: "display:none;margin-top:12px",
+    "data-testid": "sessions-revoke-all-confirm-area",
+  });
+  const warning = createElement(
+    "div",
+    { style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4" },
+    "This signs out every device, including this one. You will need to sign in again here.",
+  );
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+  });
+  const btnRow = createElement("div", { style: "display:flex;gap:8px" });
+  const confirmBtn = createElement(
+    "button",
+    { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
+    "Sign out everywhere",
+  );
+  const cancelBtn = createElement(
+    "button",
+    { class: "ac-btn", style: "background:var(--bg-active)" },
+    "Cancel",
+  );
+  appendChildren(btnRow, confirmBtn, cancelBtn);
+  appendChildren(confirmArea, warning, errorEl, btnRow);
+
+  const closeConfirm = (): void => {
+    confirmArea.style.display = "none";
+    revokeAllBtn.style.display = "";
+    setText(errorEl, "");
+  };
+  revokeAllBtn.addEventListener(
+    "click",
+    () => {
+      revokeAllBtn.style.display = "none";
+      confirmArea.style.display = "block";
+    },
+    { signal },
+  );
+  cancelBtn.addEventListener("click", closeConfirm, { signal });
+  confirmBtn.addEventListener(
+    "click",
+    () => {
+      confirmBtn.disabled = true;
+      setText(errorEl, "");
+      void options
+        .onRevokeAllSessions()
+        .then((result) => {
+          // A revoked current session is handled by the page: auth is
+          // cleared and the app leaves. Otherwise refresh what is left.
+          if (result.current_session_revoked || signal.aborted) return;
+          closeConfirm();
+          load();
+        })
+        .catch((err: unknown) => {
+          setText(errorEl, err instanceof Error ? err.message : "Failed to sign out everywhere.");
+        })
+        .finally(() => {
+          confirmBtn.disabled = false;
+        });
+    },
+    { signal },
+  );
+
+  appendChildren(wrapper, separator, header, description, list, revokeAllBtn, confirmArea);
+  load();
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Delete account (danger zone) builder
 // ---------------------------------------------------------------------------
 
@@ -1213,6 +1388,9 @@ export function buildAccountTab(
 
   // Two-factor authentication section
   section.appendChild(buildTotpSection(options, signal));
+
+  // Signed-in devices
+  section.appendChild(buildSessionsSection(options, signal));
 
   // Delete account (danger zone)
   section.appendChild(buildDeleteAccountSection(options, signal));

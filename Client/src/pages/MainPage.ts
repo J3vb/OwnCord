@@ -17,6 +17,7 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
@@ -78,6 +79,8 @@ import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 const log = createLogger("main-page");
+/** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
+const SESSION_NOTICE_TOAST_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Options
@@ -404,6 +407,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     };
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
 
+    // A sign-in not yet reviewed: listed on connect and on window focus.
+    const sessionNotice = new AbortController();
+    unsubscribers.push(() => sessionNotice.abort());
+    const pollSessions = startSessionNotice({
+      fetchSessions: (signal) => api.getSessions(signal),
+      notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),
+      signal: sessionNotice.signal,
+    });
+
     // Banner reacts to the store-backed connection status (single source of
     // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
     // — a fatal drop navigates away via clearAuth, and anything short of that
@@ -413,7 +425,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.connectionStatus,
         (status) => {
           try {
-            if (status === "connected") restoreSavedPresence();
+            if (status === "connected") {
+              restoreSavedPresence();
+              pollSessions();
+            }
             syncBanner();
           } catch (err) {
             log.error("Connection status handler error", err);
@@ -620,6 +635,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onStatusChange: (status) => applyPresence(status),
+      onListSessions: () => api.getSessions(),
+      onRevokeSession: (id) => api.revokeSession(id),
+      onRevokeAllSessions: async () => {
+        const result = await api.revokeAllSessions();
+        // The token died with the response: leave for the connect page now
+        // rather than let the next request fail with a 401.
+        if (result.current_session_revoked) clearAuth();
+        return result;
+      },
     });
     settingsOverlay.mount(root);
     children.push(settingsOverlay);
