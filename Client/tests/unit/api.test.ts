@@ -1063,13 +1063,20 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/server-info");
     });
 
-    it("getServerInfo tolerates unknown fields so later additions do not break it", async () => {
+    it("getServerInfo reads the B7-15a fields and tolerates unknown ones", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse({ ...SERVER_INFO, registration_mode: "open", retention: { days: 7 } }),
+        jsonResponse({
+          ...SERVER_INFO,
+          registration_mode: "approval",
+          retention: { messages_days: 30 },
+          future_field: "ignored",
+        }),
       );
       const info = await api.getServerInfo();
       expect(info.protocol_epoch).toBe(1);
       expect(info.name).toBe("Test Server");
+      expect(info.registration_mode).toBe("approval");
+      expect(info.retention).toEqual({ messages_days: 30 });
     });
 
     it("getServerInfo throws ApiClientError on non-ok response", async () => {

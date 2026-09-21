@@ -878,6 +878,27 @@ export interface HealthResponse {
   readonly online_users: number;
 }
 
+/** Registration mode reported by `server-info` (B4-1, B7-15a). */
+export type RegistrationMode = "closed" | "invite" | "approval" | "open";
+
+/**
+ * Narrow an unknown `registration_mode` value to the union, or null for
+ * anything else. The field is optional on an older server and a hand-edited
+ * one can hold any string, so callers must treat null as "unknown" and fall
+ * back to the invite-required behaviour — never as "open".
+ */
+export function parseRegistrationMode(value: unknown): RegistrationMode | null {
+  switch (value) {
+    case "closed":
+    case "invite":
+    case "approval":
+    case "open":
+      return value;
+    default:
+      return null;
+  }
+}
+
 /**
  * GET /api/v1/server-info response (B6-7).
  *
@@ -885,13 +906,20 @@ export interface HealthResponse {
  * with `PROTOCOL_EPOCH` to know whether it can connect before opening a
  * WebSocket. There is deliberately no version field (C-2).
  *
- * B7-15 adds `registration_mode` and a retention summary; unknown fields are
- * ignored by consumers, so extending this type is safe.
+ * B7-15 adds `registration_mode` and a retention summary; both are optional so
+ * an older server (or a failed read) leaves them undefined and consumers fall
+ * back to today's invite-required behaviour. `registration_mode` is parsed
+ * through `parseRegistrationMode` at the point of use — an unknown string is
+ * unavailable, not a licence to widen registration.
  */
 export interface ServerInfoResponse {
   readonly name: string;
   readonly protocol_epoch: number;
   readonly browser_client_enabled: boolean;
+  /** Unknown/missing is treated as unavailable; see `parseRegistrationMode`. */
+  readonly registration_mode?: RegistrationMode;
+  /** Server-default message retention window; `messages_days: 0` = indefinitely. */
+  readonly retention?: { readonly messages_days: number };
 }
 
 /** Single channel object from REST API. */
