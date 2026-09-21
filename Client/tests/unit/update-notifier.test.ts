@@ -226,3 +226,54 @@ describe("createUpdateNotifier deferred check timer", () => {
     notifier.destroy?.();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The connected path must not turn silence into "update required" (B7-12,
+// Decision 5). A 204 from /client-update is either "already latest" or the
+// server withholding a release NEWER than itself — the latter protects this
+// compatible client from updating into a refusal. A failed check resolves the
+// no-update default. Both must yield no notice of any kind.
+// ---------------------------------------------------------------------------
+
+describe("createUpdateNotifier connected-path silence", () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    host.remove();
+  });
+
+  it("shows no notice when the server answers 204 / no update", async () => {
+    mockCheckForUpdate.mockResolvedValue({
+      available: false,
+      version: null,
+      body: null,
+      manual_upgrade: false,
+    });
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(host.querySelector(".update-banner")).toBeNull();
+    expect(host.querySelector(".incompatible-notice")).toBeNull();
+    notifier.destroy?.();
+  });
+
+  it("shows no notice when the check is offline (resolves the no-update default)", async () => {
+    mockCheckForUpdate.mockRejectedValue(new Error("network error"));
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(host.querySelector(".update-banner")).toBeNull();
+    expect(host.querySelector(".incompatible-notice")).toBeNull();
+    notifier.destroy?.();
+  });
+});
