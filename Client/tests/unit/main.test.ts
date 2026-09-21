@@ -192,6 +192,7 @@ import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
+import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
 // ---------------------------------------------------------------------------
@@ -496,6 +497,22 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-c.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("shows the server-older notice without offering a client update when the refused server is older", async () => {
+    mockCheckForUpdate.mockClear();
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showIncompatible: ReturnType<typeof vi.fn>;
+    };
+    page.showIncompatible.mockClear();
+    setUpdateRequiredHost({ host: "old.example:8443", serverEpoch: 1, clientEpoch: 2 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(page.showIncompatible).toHaveBeenCalledWith("old.example:8443", 1, 2);
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
     expect(uiStore.getState().updateRequiredHost).toBeNull();
   });
 

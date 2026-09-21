@@ -301,9 +301,9 @@ export function wireDispatcher(
       log.error("Auth failed", { message: payload.message });
       setTransientError(payload.message);
       const epochRefusal = payload.code === "protocol_epoch_unsupported";
-      // The server speaks a newer protocol than this build: hand the host to
-      // the connect page so it can offer the client update right there.
-      if (epochRefusal && (payload.server_epoch ?? 0) > PROTOCOL_EPOCH) {
+      // Hand the refused host to the connect page so it can name which side
+      // updates, and offer the client update when this build is the older one.
+      if (epochRefusal) {
         const host = api?.getConfig?.().host;
         if (host) {
           setUpdateRequiredHost({

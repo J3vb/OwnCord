@@ -897,7 +897,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // Consume the fact: the next connect page must not re-offer it.
       setUpdateRequiredHost(null);
       connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
-      mountUpdateNotifier(required.host);
+      if (required.serverEpoch !== null && required.serverEpoch > required.clientEpoch) {
+        mountUpdateNotifier(required.host);
+      }
     };
     const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
     offerUpdate(uiStore.getState().updateRequiredHost);
