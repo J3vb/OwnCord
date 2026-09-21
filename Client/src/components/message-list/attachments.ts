@@ -519,13 +519,8 @@ export function isExternalGif(objectUrl: string): boolean {
  *  after scrolling back reloads the stale URL. Register it before any other
  *  error listener: a recovered load stops the error from reaching them. */
 export function recoverEvictedImage(img: HTMLImageElement, source: ExternalImageSource): void {
-  const epoch = externalEpoch;
   const recover = (event: Event): void => {
-    if (
-      epoch !== externalEpoch ||
-      !img.src.startsWith("blob:") ||
-      [...externalObjectUrls.values()].includes(img.src)
-    ) {
+    if (!img.src.startsWith("blob:") || [...externalObjectUrls.values()].includes(img.src)) {
       return;
     }
     event.stopImmediatePropagation();
@@ -696,7 +691,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     function attachLightbox(img: HTMLImageElement): void {
       img.addEventListener("click", () => {
-        openImageLightbox(img.src, att.filename);
+        openImageLightbox(img.src, att.filename, { url: resolvedUrl });
       });
     }
 
@@ -743,6 +738,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             src: dataUrl,
             alt: att.filename,
           });
+          recoverEvictedImage(img, { url: resolvedUrl });
           attachLightbox(img);
           img.addEventListener(
             "load",

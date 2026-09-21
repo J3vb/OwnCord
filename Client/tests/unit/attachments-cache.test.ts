@@ -93,6 +93,7 @@ import {
   renderAttachment,
   setServerHost,
 } from "../../src/components/message-list/attachments";
+import { createAvatarElement } from "../../src/lib/avatar";
 
 function imageResponse() {
   return {
@@ -289,5 +290,53 @@ describe("attachment cache clearing", () => {
     brokerImageMock.mockResolvedValue({ ok: false, failure: "unavailable" });
     img.dispatchEvent(new Event("error"));
     await vi.waitFor(() => expect(otherError).toHaveBeenCalledTimes(2));
+  });
+
+  it("re-requests an image the manual cache clear revoked", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:clear-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const source = { url: "https://cdn.elsewhere.example/still-shown.gif" };
+
+    const img = document.createElement("img");
+    recoverEvictedImage(img, source);
+    img.src = (await fetchExternalImage(source))!;
+    clearExternalImageCache();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:clear-1");
+
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe("blob:clear-2"));
+  });
+
+  it("re-requests an external avatar whose blob: URL the FIFO cap evicted", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:avatar-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+
+    const avatar = createAvatarElement(
+      {
+        username: "ext",
+        avatar: "https://cdn.elsewhere.example/avatar.png",
+      },
+      { className: "avatar" },
+    );
+    document.body.appendChild(avatar);
+    await vi.waitFor(() => expect(avatar.querySelector("img")).not.toBeNull());
+    const img = avatar.querySelector("img")!;
+    expect(img.src).toBe("blob:avatar-1");
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: `https://cdn.elsewhere.example/${i}.png` });
+    }
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:avatar-1");
+
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe(`blob:avatar-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
   });
 });

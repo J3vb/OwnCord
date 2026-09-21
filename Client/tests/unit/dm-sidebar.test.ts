@@ -7,6 +7,7 @@ const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
 vi.mock("@components/message-list/attachments", () => ({
   fetchImageAsDataUrl,
+  recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
 }));

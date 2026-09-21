@@ -17,7 +17,11 @@ import { createIcon } from "@lib/icons";
 import { showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "./message-list/attachments";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -92,6 +96,7 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   void fetchImageAsDataUrl(resolved).then((dataUrl) => {
     if (dataUrl === null || !el.isConnected) return;
     const img = createElement("img", { src: dataUrl, alt: label });
+    recoverEvictedImage(img, { url: resolved });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
