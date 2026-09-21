@@ -469,6 +469,7 @@ describe("API Client", () => {
         created_at: "2026-01-01T00:00:00Z",
         last_used: "2026-01-02T00:00:00Z",
         is_current: true,
+        unseen: true,
       };
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
       const result = await api.getSessions();
@@ -479,6 +480,14 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.revokeSession(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions/42");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("revokeAllSessions calls DELETE /users/me/sessions and returns the body", async () => {
+      const body = { sessions_revoked: 3, current_session_revoked: true };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.revokeAllSessions()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
   });
@@ -1063,13 +1072,20 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/server-info");
     });
 
-    it("getServerInfo tolerates unknown fields so later additions do not break it", async () => {
+    it("getServerInfo reads the B7-15a fields and tolerates unknown ones", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse({ ...SERVER_INFO, registration_mode: "open", retention: { days: 7 } }),
+        jsonResponse({
+          ...SERVER_INFO,
+          registration_mode: "approval",
+          retention: { messages_days: 30 },
+          future_field: "ignored",
+        }),
       );
       const info = await api.getServerInfo();
       expect(info.protocol_epoch).toBe(1);
       expect(info.name).toBe("Test Server");
+      expect(info.registration_mode).toBe("approval");
+      expect(info.retention).toEqual({ messages_days: 30 });
     });
 
     it("getServerInfo throws ApiClientError on non-ok response", async () => {

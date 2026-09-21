@@ -9,6 +9,7 @@ import type {
   Permission,
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
+import { parseRegistrationMode } from "../../src/lib/types";
 
 // Sample docs/protocol.md JSON payloads for parsing validation
 const sampleAuthOk = {
@@ -255,5 +256,24 @@ describe("Permission bitfield", () => {
     expect(memberPerms & P.SPEAK_VOICE).toBeTruthy();
     expect(memberPerms & P.MANAGE_MESSAGES).toBeFalsy();
     expect(memberPerms & P.ADMINISTRATOR).toBeFalsy();
+  });
+});
+
+describe("parseRegistrationMode", () => {
+  it.each(["closed", "invite", "approval", "open"] as const)(
+    "accepts the known mode %s",
+    (mode) => {
+      expect(parseRegistrationMode(mode)).toBe(mode);
+    },
+  );
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["an unknown string", "closed-ish"],
+    ["the wrong case", "OPEN"],
+    ["a non-string", 1],
+  ])("treats %s as unavailable (null), never as open", (_label, value) => {
+    expect(parseRegistrationMode(value)).toBeNull();
   });
 });

@@ -24,4 +24,9 @@ const (
 	// ErrCodeTimedOut is returned for a send, reaction or voice join refused
 	// by an active moderator timeout (B5-9).
 	ErrCodeTimedOut = "TIMED_OUT"
+	// ErrCodeSessionReplaced is sent to a connection the hub displaces
+	// because the same user connected from another device. The client stops
+	// reconnecting on it; without it the displaced device cannot tell the
+	// close from a network drop and the two devices trade the socket forever.
+	ErrCodeSessionReplaced = "SESSION_REPLACED"
 )

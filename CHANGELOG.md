@@ -234,6 +234,10 @@ server's internals were reorganised behind service boundaries.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
   registration is never opened by the upgrade. Switching mode is audited.
+- The desktop sign-up form follows the server's registration mode: it asks for
+  an invite code only when one is needed, says up front when an admin must
+  approve the account, and disables Register on a closed server. If the mode
+  cannot be read, it still asks for a code.
 - **Approval mode** adds a queue: applicants can be listed, approved or denied,
   and cannot sign in until approved.
 - Retention can be read, set and cleared per channel, with a server-wide

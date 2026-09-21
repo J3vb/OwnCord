@@ -52,6 +52,7 @@ vi.mock("@lib/livekitSession", () => ({
 vi.mock("@lib/notifications", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
+  cleanupNotificationAudio: vi.fn(),
 }));
 
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
@@ -274,6 +275,7 @@ function fakeApi(host = ""): ApiClient {
   return {
     getConfig: () => ({ host }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
+    getSessions: vi.fn(async () => []),
   } as unknown as ApiClient;
 }
 
@@ -1025,6 +1027,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       getReactionUsers: vi.fn(async () => ({ users: [] })),
+      getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
     page = createMainPage({ ws: fakeWs(), api: hostedApi });
@@ -1065,6 +1068,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
+      getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
     page = createMainPage({ ws: fakeWs(), api: hostedApi });
@@ -1109,6 +1113,79 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
     expect(status!.style.color).toBe("var(--yellow)");
     expect(container.textContent).not.toContain("Password changed successfully.");
+  });
+
+  it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device (B7-14)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: true,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Signed in elsewhere Use here");
+    });
+    banner.querySelector("button")!.click();
+
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    expect(uiStore.getState().sessionReplaced).toBe(false);
+  });
+
+  it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      getSessions: vi.fn(async () => []),
+      revokeAllSessions: vi.fn(async () => ({
+        sessions_revoked: 2,
+        current_session_revoked: true,
+      })),
+    } as unknown as ApiClient;
+    authStore.setState((prev) => ({ ...prev, isAuthenticated: true, token: "tok" }));
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    container.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!.click();
+    container
+      .querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all-confirm"]')!
+      .click();
+
+    await vi.waitFor(() => {
+      expect(hostedApi.revokeAllSessions).toHaveBeenCalledOnce();
+    });
+    await vi.waitFor(() => {
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    });
+  });
+
+  it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      getSessions: vi.fn(async () => [
+        {
+          id: 9,
+          device: "OwnCord-Client/1.4.0",
+          ip: "198.51.100.2",
+          created_at: "2026-09-21 08:00:00",
+          last_used: "2026-09-21 08:00:00",
+          is_current: false,
+          unseen: true,
+        },
+      ]),
+    } as unknown as ApiClient;
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+
+    await vi.waitFor(() => {
+      const toast = container.querySelector('[data-testid="toast"]');
+      expect(toast?.textContent).toContain("OwnCord desktop from 198.51.100.2");
+    });
   });
 
   it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {

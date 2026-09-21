@@ -53,6 +53,7 @@ export const shards = {
     "src/lib/hostValidation.ts",
     "src/lib/rate-limiter.ts",
     "src/lib/sessionScope.ts",
+    "src/lib/session-notice.ts",
     "src/lib/pendingMessages.ts",
   ], // 3103 mutants
   "lib-rest": [

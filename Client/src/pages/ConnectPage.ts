@@ -7,6 +7,7 @@ import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
 import type { Compatibility, HealthStatus } from "@lib/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
@@ -35,6 +36,8 @@ export interface ConnectPageCallbacks {
   onAutoLoginCancel?(): void;
   /** Mount the client-update banner for a refused/older host (client-older). */
   onUpdateClient?(host: string): void;
+  /** The registration mode `server-info` reported for a host, if known. */
+  getRegistrationMode?(host: string): RegistrationMode | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +96,7 @@ export function createConnectPage(
     onTotpSubmit: callbacks.onTotpSubmit,
     onSettingsOpen: () => openSettings(),
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
+    getRegistrationMode: callbacks.getRegistrationMode,
   });
 
   // Per-host compatibility from the advisory preflight. The notice reads it
@@ -290,6 +294,9 @@ export function createConnectPage(
         onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
         onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
         onRefreshTotpStatus: () => Promise.resolve(),
+        onListSessions: () => Promise.resolve([]),
+        onRevokeSession: () => Promise.reject(new Error("Not authenticated")),
+        onRevokeAllSessions: () => Promise.reject(new Error("Not authenticated")),
       });
       settingsOverlay.mount(root);
     });
@@ -378,6 +385,11 @@ export function createConnectPage(
     ) => {
       compatibilityByHost.set(host, { compatibility, serverEpoch });
       serverPanel.updateCompatibility(host, compatibility);
+      // A fresh server-info snapshot may change the host's registration mode;
+      // re-derive the register affordances if it is the selected host.
+      if (loginForm.getHost().trim() === host) {
+        loginForm.refreshRegistrationMode();
+      }
     },
     showIncompatible(host: string, serverEpoch: number | null, clientEpoch = PROTOCOL_EPOCH): void {
       incompatibleNotice.show(host, serverEpoch, clientEpoch);

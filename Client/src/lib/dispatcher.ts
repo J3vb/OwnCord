@@ -5,7 +5,12 @@
 import type { WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
 import { authStore, setAuth, clearAuth, updateUser } from "@stores/auth.store";
-import { setTransientError, setConnectionStatus, setUpdateRequiredHost } from "@stores/ui.store";
+import {
+  setTransientError,
+  setConnectionStatus,
+  setUpdateRequiredHost,
+  setSessionReplaced,
+} from "@stores/ui.store";
 import {
   setChannels,
   setRoles,
@@ -1286,6 +1291,21 @@ export function wireDispatcher(
         setTransientError(payload.message || "You have been banned");
         ws.disconnect();
         clearAuth();
+        return;
+      }
+      if (payload.code === "SESSION_REPLACED") {
+        // The same account connected from another device and the server
+        // closed this socket. Reconnecting would kick that device, which
+        // would reconnect and kick this one, forever — so stop like BANNED.
+        // Unlike BANNED this device is still signed in: keep the credential
+        // and auth, and let the user take the connection back ("Use here").
+        // The voice session moves with the connection, so leave it here.
+        ws.disconnect();
+        if (voiceStore.getState().currentChannelId !== null) {
+          void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+          leaveVoiceChannel();
+        }
+        setSessionReplaced(true);
         return;
       }
       // If the error carries the request id of a pending optimistic send, mark
