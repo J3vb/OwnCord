@@ -634,6 +634,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           log.warn("Failed to refresh the 2FA state", err);
         }
       },
+      onRegenerateRecoveryCodes: async (password) =>
+        (await api.regenerateRecoveryCodes(password)).backup_codes,
+      onEnrolRecoveryKit: (password) => api.enrolRecoveryKit(password),
+      onGetRecoveryKitStatus: () => api.getRecoveryKitStatus(),
       onStatusChange: (status) => applyPresence(status),
       onListSessions: () => api.getSessions(),
       onRevokeSession: (id) => api.revokeSession(id),

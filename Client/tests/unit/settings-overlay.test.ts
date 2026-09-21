@@ -83,6 +83,9 @@ describe("SettingsOverlay", () => {
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
     onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
     onListSessions: vi.fn().mockResolvedValue([]),
     onRevokeSession: vi.fn().mockResolvedValue(undefined),
     onRevokeAllSessions: vi
@@ -1260,6 +1263,9 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onConfirmTotp: vi.fn().mockResolvedValue(undefined),
       onDisableTotp: vi.fn().mockResolvedValue(undefined),
       onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+      onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+      onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+      onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
       onListSessions: vi.fn().mockResolvedValue([]),
       onRevokeSession: vi.fn().mockResolvedValue(undefined),
       onRevokeAllSessions: vi

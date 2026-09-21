@@ -275,6 +275,7 @@ function fakeApi(host = ""): ApiClient {
   return {
     getConfig: () => ({ host }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
+    getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
     getSessions: vi.fn(async () => []),
   } as unknown as ApiClient;
 }
@@ -1027,6 +1028,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       getReactionUsers: vi.fn(async () => ({ users: [] })),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
@@ -1068,6 +1070,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
@@ -1139,6 +1142,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
       revokeAllSessions: vi.fn(async () => ({
         sessions_revoked: 2,
@@ -1167,6 +1171,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => [
         {
           id: 9,

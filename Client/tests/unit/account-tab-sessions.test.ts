@@ -45,6 +45,9 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
     onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
     onListSessions: vi.fn().mockResolvedValue([OTHER, CURRENT]),
     onRevokeSession: vi.fn().mockResolvedValue(undefined),
     onRevokeAllSessions: vi
