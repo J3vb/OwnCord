@@ -4,7 +4,7 @@
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";
-import type { HealthStatus, ServerProfile } from "@lib/profiles";
+import type { Compatibility, HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
 import { createLogger } from "@lib/logger";
@@ -65,6 +65,11 @@ export interface ServerPanelApi {
   readonly element: HTMLDivElement;
   renderProfiles(profiles: readonly SimpleProfile[]): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
+  /**
+   * Advisory epoch-compatibility badge. It NEVER disables Connect — the
+   * WebSocket auth_error stays authoritative (Decision 1).
+   */
+  updateCompatibility(host: string, compatibility: Compatibility): void;
   destroy(): void;
 }
 
@@ -90,7 +95,12 @@ export function createServerPanel(
   // Map of host -> DOM elements for health status updates
   const healthElements = new Map<
     string,
-    { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }
+    {
+      dot: HTMLDivElement;
+      latency: HTMLSpanElement;
+      onlineUsers: HTMLSpanElement;
+      compat: HTMLSpanElement;
+    }
   >();
 
   // Cached DOM references
@@ -165,7 +175,10 @@ export function createServerPanel(
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
       const onlineUsersEl = createElement("span", { class: "srv-online-users" });
-      appendChildren(meta, host, latency, onlineUsersEl);
+      // Advisory epoch badge (B7-12): text + modifier class set by
+      // updateCompatibility; empty and inert until then.
+      const compatEl = createElement("span", { class: "srv-compat-badge" });
+      appendChildren(meta, host, latency, onlineUsersEl, compatEl);
 
       // Show username if available (full profile has it)
       const fullProfile = profile as Partial<ServerProfile>;
@@ -176,7 +189,12 @@ export function createServerPanel(
 
       appendChildren(info, name, meta);
 
-      healthElements.set(profile.host, { dot: statusDot, latency, onlineUsers: onlineUsersEl });
+      healthElements.set(profile.host, {
+        dot: statusDot,
+        latency,
+        onlineUsers: onlineUsersEl,
+        compat: compatEl,
+      });
 
       // Action buttons (auto-login toggle + delete)
       const actions = createElement("div", { class: "srv-actions" });
@@ -285,6 +303,24 @@ export function createServerPanel(
     } else {
       setText(els.onlineUsers, "");
       els.onlineUsers.className = "srv-online-users";
+    }
+  }
+
+  function updateCompatibility(host: string, compatibility: Compatibility): void {
+    const els = healthElements.get(host);
+    if (!els) return;
+
+    // Only a real mismatch earns a badge; `compatible` and `unreachable` are
+    // silence (an unreachable server is not an update requirement).
+    if (compatibility === "client-older") {
+      setText(els.compat, "Client update needed");
+      els.compat.className = "srv-compat-badge client-older";
+    } else if (compatibility === "server-older") {
+      setText(els.compat, "Server update needed");
+      els.compat.className = "srv-compat-badge server-older";
+    } else {
+      setText(els.compat, "");
+      els.compat.className = "srv-compat-badge";
     }
   }
 
@@ -410,6 +446,7 @@ export function createServerPanel(
     element: panelEl,
     renderProfiles: renderServerProfiles,
     updateHealthStatus,
+    updateCompatibility,
     destroy(): void {
       renderAc?.abort();
       renderAc = null;

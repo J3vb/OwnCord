@@ -157,6 +157,8 @@ vi.mock("@pages/ConnectPage", () => ({
       showError: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
+      updateCompatibility: vi.fn(),
+      showIncompatible: vi.fn(),
       getRememberPassword: vi.fn(() => true),
       getAutoConnect: vi.fn(() => false),
       getPassword: vi.fn(() => ""),

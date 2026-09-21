@@ -179,13 +179,24 @@ sequenceDiagram
     end
 ```
 
-| State       | Presentation                                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| checking    | Silent (no UI until a result)                                                                                                        |
-| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`) |
-| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                        |
-| applied     | App relaunches automatically                                                                                                         |
-| failed      | "Update failed. Please try again later." + Dismiss                                                                                   |
+| State       | Presentation                                                                                                                                                                                                                                                   |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| checking    | Silent (no UI until a result)                                                                                                                                                                                                                                  |
+| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`)                                                                                                                           |
+| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                                                                                                                                                  |
+| applied     | App relaunches automatically                                                                                                                                                                                                                                   |
+| failed      | "Update failed. Please try again later." + Dismiss                                                                                                                                                                                                             |
+| no update   | Silent. A `204` from `/client-update` ("already latest", or the server withholding a release **newer than itself**) and a failed/offline check both render nothing — a connected client is compatible by definition, so silence is correct (B7-12, Decision 5) |
+
+**Update required (B7-12).** When the server's `protocol_epoch` is **newer**
+than this build's, the connect page raises the `IncompatibleNotice`
+(`pages/connect-page/IncompatibleNotice.ts`) naming the client as the side to
+update, with both epoch numbers, and offers "Update client" (mounting this same
+`UpdateNotifier`) plus "Choose another server" to defer. The notice appears for
+the selected/attempted host or a WebSocket `protocol_epoch_unsupported`
+refusal — never from the background probe alone. When this client is the newer
+side, the same notice names the **server** as the side to update and offers only
+the leave exit, because installing this client cannot resolve that refusal.
 
 > **✅ Wired — download progress.** The Rust download callback
 > (`download_and_install_update` in `update_commands.rs`) accumulates received

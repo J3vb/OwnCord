@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import {
   createProfileManager,
   createTauriBackend,
+  deriveCompatibility,
   type PersistenceBackend,
   type CreateProfileData,
   type ServerProfile,
@@ -89,6 +90,26 @@ const sampleData2: CreateProfileData = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("deriveCompatibility", () => {
+  it("reports compatible when the server speaks this client's epoch", () => {
+    expect(deriveCompatibility(1, 1)).toBe("compatible");
+  });
+
+  it("reports client-older when the server speaks a newer epoch", () => {
+    expect(deriveCompatibility(2, 1)).toBe("client-older");
+  });
+
+  it("reports server-older when the server speaks an older epoch", () => {
+    expect(deriveCompatibility(0, 1)).toBe("server-older");
+  });
+
+  it("reports unreachable when the probe failed (no epoch)", () => {
+    // An older server and an unreachable one are both "cannot connect", but
+    // only the older one names the operator as the side that updates.
+    expect(deriveCompatibility(null, 1)).toBe("unreachable");
+  });
+});
 
 describe("ProfileManager", () => {
   let backend: ReturnType<typeof createMockBackend>;
