@@ -41,11 +41,17 @@ function urls(entries: readonly ScopeEntry[] | undefined): string[] {
 }
 
 describe("Tauri default capability — HTTP scope", () => {
-  it("http:allow-fetch allows exactly the https wildcard plus loopback http", () => {
+  it("http:allow-fetch allows only the loopback TOFU proxies", () => {
+    // Every external fetch goes through the external-content broker
+    // (src-tauri/src/external_content.rs), so the renderer's plugin client
+    // reaches nothing but the Rust proxies on loopback (B7-16, C-09 clause 8).
     const fetchPerm = find("http:allow-fetch") as ScopedPermission;
-    expect(urls(fetchPerm.allow).sort()).toEqual(
-      ["http://127.0.0.1:*", "https://*", "https://*:*"].sort(),
-    );
+    expect(urls(fetchPerm.allow)).toEqual(["http://127.0.0.1:*"]);
+  });
+
+  it("http:allow-fetch grants no https destination at all", () => {
+    const fetchPerm = find("http:allow-fetch") as ScopedPermission;
+    expect(urls(fetchPerm.allow).filter((url) => url.startsWith("https:"))).toEqual([]);
   });
 
   it("http:allow-fetch denies https loopback literals", () => {
@@ -53,6 +59,8 @@ describe("Tauri default capability — HTTP scope", () => {
     // All legitimate server traffic reaches loopback over http (the Rust TOFU
     // proxy). An https loopback fetch can only be an attempt to reach some
     // other local service, so deny it — deny wins over allow in Tauri's scope.
+    // With no https allow left this is defence in depth: it still holds if a
+    // future change re-adds a wildcard.
     expect(urls(fetchPerm.deny).sort()).toEqual(
       [
         "https://127.0.0.1",
