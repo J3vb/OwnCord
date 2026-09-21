@@ -1,11 +1,11 @@
-// Legacy binding for the LiveKit-proxies suite: today's `LiveKitUrlResolver`
-// (`lib/livekitUrlResolver.ts`), wrapped with no cast against the seam subset
-// of the contract. The class still exists (it is the LiveKit session's
-// handle, now delegating to `platform/desktop`), so the suite runs here and in
-// `livekitProxies.desktop.test.ts`.
+// Desktop binding for the LiveKit-proxies suite: `platform/desktop`'s
+// `nativeProxies`, which now holds the server host and the tunnel that
+// `LiveKitUrlResolver` held. The suite also runs in
+// `livekitProxies.legacy.test.ts` against the class, which still exists as the
+// LiveKit session's handle; green in both is the evidence the move changed
+// nothing.
 //
-// The server host is module state behind the class, so each test needs a
-// fresh module instance.
+// The server host is module state, so each test needs a fresh module instance.
 import { vi } from "vitest";
 import type { LiveKitProxiesSeam } from "./livekitProxies.suite";
 import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
@@ -19,15 +19,10 @@ vi.mock("@lib/logger", () => ({
 describeLiveKitProxiesSuite(async () => {
   vi.resetModules();
   invoke.mockReset().mockResolvedValue(undefined);
-  const { LiveKitUrlResolver } = await import("../../../src/lib/livekitUrlResolver");
-  const resolver = new LiveKitUrlResolver();
-  const legacy: LiveKitProxiesSeam = {
-    setLiveKitServerHost: (host) => resolver.setServerHost(host),
-    resolveLiveKitUrl: (proxyPath, directUrl) => resolver.resolve(proxyPath, directUrl),
-    stopLiveKitProxy: () => resolver.stopProxy(),
-  };
+  const mod = await import("../../../src/platform/desktop/nativeProxies");
+  const desktopBinding: LiveKitProxiesSeam = mod.nativeProxies;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       succeedWith(port: number) {
         invoke.mockImplementation((cmd: string) =>

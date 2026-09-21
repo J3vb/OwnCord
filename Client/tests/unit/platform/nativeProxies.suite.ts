@@ -1,7 +1,6 @@
 // Behaviour suite for the `ensureHttpProxy` half of the `NativeProxies`
-// contract (`src/platform/contracts/nativeProxies.ts`). The LiveKit half is
-// no-seam (`LiveKitUrlResolver` is a class, not an exported function) — its
-// suite lands with the seam in B7-5.
+// contract (`src/platform/contracts/nativeProxies.ts`). The LiveKit half has
+// its own suite, `livekitProxies.suite.ts` (B7-5).
 import { beforeEach, describe, expect, test } from "vitest";
 import type { NativeProxies } from "../../../src/platform/contracts/nativeProxies";
 

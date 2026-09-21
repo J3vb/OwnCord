@@ -123,8 +123,6 @@ export default tseslint.config(
       // static native import belongs.
       "src/platform/desktop/**",
       "src/components/settings/AdvancedTab.ts",
-      "src/lib/httpProxy.ts",
-      "src/lib/livekitUrlResolver.ts",
       "src/main.ts",
     ],
     rules: {

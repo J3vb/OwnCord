@@ -7,6 +7,7 @@ import { fileSaver } from "./fileSave";
 import { http } from "./http";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
+import { nativeProxies } from "./nativeProxies";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
 import { settings } from "./settings";
@@ -21,6 +22,7 @@ export const desktop: Partial<Platform> = {
   http,
   identity,
   logFiles,
+  nativeProxies,
   pendingMessages,
   pushToTalk,
   settings,

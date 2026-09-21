@@ -1,11 +1,10 @@
-// Legacy binding for the NativeProxies (ensureHttpProxy) suite: today's
-// `lib/httpProxy.ts` export, wrapped with no cast against the seam subset of
-// the contract. B7-5 moved the tunnel behind `platform/desktop` and kept this
-// export as its callers' name, so the suite runs here and in
-// `nativeProxies.desktop.test.ts`.
+// Desktop binding for the NativeProxies (ensureHttpProxy) suite:
+// `platform/desktop`'s tunnel. B7-5 runs the same suite file here and in
+// `nativeProxies.legacy.test.ts`, whose `lib/httpProxy.ts` export still
+// exists; green in both is the evidence the move changed nothing.
 //
-// The tunnel keeps a module-level `pending` map to de-duplicate
-// concurrent starts, so each test needs a fresh module instance.
+// The module keeps a module-level `pending` map to de-duplicate concurrent
+// starts, so each test needs a fresh module instance.
 import { vi } from "vitest";
 import type { NativeProxiesSeam } from "./nativeProxies.suite";
 import { describeNativeProxiesSuite } from "./nativeProxies.suite";
@@ -19,10 +18,10 @@ vi.mock("@lib/logger", () => ({
 describeNativeProxiesSuite(async () => {
   vi.resetModules();
   invoke.mockReset();
-  const mod = await import("../../../src/lib/httpProxy");
-  const legacy: NativeProxiesSeam = { ensureHttpProxy: mod.ensureHttpProxy };
+  const mod = await import("../../../src/platform/desktop/nativeProxies");
+  const desktopBinding: NativeProxiesSeam = mod.nativeProxies;
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       succeedWith(port: number) {
         let n = 0;
