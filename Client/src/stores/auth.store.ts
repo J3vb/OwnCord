@@ -25,8 +25,10 @@ const log = createLogger("auth.store");
  * Why the session ended. "protocol_epoch": the server refused this client's
  * wire epoch — the token is still valid, so main.ts keeps the stored
  * credential and the update it offers relaunches into auto-login.
+ * "server_switch": the user quick-switched to another server — main.ts keeps
+ * the departed server's credential so switching back resumes it (B7-13).
  */
-export type LogoutReason = "user" | "server_shutdown" | "protocol_epoch";
+export type LogoutReason = "user" | "server_shutdown" | "protocol_epoch" | "server_switch";
 
 export interface AuthState {
   readonly token: string | null;

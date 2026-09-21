@@ -18,7 +18,7 @@ import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
 import { logout } from "@lib/logout";
-import { authStore, clearAuth, updateUser } from "@stores/auth.store";
+import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
@@ -41,6 +41,7 @@ import { setServerHost } from "@components/message-list/renderers";
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
+  setAttachmentCacheScope,
 } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches, closeActiveLightbox } from "@components/message-list/media";
@@ -167,6 +168,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   setChannelMutesHost(apiConfig.host ?? null);
   setNsfwGateHost(apiConfig.host ?? null);
   setAudioVolumeHost(apiConfig.host ?? null);
+  // Server images are cached per account, not per host: two accounts on one
+  // server see different channels. Expired the moment auth clears, so a
+  // profile switch isolates the cache even before this page is destroyed.
+  setAttachmentCacheScope(apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null);
+  const unsubCacheScope = onAuthCleared(() => setAttachmentCacheScope(null));
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
@@ -956,6 +962,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // clip viewed this session stays pinned (as a blob: URL or a cached
       // data: URI) past logout.
       clearAttachmentCaches();
+      unsubCacheScope();
       // External content (link previews, YouTube titles, image heights, and
       // broker-fetched images) was fetched for this server. Clearing it here
       // — and moving the broker to a fresh partition — is what keeps one
