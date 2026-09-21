@@ -4,22 +4,14 @@
 
 import type { WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
-import { authStore, setAuth, clearAuth, updateUser } from "@stores/auth.store";
+import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import {
   setTransientError,
   setConnectionStatus,
   setUpdateRequiredHost,
   setSessionReplaced,
 } from "@stores/ui.store";
-import {
-  setChannels,
-  setRoles,
-  setActiveChannel,
-  addChannel,
-  updateChannel,
-  removeChannel,
-  noteChannelMessage,
-} from "@stores/channels.store";
+import { noteChannelMessage } from "@stores/channels.store";
 import { channelsStore } from "@stores/channels.store";
 import {
   addMessage,
@@ -39,45 +31,44 @@ import {
   setChannelLoadError,
   isWindowDetached,
 } from "@stores/messages.store";
-import {
-  setMembers,
-  addMember,
-  removeMember,
-  updateMemberRole,
-  updateMemberProfile,
-  updatePresence,
-  setTyping,
-} from "@stores/members.store";
+import { setTyping } from "@stores/members.store";
 import {
   voiceStore,
   setVoiceStates,
   updateVoiceState,
-  updateVoiceUserProfile,
   removeVoiceUser,
   setVoiceConfig,
   joinVoiceChannel,
   leaveVoiceChannel,
 } from "@stores/voice.store";
-import {
-  dmStore,
-  updateDmLastMessage,
-  updateDmLastMessagePreview,
-  updateDmParticipant,
-} from "@stores/dm.store";
+import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "@stores/dm.store";
 import { setUserBlockedByThem } from "@stores/blocks.store";
-import { emojiStore, setCustomEmoji } from "@stores/emoji.store";
-import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { parseTimestamp } from "@components/message-list/formatting";
 import { notifyIncomingMessage } from "./notifications";
 import { mentionsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
-import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { activatePendingMessages, acknowledgePendingMessage } from "./pendingMessages";
 import { ServerMessageType as S, PROTOCOL_EPOCH } from "./protocolTypes";
+import {
+  applyReadyActiveChannel,
+  applyReadyChannels,
+  applyReadyEmoji,
+  handleChannelCreate,
+  handleChannelDelete,
+  handleChannelUpdate,
+  handleEmojiUpdate,
+  handleMemberBan,
+  handleMemberJoin,
+  handleMemberUpdate,
+  handlePresence,
+  handleRolesUpdate,
+  handleUserUpdate,
+  markReadyActiveChannelRead,
+} from "../features/channels/wsHandlers";
 import {
   applyReadyBlocks,
   applyReadyDms,
@@ -314,9 +305,7 @@ export function wireDispatcher(
       const prevSelfServerMuted = voiceStore.getState().localServerMuted ?? false;
       const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
 
-      setChannels(payload.channels);
-      setRoles(payload.roles ?? []);
-      setMembers(payload.members);
+      applyReadyChannels(payload);
       setVoiceStates(payload.voice_states);
 
       // Defense-in-depth: if the ready payload shows us in a voice channel
@@ -397,34 +386,7 @@ export function wireDispatcher(
         );
       }
 
-      // Auto-select the first text channel if none is active; clear it when
-      // the channel this session was viewing is gone from the fresh snapshot
-      // (deleted, or a DM closed elsewhere while this client was offline) so
-      // the activeChannelId subscriber actually fires and tears down the
-      // stale message list/composer instead of leaving them mounted against
-      // a channel the server no longer recognizes. Checked against the raw
-      // payload (not the synthesized channelsStore row) so a still-open DM
-      // that was never locally synthesized this session isn't wrongly
-      // cleared.
-      const currentActive = channelsStore.select((s) => s.activeChannelId);
-      // Set only when the branch below clears a channel that was active
-      // before this ready — distinct from "no channel was active", which
-      // must NOT mark-read whatever the auto-select branch just picked.
-      let activeChannelCleared = false;
-      if (currentActive === null && payload.channels.length > 0) {
-        const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
-        if (firstText !== undefined) {
-          setActiveChannel(firstText.id);
-        }
-      } else if (currentActive !== null) {
-        const stillPresent =
-          payload.channels.some((ch) => ch.id === currentActive) ||
-          (payload.dm_channels ?? []).some((dm) => dm.channel_id === currentActive);
-        if (!stillPresent) {
-          setActiveChannel(null);
-          activeChannelCleared = true;
-        }
-      }
+      const readyActive = applyReadyActiveChannel(payload);
 
       // A second (or later) `ready` in this dispatcher's lifetime only ever
       // arrives from a full-ready resync (Server/ws/serve.go: a fresh connect
@@ -488,38 +450,11 @@ export function wireDispatcher(
       const dmPayloads = payload.dm_channels ?? [];
       applyReadyDms(payload);
 
-      // The server's read_states go stale while a channel stays focused
-      // (channel_focus is sent once per mount, mark_read only from the context
-      // menu), so a full-ready resync restates non-zero unread/mention counts
-      // for the very channel the user is reading. Mark it read: this advances
-      // the server read state and clears the local badges, for server channels
-      // and DMs alike. Skipped on first connect (nothing was active yet) and
-      // when the block above just cleared a channel that's gone.
-      if (currentActive !== null && !activeChannelCleared) {
-        markChannelRead(currentActive);
-      }
+      markReadyActiveChannelRead(readyActive);
 
       applyReadyBlocks(ctx);
 
-      // Custom emoji are not in the ready payload (they are server-wide and
-      // change rarely, so they do not belong in the per-session dump). Load
-      // them once here; `emoji_update` keeps them fresh from then on. A
-      // failure is non-fatal — unresolved shortcodes stay plain text.
-      //
-      // OC-0251: snapshot the revision emojiStore was at right before issuing
-      // this fetch, mirroring the OC-0218 blockedByMeRev guard above. The GET
-      // travels over a separate HTTP connection while an `emoji_update` can
-      // arrive on the already-open socket — if one lands (bumping the
-      // revision) while this GET is in flight, setCustomEmoji sees the
-      // mismatch and skips applying this reply instead of clobbering the
-      // fresher broadcast with a stale full-set snapshot.
-      if (api?.listEmoji !== undefined) {
-        const emojiRevAtFetch = emojiStore.getState().rev ?? 0;
-        api
-          .listEmoji()
-          .then((list) => setCustomEmoji(list, emojiRevAtFetch))
-          .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
-      }
+      applyReadyEmoji(ctx);
 
       log.info("Ready payload applied", {
         channels: payload.channels.length,
@@ -751,151 +686,29 @@ export function wireDispatcher(
 
   // ── Presence ──────────────────────────────────────────
 
-  unsubs.push(
-    ws.on(S.PRESENCE, (payload) => {
-      // custom_status is passed through verbatim, undefined included: the
-      // store treats "field absent" as "leave the text alone", which is what
-      // an older server's presence event means.
-      updatePresence(payload.user_id, payload.status, payload.custom_status);
-      // dmStore keeps its own frozen copy of a DM partner's status for the
-      // sidebar row (see buildDmConversations) — membersStore alone does not
-      // reach it.
-      updateDmParticipant(payload.user_id, { status: payload.status });
-    }),
-  );
+  unsubs.push(ws.on(S.PRESENCE, handlePresence));
 
   // ── Channels ──────────────────────────────────────────
 
-  unsubs.push(
-    ws.on(S.CHANNEL_CREATE, (payload) => {
-      addChannel(payload);
-    }),
-  );
+  unsubs.push(ws.on(S.CHANNEL_CREATE, handleChannelCreate));
 
-  unsubs.push(
-    ws.on(S.CHANNEL_UPDATE, (payload) => {
-      updateChannel(payload);
-    }),
-  );
+  unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
 
-  unsubs.push(
-    ws.on(S.CHANNEL_DELETE, (payload) => {
-      // If the deleted channel is the active one, redirect to the first text channel.
-      const activeId = channelsStore.select((s) => s.activeChannelId);
-      removeChannel(payload.id);
-      if (payload.id === activeId) {
-        const remaining = channelsStore.select((s) => s.channels);
-        const sorted = [...remaining.values()]
-          .filter((ch) => isTextLikeChannel(ch))
-          .toSorted((a, b) => a.position - b.position);
-        const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
-        setActiveChannel(firstTextId);
-        // The redirect alone reads as the app spontaneously changing channels;
-        // say why (ux/channels-members-dms §1.2).
-        showToast("This channel was deleted", "info");
-        log.info("Active channel deleted, redirected", { deletedId: payload.id });
-      }
-    }),
-  );
+  unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
 
   // ── Members ───────────────────────────────────────────
 
-  unsubs.push(
-    ws.on(S.MEMBER_JOIN, (payload) => {
-      log.info("Member joined", { userId: payload.user.id, username: payload.user.username });
-      addMember(payload);
-    }),
-  );
+  unsubs.push(ws.on(S.MEMBER_JOIN, handleMemberJoin));
 
-  unsubs.push(
-    ws.on(S.MEMBER_BAN, (payload) => {
-      log.info("Member banned", { userId: payload.user_id });
-      removeMember(payload.user_id);
-    }),
-  );
+  unsubs.push(ws.on(S.MEMBER_BAN, handleMemberBan));
 
-  unsubs.push(
-    ws.on(S.MEMBER_UPDATE, (payload) => {
-      log.info("Member role updated", { userId: payload.user_id, role: payload.role });
-      updateMemberRole(payload.user_id, payload.role);
+  unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 
-      // Keep authStore in sync when the signed-in user's own role changed —
-      // every permission gate (canManageChannels, canViewAuditLog, ...) reads
-      // authStore.user.role, not membersStore, so without this a promotion or
-      // demotion of the current user would leave every affordance stale until
-      // the socket reconnects (mirrors the USER_UPDATE self-branch below).
-      const me = authStore.getState().user;
-      if (me && payload.user_id === me.id) {
-        updateUser({ role: payload.role });
-      }
-    }),
-  );
+  unsubs.push(ws.on(S.ROLES_UPDATE, handleRolesUpdate));
 
-  // Roles changed server-side (created, edited, deleted or reordered). The
-  // payload is the whole list, so the store is replaced rather than patched —
-  // name colors, the member-list groups and every permission-gated affordance
-  // re-derive from it without a reconnect.
-  unsubs.push(
-    ws.on(S.ROLES_UPDATE, (payload) => {
-      log.info("Roles updated", { count: payload.roles?.length ?? 0 });
-      setRoles(payload.roles ?? []);
-    }),
-  );
+  unsubs.push(ws.on(S.EMOJI_UPDATE, handleEmojiUpdate));
 
-  // Custom emoji changed server-side (uploaded or deleted). Whole set, like
-  // roles_update: the store is replaced so a deleted emoji stops rendering in
-  // messages, pickers and reaction pills without a reconnect.
-  unsubs.push(
-    ws.on(S.EMOJI_UPDATE, (payload) => {
-      log.info("Custom emoji updated", { count: payload.emoji?.length ?? 0 });
-      setCustomEmoji(payload.emoji ?? []);
-    }),
-  );
-
-  unsubs.push(
-    ws.on(S.USER_UPDATE, (payload) => {
-      log.info("User profile updated", { userId: payload.user_id, username: payload.username });
-      updateMemberProfile(payload.user_id, {
-        username: payload.username,
-        avatar: payload.avatar,
-        displayName: payload.display_name,
-        identityPublicKey: payload.identity_public_key,
-      });
-      // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
-      // username/avatar/displayName is otherwise never refreshed. DmUser's
-      // avatar/displayName are non-nullable ("" = unset), so null (cleared)
-      // maps to "". display_name absent means "leave the nickname alone" —
-      // an older or partial payload must not blank it, exactly as
-      // updateMemberProfile above.
-      updateDmParticipant(payload.user_id, {
-        username: payload.username,
-        avatar: payload.avatar ?? "",
-        ...(payload.display_name === undefined ? {} : { displayName: payload.display_name ?? "" }),
-      });
-      // voiceStore.voiceUsers is the third store holding a frozen username
-      // copy (see updateVoiceUserProfile's doc comment) — without this, a
-      // rename leaves the voice roster showing the old name for the rest of
-      // the call.
-      updateVoiceUserProfile(payload.user_id, { username: payload.username });
-
-      // Update auth store if the current user changed their own profile.
-      const currentUser = authStore.getState().user;
-      if (currentUser && payload.user_id === currentUser.id) {
-        setAuth(
-          authStore.getState().token ?? "",
-          {
-            ...currentUser,
-            username: payload.username,
-            avatar: payload.avatar,
-            display_name: payload.display_name,
-            about: payload.about,
-          },
-          authStore.getState().serverName ?? "",
-          authStore.getState().motd ?? "",
-        );
-      }
-    }),
-  );
+  unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
 
   // ── Voice ─────────────────────────────────────────────
 

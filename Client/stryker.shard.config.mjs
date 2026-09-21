@@ -57,6 +57,7 @@ export const shards = {
     "src/lib/pendingMessages.ts",
     "src/features/connection/dispatchContext.ts",
     "src/features/direct-messages/wsHandlers.ts",
+    "src/features/channels/wsHandlers.ts",
   ], // 3103 mutants
   "lib-rest": [
     "src/lib/a11y.ts",
