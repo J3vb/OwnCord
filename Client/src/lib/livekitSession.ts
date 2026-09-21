@@ -22,9 +22,6 @@ import {
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
-  getLocalCameraStream as doGetLocalCameraStream,
-  getLocalScreenshareStream as doGetLocalScreenshareStream,
-  getRemoteVideoStream as doGetRemoteVideoStream,
 } from "@lib/screenShare";
 import { buildSessionDebugInfo } from "@lib/livekitDiagnostics";
 import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventHandlers";
@@ -39,6 +36,7 @@ import type {
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
+import { RemoteTracks } from "../features/voice/remoteTracks";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -80,8 +78,15 @@ export class LiveKitSession {
   private ws: WsClient | null = null;
   private onErrorCallback: ((message: string) => void) | null = null;
   private serverHost: string | null = null;
-  private onRemoteVideoCallback: RemoteVideoCallback | null = null;
-  private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
+  /** Remote-video callbacks and the video stream lookups. */
+  private _remoteTracks = new RemoteTracks(() => this._room);
+  // Test-visibility proxies: the callbacks live on RemoteTracks.
+  private get onRemoteVideoCallback(): RemoteVideoCallback | null {
+    return this._remoteTracks.onRemoteVideoCallback;
+  }
+  private get onRemoteVideoRemovedCallback(): RemoteVideoRemovedCallback | null {
+    return this._remoteTracks.onRemoteVideoRemovedCallback;
+  }
   /** An explicit unmute waiting for this room's SFU publishing grant. */
   private pendingMicrophoneRoom: Room | null = null;
 
@@ -593,15 +598,14 @@ export class LiveKitSession {
     this._deviceManager.setOnError(null);
   }
   setOnRemoteVideo(cb: RemoteVideoCallback): void {
-    this.onRemoteVideoCallback = cb;
+    this._remoteTracks.setOnRemoteVideo(cb);
   }
   setOnRemoteVideoRemoved(cb: RemoteVideoRemovedCallback): void {
-    this.onRemoteVideoRemovedCallback = cb;
+    this._remoteTracks.setOnRemoteVideoRemoved(cb);
   }
 
   clearOnRemoteVideo(): void {
-    this.onRemoteVideoCallback = null;
-    this.onRemoteVideoRemovedCallback = null;
+    this._remoteTracks.clearOnRemoteVideo();
   }
 
   /** Shared connect-with-retry + post-connect setup used by both the primary
@@ -684,8 +688,7 @@ export class LiveKitSession {
     // leaveVoice() already transitions state to "idle".
     // Clear non-connection fields (config / callbacks / infrastructure).
     this.onErrorCallback = null;
-    this.onRemoteVideoCallback = null;
-    this.onRemoteVideoRemovedCallback = null;
+    this._remoteTracks.clearOnRemoteVideo();
     this.ws = null;
     this.serverHost = null;
     this._urlResolver.setServerHost(null);
@@ -777,16 +780,16 @@ export class LiveKitSession {
   }
 
   getLocalCameraStream(): MediaStream | null {
-    return doGetLocalCameraStream(this._room);
+    return this._remoteTracks.getLocalCameraStream();
   }
 
   getLocalScreenshareStream(): MediaStream | null {
-    return doGetLocalScreenshareStream(this._room);
+    return this._remoteTracks.getLocalScreenshareStream();
   }
 
   /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
   getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return doGetRemoteVideoStream(this._room, userId, type);
+    return this._remoteTracks.getRemoteVideoStream(userId, type);
   }
 
   getRoom(): Room | null {
