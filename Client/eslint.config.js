@@ -99,6 +99,8 @@ export default tseslint.config(
       "src/features/voice/e2eeIdentity.ts",
       "src/features/voice/e2eeEpoch.ts",
       "src/features/voice/e2eePeerState.ts",
+      "src/features/voice/e2eeWorker.ts",
+      "src/features/voice/e2eeOffer.ts",
     ],
     plugins: { local: localRules },
     rules: {
