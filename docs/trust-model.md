@@ -583,7 +583,7 @@ the LiveKit URL the server hands out when the server is local
 always directly, to the SFU's advertised ICE endpoints on TCP 7881 / UDP
 50000–60000 (`Server/ws/livekit_process.go:130-133`; `docs/deployment.md`
 §Firewall and Ports); `www.youtube.com` and `img.youtube.com` for video
-embeds (`Client/src/components/message-list/media.ts:173-174`, `:210`, `:229`);
+embeds (`Client/src/components/message-list/media.ts:179`, `:202`, `:224`);
 the Klipy CDN for GIF media; GitHub for its own updates via the server's
 `client-update` endpoint; and any URL a user posted, for link previews — the
 C-09 contract above governs that last one.
