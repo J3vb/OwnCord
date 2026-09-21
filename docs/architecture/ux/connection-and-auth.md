@@ -84,7 +84,7 @@ follow.
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | `idle`            | Enabled fields; Login/Register toggle                                                                                             | submit → validate               |
 | `loading`         | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`)                   | `auth.login` resolves           |
-| `totp`            | 6-digit overlay, Verify/Cancel                                                                                                    | code → `verifyTotp`             |
+| `totp`            | Code overlay (6-digit TOTP or `XXXXX-XXXXX` emergency code), Verify/Cancel                                                        | code → `verifyTotp`             |
 | `connecting`      | "Connecting…" while WS handshakes                                                                                                 | ws `connected`                  |
 | `auto-connecting` | Dedicated spinner card for saved-profile auto-login                                                                               | any key/click cancels to `idle` |
 | `error`           | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle`             |
@@ -93,6 +93,22 @@ follow.
 username, password required; password ≥ 8; in register mode the invite code is
 required when the host's registration mode is `invite` or unknown (see §2.4).
 Validation failures never hit the network.
+
+The 2FA box takes either a six-digit authenticator code or an emergency
+recovery code (`XXXXX-XXXXX`, case-insensitive, separator optional); the server
+routes the one `code` field by shape. A wrong code of either kind keeps the
+overlay and the partial token, so the user can retry; the re-entrancy guard
+stops a double Enter spending a single-use code twice.
+
+**Account recovery (B7-15b).** "Lost your password or 2FA device? Recover your
+account" opens a recovery overlay (`pages/connect-page/RecoverOverlay.ts`,
+loaded on first use to keep it out of the startup bundle): username (carried over from the form), a
+field for the recovery kit secret or a recovery credential from the server
+owner, and a new password (≥ 8). It calls `POST /auth/recover` with the secret
+in `kit_secret` (the server tells a kit from an owner credential by shape), and
+the returned session is signed in through the same `completeLogin` tail as a
+login. A refusal keeps the overlay and shows the server's message; success or
+Cancel wipes the secret and the new password from the inputs.
 
 ### 2.3 Login sequence
 
@@ -109,7 +125,7 @@ sequenceDiagram
     alt requires_2fa
         API-->>F: 200 {partial_token, requires_2fa}
         F->>U: show TOTP overlay
-        U->>F: 6-digit code
+        U->>F: 6-digit code or emergency recovery code
         F->>API: POST /auth/verify-totp (Bearer partial_token)
         API-->>F: 200 {token, user}
     else banned
