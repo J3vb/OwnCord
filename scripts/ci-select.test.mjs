@@ -252,6 +252,72 @@ test("the client lockfile selects the components that consume the client npm tre
   }
 });
 
+// ─── The supply-chain and workflow-lint jobs (2026-09-21).
+
+test("a workflow change runs the workflow linter as well as the hygiene gate", () => {
+  const sel = picked("M\t.github/workflows/ci.yml");
+  assert.equal(sel.workflows, true, "zizmor audits .github/workflows/");
+  assert.equal(sel.server, true, "a workflow file is still a shared CI input");
+});
+
+test("any .github file runs the workflow linter, because .github is a shared CI input", () => {
+  // `.github/` is already in the unbounded-blast-radius rule below — a
+  // Dependabot config or an issue template is a change to how the repository
+  // itself is driven, so every capability is selected conservatively. The
+  // workflow-lint job therefore runs for a non-workflow .github file too; that
+  // is the existing rule, not a new one, and it is recorded here so a future
+  // "helpfully" narrowed .github rule has to confront it.
+  const sel = picked("M\t.github/dependabot.yml");
+  assert.equal(sel.workflows, true);
+  assert.equal(sel.server, true, "still the shared-input rule");
+});
+
+test("every lockfile and manifest in the repository runs the supply-chain scan", () => {
+  // Named one by one: the scan's file list in ci.yml is explicit, and this test
+  // is what fails when a new component's lockfile is left out of both.
+  for (const path of [
+    "Server/go.mod",
+    "Server/go.sum",
+    "Client/package.json",
+    "Client/package-lock.json",
+    "Client/src-tauri/Cargo.toml",
+    "Client/src-tauri/Cargo.lock",
+    "tools/mcp-introspect/package.json",
+    "tools/mcp-introspect/package-lock.json",
+  ]) {
+    assert.equal(runs(`M\t${path}`, "deps"), true, `${path} moves a dependency`);
+  }
+});
+
+test("the scanner baselines run the supply-chain scan, because editing them changes its verdict", () => {
+  assert.equal(runs("M\tosv-scanner.toml", "deps"), true);
+  assert.equal(runs("M\tClient/src-tauri/deny.toml", "deps"), true);
+});
+
+test("the scanner baselines do not run every job", () => {
+  // They are not build inputs and not read by any test: a one-line exception
+  // edit must reach the fallback-free `deps`-only path, not select everything.
+  const sel = picked("M\tosv-scanner.toml");
+  for (const cap of CAPABILITIES) {
+    assert.equal(sel[cap], cap === "deps", `${cap} after osv-scanner.toml`);
+  }
+});
+
+test("an ordinary source change runs no supply-chain scan", () => {
+  // Source cannot move a version. Gating here is what keeps the two new jobs
+  // off the overwhelming majority of PRs.
+  assert.equal(runs("M\tServer/ws/hub.go", "deps"), false);
+  assert.equal(runs("M\tClient/src/pages/MainPage.ts", "deps"), false);
+  assert.equal(runs("M\tClient/src-tauri/src/lib.rs", "deps"), false);
+});
+
+test("a server change runs the server job but not the workflow linter or the scan", () => {
+  const sel = picked("M\tServer/service/new_thing.go");
+  assert.equal(sel.server, true);
+  assert.equal(sel.workflows, false);
+  assert.equal(sel.deps, false);
+});
+
 test("a path the classifier has never been taught selects everything", () => {
   const sel = picked("A\tsome/new/top-level-thing.bin");
   for (const cap of CAPABILITIES) assert.equal(sel[cap], true);

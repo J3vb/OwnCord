@@ -7,6 +7,10 @@ edition = "2021"
 # warning instead of silently following whatever toolchain is installed.
 rust-version = "1.77.2"
 description = "OwnCord Desktop Client"
+# Not published to any registry: this crate is built in place by `tauri build`.
+# cargo-deny reads this with licenses.private.ignore below, so its absent
+# `license` field is not an unlicensed-crate finding.
+publish = false
 
 # Crate-level lint policy so hardening ships with every build, not only the CI
 # `cargo clippy -- -D warnings` gate (which downstream/local builds don't run).

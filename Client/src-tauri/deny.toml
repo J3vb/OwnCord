@@ -1,0 +1,81 @@
+# cargo-deny policy for the desktop client's Rust dependency graph.
+#
+#   cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+#
+# CI runs exactly that (ci.yml, Supply-chain scan job). Three audits: advisories,
+# licences and sources. Every exception below names the crate, the advisory and
+# why it is accepted, so the check fails on anything NEW rather than on this
+# baseline. An exception that stops matching is itself a failure
+# (unused-ignored-advisory / unused-allowed-license), so this list cannot rot
+# silently.
+
+[advisories]
+# `all`: an unmaintained/unsound advisory anywhere in the graph fails, not only
+# on a direct dependency. That is the point of the check.
+unmaintained = "all"
+unsound = "workspace"
+# A stale ignore is an error, not a warning: it means the exception list has
+# drifted from the graph and is no longer reviewed.
+unused-ignored-advisory = "deny"
+# A yanked crate is a warning only. cargo-audit's own `yanked` handling matches,
+# and a yank is usually a version-resolution hazard rather than a vulnerability.
+yanked = "warn"
+ignore = [
+  # rustls 0.23.43 accepts a TLS 1.3 handshake message sent at the wrong
+  # encryption level. The handshake transcript stays authenticated, so no
+  # network attacker can alter or complete a handshake with it — the effect is
+  # a stricter peer being accepted in cleartext rather than a break. Arrives
+  # through reqwest and tokio-tungstenite. `cargo update -p rustls` to >=0.23.45
+  # clears it; the bump is deliberately left to the dependency-owning PR, not
+  # folded into a tooling change.
+  { id = "RUSTSEC-2026-0285", reason = "low-impact; fixed in rustls 0.23.45, a lockfile bump for its own PR" },
+
+  # The rust-unic family (unic-char-property/-range/-common/-ucd-ident/
+  # -ucd-version) is unmaintained upstream. It arrives only through urlpattern
+  # 0.3.0, a tauri-utils dependency; no replacement version is in range.
+  { id = "RUSTSEC-2025-0075", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0080", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0081", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0098", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0100", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+
+  # proc-macro-error is unmaintained. It arrives only through the same Linux
+  # GTK stack that pins glib, and ships no code into the client.
+  { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
+]
+
+[licenses]
+# Explicitly allowed SPDX terms, read off the resolved graph with `cargo deny
+# list`. A crate behind an OR expression passes on any one of these, so the
+# transitive LGPL term on r-efi (MIT OR Apache-2.0 OR LGPL-2.1-or-later) is
+# satisfied by MIT and LGPL is deliberately NOT allowed here.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+# Warn (not fail) if an allow entry stops being used: keep the list tight
+# without making a dependency removal a red build on its own.
+unused-allowed-license = "warn"
+# owncord-client is this repository's own crate. It is `publish = false` in
+# Cargo.toml, so its absent `license` field is not an unlicensed-crate finding.
+private = { ignore = true }
+
+[sources]
+# Dependencies must come from crates.io or a registered replacement; an
+# unknown registry or a git source is an error, which is how a typo-squatted
+# or a surprise git dependency is caught.
+unknown-registry = "deny"
+unknown-git = "deny"

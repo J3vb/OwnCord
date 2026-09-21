@@ -14,6 +14,12 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
+# Least privilege by default. Without this, every job below inherits whatever
+# the repository's default GITHUB_TOKEN permissions are; each job then names
+# the scopes it actually uses. zizmor's excessive-permissions audit is the
+# check that keeps this honest.
+permissions: {}
+
 jobs:
   # R-09 / RL-16. ci.yml has no `tags:` trigger, so a tag push starts this
   # workflow and nothing else — and this workflow re-runs none of the required
@@ -37,9 +43,14 @@ jobs:
       checks: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
+          # zizmor cache-poisoning, as in the build jobs below: no cache is
+          # restored in a workflow that can publish a runtime artifact.
+          package-manager-cache: false
       - name: Required checks must be green on the tagged commit
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,6 +72,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Compare tag with client manifests
         shell: bash
         run: |
@@ -86,12 +99,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
-          cache: npm
-          cache-dependency-path: Client/package-lock.json
+          # zizmor cache-poisoning. This workflow publishes runtime artifacts and
+          # is tag-triggered, so it must not restore a cache an attacker could
+          # poison. Removing `cache: npm` is what stops the restore on today's
+          # v4 pin; `package-manager-cache: false` is zizmor's documented input
+          # and becomes load-bearing if setup-node is ever bumped to v5, where
+          # caching is on by default.
+          package-manager-cache: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -100,6 +120,7 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          lookup-only: true
 
       - name: Install npm dependencies
         working-directory: Client
@@ -138,12 +159,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
-          cache: npm
-          cache-dependency-path: Client/package-lock.json
+          # zizmor cache-poisoning. This workflow publishes runtime artifacts and
+          # is tag-triggered, so it must not restore a cache an attacker could
+          # poison. Removing `cache: npm` is what stops the restore on today's
+          # v4 pin; `package-manager-cache: false` is zizmor's documented input
+          # and becomes load-bearing if setup-node is ever bumped to v5, where
+          # caching is on by default.
+          package-manager-cache: false
 
       - name: Install Linux system dependencies
         run: |
@@ -167,6 +195,7 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          lookup-only: true
 
       - name: Install npm dependencies
         working-directory: Client
@@ -255,10 +284,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
+          cache: false
 
       - name: Extract version from tag
         shell: bash
@@ -352,12 +384,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
-          cache: npm
-          cache-dependency-path: Client/package-lock.json
+          # zizmor cache-poisoning. This workflow publishes runtime artifacts and
+          # is tag-triggered, so it must not restore a cache an attacker could
+          # poison. Removing `cache: npm` is what stops the restore on today's
+          # v4 pin; `package-manager-cache: false` is zizmor's documented input
+          # and becomes load-bearing if setup-node is ever bumped to v5, where
+          # caching is on by default.
+          package-manager-cache: false
 
       - name: Install Linux system dependencies
         run: |
@@ -381,6 +420,7 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          lookup-only: true
 
       - name: Install npm dependencies
         working-directory: Client
@@ -453,6 +493,8 @@ jobs:
     needs: verify-versions
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -470,6 +512,8 @@ jobs:
       imageid-arm64: ${{ steps.id-arm64.outputs.imageid }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Same VERSION the push job builds with, so the layers this job smoked are
       # the layers the push job restores from cache rather than rebuilding.
@@ -522,11 +566,18 @@ jobs:
       # on native hardware.
       - id: id-amd64
         if: matrix.arch == 'amd64'
-        run: echo "imageid=${{ steps.build.outputs.imageid }}" >> "$GITHUB_OUTPUT"
+        env:
+          # Via env, not inline in the run script: zizmor's template-injection
+          # audit is right that a `steps.*.outputs.*` expansion inside `run:` is
+          # attacker-influenced text.
+          IMAGEID: ${{ steps.build.outputs.imageid }}
+        run: echo "imageid=${IMAGEID}" >> "$GITHUB_OUTPUT"
 
       - id: id-arm64
         if: matrix.arch == 'arm64'
-        run: echo "imageid=${{ steps.build.outputs.imageid }}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGEID: ${{ steps.build.outputs.imageid }}
+        run: echo "imageid=${IMAGEID}" >> "$GITHUB_OUTPUT"
 
   # B6-8. An upgrade is the path every existing install takes to this release,
   # and a failed one is the path back out — neither is exercised by any job
@@ -548,8 +599,13 @@ jobs:
   # A `uses:` job takes no timeout-minutes (GitHub rejects the key on a
   # reusable-workflow call); the timeout lives on the called workflow's job.
   upgrade-rehearsal:
-    name: Rehearse Upgrade and Rollback
+    name: Rehearse Upgrade and Rollback # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
     needs: verify-versions
+    # zizmor's self-repository audit prefers GitHub's `$/...` form here, and it
+    # is right that the form is safer. The actionlint this repository pins
+    # (1.7.7) rejects `$/...` as malformed, so adopting it would trade one gate
+    # for another. The ignore above is deliberate and is re-examined when
+    # actionlint learns the syntax.
     uses: ./.github/workflows/upgrade-rehearsal.yml
     permissions:
       contents: read
@@ -576,6 +632,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         shell: bash
@@ -730,7 +788,9 @@ jobs:
       - name: Verify the image attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh attestation verify "oci://ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server@${{ steps.build.outputs.digest }}" --repo "$GITHUB_REPOSITORY"
+          STEPS_OWNER_OUTPUTS_LOWER: ${{ steps.owner.outputs.lower }}
+          STEPS_BUILD_OUTPUTS_DIGEST: ${{ steps.build.outputs.digest }}
+        run: gh attestation verify "oci://ghcr.io/${STEPS_OWNER_OUTPUTS_LOWER}/owncord-server@${STEPS_BUILD_OUTPUTS_DIGEST}" --repo "$GITHUB_REPOSITORY"
 
   publish:
     name: Publish GitHub Release
@@ -755,12 +815,19 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
-          cache: npm
-          cache-dependency-path: Client/package-lock.json
+          # zizmor cache-poisoning. This workflow publishes runtime artifacts and
+          # is tag-triggered, so it must not restore a cache an attacker could
+          # poison. Removing `cache: npm` is what stops the restore on today's
+          # v4 pin; `package-manager-cache: false` is zizmor's documented input
+          # and becomes load-bearing if setup-node is ever bumped to v5, where
+          # caching is on by default.
+          package-manager-cache: false
 
       - name: Download Windows client assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -807,7 +874,7 @@ jobs:
         shell: bash
         run: |
           git archive --format=tar.gz --prefix="OwnCord-${VERSION}/" \
-            -o "owncord-src-${{ github.ref_name }}.tar.gz" HEAD
+            -o "owncord-src-${GITHUB_REF_NAME}.tar.gz" HEAD
 
       # Checksum lines must use bare asset filenames: the v1.0.0 updater's
       # ParseChecksumFile does an exact match on the last field, so a
@@ -985,6 +1052,6 @@ jobs:
         run: |
           mapfile -t assets < <(find windows linux -type f)
           assets+=(checksums.sha256 owncord-src-*.tar.gz)
-          gh release create "${{ github.ref_name }}" \
+          gh release create "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             "${assets[@]}"
