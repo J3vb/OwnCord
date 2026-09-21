@@ -40,7 +40,7 @@ flowchart TB
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
         DISP["dispatcher.ts<br/>34 msg types → store mutators"]
         LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
-        LKE["livekitE2EE.ts<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
+        LKE["livekitE2EE.ts (1.0k LOC facade)<br/>+ features/voice/e2ee*<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
 
     subgraph state ["Stores (9 singletons)"]

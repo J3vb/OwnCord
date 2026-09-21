@@ -1,7 +1,11 @@
 // LiveKit E2EE manager — client-side ECDH key exchange extracted from livekitSession.ts.
-// Owns the E2EE state (ephemeral keypair, room key, peer keys, rotation timers)
-// and the key-exchange protocol: identity signing / TOFU pin verification (F3),
-// announce/offer handling, and room-key generation/rotation.
+// E2EEManager is the public class: it owns the session generation, the
+// key-holder role and the join, reconnect, announce, re-pin and leave protocol,
+// and composes the ownership modules under src/features/voice/ for the rest —
+// e2eeIdentity (identity signing, F3, and the ephemeral keypair), e2eeEpoch
+// (room key, epoch, rotation), e2eePeerState (peer keys and TOFU pin
+// verification), e2eeWorker (the key provider and its write queue) and
+// e2eeOffer (receiving and sending room-key offers).
 import { ExternalE2EEKeyProvider } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
@@ -9,26 +13,23 @@ import {
   exportPublicKey,
   importPublicKey,
   generateRoomKey,
-  roomKeyToBase64,
   wrapRoomKey,
-  unwrapRoomKey,
-  signEphemeralKey,
-  verifyEphemeralKeySignature,
-  importIdentityPublicKey,
-  computeKeyFingerprint,
   computeRawKeyFingerprint,
 } from "@lib/e2eeCrypto";
-import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
+import { storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
-import { membersStore } from "@stores/members.store";
 import {
   voiceStore,
-  setPeerVerification,
   clearPeerVerification,
   clearPeerVerifications,
   setLocalSessionFingerprint,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { E2EEIdentity, rawFromBase64 } from "../features/voice/e2eeIdentity";
+import { E2EEEpoch } from "../features/voice/e2eeEpoch";
+import { E2EEPeerState, type PendingAnnounce } from "../features/voice/e2eePeerState";
+import { E2EEWorker } from "../features/voice/e2eeWorker";
+import { E2EEOffer } from "../features/voice/e2eeOffer";
 
 const log = createLogger("livekitE2EE");
 
@@ -43,36 +44,132 @@ export interface E2EEDeps {
 // --- E2EEManager class ---
 
 export class E2EEManager {
-  /** E2EE key provider — shared across Room instances. The room key is generated
-   *  and exchanged client-side via ECDH; the server never sees it. */
-  readonly keyProvider = new ExternalE2EEKeyProvider();
-
-  // ── Client-side E2EE state (ECDH key exchange) ───────────────────────────
+  // ── Ownership modules (src/features/voice/e2ee*.ts) ──────────────────────
+  /** Identity signing (F3 TOFU) and the ephemeral ECDH keypair. See e2eeIdentity.ts. */
+  private _identity = new E2EEIdentity({ getServerHost: () => this.deps.getServerHost() });
   /** Ephemeral ECDH P-256 keypair for the current voice session. */
-  private _ecdhKeyPair: CryptoKeyPair | null = null;
-  /** The 256-bit symmetric room key (plaintext). Only held by the key holder
-   *  initially; other participants receive it via ECDH-wrapped offers. */
-  private _roomKey: Uint8Array | null = null;
+  private get _ecdhKeyPair(): CryptoKeyPair | null {
+    return this._identity.ecdhKeyPair;
+  }
+  private set _ecdhKeyPair(value: CryptoKeyPair | null) {
+    this._identity.ecdhKeyPair = value;
+  }
+  /** Room key, epoch, offer high-water marks and rotation. See e2eeEpoch.ts. */
+  private _epoch = new E2EEEpoch({
+    isKeyHolder: () => this._isKeyHolder,
+    getChannelId: () => this._channelId,
+    getCurrentChannelId: () => this.deps.getCurrentChannelId(),
+    getSessionGeneration: () => this._sessionGeneration,
+    getEcdhKeyPair: () => this._ecdhKeyPair,
+    getPeerPublicKeys: () => this._peerPublicKeys,
+    applyRoomKey: (roomKey) => this._worker.applyRoomKey(roomKey),
+    distributeRoomKey: (keypair, roomKey, peers) =>
+      this._offers.distributeRoomKey(keypair, roomKey, peers),
+  });
+  /** The 256-bit symmetric room key (plaintext). */
+  private get _roomKey(): Uint8Array | null {
+    return this._epoch.roomKey;
+  }
+  private set _roomKey(value: Uint8Array | null) {
+    this._epoch.roomKey = value;
+  }
+  /** Highest offer epoch applied per sender (OC-0001). */
+  private get _peerOfferEpochs(): Map<number, number> {
+    return this._epoch.peerOfferEpochs;
+  }
+  /** True while a key rotation is in progress. */
+  private get _rotatingKey(): boolean {
+    return this._epoch.rotatingKey;
+  }
+  private set _rotatingKey(value: boolean) {
+    this._epoch.rotatingKey = value;
+  }
+  /** A keyed-peer leave deferred a rekey behind an in-flight rotation. */
+  private get _rotationPending(): boolean {
+    return this._epoch.rotationPending;
+  }
+  private set _rotationPending(value: boolean) {
+    this._epoch.rotationPending = value;
+  }
+  /** Monotonic rotation counter. */
+  private get _e2eeEpoch(): number {
+    return this._epoch.epoch;
+  }
+  private set _e2eeEpoch(value: number) {
+    this._epoch.epoch = value;
+  }
+  /** Peer keys, generations, retired keys, queued/blocked announces and TOFU
+   *  verification. See e2eePeerState.ts. */
+  private _peers = new E2EEPeerState({
+    getServerHost: () => this.deps.getServerHost(),
+    getSessionGeneration: () => this._sessionGeneration,
+  });
   /** Peer ECDH public keys indexed by userId. */
-  private _peerPublicKeys: Map<number, CryptoKey> = new Map();
+  private get _peerPublicKeys(): Map<number, CryptoKey> {
+    return this._peers.peerPublicKeys;
+  }
   /** Invalidates work for a departed membership while allowing a fresh rejoin. */
-  private _peerGenerations: Map<number, number> = new Map();
-  /** Ephemeral keys we've seen superseded for a given peer this session
-   *  (base64), indexed by userId. A signed announce carries no channel/epoch/
-   *  nonce (F3), so a validly-signed announce replays cleanly — this blocks a
-   *  replay of a key we already moved a peer off of from overwriting their
-   *  current live key (OC-0011). */
-  private _retiredPeerKeys: Map<number, Set<string>> = new Map();
-  /** Highest offer epoch applied per sender (OC-0001). The holder binds its
-   *  epoch into every wrapped room key; an offer below this mark is a
-   *  superseded key and is discarded. Per sender because each client's epoch
-   *  counter is local; reset when that sender's ephemeral key is replaced. */
-  private _peerOfferEpochs: Map<number, number> = new Map();
-  /** This client's long-term ECDSA identity keypair (F3 TOFU), used to sign our
-   *  ephemeral announces. Loaded lazily from the OS keyring, cached per session. */
-  private _identityKeyPair: CryptoKeyPair | null = null;
-  private _identityScope: string | null = null;
-  private _identityGeneration = 0;
+  private get _peerGenerations(): Map<number, number> {
+    return this._peers.peerGenerations;
+  }
+  /** Keys a peer has been moved off this session (replay guard, OC-0011). */
+  private get _retiredPeerKeys(): Map<number, Set<string>> {
+    return this._peers.retiredPeerKeys;
+  }
+  /** Announces that arrived before our ECDH keypair was ready. */
+  private get _pendingAnnounces(): PendingAnnounce[] {
+    return this._peers.pendingAnnounces;
+  }
+  private set _pendingAnnounces(value: PendingAnnounce[]) {
+    this._peers.pendingAnnounces = value;
+  }
+  /** Announces blocked on a TOFU pin mismatch, replayed by a re-pin (OC-0212). */
+  private get _blockedAnnounces(): Map<
+    number,
+    { publicKeyBase64: string; signatureBase64?: string }
+  > {
+    return this._peers.blockedAnnounces;
+  }
+  /** The key provider the Room E2EE workers read from, and its write queue.
+   *  See e2eeWorker.ts. */
+  private _worker = new E2EEWorker({
+    getSessionGeneration: () => this._sessionGeneration,
+    getRoomKey: () => this._roomKey,
+  });
+  /** E2EE key provider — shared across Room instances. */
+  get keyProvider(): ExternalE2EEKeyProvider {
+    return this._worker.keyProvider;
+  }
+  /** Receiving, applying, wrapping and pacing voice_e2ee_offer. See e2eeOffer.ts. */
+  private _offers = new E2EEOffer({
+    getWs: () => this.deps.getWs(),
+    getAnnounceChain: () => this._announceChain,
+    peerAttemptIsCurrent: (userId) => this._peers.peerAttemptIsCurrent(userId),
+    getPeerPublicKeys: () => this._peerPublicKeys,
+    getEcdhKeyPair: () => this._ecdhKeyPair,
+    getEpoch: () => this._e2eeEpoch,
+    getPeerOfferEpochs: () => this._peerOfferEpochs,
+    getRoomKey: () => this._roomKey,
+    setRoomKey: (roomKey) => {
+      this._roomKey = roomKey;
+    },
+    applyRoomKey: (roomKey, isCurrent) => this._worker.applyRoomKey(roomKey, isCurrent),
+    isKeyHolder: () => this._isKeyHolder,
+    setKeyHolder: (value) => {
+      this._isKeyHolder = value;
+    },
+    clearKeyRotationTimer: () => this._epoch.clearKeyRotationTimer(),
+    getRoomKeyResolver: () => this._roomKeyResolver,
+    setRoomKeyResolver: (resolver) => {
+      this._roomKeyResolver = resolver;
+    },
+    getRoomKeyRejector: () => this._roomKeyRejector,
+    setRoomKeyRejector: (rejector) => {
+      this._roomKeyRejector = rejector;
+    },
+  });
+
+  // ── State the manager itself owns ─────────────────────────────────────────
   /** True if this client is the key holder (longest-present participant). */
   private _isKeyHolder = false;
   /** Channel this exchange runs in, set at setupKeyExchange entry. The session
@@ -83,34 +180,6 @@ export class E2EEManager {
   /** Resolver/rejector for non-key-holders waiting to receive the room key via offer. */
   private _roomKeyResolver: (() => void) | null = null;
   private _roomKeyRejector: ((err: Error) => void) | null = null;
-  /** Guard: true while a key rotation is in progress (prevents concurrent rotations). */
-  private _rotatingKey = false;
-  /** Set when a keyed-peer leave coincides with an in-flight rotation: the rekey
-   *  is deferred (not dropped) and re-run when the current rotation finishes, so
-   *  a member that left mid-rotation is excluded from the fresh room key. */
-  private _rotationPending = false;
-  /** Monotonic counter incremented on every key rotation. handleOffer captures the
-   *  epoch before async work and discards the result if epoch changed (stale offer). */
-  private _e2eeEpoch = 0;
-  /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
-  private _pendingAnnounces: Array<{
-    userId: number;
-    publicKeyBase64: string;
-    signatureBase64?: string;
-  }> = [];
-  /** Announce that verifyPeerAnnounce rejected as a TOFU pin mismatch, keyed
-   *  by userId — buffered so a subsequent successful rePinPeerIdentity can
-   *  replay it instead of leaving the recovery a no-op for the live call
-   *  (OC-0212): a mid-call peer never re-announces on its own, so nothing
-   *  else would re-run verification against the freshly-stored pin. At most
-   *  one entry per peer; a later mismatch (or a later legitimate announce)
-   *  simply overwrites the previous one. Cleared in clearState(). */
-  private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
-    new Map();
-  /** Periodic key rotation timer — fires every KEY_ROTATION_INTERVAL_MS when key holder. */
-  private _keyRotationTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Interval between periodic key rotations (5 minutes). */
-  private static readonly KEY_ROTATION_INTERVAL_MS = 5 * 60 * 1000;
   /** Bumped every time clearState() tears down a session. An in-flight
    *  setupKeyExchange/reannounceForReconnect captures this before its first
    *  await and re-checks it before publishing to this._ecdhKeyPair — a plain
@@ -118,9 +187,6 @@ export class E2EEManager {
    *  that happens entirely during those awaits, since nothing is null by the
    *  time the abandoned attempt resumes. */
   private _sessionGeneration = 0;
-  /** Provider imports are asynchronous. Keep one write queue across session
-   *  resets so an abandoned import cannot overwrite a newer session's key. */
-  private _keyApplyChain: Promise<void> = Promise.resolve();
 
   constructor(private deps: E2EEDeps) {}
 
@@ -144,11 +210,7 @@ export class E2EEManager {
   set rotationPending(value: boolean) {
     this._rotationPending = value;
   }
-  get pendingAnnounces(): Array<{
-    userId: number;
-    publicKeyBase64: string;
-    signatureBase64?: string;
-  }> {
+  get pendingAnnounces(): PendingAnnounce[] {
     return this._pendingAnnounces;
   }
 
@@ -191,11 +253,11 @@ export class E2EEManager {
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
     const myPubKeyBase64 = await exportPublicKey(ecdhKeyPair.publicKey);
-    const myFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(myPubKeyBase64));
+    const myFingerprint = await computeRawKeyFingerprint(rawFromBase64(myPubKeyBase64));
     // Build the signed announce up front — this loads the identity key from
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
-    const announcePayload = await this.buildAnnouncePayload(myPubKeyBase64);
+    const announcePayload = await this._identity.buildAnnouncePayload(myPubKeyBase64);
 
     // Same check again after the keyring round trip — the widest window of
     // the three, and the next statements install OUR role and room key over
@@ -229,10 +291,10 @@ export class E2EEManager {
       // holder joins an ongoing call.
       this._e2eeEpoch++;
       this._roomKey = generateRoomKey();
-      await this.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
+      await this._worker.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
       if (this._sessionGeneration !== myGeneration) return false;
       log.info("E2EE: key holder — generated room key", { channelId });
-      this.startKeyRotationTimer();
+      this._epoch.startKeyRotationTimer();
     }
 
     // And once more after keyProvider.setKey's await: a torn-down attempt
@@ -387,7 +449,7 @@ export class E2EEManager {
     const wsState = this.deps.getWs()?.getState?.();
     if (wsState !== undefined && wsState !== "connected") {
       log.warn("E2EE: reconnect re-announce skipped — WS not connected, keeping current keypair");
-      await this.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
+      await this._worker.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
       return;
     }
     this._ecdhKeyPair = pair;
@@ -398,16 +460,14 @@ export class E2EEManager {
     // counter-announce, and the server relays stored peer keys only on
     // voice_join — so handleOffer's unknown-peer guard would drop every
     // subsequent rotation, stranding us on the pre-reconnect key.
-    await this.applyCurrentRoomKey(() => this._ecdhKeyPair === pair);
+    await this._worker.applyCurrentRoomKey(() => this._ecdhKeyPair === pair);
     if (this._ecdhKeyPair !== pair) return;
     const reconnectPubKey = await exportPublicKey(pair.publicKey);
-    const reconnectFingerprint = await computeRawKeyFingerprint(
-      this.rawFromBase64(reconnectPubKey),
-    );
+    const reconnectFingerprint = await computeRawKeyFingerprint(rawFromBase64(reconnectPubKey));
     if (this._ecdhKeyPair === pair) {
       setLocalSessionFingerprint(reconnectFingerprint);
     }
-    const reconnectAnnounce = await this.buildAnnouncePayload(reconnectPubKey);
+    const reconnectAnnounce = await this._identity.buildAnnouncePayload(reconnectPubKey);
     // Re-check ownership right before the send too: buildAnnouncePayload can
     // itself await a keyring round trip, another window for clearState() (or
     // a fresh setupKeyExchange) to have superseded this attempt.
@@ -464,237 +524,10 @@ export class E2EEManager {
 
   // ── Identity signing (F3 TOFU) ──────────────────────────────────────────
 
-  /** Decode a base64 raw-key string to bytes for sign/verify. Throws on bad
-   *  input (callers verifying a peer key already run inside try/catch). */
-  private rawFromBase64(base64: string): Uint8Array {
-    return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  }
-
-  /** Load (once per session) this client's long-term identity keypair from the
-   *  OS keyring so we can sign ephemeral announces. Returns null when there is
-   *  no server host (identity is host-scoped) OR no authenticated user id yet
-   *  (identity is host+user scoped, B3-3) — the announce then goes out
-   *  unsigned and peers treat us as a legacy/unverified client. A missing user
-   *  id must never fall back to a placeholder scope like `?? 0`:
-   *  `getOrCreateIdentityKeyPair` would mint (or migrate-and-DELETE the real
-   *  legacy key into) a bogus `host:0` keyring account, and a later
-   *  authenticated call would then mint a second, different keypair under
-   *  `host:<realId>` — so the published key and the announce signing key
-   *  permanently disagree and every peer's verifyPeerAnnounce reports a false
-   *  MITM "mismatch" (see identity.ts's `identityKeyPairCache` doc). */
-  private async ensureIdentityKeyPair(): Promise<CryptoKeyPair | null> {
-    const host = this.deps.getServerHost();
-    if (host === null) return null;
-    const myUserId = authStore.getState().user?.id;
-    if (myUserId === undefined) {
-      log.warn(
-        "E2EE: no authenticated user id yet — announcing unsigned instead of scoping under a placeholder id",
-      );
-      return null;
-    }
-    const scope = `${myUserId}@${host}`;
-    if (this._identityKeyPair && this._identityScope === scope) return this._identityKeyPair;
-    const generation = this._identityGeneration;
-    const pair = await getOrCreateIdentityKeyPair(host, myUserId);
-    if (
-      generation !== this._identityGeneration ||
-      host !== this.deps.getServerHost() ||
-      myUserId !== authStore.getState().user?.id
-    ) {
-      return null;
-    }
-    this._identityKeyPair = pair;
-    this._identityScope = scope;
-    return pair;
-  }
-
   /** Identity keys are host-scoped — the session drops the cached keypair when
-   *  the host changes (and on cleanupAll) so we never sign an announce with
-   *  another host's identity key. */
+   *  the host changes (and on cleanupAll). See E2EEIdentity.clearIdentityKeyPair. */
   clearIdentityKeyPair(): void {
-    this._identityGeneration++;
-    this._identityKeyPair = null;
-    this._identityScope = null;
-  }
-
-  /** Build the voice_e2ee_announce payload, signing the ephemeral public key
-   *  with our identity key (F3). Signing failures degrade to an unsigned
-   *  announce rather than blocking the join. */
-  private async buildAnnouncePayload(
-    ephemeralPubBase64: string,
-  ): Promise<{ public_key: string; signature?: string }> {
-    try {
-      const idKeyPair = await this.ensureIdentityKeyPair();
-      if (idKeyPair) {
-        const myUserId = authStore.getState().user?.id ?? 0;
-        const ephemeralRaw = this.rawFromBase64(ephemeralPubBase64);
-        const signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
-        return { public_key: ephemeralPubBase64, signature };
-      }
-    } catch (err) {
-      log.error("E2EE: failed to sign announce — sending unsigned", err);
-    }
-    return { public_key: ephemeralPubBase64 };
-  }
-
-  /**
-   * F3 TOFU: resolve a peer's identity key and verify their ephemeral-announce
-   * signature. Pins the identity key on first sight; on a later change it emits
-   * an identity-tofu "mismatch" (via the voice store) and blocks the peer until
-   * the user re-pins. Returns true when the announce may be accepted (verified,
-   * or a legacy peer with no identity key), false to reject/block. The store
-   * write is the surfaced verification state the voice panel reads.
-   *
-   * Compatibility posture (transition):
-   *   - peer HAS a published identity key, signature missing/invalid → reject
-   *     (fail closed);
-   *   - peer has NO identity key (legacy client) → accept, mark unverified
-   *     (pin-pending).
-   */
-  private async verifyPeerAnnounce(
-    userId: number,
-    publicKeyBase64: string,
-    signatureBase64: string | undefined,
-    isCurrent: () => boolean,
-  ): Promise<boolean> {
-    const publishedIdentity =
-      membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
-    const host = this.deps.getServerHost();
-
-    // Resolve the persisted pin FIRST — before any legacy shortcut. A server
-    // must not be able to strip a pinned peer's published key (or swap it) to
-    // force it back onto the legacy accept path (finding #2: TOFU pin bypass).
-    const lookup = host
-      ? await getIdentityPin(host, String(userId))
-      : ({ status: "unpinned" } as const);
-    if (!isCurrent()) return false;
-
-    // Fail closed when the pin store could not be read (DC-08): with the pin
-    // unknown, this peer might be pinned to a different key — proceeding down
-    // the first-sight path would verify against, and then RE-PIN, whatever key
-    // the server delivered. Reject the announce and surface the distinct
-    // "unknown" state; the peer stays blocked for E2EE until the store recovers.
-    if (lookup.status === "unavailable") {
-      this.setPeerVerificationIfCurrent(isCurrent, {
-        userId,
-        status: "unknown",
-        safetyNumber: null,
-        sessionFingerprint: null,
-      });
-      log.error("E2EE: identity pin store unreadable — rejecting announce (fail closed)", {
-        userId,
-      });
-      return false;
-    }
-
-    const pin = lookup.status === "pinned" ? lookup.pin : null;
-
-    // Pinned peer whose delivered key is absent or differs from the pin —
-    // possible server MITM. Block until the user re-pins.
-    if (pin !== null && publishedIdentity !== pin) {
-      // Buffer this announce (OC-0212) so a successful rePinPeerIdentity can
-      // replay it: a mid-call peer never re-announces on its own, so without
-      // this, re-pinning writes a new pin that nothing ever verifies the
-      // peer's key against, leaving them un-keyed for the rest of the call.
-      this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
-      this.setPeerVerificationIfCurrent(isCurrent, {
-        userId,
-        status: "mismatch",
-        safetyNumber: null,
-        sessionFingerprint: null,
-      });
-      log.error("E2EE: pinned peer identity key missing/changed — blocking (identity-tofu)", {
-        userId,
-      });
-      return false;
-    }
-
-    // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
-    // accepted peer gets one — for an unverified peer it is the only value
-    // that can be compared out of band, since there is no identity key.
-    const sessionFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(publicKeyBase64));
-
-    // Genuine legacy peer: never pinned AND no published identity key — accept
-    // but mark unverified (pin-pending). This is the only case the compatibility
-    // posture keeps open.
-    if (!publishedIdentity) {
-      this.setPeerVerificationIfCurrent(isCurrent, {
-        userId,
-        status: "unverified",
-        safetyNumber: null,
-        sessionFingerprint,
-      });
-      log.warn("E2EE: peer has no identity key — accepting as unverified (legacy)", { userId });
-      return true;
-    }
-
-    // Verify the ephemeral-key signature against the trusted identity key
-    // (the pin when we have one, else the first-sight published key).
-    const anchorBase64 = pin ?? publishedIdentity;
-    const identityKey = await importIdentityPublicKey(anchorBase64);
-    const ephemeralRaw = this.rawFromBase64(publicKeyBase64);
-    const ok = signatureBase64
-      ? await verifyEphemeralKeySignature(identityKey, userId, ephemeralRaw, signatureBase64)
-      : false;
-    if (!ok) {
-      // Fail closed: peer has an identity key but no valid signature (MITM).
-      this.setPeerVerificationIfCurrent(isCurrent, {
-        userId,
-        status: "mismatch",
-        safetyNumber: null,
-        sessionFingerprint: null,
-      });
-      log.error("E2EE: peer announce signature invalid — rejecting (MITM?)", { userId });
-      return false;
-    }
-
-    // First sight with a valid signature — pin the identity key now. A
-    // failed write (disk full, unwritable pins file) must not display
-    // "verified" with no pin ever persisted: the pin is what arms mismatch
-    // detection on a LATER announce, so a peer we call verified but never
-    // pinned can never have that check fire — the exact MITM window the pin
-    // exists to close. "no-store" (non-Tauri: no pin store by design) is not
-    // a failure and keeps the normal verified outcome below.
-    if (!isCurrent()) return false;
-    let pinWriteFailed = false;
-    if (pin === null && host) {
-      const pinResult = await storeIdentityPin(host, String(userId), publishedIdentity);
-      if (pinResult === "failed") {
-        pinWriteFailed = true;
-        log.error("E2EE: failed to persist identity pin — marking unverified, not verified", {
-          userId,
-        });
-      } else {
-        log.info("E2EE: pinned peer identity key on first sight", { userId });
-      }
-    }
-    if (pinWriteFailed) {
-      this.setPeerVerificationIfCurrent(isCurrent, {
-        userId,
-        status: "unverified",
-        safetyNumber: null,
-        sessionFingerprint,
-      });
-      return true; // still accept the announce — the write failure alone shouldn't block the call
-    }
-    const safetyNumber = await computeKeyFingerprint(identityKey);
-    this.setPeerVerificationIfCurrent(isCurrent, {
-      userId,
-      status: "verified",
-      safetyNumber,
-      sessionFingerprint,
-    });
-    return true;
-  }
-
-  /** Verification belongs to both the call and the peer's current membership.
-   *  Re-check that ownership after async verification before updating the UI. */
-  private setPeerVerificationIfCurrent(
-    isCurrent: () => boolean,
-    verification: Parameters<typeof setPeerVerification>[0],
-  ): void {
-    if (!isCurrent()) return;
-    setPeerVerification(verification);
+    this._identity.clearIdentityKeyPair();
   }
 
   /**
@@ -774,39 +607,13 @@ export class E2EEManager {
    * no published identity key (legacy) are accepted but marked unverified.
    */
   handleAnnounce(userId: number, publicKeyBase64: string, signatureBase64?: string): Promise<void> {
-    const isCurrent = this.peerAttemptIsCurrent(userId);
+    const isCurrent = this._peers.peerAttemptIsCurrent(userId);
     const run = this._announceChain.then(() => {
       if (!isCurrent()) return undefined;
       return this.handleAnnounceInner(userId, publicKeyBase64, signatureBase64, isCurrent);
     });
     this._announceChain = run;
     return run;
-  }
-
-  /** Capture ownership when a frame arrives, before it waits on a work queue. */
-  private peerAttemptIsCurrent(userId: number): () => boolean {
-    const generation = this._sessionGeneration;
-    const peerGeneration = this._peerGenerations.get(userId) ?? 0;
-    return () =>
-      this._sessionGeneration === generation &&
-      (this._peerGenerations.get(userId) ?? 0) === peerGeneration;
-  }
-
-  /** True if `publicKeyBase64` is a key we've already moved this peer off of
-   *  in the current session (see `_retiredPeerKeys`). */
-  private isRetiredPeerKey(userId: number, publicKeyBase64: string): boolean {
-    return this._retiredPeerKeys.get(userId)?.has(publicKeyBase64) ?? false;
-  }
-
-  /** Record that `publicKeyBase64` is no longer this peer's live key —
-   *  a later announce carrying it again is a replay, not a legitimate change. */
-  private retirePeerKey(userId: number, publicKeyBase64: string): void {
-    const retired = this._retiredPeerKeys.get(userId);
-    if (retired) {
-      retired.add(publicKeyBase64);
-    } else {
-      this._retiredPeerKeys.set(userId, new Set([publicKeyBase64]));
-    }
   }
 
   private async handleAnnounceInner(
@@ -831,7 +638,7 @@ export class E2EEManager {
     // being rejected, even though _peerPublicKeys itself was never touched.
     // This check is synchronous (no await), so it introduces no new window
     // for a session to be superseded before it runs.
-    if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
+    if (this._peers.isRetiredPeerKey(userId, publicKeyBase64)) {
       log.error("E2EE: rejecting replayed peer key announce (previously retired)", { userId });
       return;
     }
@@ -840,7 +647,9 @@ export class E2EEManager {
       // Resolve the peer's identity key and verify the announce signature
       // BEFORE storing the ECDH key or wrapping the room key. A malicious
       // server that swaps user_id↔ephemeral-key or forges keys fails here.
-      if (!(await this.verifyPeerAnnounce(userId, publicKeyBase64, signatureBase64, isCurrent))) {
+      if (
+        !(await this._peers.verifyPeerAnnounce(userId, publicKeyBase64, signatureBase64, isCurrent))
+      ) {
         return; // rejected/blocked — do not store or wrap
       }
 
@@ -885,7 +694,7 @@ export class E2EEManager {
         return;
       }
       if (!isDuplicate) {
-        if (retiredKey) this.retirePeerKey(userId, retiredKey);
+        if (retiredKey) this._peers.retirePeerKey(userId, retiredKey);
         this._peerPublicKeys.set(userId, peerKey);
         this._peerOfferEpochs.delete(userId);
         log.info("E2EE: received peer public key", { userId });
@@ -911,7 +720,7 @@ export class E2EEManager {
       const myUserId = authStore.getState().user?.id ?? 0;
       if (this._isKeyHolder && myUserId !== 0 && userId < myUserId) {
         this._isKeyHolder = false;
-        this.clearKeyRotationTimer();
+        this._epoch.clearKeyRotationTimer();
         log.info("E2EE: stood down as key holder — announcing peer has a lower user id", {
           userId,
           myUserId,
@@ -948,7 +757,7 @@ export class E2EEManager {
         // (a key holder joining a large ongoing call), and those sends must
         // draw from the same per-second budget as rotation offers instead of
         // bypassing pacing entirely.
-        const sent = await this.sendOfferPaced(
+        const sent = await this._offers.sendOfferPaced(
           userId,
           encryptedKey,
           iv,
@@ -968,332 +777,13 @@ export class E2EEManager {
     }
   }
 
-  /** Serializes offer application. The offer payload carries no epoch or
-   *  sequence and WebCrypto gives no cross-operation ordering guarantee, so
-   *  two in-flight offers could complete out of order — applying the older
-   *  key last and stranding this receiver on a dead key until the next
-   *  rotation. Chaining applies offers strictly in WS delivery order. */
-  private _offerChain: Promise<void> = Promise.resolve();
-
   /**
    * Handle a voice_e2ee_offer from the server — the key holder has sent us
-   * the encrypted room key. Unwrap it and apply to the E2EE key provider.
-   * Offers are applied one at a time, in delivery order.
-   *
-   * Chained through _announceChain first (OC-0002): handleAnnounceInner only
-   * stores the sender's ECDH key after several awaits (identity-pin lookup,
-   * signature verification, key import), while handleOfferInner's first
-   * statement is a synchronous _peerPublicKeys lookup. An offer dispatched
-   * immediately behind that same sender's announce — the OC-0098 send order
-   * guarantees exactly this WS delivery order — would otherwise reach the
-   * lookup before the announce applied, and be dropped as "unknown peer"
-   * with no retry until the next 5-minute rotation. Waiting on the announce
-   * chain reproduces WS delivery order exactly: the announce is enqueued on
-   * it before the offer's frame is even dispatched. No deadlock risk:
-   * handleAnnounceInner never awaits the offer chain and never rejects (it
-   * catches internally), and clearState() resets both chains together.
+   * the encrypted room key. Applied strictly in delivery order, behind the
+   * announces that preceded it. See E2EEOffer.handleOffer.
    */
   handleOffer(fromUserId: number, encryptedKeyBase64: string, ivBase64: string): Promise<void> {
-    // handleOfferInner never rejects (it catches internally), so the chain
-    // cannot wedge on a failed offer.
-    const isCurrent = this.peerAttemptIsCurrent(fromUserId);
-    const announcesBeforeOffer = this._announceChain;
-    const run = this._offerChain
-      .then(() => announcesBeforeOffer)
-      .then(() => {
-        if (!isCurrent()) return undefined;
-        return this.handleOfferInner(fromUserId, encryptedKeyBase64, ivBase64, isCurrent);
-      });
-    this._offerChain = run;
-    return run;
-  }
-
-  private async handleOfferInner(
-    fromUserId: number,
-    encryptedKeyBase64: string,
-    ivBase64: string,
-    isCurrent: () => boolean,
-  ): Promise<void> {
-    try {
-      const peerKey = this._peerPublicKeys.get(fromUserId);
-      if (!peerKey) {
-        log.warn("E2EE: received offer from unknown peer", { fromUserId });
-        return;
-      }
-      const keypair = this._ecdhKeyPair;
-      if (!keypair) {
-        log.warn("E2EE: received offer but no ECDH keypair");
-        return;
-      }
-
-      // Capture epoch before async work — if a key rotation occurs during
-      // unwrap, the epoch will have advanced and we discard this stale result.
-      const epochBefore = this._e2eeEpoch;
-
-      const { roomKey: unwrapped, epoch } = await unwrapRoomKey(
-        keypair.privateKey,
-        peerKey,
-        encryptedKeyBase64,
-        ivBase64,
-      );
-
-      // Discard if either the epoch advanced (a rotation landed during
-      // unwrap) OR the keypair no longer matches (clearState() ran and a new
-      // session generated a fresh one — possible when the epoch is 0 in both
-      // the old and new session, since a non-key-holder never bumps it).
-      if (!isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
-        log.info("E2EE: discarding stale offer (epoch or session keypair changed during unwrap)", {
-          fromUserId,
-          epochBefore,
-          epochNow: this._e2eeEpoch,
-        });
-        return;
-      }
-
-      // Freshness (OC-0001): the epoch is GCM-authenticated, so it is the
-      // holder's own value. Equal is fine — the holder re-sends the current
-      // key at the current epoch when a peer re-announces.
-      if (epoch === null) {
-        // ponytail: compat with holders on the pre-epoch build — remove with
-        // the legacy branch in unwrapRoomKey.
-        log.warn(
-          "E2EE: offer carries no epoch (legacy holder) — applying without freshness check",
-          {
-            fromUserId,
-          },
-        );
-      } else {
-        const highWater = this._peerOfferEpochs.get(fromUserId);
-        if (highWater !== undefined && epoch < highWater) {
-          log.warn("E2EE: discarding superseded offer (epoch below high-water mark)", {
-            fromUserId,
-            epoch,
-            highWater,
-          });
-          return;
-        }
-        this._peerOfferEpochs.set(fromUserId, epoch);
-      }
-
-      this._roomKey = unwrapped;
-      if (!(await this.applyRoomKey(unwrapped, isCurrent))) return;
-      log.info("E2EE: room key received and applied", { fromUserId, epoch });
-
-      // Re-check after the setKey await too: the guard above only covers the
-      // window up to unwrap, not this call. A teardown-and-rejoin-as-holder
-      // landing here would otherwise have this stale continuation read the
-      // NEW session's live _isKeyHolder/_roomKeyResolver below and stand it
-      // down / resolve it — corrupting a session this attempt no longer owns
-      // (OC-0010).
-      if (!isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
-        log.info("E2EE: discarding stale offer after setKey (epoch or session keypair changed)", {
-          fromUserId,
-        });
-        return;
-      }
-
-      // Accepting an offer proves the sender is the server-authoritative key
-      // holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
-      // still think we hold the key, we have been re-elected away — a lower
-      // userID joined. Stand down: our rotations would be rejected with
-      // NOT_KEY_HOLDER, but only after we applied the new key locally, leaving
-      // us deaf and mute until the real holder rotates again.
-      // handleParticipantLeft can still re-promote us later.
-      if (this._isKeyHolder) {
-        this._isKeyHolder = false;
-        this.clearKeyRotationTimer();
-        log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
-          fromUserId,
-        });
-      }
-
-      // Resolve the pending connect promise if we were waiting for the key.
-      if (this._roomKeyResolver) {
-        this._roomKeyResolver();
-        this._roomKeyResolver = null;
-        this._roomKeyRejector = null;
-      }
-    } catch (err) {
-      log.error("E2EE: failed to handle offer", err);
-      // Propagate decryption failure so the waiting setupKeyExchange unblocks.
-      if (isCurrent() && this._roomKeyRejector) {
-        this._roomKeyRejector(err instanceof Error ? err : new Error(String(err)));
-        this._roomKeyResolver = null;
-        this._roomKeyRejector = null;
-      }
-    }
-  }
-
-  /** Server-side cap is voiceE2EEOfferRateLimit = 64 offers per (sender,
-   *  channel) per second (Server/ws/voice_e2ee.go) — a whole rotation's
-   *  offers can exceed it in a large channel, and everything past the cap is
-   *  dropped with no client-side signal, starving the same tail peers (in
-   *  stable Map insertion order) on every subsequent rotation (OC-0005).
-   *  Stay under it with margin rather than reading the limit back from the
-   *  server. */
-  private static readonly OFFER_RATE_LIMIT_PER_SEC = 60;
-  /** Sliding-window length. The server window is a flat per-second cap, so
-   *  "at most LIMIT sends inside any WINDOW_MS-wide slice" is the whole
-   *  algorithm needed. Upgrade if the cap ever becomes variable or
-   *  sub-second. */
-  private static readonly OFFER_RATE_WINDOW_MS = 1_100;
-  /** Timestamps (Date.now()) of every voice_e2ee_offer sent within the
-   *  current OFFER_RATE_WINDOW_MS window — an INSTANCE-level sliding-window
-   *  budget shared by every offer-send path (rotation, become-holder, its H3
-   *  late-arrival pass, AND announce-driven offers), never a per-call
-   *  counter. A per-call counter (the original OC-0005 fix) resets to zero
-   *  on every distributeRoomKey invocation, so two back-to-back rotations —
-   *  the second one run immediately by drainPendingRotationOrArmTimer —
-   *  each got their own fresh budget and together could blow through the
-   *  server's single per-second window (OC-0155); handleAnnounceInner's
-   *  drain-time offer send bypassed the budget altogether (OC-0167). Reset
-   *  in clearState(). */
-  private _offerSendTimes: number[] = [];
-
-  /** Drop timestamps that have aged out of the current pacing window. */
-  private pruneOfferSendTimes(): void {
-    const cutoff = Date.now() - E2EEManager.OFFER_RATE_WINDOW_MS;
-    while (this._offerSendTimes.length > 0 && (this._offerSendTimes[0] ?? Infinity) <= cutoff) {
-      this._offerSendTimes.shift();
-    }
-  }
-
-  /**
-   * Send one voice_e2ee_offer, pacing under the server's per-(sender,
-   * channel) sliding-window rate limit (OC-0005/OC-0155/OC-0167;
-   * Server/ws/voice_e2ee.go voiceE2EEOfferRateLimit=64/1s). Prunes this
-   * instance's send timestamps older than OFFER_RATE_WINDOW_MS, and if
-   * OFFER_RATE_LIMIT_PER_SEC sends already fall inside the window, waits for
-   * the oldest of them to age out before sending — so every offer-send path
-   * draws from ONE shared budget instead of each resetting its own.
-   *
-   * `isStale`, when given, is re-checked after any pacing wait (never
-   * before) so a keypair/room-key/epoch swap that lands during the wait is
-   * caught right before the send — the same protection distributeRoomKey and
-   * handleAnnounceInner already apply around the wrap itself (findings v045,
-   * v101). Returns false (and sends nothing) when `isStale` reports true
-   * post-wait.
-   */
-  private async sendOfferPaced(
-    targetUserId: number,
-    encryptedKey: string,
-    iv: string,
-    isStale?: () => boolean,
-  ): Promise<boolean> {
-    this.pruneOfferSendTimes();
-    if (this._offerSendTimes.length >= E2EEManager.OFFER_RATE_LIMIT_PER_SEC) {
-      // Guarded by the length check above — the array is non-empty here.
-      const oldest = this._offerSendTimes[0] as number;
-      const waitMs = oldest + E2EEManager.OFFER_RATE_WINDOW_MS - Date.now();
-      if (waitMs > 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
-      }
-      this.pruneOfferSendTimes();
-      if (isStale?.()) {
-        return false;
-      }
-    }
-    this._offerSendTimes.push(Date.now());
-    this.deps.getWs()?.send({
-      type: "voice_e2ee_offer",
-      payload: { target_user_id: targetUserId, encrypted_key: encryptedKey, iv },
-    });
-    return true;
-  }
-
-  /**
-   * Wrap the room key for each peer and send an offer, one at a time. Bails
-   * out (without sending further offers) as soon as a concurrent keypair
-   * swap (reannounceForReconnect) or room-key change invalidates the wrap —
-   * an offer wrapped under an abandoned keypair/key is undecryptable by the
-   * peer and would otherwise silently strand them on the stale key until the
-   * next rotation (finding v045). Shared by the become-holder distribution,
-   * its late-arrival (H3) pass, and the periodic rotation loop.
-   *
-   * Sends go through sendOfferPaced's shared instance-level budget to stay
-   * under the server's per-(sender,channel) rate limit (OC-0005/OC-0155) —
-   * without this, a rotation (or two back-to-back rotations) in a large
-   * channel silently drops every offer past the cap, and the same tail peers
-   * stay stranded on the old key forever.
-   */
-  private async distributeRoomKey(
-    keypair: CryptoKeyPair,
-    roomKey: Uint8Array,
-    peers: Iterable<[number, CryptoKey]>,
-  ): Promise<void> {
-    for (const [peerId, peerKey] of peers) {
-      if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
-        log.warn("E2EE: aborting key distribution — keypair/room key changed mid-loop", {
-          peerId,
-        });
-        return;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design: each peer's staleness guard must observe the key state between wraps
-      const { encryptedKey, iv } = await wrapRoomKey(
-        keypair.privateKey,
-        peerKey,
-        roomKey,
-        this._e2eeEpoch,
-      );
-      if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
-        log.info("E2EE: discarding stale room-key offer (keypair/room key changed during wrap)", {
-          peerId,
-        });
-        return;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design: offers are rate-paced per peer, not fired in parallel
-      const sent = await this.sendOfferPaced(
-        peerId,
-        encryptedKey,
-        iv,
-        () => this._ecdhKeyPair !== keypair || this._roomKey !== roomKey,
-      );
-      if (!sent) {
-        log.info(
-          "E2EE: discarding stale room-key offer (keypair/room key changed during pacing pause)",
-          { peerId },
-        );
-        return;
-      }
-    }
-  }
-
-  /** Serialize provider writes, skipping keys superseded before their turn.
-   *  A failed import rejects its caller without blocking later writes. */
-  private applyRoomKey(
-    roomKey: Uint8Array,
-    isCurrent: () => boolean = () => true,
-  ): Promise<boolean> {
-    const myGeneration = this._sessionGeneration;
-    const ownsKey = () =>
-      this._sessionGeneration === myGeneration && this._roomKey === roomKey && isCurrent();
-    const run = this._keyApplyChain.then(async () => {
-      if (!ownsKey()) return false;
-      await this.keyProvider.setKey(roomKeyToBase64(roomKey));
-      return ownsKey();
-    });
-    this._keyApplyChain = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  }
-
-  /** Setup/reconnect must await the current key even if a rotation or offer
-   *  replaces the original snapshot while its provider write is pending. */
-  private async applyCurrentRoomKey(isCurrent: () => boolean): Promise<void> {
-    while (isCurrent() && this._roomKey) {
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design: re-reads the live room key after each provider write, retrying until it lands
-      if (await this.applyRoomKey(this._roomKey, isCurrent)) return;
-    }
-  }
-
-  /** Install a fresh key before distribution; return null when superseded. */
-  private async rotateRoomKey(): Promise<Uint8Array | null> {
-    this._e2eeEpoch++;
-    const roomKey = generateRoomKey();
-    this._roomKey = roomKey;
-    return (await this.applyRoomKey(roomKey)) ? roomKey : null;
+    return this._offers.handleOffer(fromUserId, encryptedKeyBase64, ivBase64);
   }
 
   /**
@@ -1309,7 +799,7 @@ export class E2EEManager {
    */
   async handleParticipantLeft(userId: number): Promise<void> {
     this._peerGenerations.set(userId, (this._peerGenerations.get(userId) ?? 0) + 1);
-    const isCurrent = this.peerAttemptIsCurrent(userId);
+    const isCurrent = this._peers.peerAttemptIsCurrent(userId);
     // peerAttemptIsCurrent() goes false for two unrelated reasons; only one of
     // them is survivable here, so keep the session half separately (OC-0442).
     const entrySessionGeneration = this._sessionGeneration;
@@ -1382,7 +872,7 @@ export class E2EEManager {
       // wasKeyHolder read below stay correct. Scope that bail-out to the
       // now-redundant retirement write — returning would drop the
       // membership-forward-secrecy rekey a few lines down (OC-0416).
-      if (isCurrent()) this.retirePeerKey(userId, departingKeyBase64);
+      if (isCurrent()) this._peers.retirePeerKey(userId, departingKeyBase64);
     }
 
     if (!channelId) return;
@@ -1432,7 +922,7 @@ export class E2EEManager {
 
       // Rotate the room key — generate a new one and distribute to all remaining peers.
       try {
-        const roomKey = await this.rotateRoomKey();
+        const roomKey = await this._epoch.rotateRoomKey();
         if (roomKey === null) {
           // Superseded while setKey was in flight — the now-current session
           // owns its own key-holder role and rotation; nothing left to do.
@@ -1456,7 +946,7 @@ export class E2EEManager {
         const peersSnapshot = new Map(this._peerPublicKeys);
 
         if (keypair) {
-          await this.distributeRoomKey(keypair, roomKey, peersSnapshot);
+          await this._offers.distributeRoomKey(keypair, roomKey, peersSnapshot);
           log.info("E2EE: distributed rotated key to peers", {
             peerCount: peersSnapshot.size,
           });
@@ -1468,7 +958,7 @@ export class E2EEManager {
               ([peerId]) => !peersSnapshot.has(peerId),
             );
             if (lateArrivals.length > 0) {
-              await this.distributeRoomKey(keypair, roomKey, lateArrivals);
+              await this._offers.distributeRoomKey(keypair, roomKey, lateArrivals);
               log.info("E2EE: sent rotated key to late-arriving peers", {
                 peerCount: lateArrivals.length,
               });
@@ -1481,7 +971,7 @@ export class E2EEManager {
         if (this._sessionGeneration === myGeneration) {
           this._rotatingKey = false;
           // A leave during this rotation may have deferred another rekey.
-          await this.drainPendingRotationOrArmTimer();
+          await this._epoch.drainPendingRotationOrArmTimer();
         }
       }
     } else if (wasKeyHolder && hadPeerKey) {
@@ -1497,80 +987,14 @@ export class E2EEManager {
         // when the in-flight rotation completes, excluding them.
         this._rotationPending = true;
       } else {
-        await this.rotateKeyPeriodically();
+        await this._epoch.rotateKeyPeriodically();
       }
     }
   }
 
-  // ── Periodic key rotation ──────────────────────────────────────────────────
-
-  /** Start the periodic key rotation timer (only meaningful for key holders). */
-  private startKeyRotationTimer(): void {
-    this.clearKeyRotationTimer();
-    if (!this._isKeyHolder) return;
-    this._keyRotationTimer = setTimeout(() => {
-      this._keyRotationTimer = null;
-      void this.rotateKeyPeriodically();
-    }, E2EEManager.KEY_ROTATION_INTERVAL_MS);
-    log.debug("E2EE: key rotation timer started", {
-      intervalMs: E2EEManager.KEY_ROTATION_INTERVAL_MS,
-    });
-  }
-
-  private clearKeyRotationTimer(): void {
-    if (this._keyRotationTimer !== null) {
-      clearTimeout(this._keyRotationTimer);
-      this._keyRotationTimer = null;
-    }
-  }
-
-  /** Rotate the room key on a timer tick (forward secrecy improvement). */
-  async rotateKeyPeriodically(): Promise<void> {
-    if (!this._isKeyHolder || this._rotatingKey) return;
-    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
-    if (!channelId) return;
-
-    const myGeneration = this._sessionGeneration;
-    this._rotatingKey = true;
-    try {
-      const roomKey = await this.rotateRoomKey();
-      if (roomKey === null) {
-        // Superseded while setKey was in flight — the now-current session
-        // owns its own key-holder role and rotation; nothing left to do.
-        return;
-      }
-      log.info("E2EE: periodic key rotation", { channelId, epoch: this._e2eeEpoch });
-
-      const keypair = this._ecdhKeyPair;
-      if (keypair) {
-        const peerCount = this._peerPublicKeys.size;
-        // Pass the live map (not a snapshot): peers that arrive mid-loop are
-        // still visited, matching the original behavior — only the
-        // keypair/room-key ownership check is new here.
-        await this.distributeRoomKey(keypair, roomKey, this._peerPublicKeys);
-        log.info("E2EE: distributed periodically rotated key", { peerCount });
-      }
-    } catch (err) {
-      log.error("E2EE: periodic key rotation failed", err);
-    } finally {
-      if (this._sessionGeneration === myGeneration) {
-        this._rotatingKey = false;
-        // Also drain when another current-session key superseded this one.
-        await this.drainPendingRotationOrArmTimer();
-      }
-    }
-  }
-
-  /** After a rotation completes: if a keyed-peer leave coincided with it (its
-   *  rekey was deferred, not dropped), run one more rotation to exclude the
-   *  departed member; otherwise re-arm the periodic rotation timer. */
-  private async drainPendingRotationOrArmTimer(): Promise<void> {
-    if (this._rotationPending) {
-      this._rotationPending = false;
-      await this.rotateKeyPeriodically();
-      return;
-    }
-    this.startKeyRotationTimer();
+  /** Rotate the room key on a timer tick. See E2EEEpoch.rotateKeyPeriodically. */
+  rotateKeyPeriodically(): Promise<void> {
+    return this._epoch.rotateKeyPeriodically();
   }
 
   /** Clear all E2EE state (called on voice leave). The long-term identity
@@ -1579,7 +1003,7 @@ export class E2EEManager {
   clearState(): void {
     this._sessionGeneration++;
     this._channelId = null;
-    this._offerChain = Promise.resolve();
+    this._offers.clearState();
     this._announceChain = Promise.resolve();
     this._ecdhKeyPair = null;
     this._roomKey = null;
@@ -1595,11 +1019,7 @@ export class E2EEManager {
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
     this._blockedAnnounces.clear();
-    // The server's offer rate limit is scoped per (sender, channel) — a
-    // fresh channel gets a fresh bucket server-side, so stale timestamps
-    // from the old channel must not throttle the new one.
-    this._offerSendTimes.length = 0;
-    this.clearKeyRotationTimer();
+    this._epoch.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a
     // silent success with no room key.

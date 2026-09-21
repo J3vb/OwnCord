@@ -15,9 +15,9 @@
       "note": "Measured 132,225 B at dev 4c45d26a (B7-7)."
     },
     "livekitSession": {
-      "budget": 800000,
+      "budget": 24000,
       "lazy": true,
-      "note": "Measured 20,192 B at dev 4c45d26a (B7-7), after the RNNoise deep import; the budget is decision 10's post-decomposition figure, left for B7-9 to ratchet."
+      "note": "Measured 21,652 B after the B7-9 split (livekitSession and livekitE2EE facades plus src/features/voice/). Ratchet rule (B7-9): measured + 10 %, rounded up to the next 1,000 B — 21,652 x 1.10 = 23,817 -> 24,000. Replaces decision 10's 800,000 B post-decomposition placeholder."
     }
   },
   "forbidEmbeddedWasm": {

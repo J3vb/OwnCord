@@ -283,3 +283,94 @@ lines 403, 434, 495, 1031, 1116, 1291, 2442, 2808, 2887, 2998, 3330, 3389,
 `joinOrchestration.ts`; a deliberately re-introduced `leaveVoice()` inside its
 `!isStateConnected()` checkpoint was reported red, then reverted. The
 `livekitE2EE` oracle and its three rules are 9b's.
+
+## B7-9b post-split measurement (evidence append, 2026-09-21)
+
+B7-9b (plan `.claude/plans/b7-9-decompose-voice.plan.md`, Tasks 7–12) split
+`src/lib/livekitE2EE.ts` into the `E2EEManager` facade plus five ownership
+modules under `src/features/voice/`: `e2eeIdentity.ts`, `e2eeEpoch.ts`,
+`e2eePeerState.ts`, `e2eeWorker.ts` and `e2eeOffer.ts`. Same machine, Node
+26.9.0 and Stryker 10.0.0 as 9a, from `Client/`:
+
+```bash
+# before: dev at c4f01161 (9a merged, livekitE2EE.ts not yet split)
+npx stryker run --mutate "src/lib/livekitE2EE.ts" --reporters clear-text,json
+# after: fm/b7-9b-impl at 66b18f51 (60 m 40 s) — the whole livekit shard,
+# a superset of the facade + extracted files
+STRYKER_SHARD=livekit npx stryker run stryker.shard.config.mjs --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+`--ignorePatterns src-tauri` only keeps the Rust `target/` directory (~11 GB
+on a machine that has built the Tauri app) out of Stryker's sandbox copy; it
+changes neither the mutated files nor the tests. The before report's embedded
+source is byte-identical to `livekitE2EE.ts` at `c4f01161`.
+
+| Scope                                       | Before: mutants / errors / score | After: mutants / errors / score |
+| ------------------------------------------- | -------------------------------: | ------------------------------: |
+| `livekitE2EE` (facade + extracted files)    |              896 / 229 / 57.27 % |           1 005 / 304 / 65.34 % |
+| `livekitSession` (facade + extracted files) |           1 198 / 486 / 58.29 %¹ |           1 198 / 486 / 58.71 % |
+| **Two-module total**                        |       **2 094 / 715 / 57.80 %**¹ |       **2 203 / 790 / 62.00 %** |
+| `livekit` shard (17 files)                  |                                — |         3 103 / 1 031 / 61.25 % |
+
+¹ 9a's after-run, above. The before `livekitE2EE` row is identical across
+B7-8, 9a's two runs and this before-run (896 / 229 / 57.27 %).
+
+**The pass rule holds:** the after-score over the `E2EEManager` facade and the
+extracted `livekitE2EE` files is 65.34 %, 8.07 points above 57.27 %, not
+more than 1 point below it. `livekitSession.ts` and its five 9a modules are
+byte-identical to 9a. Four of the modules score exactly as 9a recorded
+(`joinOrchestration` 45.61, `mediaControl` 69.06, `roomLifecycle` 56.18,
+`remoteTracks`/`sessionState` 100). The facade kills 156 of 238 valid mutants
+here against 153 in 9a (65.55 % vs 64.29 %). That is 3 mutants on unchanged
+code, run-to-run variance outside this pass rule's scope.
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file. The before-run's mutants are bucketed by their enclosing
+class member, and each member by the module that now holds its body:
+
+| Module (after)                 | Before, same code |    After |     Δ |
+| ------------------------------ | ----------------: | -------: | ----: |
+| `features/voice/e2eeIdentity`  |           41.67 % |  80.00 % | +38.3 |
+| `features/voice/e2eeEpoch`     |           63.64 % |  81.63 % | +18.0 |
+| `features/voice/e2eePeerState` |           69.01 % |  78.08 % |  +9.1 |
+| `features/voice/e2eeWorker`    |           66.67 % | 100.00 % | +33.3 |
+| `features/voice/e2eeOffer`     |           50.38 % |  68.53 % | +18.2 |
+| `lib/livekitE2EE` (facade)     |           57.26 % |  57.25 % | −0.01 |
+
+- **The rises are the colocated tests.** `tests/unit/livekit-e2ee.test.ts` is
+  unchanged. Every gain comes from the new `src/features/voice/e2ee*.test.ts`
+  files, which kill mutants the frozen suite never reached. Examples: the
+  `ConditionalExpression` guards in `ensureIdentityKeyPair` (2/8 → 8/8), the
+  `applyRoomKey` staleness checks in `e2eeWorker` (6/9 → 9/9) and the
+  offer-path `ConditionalExpression`s in `e2eeOffer` (17/38 → 27/38).
+- **The one drop is the facade's −0.01, and none of it is lost coverage.**
+  The facade gained 57 mutants (495 → 552). Five survivors are new, and
+  every one sits on wiring that did not exist before the split:
+  `BlockStatement` on the `setRoomKeyResolver` and `setRoomKeyRejector`
+  host setters, `ArrowFunction` on the `clearKeyRotationTimer: () => …`
+  host closure, and `CallExpression` on the one-line delegates
+  `this._identity.clearIdentityKeyPair()` and `this._offers.clearState()`.
+  Before the split these were direct field writes or inline bodies, whose
+  mutants now live (and are counted) in `e2eeIdentity`/`e2eeOffer`. Every
+  other facade survivor is the same mutant, surviving the same way, as on
+  the pre-split line. For example, the `ConditionalExpression` on
+  `if (isCurrent()) this._peers.retirePeerKey(…)` was line 1385's.
+- **The errored count rises by 75** (229 → 304; facade +43). The typed host
+  object literals and accessor pairs are rejected by the TypeScript checker
+  when mutated, the same `CompileError` class as caveat 2 above. Errors stay
+  excluded from the denominator.
+
+The oracle named before the move and unchanged after it:
+`tests/unit/livekit-e2ee.test.ts` (77 `it`s) was not edited. It passes at
+HEAD together with the ten colocated `src/features/voice/*.test.ts` suites
+(177 tests in all). Its supersession/staleness cases are at lines 401, 444,
+554, 597, 631, 721, 800, 1095, 1137, 1367, 1508, 1739, 1837 and 2122. The three
+E2EE rules are armed on the new homes. Each probe below was reported red,
+then reverted:
+
+- `local/e2ee-epoch-needs-keypair-check`: dropping
+  `|| this._ecdhKeyPair !== keypair` from `e2eeOffer.ts`'s unwrap guard.
+- `local/e2ee-verified-status-literal`: a computed `status` in an
+  `e2eePeerState.ts` `setPeerVerificationIfCurrent` call.
+- `local/no-identity-scope-fallback`: `myUserId ?? 0` passed to
+  `getOrCreateIdentityKeyPair` in `e2eeIdentity.ts`.

@@ -62,8 +62,13 @@ Supporting pieces:
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
   teardown; `mediaControl.ts` mute/deafen/devices; `remoteTracks.ts`;
-  `sessionState.ts` state types), `src/lib/livekitE2EE.ts` (key-holder election, room-key
-  wrap/unwrap, peer verification state), `src/lib/e2eeCrypto.ts` (ECDH
+  `sessionState.ts` state types), `src/lib/livekitE2EE.ts` (`E2EEManager`
+  facade: key-holder election, join/reconnect key exchange, announce handling,
+  rotation-on-leave), its `src/features/voice/e2ee*.ts` modules
+  (`e2eeIdentity.ts` identity signing and the ephemeral keypair;
+  `e2eeEpoch.ts` room key, epoch and rotation; `e2eePeerState.ts` peer keys
+  and TOFU pin verification; `e2eeWorker.ts` key provider write queue;
+  `e2eeOffer.ts` room-key offers), `src/lib/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
   `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
@@ -79,5 +84,5 @@ and surface a blocking mismatch modal if it later changes (see
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
 `Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
-`Client/src/lib/e2eeCrypto.ts`,
+`Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
