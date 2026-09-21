@@ -970,6 +970,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       if (host) hostInput.value = host;
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
+      updateRegistrationUi();
       // Focus the first field the user still has to fill in.
       if (host) usernameInput.focus();
       else hostInput.focus();

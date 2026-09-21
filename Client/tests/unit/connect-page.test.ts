@@ -2113,4 +2113,27 @@ describe("ConnectPage", () => {
 
     page.destroy?.();
   });
+
+  it("an invite link to another host re-derives the mode while already registering", () => {
+    const page = createConnectPage(
+      makeCallbacks({
+        getRegistrationMode: (host) => (host === "localhost:8443" ? "open" : "closed"),
+      }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    selectHostAndRegister(container);
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+
+    page.applyInviteLink("abc123", "other.example:8443");
+
+    expect(submit.disabled).toBe(true);
+    expect(container.querySelector(".registration-notice")!.textContent).toContain(
+      "Registration is closed",
+    );
+
+    page.destroy?.();
+  });
 });

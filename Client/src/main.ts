@@ -376,6 +376,7 @@ function runHealthChecks(
           compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
         } catch (infoErr) {
           if (!owner.isCurrent()) return;
+          serverInfoByHost.delete(profile.host);
           log.debug("server-info preflight failed", {
             host: profile.host,
             error: String(infoErr),
@@ -384,6 +385,7 @@ function runHealthChecks(
         connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
       } catch (err) {
         if (!owner.isCurrent()) return;
+        serverInfoByHost.delete(profile.host);
         // Record why the check failed (TLS/cert-pin/network) — otherwise a
         // "can't connect" report has no logged cause to diagnose.
         log.warn("health check failed", { host: profile.host, error: String(err) });
