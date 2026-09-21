@@ -38,6 +38,11 @@ import type {
   NativeControl as NativeProxiesNativeControl,
   NativeProxiesSeam,
 } from "./nativeProxies.suite";
+import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
+import type {
+  LiveKitProxiesSeam,
+  NativeControl as LiveKitProxiesNativeControl,
+} from "./livekitProxies.suite";
 import { describePendingMessagesSuite } from "./pendingMessages.suite";
 import type { NativeControl as PendingMessagesNativeControl } from "./pendingMessages.suite";
 import { describePushToTalkSuite } from "./pushToTalk.suite";
@@ -230,6 +235,19 @@ describeFileSaverSuite(async () => {
     dialogFailsWith: () => undefined,
     written: () => [],
     writeFailsWith: () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeLiveKitProxiesSuite(async () => {
+  const subject = {
+    setLiveKitServerHost: () => undefined,
+    resolveLiveKitUrl: async () => undefined,
+    stopLiveKitProxy: () => undefined,
+  } as unknown as LiveKitProxiesSeam;
+  const native: LiveKitProxiesNativeControl = {
+    succeedWith: () => undefined,
+    failWith: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);
