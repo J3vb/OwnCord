@@ -22,6 +22,7 @@ export const shards = {
     "src/features/voice/remoteTracks.ts",
     "src/features/voice/e2eeIdentity.ts",
     "src/features/voice/e2eeEpoch.ts",
+    "src/features/voice/e2eePeerState.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",

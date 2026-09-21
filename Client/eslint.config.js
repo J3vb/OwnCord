@@ -98,6 +98,7 @@ export default tseslint.config(
       "src/lib/livekitE2EE.ts",
       "src/features/voice/e2eeIdentity.ts",
       "src/features/voice/e2eeEpoch.ts",
+      "src/features/voice/e2eePeerState.ts",
     ],
     plugins: { local: localRules },
     rules: {
