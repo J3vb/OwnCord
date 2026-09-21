@@ -25,9 +25,7 @@ let installState: UpdateInstallState = { status: "idle" };
 const installListeners = new Set<(state: UpdateInstallState) => void>();
 
 /** Observe the app-wide install, including when its original page has closed. */
-function subscribeToUpdateInstall(
-  listener: (state: UpdateInstallState) => void,
-): () => void {
+function subscribeToUpdateInstall(listener: (state: UpdateInstallState) => void): () => void {
   installListeners.add(listener);
   notifyInstallListener(listener, installState);
   return () => {

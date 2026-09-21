@@ -2685,9 +2685,7 @@ describe("LiveKitSession", () => {
     });
 
     it("throws when serverHost is null", async () => {
-      await expect(ensureLiveKitProxy()).rejects.toThrow(
-        "no server host for LiveKit proxy",
-      );
+      await expect(ensureLiveKitProxy()).rejects.toThrow("no server host for LiveKit proxy");
     });
   });
 
