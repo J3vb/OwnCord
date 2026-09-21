@@ -304,7 +304,11 @@ describe("WS Dispatcher", () => {
 
     expectConsole("error", /\[dispatcher\] Auth failed/);
 
-    expect(uiStore.getState().updateRequiredHost).toBe("chat.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toEqual({
+      host: "chat.example:8443",
+      serverEpoch: PROTOCOL_EPOCH + 1,
+      clientEpoch: PROTOCOL_EPOCH,
+    });
     expect(uiStore.getState().transientError).toBe("update the client");
     expect(authStore.getState().isAuthenticated).toBe(false);
     // The token is still valid — main.ts keeps the stored credential on this

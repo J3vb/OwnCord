@@ -304,7 +304,14 @@ export function wireDispatcher(
       // The server speaks a newer protocol than this build: hand the host to
       // the connect page so it can offer the client update right there.
       if (epochRefusal && (payload.server_epoch ?? 0) > PROTOCOL_EPOCH) {
-        setUpdateRequiredHost(api?.getConfig?.().host ?? null);
+        const host = api?.getConfig?.().host;
+        if (host) {
+          setUpdateRequiredHost({
+            host,
+            serverEpoch: payload.server_epoch ?? null,
+            clientEpoch: PROTOCOL_EPOCH,
+          });
+        }
       }
       // A protocol refusal is not a bad token: say so, so main.ts keeps the
       // stored credential for the relaunch after the update.

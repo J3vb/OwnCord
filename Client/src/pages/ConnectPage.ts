@@ -5,9 +5,11 @@ import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
-import type { HealthStatus } from "@lib/profiles";
+import type { Compatibility, HealthStatus } from "@lib/profiles";
+import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
+import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
 import { loadCredential } from "@lib/credentials";
 
 const log = createLogger("ConnectPage");
@@ -31,6 +33,8 @@ export interface ConnectPageCallbacks {
   onDeleteProfile?(profileId: string): void;
   onToggleAutoLogin?(profileId: string, enabled: boolean): void;
   onAutoLoginCancel?(): void;
+  /** Mount the client-update banner for a refused/older host (client-older). */
+  onUpdateClient?(host: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +59,10 @@ export function createConnectPage(
   showError(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
+  /** Advisory per-row epoch badge; never disables Connect. */
+  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
+  /** Show the incompatible state for a refused host (WS refusal or selection). */
+  showIncompatible(host: string, serverEpoch: number | null, clientEpoch?: number): void;
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
   getAutoConnect(): boolean;
@@ -87,6 +95,27 @@ export function createConnectPage(
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
   });
 
+  // Per-host compatibility from the advisory preflight. The notice reads it
+  // when the user selects a server; the 15 s probe only writes badges.
+  const compatibilityByHost = new Map<
+    string,
+    { readonly compatibility: Compatibility; readonly serverEpoch: number | null }
+  >();
+
+  const incompatibleNotice = createIncompatibleNotice({
+    onUpdate: (host) => callbacks.onUpdateClient?.(host),
+    onLeave: () => incompatibleNotice.hide(),
+  });
+
+  function selectHost(host: string): void {
+    const known = compatibilityByHost.get(host);
+    if (known && (known.compatibility === "client-older" || known.compatibility === "server-older")) {
+      incompatibleNotice.show(host, known.serverEpoch, PROTOCOL_EPOCH);
+    } else {
+      incompatibleNotice.hide();
+    }
+  }
+
   const serverPanel = createServerPanel(
     {
       signal,
@@ -96,6 +125,9 @@ export function createConnectPage(
           loginForm.setCredentials(username);
         }
         loginForm.setAutoConnect(autoConnect === true);
+        // The notice appears only for the host the user selects — never for a
+        // background-probe profile (Decision 2).
+        selectHost(host);
       },
       onCredentialLoaded(host: string, username: string, hasPassword?: boolean) {
         // Guard: user may have clicked a different profile while loading
@@ -200,6 +232,10 @@ export function createConnectPage(
     serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
 
     appendChildren(root, serverPanel.element, loginForm.element);
+
+    // The incompatible-epoch notice sits above the form so it is seen before
+    // another attempt; hidden until a mismatch is selected or refused.
+    root.insertBefore(incompatibleNotice.element, loginForm.element);
 
     // Status bar at bottom
     root.appendChild(loginForm.statusBarElement);
@@ -329,6 +365,13 @@ export function createConnectPage(
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),
+    updateCompatibility: (host: string, compatibility: Compatibility, serverEpoch: number | null) => {
+      compatibilityByHost.set(host, { compatibility, serverEpoch });
+      serverPanel.updateCompatibility(host, compatibility);
+    },
+    showIncompatible(host: string, serverEpoch: number | null, clientEpoch = PROTOCOL_EPOCH): void {
+      incompatibleNotice.show(host, serverEpoch, clientEpoch);
+    },
     getRememberPassword: () => loginForm.getRememberPassword(),
     getAutoConnect: () => loginForm.getAutoConnect(),
     getPassword: () => loginForm.getPassword(),

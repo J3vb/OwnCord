@@ -115,6 +115,9 @@ vi.mock("@lib/api", async (importOriginal) => {
         }),
         login: (...args: unknown[]) => mockLogin(...args),
         getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
+        getServerInfo: vi
+          .fn()
+          .mockResolvedValue({ name: "Test Server", protocol_epoch: 1, browser_client_enabled: false }),
       };
     }),
   };
@@ -138,6 +141,8 @@ vi.mock("@pages/ConnectPage", () => ({
       showError: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
+      updateCompatibility: vi.fn(),
+      showIncompatible: vi.fn(),
       getRememberPassword: vi.fn(() => false),
       getAutoConnect: vi.fn(() => false),
       getPassword: vi.fn(() => ""),
@@ -463,7 +468,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
     // that); the dispatcher is stubbed here, so set what it would have set,
     // then end the session the way auth_error does.
     mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
-    setUpdateRequiredHost("server-a.example:8443");
+    setUpdateRequiredHost({ host: "server-a.example:8443", serverEpoch: 2, clientEpoch: 1 });
     clearAuth();
     await Promise.resolve();
     await Promise.resolve();
@@ -483,7 +488,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
     // dispatcher is stubbed here; set what its auth_error handler sets.
     mockCheckForUpdate.mockClear();
     mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
-    setUpdateRequiredHost("server-c.example:8443");
+    setUpdateRequiredHost({ host: "server-c.example:8443", serverEpoch: 2, clientEpoch: 1 });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -499,7 +504,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
   ])("offers a usable update URL after a protocol refusal from %s", async (host, expectedUrl) => {
     mockCheckForUpdate.mockClear();
     mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
-    setUpdateRequiredHost(host);
+    setUpdateRequiredHost({ host, serverEpoch: 2, clientEpoch: 1 });
     await vi.advanceTimersByTimeAsync(3000);
 
     expect(mockCheckForUpdate).toHaveBeenCalledWith(expectedUrl);

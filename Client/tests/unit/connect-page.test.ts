@@ -1139,6 +1139,121 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // --- Incompatible epoch state (B7-12) ---
+
+  describe("incompatible state", () => {
+    it("shows the notice for a selected client-older server, naming the client", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "client-older", 2);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("update the client");
+      expect(container.querySelector(".incompatible-notice-update")).not.toBeNull();
+
+      page.destroy?.();
+    });
+
+    it("keeps the notice hidden for a compatible server", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "compatible", 1);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      expect(
+        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
+      ).toBe(false);
+
+      page.destroy?.();
+    });
+
+    it("badges a background-probe server without showing the notice", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      // The 15 s background probe only reaches updateCompatibility — it must
+      // never raise the notice for a profile the user has not selected.
+      page.updateCompatibility("localhost:8443", "client-older", 2);
+
+      expect(container.querySelector(".srv-compat-badge")!.textContent).toBe(
+        "Client update needed",
+      );
+      expect(
+        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
+      ).toBe(false);
+
+      page.destroy?.();
+    });
+
+    it("gives server-older its own wording and no client-update exit", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "server-older", 0);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("update the server");
+      expect(container.querySelector(".incompatible-notice-update")).toBeNull();
+      expect(container.querySelector(".incompatible-notice-leave")).not.toBeNull();
+
+      page.destroy?.();
+    });
+
+    it("the update exit asks the host to mount the updater", () => {
+      const onUpdateClient = vi.fn();
+      const page = createConnectPage(makeCallbacks({ onUpdateClient }), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("localhost:8443", 2, 1);
+      (container.querySelector(".incompatible-notice-update") as HTMLElement).click();
+
+      expect(onUpdateClient).toHaveBeenCalledWith("localhost:8443");
+
+      page.destroy?.();
+    });
+
+    it("the leave exit dismisses the notice and leaves the server rows usable", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("localhost:8443", 2, 1);
+      expect(
+        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
+      ).toBe(true);
+
+      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      expect(
+        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
+      ).toBe(false);
+
+      // The list is untouched: clicking the row still fills the form.
+      (container.querySelector(".server-item") as HTMLElement).click();
+      const hostInput = container.querySelector("#host") as HTMLInputElement;
+      expect(hostInput.value).toBe("localhost:8443");
+
+      page.destroy?.();
+    });
+
+    it("renders the notice for a WS-refusal host via showIncompatible", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("server-a.example:8443", 2, 1);
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("server-a.example:8443");
+
+      page.destroy?.();
+    });
+  });
+
   // --- Pending transient error display ---
 
   it("shows pending transient error on mount and clears it", () => {
