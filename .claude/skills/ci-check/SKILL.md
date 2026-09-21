@@ -86,6 +86,7 @@ npm run typecheck
 npm run typecheck:build   # tsconfig.build.json — the shipped app graph
 npm run typecheck:e2e     # tsconfig.e2e.json — tests/e2e, EXCLUDED from the main tsconfig
 npm run lint
+npm run build:budget && npm run check:budgets   # B7-7 gzip budgets; see bundle-budgets.json
 ```
 
 **`npm run typecheck` does not cover `tests/e2e/`.** The main tsconfig excludes
