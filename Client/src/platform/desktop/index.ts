@@ -8,6 +8,7 @@ import { http } from "./http";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
 import { pendingMessages } from "./pendingMessages";
+import { pushToTalk } from "./pushToTalk";
 import { settings } from "./settings";
 import { socket } from "./socket";
 import type { Platform } from "../contracts";
@@ -20,6 +21,7 @@ export const desktop: Partial<Platform> = {
   identity,
   logFiles,
   pendingMessages,
+  pushToTalk,
   settings,
   socket,
 };

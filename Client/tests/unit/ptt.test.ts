@@ -1,5 +1,6 @@
 /**
- * Unit tests for the Push-to-Talk service (src/lib/ptt.ts).
+ * Unit tests for the Push-to-Talk service (src/platform/desktop/pushToTalkService.ts, and
+ * the vkName display helper in src/lib/ptt.ts).
  *
  * Covers:
  *  - vkName: known keys, A-Z, 0-9, Numpad, unknown (hex fallback)
@@ -94,7 +95,10 @@ vi.mock("../../src/lib/livekitSession", () => ({
 // Import module under test (AFTER mocks)
 // ---------------------------------------------------------------------------
 
-import { vkName, initPtt, stopPtt, updatePttKey, captureKeyPress } from "../../src/lib/ptt";
+import { vkName } from "../../src/lib/ptt";
+import { pushToTalk } from "../../src/platform/desktop/pushToTalkService";
+
+const { init: initPtt, stop: stopPtt, updateKey: updatePttKey, captureKeyPress } = pushToTalk;
 
 // ---------------------------------------------------------------------------
 // Helpers

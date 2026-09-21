@@ -1,9 +1,11 @@
-// Legacy binding for the PushToTalk suite: today's `lib/ptt.ts` exports,
-// wrapped with no cast against the contract. B7-5 re-runs
-// `pushToTalk.suite.ts` against `platform/desktop` instead of this file.
+// Desktop binding for the PushToTalk suite: `platform/desktop`'s registered
+// push-to-talk facade, which loads the service on first use. B7-5 re-runs the
+// same suite file the legacy binding ran against
+// `lib/ptt.ts`'s exports; those are now internal to the desktop adapter, so
+// the legacy binding is deleted with this commit.
 //
-// `ptt.ts` keeps module-level binding/generation state across calls, so each
-// test needs a fresh module instance.
+// The service keeps module-level binding/generation state across calls, so
+// each test needs a fresh module instance.
 import { vi } from "vitest";
 import type { PushToTalk } from "../../../src/platform/contracts/pushToTalk";
 import { describePushToTalkSuite } from "./pushToTalk.suite";
@@ -56,16 +58,11 @@ describePushToTalkSuite(async () => {
   });
   listen.mockReset().mockResolvedValue(() => {});
 
-  const mod = await import("../../../src/lib/ptt");
-  const legacy: PushToTalk = {
-    init: mod.initPtt,
-    stop: mod.stopPtt,
-    updateKey: mod.updatePttKey,
-    captureKeyPress: mod.captureKeyPress,
-  };
+  const mod = await import("../../../src/platform/desktop/pushToTalk");
+  const desktopBinding: PushToTalk = mod.pushToTalk;
 
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       captureSucceedsWith(vk: number) {
         captureBehavior = () => Promise.resolve(vk);

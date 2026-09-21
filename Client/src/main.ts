@@ -18,7 +18,6 @@ import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.st
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
-import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { MountableComponent } from "@lib/safe-render";
@@ -107,7 +106,7 @@ installGlobalErrorHandlers();
 applyStoredAppearance();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming)
-void initPtt();
+void desktop.pushToTalk!.init();
 
 const appEl = document.getElementById("app");
 if (!appEl) {

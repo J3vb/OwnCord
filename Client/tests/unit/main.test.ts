@@ -42,7 +42,9 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("@lib/ptt", () => ({ initPtt: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
+}));
 vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
