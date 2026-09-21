@@ -586,6 +586,21 @@
   font-size: 13px;
 }
 
+/* Registration policy notice (B7-15a): closed / approval, shown before submit */
+.registration-notice {
+  background: rgba(56, 40, 20, 1);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: none;
+  color: #f0c27b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.registration-notice.visible {
+  display: block;
+}
+
 /* Form fields */
 .form-group {
   margin-bottom: 16px;

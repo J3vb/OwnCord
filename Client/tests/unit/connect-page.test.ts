@@ -1924,4 +1924,193 @@ describe("ConnectPage", () => {
 
     page.destroy?.();
   });
+
+  // ── Registration mode awareness (B7-15a) ─────────────────────────────────
+  //
+  // LoginForm reads the host's registration mode through the ConnectPage
+  // `getRegistrationMode` callback (fed from main.ts's per-host server-info
+  // snapshot). `closed` refuses register with a stated reason; `open` and
+  // `approval` submit without an invite code; `approval` also shows the
+  // pending-approval notice up front; an unavailable mode falls back to
+  // today's invite-required form.
+
+  /** Fill the register form, leaving the invite field at `invite`. */
+  function fillRegisterForm(el: HTMLDivElement, invite: string | null): HTMLFormElement {
+    // The mode is keyed by host, so set it (and let the input handler re-derive)
+    // before switching to register.
+    const host = el.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    const toggle = el.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+    (el.querySelector("#username") as HTMLInputElement).value = "newuser";
+    (el.querySelector("#password") as HTMLInputElement).value = "password123";
+    if (invite !== null) {
+      (el.querySelector("#invite") as HTMLInputElement).value = invite;
+    }
+    return el.querySelector(".connect-form") as HTMLFormElement;
+  }
+
+  /** Select a host and enter register mode, in the order a real user would. */
+  function selectHostAndRegister(el: HTMLDivElement): void {
+    const host = el.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    (el.querySelector(".form-switch a") as HTMLElement).click();
+  }
+
+  it("invite mode requires an invite code and hides no notice", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "invite" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+    expect(container.querySelector(".registration-notice")!.classList.contains("visible")).toBe(
+      false,
+    );
+
+    page.destroy?.();
+  });
+
+  it("open mode submits without an invite code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "open" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
+    });
+
+    page.destroy?.();
+  });
+
+  it("approval mode submits without a code and shows the pending-approval notice up front", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "approval" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+
+    const notice = container.querySelector(".registration-notice")!;
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toContain("admin must approve");
+
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
+    });
+
+    page.destroy?.();
+  });
+
+  it("closed mode disables register and states why", () => {
+    const onRegister = vi.fn();
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "closed" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    selectHostAndRegister(container);
+
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    const notice = container.querySelector(".registration-notice")!;
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toContain("Registration is closed");
+
+    // Even a forced submit refuses and never reaches the callback.
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+  it("an unavailable mode (no snapshot) still requires an invite code", async () => {
+    // No `getRegistrationMode` callback at all — the older-server / failed-read
+    // fallback. Registration must not be silently widened.
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      const banner = container.querySelector(".error-banner")!;
+      expect(banner.classList.contains("visible")).toBe(true);
+      expect(banner.textContent).toContain("Invite code is required");
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("an unknown mode string (null from the parser) still requires an invite code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => null }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.textContent).toContain(
+        "Invite code is required",
+      );
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("re-derives the mode when server-info arrives after a host is selected", () => {
+    let mode: import("../../src/lib/types").RegistrationMode | null = null;
+    const page = createConnectPage(
+      makeCallbacks({ getRegistrationMode: () => mode }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    toggle.click();
+    expect(
+      (container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    // A late snapshot flips the host to `closed`; updateCompatibility nudges
+    // the form to re-read it.
+    mode = "closed";
+    page.updateCompatibility("localhost:8443", "compatible", 1);
+
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(container.querySelector(".registration-notice")!.textContent).toContain(
+      "Registration is closed",
+    );
+
+    page.destroy?.();
+  });
 });

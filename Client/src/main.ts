@@ -48,6 +48,7 @@ import {
   type Compatibility,
 } from "@lib/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import { parseRegistrationMode } from "@lib/types";
 import type { ServerInfoResponse } from "@lib/types";
 import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
@@ -664,6 +665,13 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     const connectPage = createConnectPage(
       {
+        // The mode is read from the per-host snapshot `runHealthChecks` fills
+        // beside the health probe. Unknown (no snapshot / unrecognised value)
+        // returns null, which LoginForm treats as invite-required.
+        getRegistrationMode(host) {
+          const info = serverInfoByHost.get(host);
+          return parseRegistrationMode(info?.registration_mode);
+        },
         async onLogin(host, username, password) {
           api.endSession();
           api.setConfig({ host });

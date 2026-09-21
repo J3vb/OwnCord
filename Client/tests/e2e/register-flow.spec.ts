@@ -10,11 +10,29 @@ const MOCK_REGISTER_RESPONSE = {
   token: "register-token-abc",
 };
 
-async function mockRegisterSuccess(page: import("@playwright/test").Page): Promise<void> {
+/** A `server-info` route carrying the given registration mode. */
+function serverInfoRoute(mode: string) {
+  return {
+    pattern: "/api/v1/server-info",
+    status: 200,
+    body: {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: mode,
+    },
+  };
+}
+
+async function mockRegisterSuccess(
+  page: import("@playwright/test").Page,
+  mode?: string,
+): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ...(mode ? [serverInfoRoute(mode)] : []),
         { pattern: "/api/v1/auth/register", status: 200, body: MOCK_REGISTER_RESPONSE },
       ],
       simulateWsFlow: true,
@@ -190,5 +208,89 @@ test.describe("Register Flow — Submission", () => {
 
     const errorBanner = page.locator(".error-banner");
     await expect(errorBanner).toHaveClass(/visible/, { timeout: 5000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: registration mode awareness (B7-15a)
+//
+// The connect path reads server-info's registration_mode into a per-host
+// snapshot and the register form follows it: invite requires a code, open and
+// approval submit without one, closed refuses and says why, and an unavailable
+// mode falls back to today's invite-required form.
+// ---------------------------------------------------------------------------
+
+test.describe("Register Flow — Registration modes", () => {
+  const notice = (page: import("@playwright/test").Page) => page.locator(".registration-notice");
+
+  test("invite mode requires an invite code", async ({ page }) => {
+    await mockRegisterSuccess(page, "invite");
+    await page.goto("/");
+    await switchToRegisterMode(page);
+
+    await page.locator("#host").fill("localhost:8443");
+    await page.locator("#username").fill("newuser");
+    await page.locator("#password").fill("password123");
+    await page.locator(".btn-primary[type='submit']").click();
+
+    await expect(page.locator(".error-banner")).toContainText("Invite code is required");
+  });
+
+  test("open mode submits without an invite code", async ({ page }) => {
+    await mockRegisterSuccess(page, "open");
+    await page.goto("/");
+    await switchToRegisterMode(page);
+    await page.locator("#host").fill("localhost:8443");
+    await page.locator("#username").fill("newuser");
+    await page.locator("#password").fill("password123");
+
+    // The invite field is hidden — no code is needed.
+    await expect(page.locator("#invite").locator("..")).toHaveClass(/form-group--hidden/);
+
+    await page.locator(".btn-primary[type='submit']").click();
+    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5000 });
+  });
+
+  test("approval mode shows the pending-approval notice up front and submits without a code", async ({
+    page,
+  }) => {
+    await mockRegisterSuccess(page, "approval");
+    await page.goto("/");
+    await switchToRegisterMode(page);
+
+    await page.locator("#host").fill("localhost:8443");
+    await expect(notice(page)).toBeVisible();
+    await expect(notice(page)).toContainText("admin must approve");
+
+    await page.locator("#username").fill("newuser");
+    await page.locator("#password").fill("password123");
+    await page.locator(".btn-primary[type='submit']").click();
+    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5000 });
+  });
+
+  test("closed mode disables register and states why", async ({ page }) => {
+    await mockRegisterSuccess(page, "closed");
+    await page.goto("/");
+    await switchToRegisterMode(page);
+
+    await page.locator("#host").fill("localhost:8443");
+    await expect(notice(page)).toBeVisible();
+    await expect(notice(page)).toContainText("Registration is closed");
+    await expect(page.locator(".btn-primary[type='submit']")).toBeDisabled();
+  });
+
+  test("an unavailable server-info still requires an invite code", async ({ page }) => {
+    // No server-info route: GET returns 404, so the mode is unknown. The form
+    // must not silently widen registration.
+    await mockRegisterSuccess(page);
+    await page.goto("/");
+    await switchToRegisterMode(page);
+
+    await page.locator("#host").fill("localhost:8443");
+    await page.locator("#username").fill("newuser");
+    await page.locator("#password").fill("password123");
+    await page.locator(".btn-primary[type='submit']").click();
+
+    await expect(page.locator(".error-banner")).toContainText("Invite code is required");
   });
 });

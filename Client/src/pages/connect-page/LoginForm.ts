@@ -3,6 +3,7 @@
 
 import { createElement, setText, appendChildren, qs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import type { RegistrationMode } from "@lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,6 +26,21 @@ const MIN_PASSWORD_LENGTH = 8;
 // text, so this string can never be mistaken for a real password.
 const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
 
+/**
+ * Copy shown in the register notice for a mode, or null when no notice
+ * applies. `closed` states why register is refused; `approval` states the
+ * pending-approval fact up front, not only after a 202.
+ */
+function registrationNoticeText(mode: RegistrationMode | null): string | null {
+  if (mode === "closed") {
+    return "Registration is closed on this server.";
+  }
+  if (mode === "approval") {
+    return "Registration requires admin approval. You can register now, but an admin must approve your account before you can sign in.";
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Options & Return type
 // ---------------------------------------------------------------------------
@@ -45,6 +61,13 @@ export interface LoginFormOptions {
   readonly onTotpSubmit: (code: string) => Promise<void>;
   readonly onSettingsOpen: () => void;
   readonly onAutoLoginCancel?: () => void;
+  /**
+   * The registration mode the server reported for a host, or null when it is
+   * unknown (an older server, a failed read, an unrecognised value). Null is
+   * treated exactly like `invite`: a code is required. Registration is never
+   * widened on an unreadable mode.
+   */
+  readonly getRegistrationMode?: (host: string) => RegistrationMode | null;
 }
 
 export interface LoginFormApi {
@@ -69,6 +92,9 @@ export interface LoginFormApi {
   getPassword(): string;
   /** Set the host input value (called when ServerPanel clicks a server). */
   setHost(host: string): void;
+  /** Re-derive the register affordances from the host's registration mode
+   *  (call after a late `server-info` snapshot arrives for the selected host). */
+  refreshRegistrationMode(): void;
   /** Set credentials (called for auto-fill from profile or credential store).
    *  `hasSavedPassword` fills the password box with a placeholder rather than
    *  a real password — the plaintext stays in the Rust backend. */
@@ -97,6 +123,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onTotpSubmit,
     onSettingsOpen,
     onAutoLoginCancel,
+    getRegistrationMode,
   } = opts;
 
   let usingSavedPassword = false;
@@ -134,6 +161,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let passwordInput: HTMLInputElement;
   let inviteGroup: HTMLDivElement;
   let inviteInput: HTMLInputElement;
+  let registrationNotice: HTMLDivElement;
   let submitBtn: HTMLButtonElement;
   let submitBtnText: HTMLSpanElement;
   let toggleModeBtn: HTMLAnchorElement;
@@ -244,6 +272,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Host
     const hostGroup = buildFormGroup("host", "Server Address", "text", "localhost:8443");
     hostInput = qs("input", hostGroup)!;
+    // Registration policy is per host, so a manually edited address re-derives
+    // the mode (and the invite requirement) as the user types.
+    hostInput.addEventListener("input", updateRegistrationUi, { signal });
 
     // Username
     const usernameGroup = buildFormGroup("username", "Username", "text", "");
@@ -311,6 +342,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     inviteGroup.classList.add("form-group--hidden");
     inviteInput = qs("input", inviteGroup)!;
 
+    // Registration notice (register only): states the server's policy up
+    // front for `closed` (why register is refused) and `approval` (the
+    // pending-approval state, shown before the attempt rather than only after
+    // a 202). Hidden by default.
+    registrationNotice = createElement("div", {
+      class: "registration-notice",
+      role: "status",
+    });
+
     // Submit button
     submitBtn = createElement("button", {
       class: "btn-primary",
@@ -334,6 +374,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       passwordGroup,
       rememberGroup,
       autoConnectGroup,
+      registrationNotice,
       inviteGroup,
       submitBtn,
       formSwitch,
@@ -531,13 +572,18 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateSubmitButton(): void {
     const isLoading =
       formState === "loading" || formState === "connecting" || formState === "auto-connecting";
-    submitBtn.disabled = isLoading;
+    // A closed server refuses registration outright — disable the control and
+    // let the notice state why, rather than collecting a doomed attempt.
+    const refused = isRegisterRefused();
+    submitBtn.disabled = isLoading || refused;
     submitBtn.classList.toggle("loading", isLoading);
 
     if (formState === "connecting" || formState === "auto-connecting") {
       setText(submitBtnText, "Connecting\u2026");
     } else if (formState === "loading") {
       setText(submitBtnText, formMode === "login" ? "Logging in\u2026" : "Registering\u2026");
+    } else if (refused) {
+      setText(submitBtnText, "Registration closed");
     } else {
       setText(submitBtnText, formMode === "login" ? "Login" : "Register");
     }
@@ -606,6 +652,51 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Registration mode (B7-15a)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The live registration mode for the currently-typed host, or null when it
+   * is unknown. Only `invite` and null require an invite code; unknown is
+   * deliberately treated as invite-required, never as `open`.
+   */
+  function currentRegistrationMode(): RegistrationMode | null {
+    const host = hostInput.value.trim();
+    if (!host) return null;
+    return getRegistrationMode?.(host) ?? null;
+  }
+
+  function isRegisterRefused(): boolean {
+    return formMode === "register" && currentRegistrationMode() === "closed";
+  }
+
+  /**
+   * Bring the register affordances in line with the selected host's mode:
+   * the invite field is shown only when a code is actually needed, the notice
+   * states `closed`/`approval` up front, and `closed` disables the submit
+   * control. Idempotent and cheap; call it whenever the mode may have changed
+   * (host edit, mode toggle, a late server-info snapshot).
+   */
+  function updateRegistrationUi(): void {
+    const registering = formMode === "register";
+    const mode = registering ? currentRegistrationMode() : null;
+    const requiresInvite = mode === "invite" || mode === null;
+
+    inviteGroup.classList.toggle("form-group--hidden", !(registering && requiresInvite));
+
+    const text = registering ? registrationNoticeText(mode) : null;
+    if (text !== null) {
+      setText(registrationNotice, text);
+      registrationNotice.classList.add("visible");
+    } else {
+      setText(registrationNotice, "");
+      registrationNotice.classList.remove("visible");
+    }
+
+    updateSubmitButton();
+  }
+
+  // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
 
@@ -625,7 +716,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       formMode === "login" ? "Need an account? Register" : "Already have an account? Login",
     );
 
-    inviteGroup.classList.toggle("form-group--hidden", formMode === "login");
+    updateRegistrationUi();
 
     // Clear any existing error
     if (formState === "error") {
@@ -667,9 +758,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       if (password === SAVED_PASSWORD_PLACEHOLDER) {
         return "That is the saved-password placeholder, not a password. Choose a different one.";
       }
-      const inviteCode = inviteInput.value.trim();
-      if (!inviteCode) {
-        return "Invite code is required for registration.";
+      const mode = currentRegistrationMode();
+      if (mode === "closed") {
+        return "Registration is closed on this server.";
+      }
+      // `invite` and an unknown mode (older server / failed read) both require
+      // a code. Never widen registration because the mode could not be read.
+      if (mode === "invite" || mode === null) {
+        const inviteCode = inviteInput.value.trim();
+        if (!inviteCode) {
+          return "Invite code is required for registration.";
+        }
       }
     }
     return null;
@@ -827,6 +926,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setHost(host: string): void {
       hostInput.value = host;
+      // The host's registration mode may differ from the previous one.
+      updateRegistrationUi();
+    },
+
+    refreshRegistrationMode(): void {
+      updateRegistrationUi();
     },
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
