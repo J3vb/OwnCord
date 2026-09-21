@@ -514,6 +514,33 @@ export function isExternalGif(objectUrl: string): boolean {
   return externalGifUrls.has(objectUrl);
 }
 
+/** Re-request `img`'s image through the broker when the blob: URL it shows
+ *  was evicted by the FIFO cap and revoked — a GIF unfreeze or a lazy load
+ *  after scrolling back reloads the stale URL. Register it before any other
+ *  error listener: a recovered load stops the error from reaching them. */
+export function recoverEvictedImage(img: HTMLImageElement, source: ExternalImageSource): void {
+  const epoch = externalEpoch;
+  const recover = (event: Event): void => {
+    if (
+      epoch !== externalEpoch ||
+      !img.src.startsWith("blob:") ||
+      [...externalObjectUrls.values()].includes(img.src)
+    ) {
+      return;
+    }
+    event.stopImmediatePropagation();
+    void fetchExternalImage(source).then((src) => {
+      if (src !== null) {
+        img.src = src;
+        return;
+      }
+      img.removeEventListener("error", recover);
+      img.dispatchEvent(new Event("error"));
+    });
+  };
+  img.addEventListener("error", recover);
+}
+
 /** An external image, fetched by the broker and handed back as a same-origin
  *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
  *  broker refused it or could not fetch it. */

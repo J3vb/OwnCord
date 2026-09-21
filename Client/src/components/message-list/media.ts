@@ -9,7 +9,13 @@ import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
-import { externalPartition, fetchExternalImage, isSafeUrl } from "./attachments";
+import {
+  externalPartition,
+  fetchExternalImage,
+  isSafeUrl,
+  recoverEvictedImage,
+} from "./attachments";
+import type { ExternalImageSource } from "../../platform/contracts/externalContent";
 import { desktop } from "../../platform/desktop";
 import {
   CODE_BLOCK_REGEX,
@@ -199,6 +205,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     alt: "YouTube video",
     loading: "lazy",
   });
+  recoverEvictedImage(thumb, { url: thumbUrl });
   void fetchExternalImage({ url: thumbUrl }).then((src) => {
     if (src !== null) thumb.src = src;
   });
@@ -268,6 +275,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     log.error("Image failed to load", { url });
     wrap.style.minHeight = "";
   };
+  recoverEvictedImage(img, { url });
   img.addEventListener("error", collapse, { once: true });
 
   void fetchExternalImage({ url }).then((src) => {
@@ -311,7 +319,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     }
 
     img.addEventListener("click", () => {
-      openImageLightbox(src, "Image");
+      openImageLightbox(src, "Image", { url });
     });
 
     img.src = src;
@@ -346,7 +354,7 @@ export function closeActiveLightbox(): void {
 }
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
-export function openImageLightbox(src: string, alt: string): void {
+export function openImageLightbox(src: string, alt: string, external?: ExternalImageSource): void {
   // Close any existing lightbox (including its document listeners)
   if (activeLightboxClose !== null) {
     activeLightboxClose();
@@ -357,6 +365,7 @@ export function openImageLightbox(src: string, alt: string): void {
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
+  if (external !== undefined) recoverEvictedImage(img, external);
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 

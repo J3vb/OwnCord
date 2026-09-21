@@ -7,7 +7,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
-import { fetchExternalImage } from "@components/message-list/attachments";
+import { fetchExternalImage, recoverEvictedImage } from "@components/message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -138,6 +138,7 @@ export function createGifPicker(options: GifPickerOptions): {
         alt: gif.title || "GIF",
         loading: "lazy",
       });
+      recoverEvictedImage(img, { url: gif.url });
       void fetchExternalImage({ url: gif.url }).then((src) => {
         if (src !== null) img.src = src;
       });
