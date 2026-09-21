@@ -2,9 +2,10 @@
 
 **Kind:** target-state map. **Status:** design record only — the seam described
 here **does not exist in the code yet**.
-**Measured against:** B7-4 (branch `feat/b7-4-adapter-connectivity-identity`,
-2026-09-20), which moved twelve of the twenty-one native importers behind
-the seam; the three counts above are re-derived from the tree by
+**Measured against:** B7-16 (branch `fm/b7-16-impl`, 2026-09-21), which added
+the external-content broker contract and its two native commands on top of
+B7-4's move of twelve of the twenty-one native importers behind the seam; the
+three counts above are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
@@ -103,26 +104,28 @@ to desktop/browser branching.
 
 ## Proposed contracts
 
-Fifteen capability clusters. Each becomes one file under `contracts/`, with
-matching implementations under `desktop/` and `browser/`.
+Sixteen capability clusters (the sixteenth, external content, added by
+B7-16). Each becomes one file under `contracts/`, with matching
+implementations under `desktop/` and `browser/`.
 
-| Contract          | Files today                                                                   | Native surface                                       | Browser outlook                                           |
-| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
-| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/{attachments,embeds,media}.ts` | `plugin-http`                                        | native `fetch` — but CORS becomes a server concern        |
-| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens  | ⚠ see hard cases                                          |
-| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard | ⚠ see hard cases                                          |
-| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)         | `localStorage` / IndexedDB                                |
-| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                | not needed — the proxies exist to work around desktop TLS |
-| Notifications     | `lib/notifications.ts`                                                        | `plugin-notification`, `api/window`                  | Notification API + Page Visibility                        |
-| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                              | in-memory ring buffer + download                          |
-| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                         | mostly unsupported; degrade                               |
-| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`     | unsupported — the page reloads instead                    |
-| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                      | `window.open`                                             |
-| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                         | `<a download>` / File System Access API                   |
-| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                   | ⚠ see hard cases                                          |
-| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                   | URL routing                                               |
-| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                            | build-time constant                                       |
-| Dev tools         | `main.ts:86-89`, `settings/AdvancedTab.ts:70`                                 | `api/core` (`open_devtools`)                         | unsupported — the browser has its own devtools already    |
+| Contract          | Files today                                                                   | Native surface                                       | Browser outlook                                             |
+| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/attachments.ts` (server files) | `plugin-http`                                        | native `fetch` — but CORS becomes a server concern          |
+| External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                  | `api/core`; 2 invokes (`external_*`)                 | ⚠ no equivalent — a page cannot classify resolved addresses |
+| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens  | ⚠ see hard cases                                            |
+| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard | ⚠ see hard cases                                            |
+| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)         | `localStorage` / IndexedDB                                  |
+| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                | not needed — the proxies exist to work around desktop TLS   |
+| Notifications     | `lib/notifications.ts`                                                        | `plugin-notification`, `api/window`                  | Notification API + Page Visibility                          |
+| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                              | in-memory ring buffer + download                            |
+| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                         | mostly unsupported; degrade                                 |
+| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`     | unsupported — the page reloads instead                      |
+| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                      | `window.open`                                               |
+| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                         | `<a download>` / File System Access API                     |
+| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                   | ⚠ see hard cases                                            |
+| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                   | URL routing                                                 |
+| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                            | build-time constant                                         |
+| Dev tools         | `main.ts:86-89`, `settings/AdvancedTab.ts:70`                                 | `api/core` (`open_devtools`)                         | unsupported — the browser has its own devtools already      |
 
 Two files appear under more than one contract (`lib/profiles.ts` does HTTP and
 settings; `settings/AdvancedTab.ts` spans four). That is expected — the clusters
@@ -230,11 +233,25 @@ in the same commit rather than left asserting what the desktop binding already
 covers. `LogFiles.clearAll` is the same story inside a row that already had a
 suite: no exported seam until B7-4, so its coverage lands with the move.
 
-`Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs all twelve
-suites against a null subject; the twelve are the eight rows above plus the
-four B7-4 created. The remaining rows (and the no-seam half of the two split
+`Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs all thirteen
+suites against a null subject; the thirteen are the eight rows above, the
+four B7-4 created, and B7-16's `ExternalContentBroker`. The remaining rows (and the no-seam half of the two split
 rows) are contract-only until the milestone that creates their seam writes the
 suite.
+
+**One contract was added in B7-16:** `contracts/externalContent.ts`
+(`ExternalContentBroker`, registered as `desktop.externalContent`). It is
+deliberately not an extension of `HttpClient`: the C-09 contract in
+[trust-model.md](../trust-model.md) says renderer code gets no general-purpose
+client for content other users named, so the shape makes a raw URL result
+unrepresentable. `preview(partition, url)` returns the typed minimum (title,
+description, site name, dimensions, and an opaque image handle) and
+`image(partition, source)` returns the bytes of a handle or of a URL the caller
+already holds, both as a result union whose failure is one of five refusal
+classes rather than a thrown error. Two methods, two native commands
+(`external_preview` returns JSON, `external_image` returns raw IPC bytes over
+`tauri::ipc::Response`), because a raw-bytes response cannot also carry the
+JSON. The suite is `externalContent.suite.ts`, run against the desktop binding.
 
 **Suite coverage gaps.** A round-3 adversarial review found suite tests whose
 only assertion a completely inert, do-nothing subject also satisfies —

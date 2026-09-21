@@ -199,15 +199,14 @@ pinning flow — [architecture/platform-contracts.md](architecture/platform-cont
 ## Desktop preview destination policy (C-09) — contract for B7
 
 Link previews, avatars and external inline images make the desktop client
-fetch URLs that other users chose. Today those fetches are made from the
-renderer through the Tauri HTTP plugin and the webview's own image loading,
+fetch URLs that other users chose. Before B7-16 those fetches were made from
+the renderer through the Tauri HTTP plugin and the webview's own image loading,
 with destination policy applied in TypeScript per call site rather than in
 one place (`Client/src/components/message-list/embeds.ts`, `attachments.ts`,
 `media.ts`; `docs/security.md` §"Tauri Capabilities") — which is the C-09
 finding as publicly recorded: the policy is **not centralised at the native
-boundary**, and not every automatic fetch path applies the same checks. Until
-B7 lands, treat every automatic remote fetch on the desktop as governed by
-the capability scope and CSP only. The B7 platform seam replaces that with
+boundary**, and not every automatic fetch path applies the same checks. The
+B7 platform seam replaces that with
 **one native fetch broker** that owns the whole policy. This is the
 contract B7 implements; it is written here so B7 does not rediscover it.
 
@@ -268,10 +267,46 @@ the two rows to match, and the package's own suite is the regression coverage
 listed above, plus a lying `Content-Length`, a decompression bomb, a
 slow-loris body, a redirect loop, a scheme downgrade, a sniffed type
 disagreeing with the declared one, the concurrency cap under `-race`,
-cancellation, residual buffering and offline behaviour. Clauses 1, 7 and 8 —
-the desktop broker owning renderer fetches, returning a typed minimum, and
-narrowing the `https://*` capability — are unchanged and stay B7's, so the
-client is exactly where it was.
+cancellation, residual buffering and offline behaviour.
+
+**Desktop side, done in B7-16.** `Client/src-tauri/src/external_content.rs`
+is the broker, reached through the `ExternalContentBroker` platform contract
+(`Client/src/platform/contracts/externalContent.ts`) and nothing else: link
+previews, YouTube oEmbed titles and thumbnails, inline external images, sent
+GIFs, GIF-picker thumbnails and external avatars all go through it. It admits
+`https` on port 443 only, classifies every resolved answer with the same list
+(`Server/safefetch/testdata/classify_vectors.json` is the corpus both
+languages' suites read, and a Go test forces a vector for every range), dials
+through a resolver that answers only for the vetted host with the vetted
+addresses, follows at most three redirects by hand, and bounds each fetch by
+a deadline, a streaming byte ceiling, a content-type allowlist checked
+against the sniffed type for images, a concurrency cap and a process-wide
+in-flight byte budget. Open Graph and oEmbed are parsed in Rust; the renderer
+receives only title, description, site name, dimensions and an opaque image
+handle, and image bytes as a same-origin `blob:` URL. Its cache is
+byte-weighted and keyed by the server partition, and a page teardown drops
+it. The HTTP plugin's capability now allows only the loopback TOFU proxies
+(clause 8), and the CSP's `img-src` no longer allows `https:`, so an image the
+broker did not fetch cannot load. Two residuals are deliberate: the YouTube
+player is a frame load, which cannot be brokered into bytes, and keeps its
+fixed host (`frame-src`) and sandbox; and `connect-src` keeps `https:` because
+the LiveKit SDK makes its own renderer fetches to the operator's LiveKit host.
+
+**Clause 1 and the server's own files.** Attachments, avatars and custom
+emoji hosted by the connected OwnCord server are automatic fetches too, and
+they deliberately do not go through the broker: they keep the cert-pinned
+TOFU proxy (`Client/src-tauri/src/http_proxy.rs`). The two paths have
+opposite trust models. The broker is web-PKI, public addresses only, and
+never carries a credential; the server path trusts a pinned, often
+self-signed certificate, must reach any address the operator chose —
+including the LAN and loopback ranges the broker refuses by design — and
+carries the session bearer token. Merging them would put an "is this the
+server?" branch inside the security core, where one bug either skips
+classification for an attacker-chosen URL or sends the token to one. Two
+native owners make that bug class impossible, so clause 1 is met by the
+broker for content other users named and by `http_proxy.rs` for the server's
+own files, and no renderer call site holds a general-purpose client for
+either.
 
 Aggregate cross-caller byte budgets and byte-weighted cache eviction are
 deliberately **not** in the server boundary (B5 decision 2): the server's
@@ -280,7 +315,7 @@ allowlist, and the consumer that needs them is B7's broker. `Server/safefetch`
 is shaped so B7 adds them without a rewrite.
 
 Status: contract (this document, B2-7); server half implemented B5-1, desktop
-broker B7, per B5 decisions 1 and 2, the split recorded in the register's
+broker B7-16, per B5 decisions 1 and 2, the split recorded in the register's
 SEC-03 row (B5-12, 2026-09-05); tracked as C-09 in
 [plans/repo-health-issue-register-2026-08-23.md](plans/repo-health-issue-register-2026-08-23.md).
 
