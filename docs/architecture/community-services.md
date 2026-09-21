@@ -8,7 +8,11 @@ rather than owing it; the two stale egress-inventory cells this document
 recorded were corrected by that step. **Amended 2026-09-08 (reliability):**
 S1-d and S1-e describe message retry receipts and the restore cutoff introduced
 with migration 051. **Amended 2026-09-18 (docs drift):** the S1-b
-trust-deletion row was re-measured at `dev` @ `a3a0a49b`. Other historical
+trust-deletion row was re-measured at `dev` @ `a3a0a49b`. **Amended
+2026-09-21 (B7-16):** the desktop half of S2 exists — the three renderer
+paths below, and the client cells of the abuse-case table, describe the tree
+before the native external-content broker; its current policy is
+[trust-model.md](../trust-model.md) §C-09. Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
@@ -702,15 +706,12 @@ or a property the architecture cannot have.
 11. **A shared device inheriting an NSFW acknowledgement.** Decision 13 puts
     the row server-side so a new device does not re-prompt; the cost is that
     a second person on the same account does not either.
-12. **Aggregate cross-caller byte budgets, and byte-weighted cache eviction.**
-    Decision 2 defers both to B7. B5-1 shipped the per-fetch policy and two
-    concurrency gates — per `Fetcher` and process-wide — but there is no
-    cross-caller byte ceiling, and `safefetch` fills no cache.
-13. **The desktop renderer's fetch policy.** C-09 clauses 1, 7 and 8 — the
-    native broker owning renderer fetches, returning a typed minimum, and
-    narrowing the `https://*` capability — are B7's. Until then the renderer's
-    remote fetches are governed by the capability scope and the per-call-site
-    checks in `Client/src/components/message-list/`.
+12. **Aggregate cross-caller byte budgets, and byte-weighted cache eviction,
+    on the server.** Decision 2 put both in the desktop broker, which B7-16
+    built; `safefetch` still has no cross-caller byte ceiling and fills no
+    cache.
+13. **The desktop renderer's fetch policy.** Closed by B7-16 — see
+    [trust-model.md](../trust-model.md) §C-09.
 14. **Content remanence after a sweep.** The account erasure runs its
     transaction under `PRAGMA secure_delete = ON` and truncates the WAL
     afterwards; the retention sweep uses the ordinary writer and does not

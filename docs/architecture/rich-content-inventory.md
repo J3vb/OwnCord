@@ -7,7 +7,9 @@ the operator: who starts the fetch, which side of the client/server line
 performs it, what host class it can reach, and exactly what bounds — address,
 redirect, byte, time, type, concurrency, cache — apply today. Where a bound
 does not exist, the cell says so and names the phase that owes it, never
-`unknown`. Measured at `123b07d8`.
+`unknown`. Measured at `123b07d8`. B7-16 has since moved every desktop
+renderer row for external content behind the native broker; the current
+desktop policy is [trust-model.md](../trust-model.md) §C-09.
 
 Two rules this document exists to keep visible. First, **link previews stay
 client-fetched** (plan decision 3): a server-side unfurl proxy would make the
