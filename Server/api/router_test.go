@@ -450,6 +450,44 @@ func TestAPIV1ServerInfoOmitsVersion(t *testing.T) {
 	}
 }
 
+// TestAPIV1ServerInfoIsCached locks the amplification guard on the new public
+// route: it is unauthenticated and rate-limit-exempt, and the client preflight
+// calls it for every profile every 15 s, so the handler must serve the
+// derived response from a 5 s cache (the healthCacheTTL precedent) rather than
+// re-reading the config per request.
+func TestAPIV1ServerInfoIsCached(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open error: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate error: %v", err)
+	}
+	// cfg is ours, so mutating it between calls proves whether the handler
+	// re-derives the response or serves the cached one.
+	cfg := &config.Config{Server: config.ServerConfig{Name: "First Name", Port: 8443}}
+	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	if rtErr != nil {
+		t.Fatalf("app.StartRuntime: %v", rtErr)
+	}
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
+	t.Cleanup(cleanup)
+
+	first := serverInfoBody(t, handler)
+	if first["name"] != "First Name" {
+		t.Fatalf("first call name = %v, want 'First Name'", first["name"])
+	}
+
+	// Rename behind the handler's back; a 5 s cache must still serve the first.
+	cfg.Server.Name = "Renamed Server"
+	second := serverInfoBody(t, handler)
+	if second["name"] != "First Name" {
+		t.Errorf("second call within the TTL returned %v; the handler re-read cfg instead of serving the cache",
+			second["name"])
+	}
+}
+
 func TestUnknownRouteReturns404(t *testing.T) {
 	router := setupRouter(t)
 

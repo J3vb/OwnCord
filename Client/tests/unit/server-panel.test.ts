@@ -724,6 +724,65 @@ describe("ServerPanel", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Advisory compatibility badge (B7-12)
+  // -----------------------------------------------------------------------
+
+  describe("updateCompatibility", () => {
+    it("badges a client-older server as needing a client update", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "client-older");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("Client update needed");
+      expect(badge.classList.contains("client-older")).toBe(true);
+    });
+
+    it("badges a server-older server as needing a server update", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "server-older");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("Server update needed");
+      expect(badge.classList.contains("server-older")).toBe(true);
+    });
+
+    it("shows no badge for a compatible server", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "client-older");
+      panel.updateCompatibility("localhost:8443", "compatible");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("");
+      expect(badge.classList.contains("client-older")).toBe(false);
+    });
+
+    it("shows no badge when the probe could not reach the server", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "unreachable");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("");
+    });
+
+    it("ignores updates for unknown hosts", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("unknown.host:9999", "client-older");
+
+      expect(container.querySelector(".srv-compat-badge")?.textContent).toBe("");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Add Server modal
   // -----------------------------------------------------------------------
 

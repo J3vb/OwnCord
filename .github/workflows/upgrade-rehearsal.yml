@@ -99,6 +99,7 @@ jobs:
           # started on — for a workflow_call from release.yml that is the tag
           # being built, which is precisely the version being upgraded TO.
           ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+          persist-credentials: false
 
       # So the log of a scheduled run states what was rehearsed instead of
       # leaving it to be re-derived from the trigger.

@@ -291,6 +291,13 @@
 .srv-latency.bad {
   color: var(--red);
 }
+.srv-compat-badge.client-older,
+.srv-compat-badge.server-older {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--yellow);
+  white-space: nowrap;
+}
 
 /* Action buttons on server item */
 .srv-actions {
@@ -530,6 +537,32 @@
   color: #f38688;
   font-size: 13px;
   line-height: 1.4;
+}
+.incompatible-notice {
+  background: rgba(45, 18, 20, 1);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+.incompatible-notice.visible {
+  display: flex;
+}
+.incompatible-notice-text {
+  color: #f38688;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.incompatible-notice-actions {
+  display: flex;
+  gap: 8px;
+}
+.incompatible-notice-actions .btn-primary {
+  width: auto;
+  padding: 8px 16px;
+  font-size: 13px;
 }
 .success-banner {
   background: rgba(35, 165, 90, 0.12);

@@ -52,10 +52,27 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 | `empty`             | No saved profiles                                               | "Add a server to get started" with an inline add affordance                 |
 | health: reachable   | `GET /api/v1/health` ok within 3 s                              | Green dot + server name/MOTD preview                                        |
 | health: unreachable | timeout/opaque error                                            | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
+| epoch: compatible   | `server-info.protocol_epoch == PROTOCOL_EPOCH`                  | No badge, no notice — Connect behaves as before                             |
+| epoch: mismatch     | `server-info.protocol_epoch != PROTOCOL_EPOCH` (B7-12)          | Advisory row badge only; Connect stays enabled                              |
 
-Health polls every 15 s (interval wired in `main.ts`, profile data via
-`profiles.ts`); auto-connect, if enabled for the active profile, drives the
-login form's `auto-connecting` state.
+Health and `server-info` poll every 15 s (interval wired in `main.ts`, profile
+data via `profiles.ts`); auto-connect, if enabled for the active profile,
+drives the login form's `auto-connecting` state.
+
+**Incompatible epoch state (B7-12).** A mismatch is shown in two places, never
+as a bare badge:
+
+- The 15 s preflight (`GET /api/v1/server-info`, `api.getServerInfo`) only
+  **badges** the row — "Client update needed" / "Server update needed". The
+  badge is **advisory**: it never disables Connect, and the WebSocket
+  `auth_error` (`protocol_epoch_unsupported`) is the authority.
+- Selecting the row, or a WS refusal, raises the `IncompatibleNotice`
+  (`pages/connect-page/IncompatibleNotice.ts`), which states the requirement in
+  the server's own terms — which side updates, with both epoch numbers. It is
+  exitable: "Update client" mounts the existing updater (client-older only; an
+  older server needs operator guidance, not a client install) and "Choose
+  another server" dismisses it, leaving the list usable. The notice never
+  appears for a background-probe profile the user has not selected.
 
 ### 2.2 Login form — state machine
 

@@ -11,6 +11,7 @@ import type {
   AdminUser,
   RegisterResponse,
   HealthResponse,
+  ServerInfoResponse,
   MessagesResponse,
   MessagesAroundResponse,
   ReactionUsersResponse,
@@ -659,6 +660,44 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         }
         const data = await owner
           .run(res.json() as Promise<HealthResponse>)
+          .finally(releaseTransport);
+        owner.assertCurrent();
+        return data;
+      } finally {
+        clearTimeout(timer);
+        owner.dispose();
+      }
+    },
+
+    async getServerInfo(
+      host?: string,
+      timeoutMs = 3000,
+      signal?: AbortSignal,
+    ): Promise<ServerInfoResponse> {
+      // Same explicit-host shape as getHealth: the connect page probes every
+      // saved profile independently of the signed-in server. B7-15 reads
+      // through this method rather than inventing a second transport.
+      const targetHost = host ?? config.host;
+      const owner =
+        host === undefined
+          ? session.fork(signal)
+          : new SessionScope({ host: targetHost, generation }, signal ? [signal] : []);
+      const transport = new AbortController();
+      const releaseTransport = owner.addCleanup(() => transport.abort());
+      const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      try {
+        owner.assertCurrent();
+        const origin = await owner.run(ensureHttpProxy(targetHost));
+        owner.assertCurrent();
+        const res = await owner.run(
+          desktop.http.fetch(`${origin}/api/v1/server-info`, { signal: transport.signal }),
+        );
+        owner.assertCurrent();
+        if (!res.ok) {
+          throw new ApiClientError(res.status, "SERVER_INFO_FAILED", "Server info check failed");
+        }
+        const data = await owner
+          .run(res.json() as Promise<ServerInfoResponse>)
           .finally(releaseTransport);
         owner.assertCurrent();
         return data;

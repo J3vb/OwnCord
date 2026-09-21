@@ -47,6 +47,7 @@ jobs:
           # This file is read from the default branch on a schedule; dev is the
           # branch the nightly exists to smoke.
           ref: dev
+          persist-credentials: false
 
       # So every run's log states what was smoked, rather than leaving it to be
       # re-derived from the trigger.

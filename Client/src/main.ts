@@ -14,7 +14,12 @@ import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
-import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.store";
+import {
+  setTransientError,
+  uiStore,
+  setUpdateRequiredHost,
+  type UpdateRequired,
+} from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
@@ -36,7 +41,14 @@ import { initWindowState } from "@lib/window-state";
 import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
-import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import {
+  createProfileManager,
+  createTauriBackend,
+  deriveCompatibility,
+  type Compatibility,
+} from "@lib/profiles";
+import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import type { ServerInfoResponse } from "@lib/types";
 import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
@@ -301,6 +313,13 @@ desktop.trayStatus.onStatusChange((status) => {
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
 
+/**
+ * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
+ * it for the advisory epoch badge and the incompatible notice; B7-15 will read
+ * the same snapshot for `registration_mode`/retention.
+ */
+const serverInfoByHost = new Map<string, ServerInfoResponse>();
+
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
   connectPage: {
@@ -312,6 +331,11 @@ function runHealthChecks(
         version: string | null;
         onlineUsers: number | null;
       },
+    ): void;
+    updateCompatibility(
+      host: string,
+      compatibility: Compatibility,
+      serverEpoch: number | null,
     ): void;
   },
   profiles: readonly { host: string }[],
@@ -337,6 +361,26 @@ function runHealthChecks(
           version: health.version ?? null,
           onlineUsers: health.online_users ?? null,
         });
+
+        // Advisory epoch preflight, beside the health probe and sharing its
+        // timeout/dispose shape. A failed probe is `unreachable` — no badge,
+        // never an error banner (the WebSocket refusal stays authoritative).
+        let serverEpoch: number | null = null;
+        let compatibility: Compatibility = "unreachable";
+        try {
+          const info = await api.getServerInfo(profile.host, 3000, owner.signal);
+          owner.assertCurrent();
+          serverInfoByHost.set(profile.host, info);
+          serverEpoch = info.protocol_epoch;
+          compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
+        } catch (infoErr) {
+          if (!owner.isCurrent()) return;
+          log.debug("server-info preflight failed", {
+            host: profile.host,
+            error: String(infoErr),
+          });
+        }
+        connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
       } catch (err) {
         if (!owner.isCurrent()) return;
         // Record why the check failed (TLS/cert-pin/network) — otherwise a
@@ -763,6 +807,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           lastConnectHost = "";
           lastConnectToken = "";
         },
+        onUpdateClient(host) {
+          mountUpdateNotifier(host);
+        },
       },
       getProfileList(),
     );
@@ -828,23 +875,31 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     safeMount(connectPage, appEl!);
 
-    // A server refused this client's protocol epoch as too old: offer the
-    // update on the connect page itself. The main page's notifier never
-    // mounts on a refusal, so without this the user would have to fetch the
-    // installer by hand. Subscribed, not read once: on a first login or a
-    // startup auto-login this page is already mounted when the refusal
-    // arrives and nothing re-renders it (no overlay exists before auth_ok, so
-    // the isAuthenticated subscriber below does not navigate).
+    // A server refused this client's protocol epoch as too old: state the
+    // requirement on the connect page itself and offer the update there. The
+    // main page's notifier never mounts on a refusal, so without this the user
+    // would have to fetch the installer by hand. Subscribed, not read once:
+    // on a first login or a startup auto-login this page is already mounted
+    // when the refusal arrives and nothing re-renders it (no overlay exists
+    // before auth_ok, so the isAuthenticated subscriber below does not
+    // navigate).
     let updateNotifier: MountableComponent | null = null;
-    const offerUpdate = (host: string | null): void => {
-      if (!host) return;
-      setUpdateRequiredHost(null);
+    const mountUpdateNotifier = (host: string): void => {
       // A later refusal (another server tried from this same page) replaces
       // the banner rather than being ignored.
       updateNotifier?.destroy?.();
       const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
       notifier.mount(appEl!);
       updateNotifier = notifier;
+    };
+    const offerUpdate = (required: UpdateRequired | null): void => {
+      if (!required) return;
+      // Consume the fact: the next connect page must not re-offer it.
+      setUpdateRequiredHost(null);
+      connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
+      if (required.serverEpoch !== null && required.serverEpoch > required.clientEpoch) {
+        mountUpdateNotifier(required.host);
+      }
     };
     const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
     offerUpdate(uiStore.getState().updateRequiredHost);

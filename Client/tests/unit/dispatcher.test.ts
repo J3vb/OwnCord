@@ -276,6 +276,7 @@ describe("WS Dispatcher", () => {
     });
     expect(authStore.getState().isAuthenticated).toBe(true);
 
+    setUpdateRequiredHost(null);
     mock.dispatch("auth_error", { message: "Invalid token" });
 
     expectConsole("error", /\[dispatcher\] Auth failed/);
@@ -304,7 +305,11 @@ describe("WS Dispatcher", () => {
 
     expectConsole("error", /\[dispatcher\] Auth failed/);
 
-    expect(uiStore.getState().updateRequiredHost).toBe("chat.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toEqual({
+      host: "chat.example:8443",
+      serverEpoch: PROTOCOL_EPOCH + 1,
+      clientEpoch: PROTOCOL_EPOCH,
+    });
     expect(uiStore.getState().transientError).toBe("update the client");
     expect(authStore.getState().isAuthenticated).toBe(false);
     // The token is still valid — main.ts keeps the stored credential on this
@@ -312,7 +317,7 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().logoutReason).toBe("protocol_epoch");
   });
 
-  it("does not offer a client update when the SERVER is the older side, or on an ordinary auth_error", () => {
+  it("marks the host with the server-older epochs when the SERVER is the older side, but not on an ordinary auth_error", () => {
     cleanup();
     setUpdateRequiredHost(null);
     const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
@@ -326,12 +331,17 @@ describe("WS Dispatcher", () => {
       min_epoch: PROTOCOL_EPOCH - 1,
     });
     expectConsole("error", /\[dispatcher\] Auth failed .*update the server/);
-    expect(uiStore.getState().updateRequiredHost).toBeNull();
+    expect(uiStore.getState().updateRequiredHost).toEqual({
+      host: "chat.example:8443",
+      serverEpoch: PROTOCOL_EPOCH - 1,
+      clientEpoch: PROTOCOL_EPOCH,
+    });
 
     // Server older than the client: still a protocol refusal, still a valid
     // token — the credential must survive this one too.
     expect(authStore.getState().logoutReason).toBe("protocol_epoch");
 
+    setUpdateRequiredHost(null);
     mock.dispatch("auth_error", { message: "Invalid token" });
     expectConsole("error", /\[dispatcher\] Auth failed .*Invalid token/);
     expect(uiStore.getState().updateRequiredHost).toBeNull();

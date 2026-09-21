@@ -301,10 +301,17 @@ export function wireDispatcher(
       log.error("Auth failed", { message: payload.message });
       setTransientError(payload.message);
       const epochRefusal = payload.code === "protocol_epoch_unsupported";
-      // The server speaks a newer protocol than this build: hand the host to
-      // the connect page so it can offer the client update right there.
-      if (epochRefusal && (payload.server_epoch ?? 0) > PROTOCOL_EPOCH) {
-        setUpdateRequiredHost(api?.getConfig?.().host ?? null);
+      // Hand the refused host to the connect page so it can name which side
+      // updates, and offer the client update when this build is the older one.
+      if (epochRefusal) {
+        const host = api?.getConfig?.().host;
+        if (host) {
+          setUpdateRequiredHost({
+            host,
+            serverEpoch: payload.server_epoch ?? null,
+            clientEpoch: PROTOCOL_EPOCH,
+          });
+        }
       }
       // A protocol refusal is not a bad token: say so, so main.ts keeps the
       // stored credential for the relaunch after the update.
