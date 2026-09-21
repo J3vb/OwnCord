@@ -41,6 +41,23 @@ export interface HealthStatus {
   readonly onlineUsers: number | null;
 }
 
+/**
+ * Compatibility of this client with a server, derived from the server's
+ * `protocol_epoch` versus this build's `PROTOCOL_EPOCH`.
+ *
+ * `client-older` and `server-older` both mean "cannot connect", but only one
+ * names the side that must update, so they are kept distinct. `unreachable`
+ * is a failed probe, not a mismatch.
+ */
+export type Compatibility = "compatible" | "client-older" | "server-older" | "unreachable";
+
+/** Derive compatibility from a server epoch; `null` means the probe failed. */
+export function deriveCompatibility(serverEpoch: number | null, clientEpoch: number): Compatibility {
+  if (serverEpoch === null) return "unreachable";
+  if (serverEpoch === clientEpoch) return "compatible";
+  return serverEpoch > clientEpoch ? "client-older" : "server-older";
+}
+
 export interface ProfilesState {
   readonly profiles: readonly ServerProfile[];
   readonly healthStatuses: ReadonlyMap<string, HealthStatus>;
