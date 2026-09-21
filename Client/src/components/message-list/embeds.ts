@@ -36,9 +36,9 @@ export interface OgMeta {
 const ogCache = new Map<string, OgMeta>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
 const ogInFlight = new Map<string, Promise<OgMeta>>();
-/** URLs whose preview was re-asked for after the broker forgot its image
- *  handle — at most once per URL until the next cache clear. */
-const ogReasked = new Set<string>();
+/** Previews re-asked for after the broker forgot their image handle — at most
+ *  once per URL until the next cache clear, shared by every embed of it. */
+const ogReasked = new Map<string, Promise<OgMeta>>();
 let embedCacheGeneration = 0;
 
 export function clearEmbedCaches(): void {
@@ -178,13 +178,18 @@ function showOgImage(
   handle: ExternalImageHandle,
   imageWrap: HTMLElement,
   url: string,
+  reask = true,
 ): void {
   const reaskPreview = (): void => {
-    if (ogReasked.has(url)) return;
-    ogReasked.add(url);
-    if (ogCache.get(url) === meta) ogCache.delete(url);
-    void fetchOgMeta(url).then((fresh) => {
-      if (fresh.image !== null) showOgImage(fresh, fresh.image, imageWrap, url);
+    if (!reask) return;
+    let fresh = ogReasked.get(url);
+    if (fresh === undefined) {
+      if (ogCache.get(url) === meta) ogCache.delete(url);
+      fresh = fetchOgMeta(url);
+      ogReasked.set(url, fresh);
+    }
+    void fresh.then((next) => {
+      if (next.image !== null) showOgImage(next, next.image, imageWrap, url, false);
     });
   };
   // The image arrives as broker-fetched bytes (a same-origin blob: URL),

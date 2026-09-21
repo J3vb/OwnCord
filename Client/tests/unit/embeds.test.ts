@@ -470,9 +470,23 @@ describe("applyOgMeta", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(previewMock).toHaveBeenCalledTimes(1);
-    expect(imageMock).toHaveBeenCalledTimes(3);
+    expect(imageMock).toHaveBeenCalledTimes(4);
     expect(first.imageWrap.querySelector("img")).toBeNull();
     expect(second.imageWrap.querySelector("img")).toBeNull();
+  });
+
+  it("draws the one fresh preview into every embed whose handle expired", async () => {
+    previewWith("h2");
+    onlyHandleAnswers("h2");
+
+    const first = apply(withImage());
+    const second = apply(withImage());
+
+    const firstImg = await appendedImg(first.imageWrap);
+    const secondImg = await appendedImg(second.imageWrap);
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(firstImg.getAttribute("src")).toBe("blob:test/1");
+    expect(secondImg.getAttribute("src")).toBe("blob:test/1");
   });
 
   it("re-asks for the preview when an evicted image's handle has expired", async () => {
