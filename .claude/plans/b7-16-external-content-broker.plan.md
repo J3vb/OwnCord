@@ -721,6 +721,47 @@ the same PR as the broker.
   (`.claude/plans/b7-5-adapter-media-shell.plan.md:127`); Task 12 records what
   it finds rather than editing the file.
 
+### What the implementation found (2026-09-21)
+
+- **`connect-src` keeps its bare `https:` — something legitimate needs it.**
+  Traced in `livekit-client` (`dist/livekit-client.esm.mjs`): the SDK itself
+  calls the renderer's `fetch` on `toHttpUrl(<voice URL>)` — a `HEAD` from its
+  browser `online`/`offline` handlers (network-reconnect detection), a GET of
+  `/rtc/validate` after a signalling failure, and, for a LiveKit Cloud host,
+  `/settings/regions` during connect. Through the TOFU proxy the voice URL is
+  `ws://127.0.0.1:<port>/livekit`, so those land on `http://127.0.0.1:*`,
+  already allowed. But `LiveKitUrlResolver.resolve` returns the server's
+  `direct_url` unchanged when the configured host is loopback, and that is the
+  operator's `livekit.url` — a `wss://` LiveKit (LiveKit Cloud, or a TLS
+  LiveKit on another host) makes every one of those fetches `https:`.
+  Dropping it would silently degrade that configuration: a refused `HEAD`
+  reads as "still offline", so the SDK skips the immediate reconnect it makes
+  when the network returns, and Cloud region discovery fails. `noise-suppression.ts:81` is same-origin. So `connect-src`
+  is unchanged, and `tauri-conf-csp.test.ts` pins that it still carries
+  `https:` so any later change is a decision. Narrowing it needs the LiveKit
+  direct-URL path to go through a proxy first.
+- **`Client/knip.json`'s `src/platform/**` ignore is not stale yet, and was
+  left alone (B7-5 owns it).** With the ignore removed, knip reports 22 unused
+  exported types, all type re-exports from `platform/contracts/index.ts` (five
+  of them this milestone's `ExternalContent*` types, the rest pre-existing)
+  plus `WindowRect` in `contracts/window.ts`. Removing the ignore therefore
+  still means deciding what `index.ts` re-exports; nothing about this broker
+  makes that easier or harder.
+- **The User-Agent is the bare `facebookexternalhit/1.1` token**, without the
+  crawler's `(+http://www.facebook.com/…)` comment: `src-tauri/src/config_gates.rs`
+  forbids third-party host literals anywhere in the crate, and sites key on
+  the product token. Still a known-crawler spoof, still no OwnCord version
+  (Decision 2); pinned by `the_user_agent_is_a_crawler_token_with_no_owncord_version`.
+- **The broker's cache is cleared on teardown without a third command.** Every
+  call names a partition (server host + renderer cache epoch); naming a new
+  one drops everything the old one cached. Teardown and the manual clear bump
+  the epoch and immediately send an empty-URL preview under the new partition,
+  which is refused before any network work — so the handler count still moves
+  by exactly two.
+- **Tasks 3–5 landed as one commit**: the classifier, the vetted fetch, the
+  OG/oEmbed parser and the two commands are one module whose tests need each
+  other's types.
+
 ## Acceptance
 
 - [ ] Every external renderer fetch (inventory rows 1–9) goes through one

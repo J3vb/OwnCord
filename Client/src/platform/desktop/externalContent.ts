@@ -24,7 +24,7 @@ const FAILURES: readonly string[] = [
 ] satisfies readonly ExternalContentFailure[];
 
 // Each command is named literally at its call site below, so the
-// platform-contracts count (a grep for `invoke("…")`) sees both.
+// platform-contracts count (a grep for the literal command name) sees both.
 type Invoke = (typeof import("@tauri-apps/api/core"))["invoke"];
 
 async function call<T>(ask: (invoke: Invoke) => Promise<T>): Promise<ExternalContentResult<T>> {
