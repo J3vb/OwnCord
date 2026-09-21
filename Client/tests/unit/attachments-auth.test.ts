@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, getTokenMock, ensureHttpProxyMock } = vi.hoisted(() => ({
+const { fetchMock, getTokenMock, ensureHttpProxyMock, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
   getTokenMock: vi.fn<any>(),
   ensureHttpProxyMock: vi.fn<any>(),
+  brokerImageMock: vi.fn<any>(),
+}));
+
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -94,10 +99,18 @@ describe("attachment fetch authentication", () => {
     getTokenMock.mockReturnValue("session-token");
     fetchMock.mockResolvedValue(imageResponse());
 
+    brokerImageMock.mockResolvedValue({ ok: false, failure: "unavailable" });
+
     await fetchImageAsDataUrl("https://cdn.external.example/image.png");
 
+    // An external image goes to the external-content broker, whose request
+    // carries no credentials at all — never to the TOFU proxy or a direct
+    // fetch that could attach the bearer token (B7-16).
     expect(ensureHttpProxyMock).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledWith("https://cdn.external.example/image.png");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
+      url: "https://cdn.external.example/image.png",
+    });
   });
 
   it("still routes through the TOFU proxy with a bearer token when the host is stored with an explicit :443", async () => {

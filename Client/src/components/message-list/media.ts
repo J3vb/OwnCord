@@ -9,7 +9,7 @@ import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
-import { isSafeUrl } from "./attachments";
+import { externalPartition, fetchExternalImage, isSafeUrl } from "./attachments";
 import { desktop } from "../../platform/desktop";
 import {
   CODE_BLOCK_REGEX,
@@ -171,36 +171,21 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, "Loading...");
     const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-    desktop.http
-      .fetch(oembedUrl, {
-        signal: AbortSignal.timeout(5000),
-      })
-      .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
-      .then((data) => {
-        if (generation !== mediaCacheGeneration) {
-          setText(titleLink, "YouTube Video");
-          return;
-        }
-        const title = data?.title ?? "YouTube Video";
-        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
-          const firstKey = ytTitleCache.keys().next().value;
-          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
-        }
-        ytTitleCache.set(videoId, title);
-        setText(titleLink, title);
-      })
-      .catch(() => {
-        if (generation !== mediaCacheGeneration) {
-          setText(titleLink, "YouTube Video");
-          return;
-        }
-        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
-          const firstKey = ytTitleCache.keys().next().value;
-          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
-        }
-        ytTitleCache.set(videoId, "YouTube Video");
+    // The broker fetches and parses the oEmbed document and hands back only
+    // its title — the renderer never reads the JSON.
+    void desktop.externalContent!.preview(externalPartition(), oembedUrl).then((result) => {
+      if (generation !== mediaCacheGeneration) {
         setText(titleLink, "YouTube Video");
-      });
+        return;
+      }
+      const title = (result.ok ? result.value.title : null) ?? "YouTube Video";
+      if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+        const firstKey = ytTitleCache.keys().next().value;
+        if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+      }
+      ytTitleCache.set(videoId, title);
+      setText(titleLink, title);
+    });
   }
 
   appendChildren(header, channelLabel, titleLink);
@@ -211,9 +196,11 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
   const thumb = createElement("img", {
     class: "msg-embed-thumb",
-    src: thumbUrl,
     alt: "YouTube video",
     loading: "lazy",
+  });
+  void fetchExternalImage({ url: thumbUrl }).then((src) => {
+    if (src !== null) thumb.src = src;
   });
 
   const playBtn = createElement("div", { class: "msg-embed-play" });
@@ -267,64 +254,67 @@ export function renderInlineImage(url: string): HTMLDivElement {
     style: `max-width: 400px; min-height: ${minH}px;`,
   });
 
-  const attrs: Record<string, string> = {
-    src: url,
+  // No src yet: the bytes come from the external-content broker as a
+  // same-origin blob: URL, never from the webview loading `url` itself.
+  const img = createElement("img", {
     alt: "Image",
     style:
       "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
-  };
-  // Enable CORS for GIFs so canvas capture works for freeze/unfreeze
-  if (isGifUrl(url)) {
-    attrs.crossorigin = "anonymous";
-  }
-  const img = createElement("img", attrs);
-
-  // On load: clear min-height reservation and cache the natural rendered
-  // height so future virtual-scroll rebuilds start at the correct size.
-  // Measure synchronously — deferring to rAF loses the race with
-  // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener(
-    "load",
-    () => {
-      log.debug("Image loaded", {
-        url: url.slice(0, 80),
-        naturalW: img.naturalWidth,
-        naturalH: img.naturalHeight,
-      });
-      wrap.style.minHeight = "";
-      const h = wrap.offsetHeight;
-      if (h > 0) cacheImageHeight(url, h);
-      log.debug("Image height cached", { url: url.slice(0, 80), h });
-    },
-    { once: true },
-  );
+  });
 
   // On error: clear min-height so the wrapper collapses instead of
   // holding a 200px empty reservation that can oscillate with virtual scroll.
-  img.addEventListener(
-    "error",
-    () => {
-      log.error("Image failed to load", { url });
-      wrap.style.minHeight = "";
-    },
-    { once: true },
-  );
+  const collapse = (): void => {
+    log.error("Image failed to load", { url });
+    wrap.style.minHeight = "";
+  };
+  img.addEventListener("error", collapse, { once: true });
 
-  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
-  // When the animateGifs pref is disabled, start frozen so the first frame is
-  // shown by default; the user can still click the play button to animate.
-  if (isGifUrl(url)) {
+  void fetchExternalImage({ url }).then((src) => {
+    if (src === null) {
+      collapse();
+      return;
+    }
+
+    // On load: clear min-height reservation and cache the natural rendered
+    // height so future virtual-scroll rebuilds start at the correct size.
+    // Measure synchronously — deferring to rAF loses the race with
+    // ResizeObserver which can rebuild the DOM before the rAF fires.
     img.addEventListener(
       "load",
       () => {
-        observeMedia(img, url, wrap, !animateGifsPref);
+        log.debug("Image loaded", {
+          url: url.slice(0, 80),
+          naturalW: img.naturalWidth,
+          naturalH: img.naturalHeight,
+        });
+        wrap.style.minHeight = "";
+        const h = wrap.offsetHeight;
+        if (h > 0) cacheImageHeight(url, h);
+        log.debug("Image height cached", { url: url.slice(0, 80), h });
       },
       { once: true },
     );
-  }
 
-  img.addEventListener("click", () => {
-    openImageLightbox(url, "Image");
+    // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
+    // When the animateGifs pref is disabled, start frozen so the first frame is
+    // shown by default; the user can still click the play button to animate.
+    // The blob: source is same-origin, so the freeze canvas is never tainted.
+    if (isGifUrl(url)) {
+      img.addEventListener(
+        "load",
+        () => {
+          observeMedia(img, src, wrap, !animateGifsPref);
+        },
+        { once: true },
+      );
+    }
+
+    img.addEventListener("click", () => {
+      openImageLightbox(src, "Image");
+    });
+
+    img.src = src;
   });
 
   wrap.appendChild(img);

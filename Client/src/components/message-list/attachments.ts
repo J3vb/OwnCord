@@ -13,6 +13,7 @@ import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
+import type { ExternalImageSource } from "../../platform/contracts/externalContent";
 
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
@@ -185,21 +186,35 @@ function isServerUrl(url: string): boolean {
   }
 }
 
+/** An absolute http(s) URL on some host other than the configured server —
+ *  content the external-content broker, not the TOFU proxy, fetches. */
+function isExternalUrl(url: string): boolean {
+  if (isServerUrl(url)) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 /** Report whether a URL targets the configured OwnCord server host. */
 export function isTrustedServerUrl(url: string): boolean {
   return isServerUrl(url);
 }
 
 /**
- * Fetch `url`, routing OwnCord-server URLs through the Rust HTTP TOFU proxy's
+ * Fetch a file from the OwnCord server through the Rust HTTP TOFU proxy's
  * loopback origin (cert-pinned) with the session bearer token attached —
  * /api/v1/files/{id} enforces channel ACLs, so an unauthenticated request
- * would 401. The token is only ever sent to the configured server host;
- * non-server URLs (external images) get a normal validated HTTPS fetch with
- * no credentials.
+ * would 401. The token is only ever sent to the configured server host.
+ *
+ * Server URLs only. An external URL is never fetched directly (B7-16): images
+ * go through the external-content broker (`fetchExternalImage`), and anything
+ * else is refused here rather than handed to a general-purpose client.
  */
 async function fetchServerFile(url: string): Promise<Response> {
-  if (!isServerUrl(url)) return desktop.http.fetch(url);
+  if (!isServerUrl(url)) throw new Error("external URLs are fetched only through the broker");
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
@@ -296,8 +311,12 @@ export function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Fetch an image and return a data: URI. Uses memory → IndexedDB → network. */
+/** Fetch an image and return a URL an `<img>` can show. Server images come
+ *  back as a data: URI through memory → IndexedDB → the TOFU proxy; an
+ *  external image comes back as a `blob:` URL from the broker and never
+ *  enters those two caches, which hold server content only (B7-16). */
 export function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  if (isExternalUrl(url)) return fetchExternalImage({ url });
   const generation = attachmentCacheGeneration;
 
   // 1. Memory cache (instant)
@@ -321,10 +340,9 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
       return idbCached;
     }
 
-    // 4. Network fetch. Server-hosted images go through the Rust HTTP TOFU
-    // proxy (cert-pinned, same trust store as the WS proxy); external images
-    // use a normal validated HTTPS fetch. isSafeUrl restricts to http/https and
-    // responses are only used as image data, never executed.
+    // 4. Network fetch through the Rust HTTP TOFU proxy (cert-pinned, same
+    // trust store as the WS proxy). Responses are only used as image data,
+    // never executed.
     try {
       const res = await fetchServerFile(url);
       if (!res.ok) return null;
@@ -447,6 +465,98 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
     }
   });
 
+  return promise;
+}
+
+// ---------------------------------------------------------------------------
+// External images (B7-16): the broker's bytes as blob: URLs
+// ---------------------------------------------------------------------------
+
+/** Bumped by `clearExternalImageCache`. The broker partition names the server
+ *  and this epoch, so after a teardown every request lands in a fresh
+ *  partition and the native cache drops the previous one. */
+let externalEpoch = 0;
+
+/** The broker cache partition for content shown on the current server. */
+export function externalPartition(): string {
+  return `${serverHost ?? ""}#${externalEpoch}`;
+}
+
+/** blob: URLs for broker-fetched images, keyed by handle or URL. */
+const externalObjectUrls = new Map<string, string>();
+/** The subset of those URLs whose bytes are a GIF — the ones that get the
+ *  freeze/play control. */
+const externalGifUrls = new Set<string>();
+const externalInFlight = new Map<string, Promise<string | null>>();
+/** FIFO cap: these copies live in the webview, outside the broker's byte
+ *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
+ *  because an image is far smaller than a clip. */
+export const EXTERNAL_IMAGE_CACHE_MAX = 100;
+
+/** Drop every broker-fetched image and move to a fresh broker partition.
+ *  Called on page teardown and from the manual "clear cache" action. */
+export function clearExternalImageCache(): void {
+  externalEpoch += 1;
+  // Name the fresh partition now rather than at the next preview: the broker
+  // drops a partition's cache the moment another one is named, and an empty
+  // URL is refused before any network work, so this costs one IPC call.
+  void desktop.externalContent?.preview(externalPartition(), "");
+  for (const objectUrl of externalObjectUrls.values()) {
+    revokeObjectUrl(objectUrl);
+  }
+  externalObjectUrls.clear();
+  externalGifUrls.clear();
+  externalInFlight.clear();
+}
+
+/** Whether a URL from `fetchExternalImage` holds a GIF. */
+export function isExternalGif(objectUrl: string): boolean {
+  return externalGifUrls.has(objectUrl);
+}
+
+/** An external image, fetched by the broker and handed back as a same-origin
+ *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
+ *  broker refused it or could not fetch it. */
+export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
+  const key = "handle" in source ? `handle:${source.handle}` : `url:${source.url}`;
+  const cached = externalObjectUrls.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const existing = externalInFlight.get(key);
+  if (existing !== undefined) return existing;
+
+  const epoch = externalEpoch;
+  const promise = (async (): Promise<string | null> => {
+    const result = await desktop.externalContent!.image(externalPartition(), source);
+    if (!result.ok) {
+      log.debug("External image refused", { failure: result.failure });
+      return null;
+    }
+    const objectUrl = createObjectUrl(result.value);
+    if (objectUrl === null) return null;
+    if (epoch !== externalEpoch) {
+      revokeObjectUrl(objectUrl);
+      return null;
+    }
+    if (externalObjectUrls.size >= EXTERNAL_IMAGE_CACHE_MAX) {
+      const firstKey = externalObjectUrls.keys().next().value;
+      if (firstKey !== undefined) {
+        const evicted = externalObjectUrls.get(firstKey);
+        externalObjectUrls.delete(firstKey);
+        if (evicted !== undefined) {
+          externalGifUrls.delete(evicted);
+          revokeObjectUrl(evicted);
+        }
+      }
+    }
+    externalObjectUrls.set(key, objectUrl);
+    if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
+    return objectUrl;
+  })();
+
+  externalInFlight.set(key, promise);
+  void promise.finally(() => {
+    if (externalInFlight.get(key) === promise) externalInFlight.delete(key);
+  });
   return promise;
 }
 

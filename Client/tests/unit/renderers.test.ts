@@ -26,6 +26,29 @@ import {
 } from "../../src/components/message-list/reaction-tooltip";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
+import { clearExternalImageCache } from "../../src/components/message-list/attachments";
+
+// B7-16: every external image and oEmbed title comes from the native broker.
+const { previewMock, imageMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
+  imageMock: vi.fn(),
+}));
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
+}));
+
+let blobCounter = 0;
+const createObjectURLMock = vi.fn(() => `blob:test/${++blobCounter}`);
+
+/** Wait until `count` inline images carry a broker blob: src, and return them. */
+async function brokerImages(count: number): Promise<HTMLImageElement[]> {
+  let imgs: HTMLImageElement[] = [];
+  await vi.waitFor(() => {
+    imgs = [...document.querySelectorAll<HTMLImageElement>('.msg-image img[src^="blob:"]')];
+    expect(imgs.length).toBe(count);
+  });
+  return imgs;
+}
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -96,6 +119,17 @@ describe("renderers", () => {
     // jsdom sets window.location.origin to "null", which breaks new URL(relativeUrl, origin).
     // Set a server host so resolveServerUrl converts relative paths to absolute URLs before isSafeUrl parses them.
     setServerHost("localhost:8080");
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = vi.fn();
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/png" }) });
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: null, description: null, siteName: null, image: null },
+    });
+    clearExternalImageCache();
+    imageMock.mockClear();
+    previewMock.mockClear();
+    createObjectURLMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -616,7 +650,7 @@ describe("renderers", () => {
     const imageExtensions = [".gif", ".png", ".jpg", ".jpeg", ".webp"] as const;
 
     for (const ext of imageExtensions) {
-      it(`produces a .msg-image embed for a ${ext} URL`, () => {
+      it(`produces a .msg-image embed for a ${ext} URL`, async () => {
         const url = `https://example.com/image${ext}`;
         const msg = makeMessage({ content: url });
         const ac = new AbortController();
@@ -625,10 +659,11 @@ describe("renderers", () => {
 
         // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
         // which produces a div.msg-image inside the message element.
-        // There may be multiple .msg-image (attachments share the class),
-        // but at least one must exist and have an <img src="...ext">
-        const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
-        expect(imgEl).not.toBeNull();
+        // The image bytes come from the broker for exactly this URL and land
+        // on the embed's <img> as a blob: URL.
+        expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+        const [imgEl] = await brokerImages(1);
+        expect(container.contains(imgEl!)).toBe(true);
 
         ac.abort();
       });
@@ -644,6 +679,7 @@ describe("renderers", () => {
       // A generic link card (.msg-embed-link) should appear instead
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -657,11 +693,12 @@ describe("renderers", () => {
       container.appendChild(el);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
 
-    it("matches image extensions case-insensitively", () => {
+    it("matches image extensions case-insensitively", async () => {
       // Uppercase extensions must also be detected
       const url = "https://example.com/photo.PNG";
       const msg = makeMessage({ content: url });
@@ -669,8 +706,8 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
-      expect(imgEl).not.toBeNull();
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await brokerImages(1);
 
       ac.abort();
     });
@@ -685,6 +722,7 @@ describe("renderers", () => {
       // YouTube gets a player embed, not a .msg-image with that src
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(container.querySelector(".msg-embed-youtube")).not.toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -695,7 +733,7 @@ describe("renderers", () => {
   // ---------------------------------------------------------------------------
 
   describe("renderInlineImage — img element and lightbox behaviour", () => {
-    it("creates an img element with the correct src attribute", () => {
+    it("creates an img element with the correct src attribute", async () => {
       const url = "https://example.com/photo.jpg";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
@@ -704,7 +742,11 @@ describe("renderers", () => {
 
       const img = container.querySelector(`.msg-image img`) as HTMLImageElement | null;
       expect(img).not.toBeNull();
-      expect(img!.getAttribute("src")).toBe(url);
+      // Never the remote URL: the broker fetches it, the img shows its blob.
+      expect(img!.getAttribute("src")).not.toBe(url);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await vi.waitFor(() => expect(img!.getAttribute("src")).toMatch(/^blob:/));
+      expect(createObjectURLMock).toHaveReturnedWith(img!.getAttribute("src"));
 
       ac.abort();
     });
@@ -723,15 +765,15 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("appends a lightbox overlay to document.body on img click", () => {
+    it("appends a lightbox overlay to document.body on img click", async () => {
       const url = "https://example.com/photo.png";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
-      expect(img).not.toBeNull();
+      const [img] = await brokerImages(1);
+      expect(img).toBeDefined();
 
       // No lightbox before click
       expect(document.body.querySelector(".image-lightbox")).toBeNull();
@@ -747,14 +789,14 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("lightbox contains a close button that removes the overlay", () => {
+    it("lightbox contains a close button that removes the overlay", async () => {
       const url = "https://example.com/photo.webp";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       const lightbox = document.body.querySelector(".image-lightbox")!;
@@ -769,34 +811,35 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("lightbox contains an img element with the same src as the inline image", () => {
+    it("lightbox contains an img element with the same src as the inline image", async () => {
       const url = "https://example.com/pic.jpeg";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       const lightbox = document.body.querySelector(".image-lightbox")!;
       const lbImg = lightbox.querySelector("img") as HTMLImageElement | null;
       expect(lbImg).not.toBeNull();
-      expect(lbImg!.getAttribute("src")).toBe(url);
+      expect(lbImg!.getAttribute("src")).toBe(img!.getAttribute("src"));
+      expect(lbImg!.getAttribute("src")).toMatch(/^blob:/);
 
       // Clean up
       lightbox.remove();
       ac.abort();
     });
 
-    it("closes lightbox when Escape key is pressed", () => {
+    it("closes lightbox when Escape key is pressed", async () => {
       const url = "https://example.com/escape-test.png";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
@@ -1603,7 +1646,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("does not duplicate embeds for the same URL appearing twice in content", () => {
+    it("does not duplicate embeds for the same URL appearing twice in content", async () => {
       const url = "https://example.com/img.gif";
       const msg = makeMessage({ content: `${url} and again ${url}` });
       const ac = new AbortController();
@@ -1611,8 +1654,10 @@ describe("renderers", () => {
       container.appendChild(el);
 
       // URL dedup inside renderUrlEmbeds — only one img embed produced
-      const imgEmbeds = container.querySelectorAll(`.msg-image img[src="${url}"]`);
-      expect(imgEmbeds.length).toBe(1);
+      expect(container.querySelectorAll(".msg-image img").length).toBe(1);
+      expect(imageMock).toHaveBeenCalledTimes(1);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await brokerImages(1);
 
       ac.abort();
     });
@@ -1626,6 +1671,7 @@ describe("renderers", () => {
 
       // URL inside a code block must not produce an embed
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -1638,11 +1684,12 @@ describe("renderers", () => {
       container.appendChild(el);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
 
-    it("renders multiple different image URLs as separate .msg-image embeds", () => {
+    it("renders multiple different image URLs as separate .msg-image embeds", async () => {
       const url1 = "https://example.com/a.png";
       const url2 = "https://example.com/b.gif";
       const msg = makeMessage({ content: `${url1} and ${url2}` });
@@ -1650,8 +1697,10 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      expect(container.querySelector(`img[src="${url1}"]`)).not.toBeNull();
-      expect(container.querySelector(`img[src="${url2}"]`)).not.toBeNull();
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url1 });
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url2 });
+      const [a, b] = await brokerImages(2);
+      expect(a!.getAttribute("src")).not.toBe(b!.getAttribute("src"));
 
       ac.abort();
     });
@@ -1665,6 +1714,7 @@ describe("renderers", () => {
 
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });

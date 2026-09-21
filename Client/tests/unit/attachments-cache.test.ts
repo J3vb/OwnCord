@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, putSpy } = vi.hoisted(() => ({
+const { fetchMock, putSpy, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
   putSpy: vi.fn<(value: string, key: string) => void>(),
+  brokerImageMock: vi.fn<any>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: fetchMock,
+}));
+
+// These caches hold server content only (B7-16): the URLs below are the
+// configured server's, reached through the (mocked) TOFU proxy.
+vi.mock("@lib/httpProxy", () => ({
+  ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
+}));
+vi.mock("@stores/auth.store", () => ({ getToken: () => null }));
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -74,8 +85,12 @@ vi.stubGlobal("indexedDB", {
 
 import {
   clearAttachmentCaches,
+  EXTERNAL_IMAGE_CACHE_MAX,
+  clearExternalImageCache,
+  fetchExternalImage,
   fetchImageAsDataUrl,
   renderAttachment,
+  setServerHost,
 } from "../../src/components/message-list/attachments";
 
 function imageResponse() {
@@ -91,7 +106,25 @@ describe("attachment cache clearing", () => {
     fetchMock.mockReset();
     putSpy.mockReset();
     clearAttachmentCaches();
+    setServerHost("example.com");
     document.body.innerHTML = "";
+  });
+
+  it("never writes an external image into the memory or IndexedDB cache", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/png" }) });
+    URL.createObjectURL = vi.fn(() => "blob:external-1");
+    URL.revokeObjectURL = vi.fn();
+
+    await expect(fetchImageAsDataUrl("https://cdn.elsewhere.example/a.png")).resolves.toBe(
+      "blob:external-1",
+    );
+
+    expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
+      url: "https://cdn.elsewhere.example/a.png",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
   });
 
   it("does not repopulate caches from an in-flight fetch after clear", async () => {
@@ -188,5 +221,33 @@ describe("attachment cache clearing", () => {
     await vi.waitFor(() => {
       expect(placeholder.classList.contains("loading")).toBe(false);
     });
+  });
+
+  it("bounds broker-fetched blob: URLs FIFO at EXTERNAL_IMAGE_CACHE_MAX", async () => {
+    // These copies live in the webview, outside the broker's byte budget, so
+    // the FIFO cap is the only thing bounding them.
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:fifo-${++next}`);
+    const revoke = vi.fn();
+    URL.revokeObjectURL = revoke;
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    expect(revoke).not.toHaveBeenCalled(); // exactly at the cap: nothing evicted
+
+    await fetchExternalImage({ url: url(EXTERNAL_IMAGE_CACHE_MAX + 1) });
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith("blob:fifo-1"); // the oldest goes first
+
+    const calls = brokerImageMock.mock.calls.length;
+    await fetchExternalImage({ url: url(2) }); // still cached
+    expect(brokerImageMock.mock.calls.length).toBe(calls);
+    await fetchExternalImage({ url: url(1) }); // evicted: asked for again
+    expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
   });
 });
