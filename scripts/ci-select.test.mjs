@@ -158,6 +158,15 @@ test("tauri.conf.json runs the server job, because a Go test reads it", () => {
   assert.equal(sel.native, true);
 });
 
+test("the shared classifier corpus runs the Rust suite as well as the server", () => {
+  // Server/safefetch/classify_test.go and Client/src-tauri/src/external_content.rs
+  // both read it; a server-only PR that adds a vector must not merge with the
+  // Rust side never run against it.
+  const sel = picked("M\tServer/safefetch/testdata/classify_vectors.json");
+  assert.equal(sel.server, true, "classify_test.go reads it");
+  assert.equal(sel.rust, true, "external_content.rs's tests read it");
+});
+
 test("the platform-contracts document runs the client unit suite", () => {
   // Client/tests/unit/platform-contracts-counts.test.ts reads it and asserts
   // its counts against the source tree.

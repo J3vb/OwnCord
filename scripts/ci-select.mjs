@@ -93,6 +93,15 @@ const CLIENT_READS_OUTSIDE = new Set([
   "Server/admin/static/index.html",
 ]);
 
+/** Paths outside Client/src-tauri/ that a Rust test reads. */
+const RUST_READS_OUTSIDE = new Set([
+  // The C-09 classifier corpus: Server/safefetch's Go tests and the desktop
+  // broker's Rust tests (external_content.rs) both read it at run time. A
+  // vector added in a server-only PR must still run the Rust suite, or the
+  // corpus looks like a shared gate and only one side is ever checked.
+  "Server/safefetch/testdata/classify_vectors.json",
+]);
+
 /**
  * Paths that change the browser suite's own machinery: the Playwright specs and
  * their fixtures. A change here is the one case where the fast development run
@@ -172,6 +181,7 @@ export function classify(paths) {
     // specific file can pull in a component its generic prefix would not.
     if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
+    if (RUST_READS_OUTSIDE.has(path)) add("rust");
     if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
       add("harness");
     }

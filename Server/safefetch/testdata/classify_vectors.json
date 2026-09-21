@@ -1,0 +1,314 @@
+{
+  "_comment": [
+    "The C-09 classifier corpus, read by Server/safefetch/classify_test.go and by Client/src-tauri/src/external_content.rs's tests.",
+    "Only `allowed` is asserted. `note` is for a human reading a failure; the two implementations word their refusals differently and that is not a contract.",
+    "Every blockedPrefixes entry in classify.go must contain at least one allowed:false vector (TestClassifyVectors_CoverEveryBlockedPrefix)."
+  ],
+  "vectors": [
+    {
+      "address": "127.0.0.1",
+      "allowed": false,
+      "note": "loopback"
+    },
+    {
+      "address": "127.255.255.254",
+      "allowed": false,
+      "note": "loopback range"
+    },
+    {
+      "address": "10.0.0.1",
+      "allowed": false,
+      "note": "RFC1918"
+    },
+    {
+      "address": "172.16.5.5",
+      "allowed": false,
+      "note": "RFC1918"
+    },
+    {
+      "address": "172.31.255.255",
+      "allowed": false,
+      "note": "RFC1918 high"
+    },
+    {
+      "address": "192.168.1.1",
+      "allowed": false,
+      "note": "RFC1918"
+    },
+    {
+      "address": "169.254.169.254",
+      "allowed": false,
+      "note": "link-local / cloud metadata"
+    },
+    {
+      "address": "100.64.5.5",
+      "allowed": false,
+      "note": "RFC6598 carrier-grade NAT"
+    },
+    {
+      "address": "100.127.255.255",
+      "allowed": false,
+      "note": "RFC6598 high"
+    },
+    {
+      "address": "0.0.0.0",
+      "allowed": false,
+      "note": "unspecified"
+    },
+    {
+      "address": "224.0.0.1",
+      "allowed": false,
+      "note": "multicast"
+    },
+    {
+      "address": "::1",
+      "allowed": false,
+      "note": "IPv6 loopback"
+    },
+    {
+      "address": "::",
+      "allowed": false,
+      "note": "IPv6 unspecified"
+    },
+    {
+      "address": "fc00::1",
+      "allowed": false,
+      "note": "RFC4193 unique local"
+    },
+    {
+      "address": "fd12:3456:789a::1",
+      "allowed": false,
+      "note": "RFC4193 unique local"
+    },
+    {
+      "address": "fe80::1",
+      "allowed": false,
+      "note": "IPv6 link-local"
+    },
+    {
+      "address": "ff02::1",
+      "allowed": false,
+      "note": "IPv6 multicast"
+    },
+    {
+      "address": "192.0.2.1",
+      "allowed": false,
+      "note": "RFC5737 TEST-NET-1 documentation"
+    },
+    {
+      "address": "198.51.100.1",
+      "allowed": false,
+      "note": "RFC5737 TEST-NET-2 documentation"
+    },
+    {
+      "address": "203.0.113.5",
+      "allowed": false,
+      "note": "RFC5737 TEST-NET-3 documentation"
+    },
+    {
+      "address": "2001:db8::1",
+      "allowed": false,
+      "note": "RFC3849 IPv6 documentation"
+    },
+    {
+      "address": "3fff::1",
+      "allowed": false,
+      "note": "RFC9637 IPv6 documentation"
+    },
+    {
+      "address": "198.18.0.1",
+      "allowed": false,
+      "note": "RFC2544 benchmarking"
+    },
+    {
+      "address": "198.19.255.255",
+      "allowed": false,
+      "note": "RFC2544 benchmarking high"
+    },
+    {
+      "address": "2001:2::1",
+      "allowed": false,
+      "note": "RFC5180 IPv6 benchmarking"
+    },
+    {
+      "address": "0.1.2.3",
+      "allowed": false,
+      "note": "RFC1122 this-network"
+    },
+    {
+      "address": "192.0.0.1",
+      "allowed": false,
+      "note": "RFC6890 IETF protocol assignments"
+    },
+    {
+      "address": "192.0.0.170",
+      "allowed": false,
+      "note": "RFC7050 NAT64 discovery"
+    },
+    {
+      "address": "192.88.99.1",
+      "allowed": false,
+      "note": "RFC7526 deprecated 6to4 relay anycast"
+    },
+    {
+      "address": "240.0.0.1",
+      "allowed": false,
+      "note": "RFC1112 reserved"
+    },
+    {
+      "address": "255.255.255.255",
+      "allowed": false,
+      "note": "limited broadcast"
+    },
+    {
+      "address": "2002::1",
+      "allowed": false,
+      "note": "RFC3056 6to4"
+    },
+    {
+      "address": "2001::1",
+      "allowed": false,
+      "note": "RFC4380 Teredo"
+    },
+    {
+      "address": "2001:20::1",
+      "allowed": false,
+      "note": "RFC7343 ORCHIDv2"
+    },
+    {
+      "address": "64:ff9b:1::1",
+      "allowed": false,
+      "note": "RFC8215 local-use IPv4/IPv6 translation"
+    },
+    {
+      "address": "100::1",
+      "allowed": false,
+      "note": "RFC6666 discard-only"
+    },
+    {
+      "address": "5f00::1",
+      "allowed": false,
+      "note": "RFC9602 SRv6 segment routing"
+    },
+    {
+      "address": "::ffff:127.0.0.1",
+      "allowed": false,
+      "note": "IPv4-mapped loopback"
+    },
+    {
+      "address": "::ffff:169.254.169.254",
+      "allowed": false,
+      "note": "IPv4-mapped link-local"
+    },
+    {
+      "address": "::ffff:10.0.0.1",
+      "allowed": false,
+      "note": "IPv4-mapped RFC1918"
+    },
+    {
+      "address": "::ffff:192.0.2.1",
+      "allowed": false,
+      "note": "IPv4-mapped documentation"
+    },
+    {
+      "address": "64:ff9b::7f00:1",
+      "allowed": false,
+      "note": "NAT64 wrapper around 127.0.0.1"
+    },
+    {
+      "address": "64:ff9b::a00:5",
+      "allowed": false,
+      "note": "NAT64 wrapper around 10.0.0.5"
+    },
+    {
+      "address": "64:ff9b::a9fe:a9fe",
+      "allowed": false,
+      "note": "NAT64 wrapper around 169.254.169.254 (cloud metadata)"
+    },
+    {
+      "address": "64:ff9b::c0a8:1",
+      "allowed": false,
+      "note": "NAT64 wrapper around 192.168.0.1"
+    },
+    {
+      "address": "64:ff9b::c000:201",
+      "allowed": false,
+      "note": "NAT64 wrapper around 192.0.2.1 (documentation)"
+    },
+    {
+      "address": "64:ff9b::6440:1",
+      "allowed": false,
+      "note": "NAT64 wrapper around 100.64.0.1 (carrier-grade NAT)"
+    },
+    {
+      "address": "64:ff9b::10.0.0.1",
+      "allowed": false,
+      "note": "NAT64 wrapper around 10.0.0.1, dotted form"
+    },
+    {
+      "address": "fec0::1",
+      "allowed": false,
+      "note": "deprecated site-local"
+    },
+    {
+      "address": "feff::1",
+      "allowed": false,
+      "note": "deprecated site-local high"
+    },
+    {
+      "address": "::7f00:1",
+      "allowed": false,
+      "note": "deprecated IPv4-compatible loopback"
+    },
+    {
+      "address": "::a00:5",
+      "allowed": false,
+      "note": "deprecated IPv4-compatible RFC1918"
+    },
+    {
+      "address": "::c0a8:1",
+      "allowed": false,
+      "note": "deprecated IPv4-compatible RFC1918"
+    },
+    {
+      "address": "8.8.8.8",
+      "allowed": true,
+      "note": "public IPv4"
+    },
+    {
+      "address": "1.1.1.1",
+      "allowed": true,
+      "note": "public IPv4"
+    },
+    {
+      "address": "93.184.216.34",
+      "allowed": true,
+      "note": "public IPv4"
+    },
+    {
+      "address": "2606:4700:4700::1111",
+      "allowed": true,
+      "note": "public IPv6"
+    },
+    {
+      "address": "2a00:1450:4001:800::200e",
+      "allowed": true,
+      "note": "public IPv6"
+    },
+    {
+      "address": "64:ff9b::808:808",
+      "allowed": true,
+      "note": "NAT64 wrapper around 8.8.8.8"
+    },
+    {
+      "address": "64:ff9b::5db8:d822",
+      "allowed": true,
+      "note": "NAT64 wrapper around 93.184.216.34"
+    },
+    {
+      "address": "64:ff9b::8.8.8.8",
+      "allowed": true,
+      "note": "NAT64 wrapper around 8.8.8.8, dotted form"
+    }
+  ]
+}
