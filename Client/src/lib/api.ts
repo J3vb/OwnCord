@@ -72,6 +72,16 @@ export interface SessionInfo {
   readonly created_at: string;
   readonly last_used: string;
   readonly is_current: boolean;
+  /** A sign-in no other device has acknowledged yet. Listing the sessions
+   *  acknowledges every row but the caller's own, so this is visible in
+   *  exactly one listing per device. */
+  readonly unseen: boolean;
+}
+
+/** DELETE /users/me/sessions: every session is revoked, the caller's included. */
+export interface RevokeAllSessionsResponse {
+  readonly sessions_revoked: number;
+  readonly current_session_revoked: boolean;
 }
 
 interface SessionsListResponse {
@@ -382,6 +392,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/users/me/sessions/${sessionId}`, undefined, signal);
+    },
+
+    revokeAllSessions(signal?: AbortSignal): Promise<RevokeAllSessionsResponse> {
+      return request<RevokeAllSessionsResponse>("DELETE", "/users/me/sessions", undefined, signal);
     },
 
     // ── Channels ──────────────────────────────────────────
