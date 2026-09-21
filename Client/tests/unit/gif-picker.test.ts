@@ -13,8 +13,21 @@ vi.mock("@lib/gifProvider", () => ({
   getTrendingGifs: vi.fn(),
 }));
 
+// B7-16: grid thumbnails come from the native external-content broker.
+const { previewMock, imageMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
+  imageMock: vi.fn(),
+}));
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
+}));
+
 // Import the mocks so tests can control their return values
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
+import { clearExternalImageCache } from "@components/message-list/attachments";
+
+let blobCounter = 0;
+const createObjectURLMock = vi.fn(() => `blob:test/${++blobCounter}`);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -66,6 +79,15 @@ describe("GifPicker", () => {
     // Default: trending returns data, search returns search data
     vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
     vi.mocked(searchGifs).mockResolvedValue(SEARCH_GIFS);
+
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = vi.fn();
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: null, description: null, siteName: null, image: null },
+    });
+    clearExternalImageCache();
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -249,9 +271,18 @@ describe("GifPicker", () => {
       const imgs = picker.element.querySelectorAll(".gp-img") as NodeListOf<HTMLImageElement>;
       expect(imgs.length).toBe(TRENDING_GIFS.length);
 
+      // The webview never loads the Klipy URL itself: the broker is asked for
+      // each preview url and the img shows the blob: URL it produced.
       TRENDING_GIFS.forEach((gif, i) => {
-        expect(imgs[i]!.src).toBe(gif.url);
+        expect(imgs[i]!.getAttribute("src")).not.toBe(gif.url);
+        expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: gif.url });
       });
+      await vi.waitFor(() => {
+        imgs.forEach((img) => expect(img.getAttribute("src")).toMatch(/^blob:/));
+      });
+      const srcs = [...imgs].map((img) => img.getAttribute("src"));
+      expect(new Set(srcs).size).toBe(TRENDING_GIFS.length);
+      srcs.forEach((src) => expect(createObjectURLMock).toHaveReturnedWith(src));
       picker.destroy();
     });
   });

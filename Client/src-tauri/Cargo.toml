@@ -35,9 +35,18 @@ serde_json = "1"
 # Self-signed server certificates are handled by the Rust TOFU proxies
 # (ws_proxy, livekit_proxy, http_proxy), NOT by the plugin's dangerous-settings
 # feature — REST traffic is tunneled through http_proxy which pins the cert to
-# the trust-on-first-use fingerprint. The plugin therefore does default TLS
-# validation (used only for external hosts: image CDNs, OG previews, YouTube).
+# the trust-on-first-use fingerprint. The plugin's capability is scoped to
+# those loopback proxies only: external content (previews, images, YouTube) is
+# fetched by the external-content broker (external_content.rs), not the plugin.
 tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls"] }
+# The external-content broker's client (external_content.rs). Already in the
+# tree via tauri-plugin-http with these same features, so this adds no build:
+# the broker needs it directly for what the plugin's fetch cannot do — a
+# resolver that answers only with classified addresses, and redirects off.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# The broker parses Open Graph in native code (B7-16 Decision 6) with the spec
+# tokenizer, not a regex. Already in Cargo.lock via tauri-utils.
+html5ever = "0.38"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

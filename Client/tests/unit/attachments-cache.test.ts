@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, putSpy } = vi.hoisted(() => ({
+const { fetchMock, putSpy, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
   putSpy: vi.fn<(value: string, key: string) => void>(),
+  brokerImageMock: vi.fn<any>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: fetchMock,
+}));
+
+// These caches hold server content only (B7-16): the URLs below are the
+// configured server's, reached through the (mocked) TOFU proxy.
+vi.mock("@lib/httpProxy", () => ({
+  ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
+}));
+vi.mock("@stores/auth.store", () => ({ getToken: () => null }));
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -74,9 +85,15 @@ vi.stubGlobal("indexedDB", {
 
 import {
   clearAttachmentCaches,
+  EXTERNAL_IMAGE_CACHE_MAX,
+  clearExternalImageCache,
+  fetchExternalImage,
   fetchImageAsDataUrl,
+  recoverEvictedImage,
   renderAttachment,
+  setServerHost,
 } from "../../src/components/message-list/attachments";
+import { createAvatarElement } from "../../src/lib/avatar";
 
 function imageResponse() {
   return {
@@ -91,7 +108,25 @@ describe("attachment cache clearing", () => {
     fetchMock.mockReset();
     putSpy.mockReset();
     clearAttachmentCaches();
+    setServerHost("example.com");
     document.body.innerHTML = "";
+  });
+
+  it("never writes an external image into the memory or IndexedDB cache", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/png" }) });
+    URL.createObjectURL = vi.fn(() => "blob:external-1");
+    URL.revokeObjectURL = vi.fn();
+
+    await expect(fetchImageAsDataUrl("https://cdn.elsewhere.example/a.png")).resolves.toBe(
+      "blob:external-1",
+    );
+
+    expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
+      url: "https://cdn.elsewhere.example/a.png",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
   });
 
   it("does not repopulate caches from an in-flight fetch after clear", async () => {
@@ -188,5 +223,120 @@ describe("attachment cache clearing", () => {
     await vi.waitFor(() => {
       expect(placeholder.classList.contains("loading")).toBe(false);
     });
+  });
+
+  it("bounds broker-fetched blob: URLs FIFO at EXTERNAL_IMAGE_CACHE_MAX", async () => {
+    // These copies live in the webview, outside the broker's byte budget, so
+    // the FIFO cap is the only thing bounding them.
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:fifo-${++next}`);
+    const revoke = vi.fn();
+    URL.revokeObjectURL = revoke;
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    expect(revoke).not.toHaveBeenCalled(); // exactly at the cap: nothing evicted
+
+    await fetchExternalImage({ url: url(EXTERNAL_IMAGE_CACHE_MAX + 1) });
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith("blob:fifo-1"); // the oldest goes first
+
+    const calls = brokerImageMock.mock.calls.length;
+    await fetchExternalImage({ url: url(2) }); // still cached
+    expect(brokerImageMock.mock.calls.length).toBe(calls);
+    await fetchExternalImage({ url: url(1) }); // evicted: asked for again
+    expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
+  });
+
+  it("re-requests an on-screen image whose blob: URL the FIFO cap evicted", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:live-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const img = document.createElement("img");
+    const otherError = vi.fn();
+    recoverEvictedImage(img, { url: url(0) });
+    img.addEventListener("error", otherError);
+    img.src = (await fetchExternalImage({ url: url(0) }))!;
+    expect(img.src).toBe("blob:live-1");
+
+    // A still-live URL that fails is a real failure: nothing to recover.
+    img.dispatchEvent(new Event("error"));
+    expect(otherError).toHaveBeenCalledTimes(1);
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:live-1");
+
+    // The element reloads its revoked URL (a GIF unfreeze, a lazy load).
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe(`blob:live-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
+    expect(otherError).toHaveBeenCalledTimes(1); // recovered, not reported
+
+    // When the broker can no longer serve it, the failure reaches the element.
+    for (let i = EXTERNAL_IMAGE_CACHE_MAX + 1; i <= 2 * EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: url(i) });
+    }
+    brokerImageMock.mockResolvedValue({ ok: false, failure: "unavailable" });
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(otherError).toHaveBeenCalledTimes(2));
+  });
+
+  it("re-requests an image the manual cache clear revoked", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:clear-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const source = { url: "https://cdn.elsewhere.example/still-shown.gif" };
+
+    const img = document.createElement("img");
+    recoverEvictedImage(img, source);
+    img.src = (await fetchExternalImage(source))!;
+    clearExternalImageCache();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:clear-1");
+
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe("blob:clear-2"));
+  });
+
+  it("re-requests an external avatar whose blob: URL the FIFO cap evicted", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:avatar-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+
+    const avatar = createAvatarElement(
+      {
+        username: "ext",
+        avatar: "https://cdn.elsewhere.example/avatar.png",
+      },
+      { className: "avatar" },
+    );
+    document.body.appendChild(avatar);
+    await vi.waitFor(() => expect(avatar.querySelector("img")).not.toBeNull());
+    const img = avatar.querySelector("img")!;
+    expect(img.src).toBe("blob:avatar-1");
+
+    for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+      await fetchExternalImage({ url: `https://cdn.elsewhere.example/${i}.png` });
+    }
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:avatar-1");
+
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe(`blob:avatar-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
   });
 });

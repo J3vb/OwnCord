@@ -4,14 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mocks — must be set up before any import that references them.
 // ---------------------------------------------------------------------------
 
-const { fetchMock, observeMediaMock, loadPrefMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
+const { previewMock, imageMock, observeMediaMock, loadPrefMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
+  imageMock: vi.fn(),
   observeMediaMock: vi.fn(),
   loadPrefMock: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: fetchMock,
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -40,7 +41,10 @@ vi.mock("@components/settings/helpers", () => ({
   loadPref: loadPrefMock,
 }));
 
-vi.mock("../../src/components/message-list/attachments", () => ({
+// The real broker wrapper (fetchExternalImage + its FIFO cache) runs against
+// the mocked broker above; only isSafeUrl is pinned to a plain http(s) check.
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
   isSafeUrl: (url: string) => {
     try {
       const parsed = new URL(url, "https://placeholder");
@@ -75,23 +79,36 @@ import {
   renderUrlEmbeds,
   clearMediaCaches,
 } from "../../src/components/message-list/media";
+import { clearExternalImageCache } from "../../src/components/message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function oembedResponse(title: string) {
-  return {
-    ok: true,
-    json: vi.fn().mockResolvedValue({ title }),
-  };
+function oembedResponse(title: string | null) {
+  return { ok: true, value: { title, description: null, siteName: null, image: null } };
 }
 
-function oembedFail() {
-  return {
-    ok: false,
-    json: vi.fn().mockResolvedValue(null),
-  };
+function oembedFail(failure = "unavailable") {
+  return { ok: false, failure };
+}
+
+function imageResponse(type = "image/png") {
+  return { ok: true, value: new Blob(["x"], { type }) };
+}
+
+let blobCounter = 0;
+const createObjectURLMock = vi.fn(() => `blob:owncord/${++blobCounter}`);
+const revokeObjectURLMock = vi.fn();
+
+/** Wait until the broker has answered and the <img> inside `parent` has its
+ *  blob: src; returns that src. */
+async function awaitImgSrc(parent: HTMLElement): Promise<string> {
+  const img = parent.querySelector("img") as HTMLImageElement;
+  await vi.waitFor(() => {
+    expect(img.getAttribute("src")).toMatch(/^blob:/);
+  });
+  return img.getAttribute("src")!;
 }
 
 /**
@@ -139,7 +156,17 @@ function mouseEvent(
 
 describe("media.ts", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = revokeObjectURLMock;
+    // Before the mock resets: clearing names a fresh broker partition through
+    // preview(), which must not count against the oEmbed call assertions.
+    clearExternalImageCache();
+    previewMock.mockReset();
+    previewMock.mockResolvedValue(oembedFail());
+    imageMock.mockReset();
+    imageMock.mockResolvedValue(imageResponse());
+    createObjectURLMock.mockClear();
+    revokeObjectURLMock.mockClear();
     observeMediaMock.mockReset();
     loadPrefMock.mockReset();
     loadPrefMock.mockImplementation((_key: string, fallback: unknown) => fallback);
@@ -247,12 +274,18 @@ describe("media.ts", () => {
   // =========================================================================
 
   describe("renderInlineImage", () => {
-    it("creates a div.msg-image wrapper with an <img> inside", () => {
+    it("creates a div.msg-image wrapper with an <img> inside", async () => {
       const wrap = renderInlineImage("https://example.com/photo.jpg");
       expect(wrap.classList.contains("msg-image")).toBe(true);
       const img = wrap.querySelector("img");
       expect(img).not.toBeNull();
-      expect(img!.getAttribute("src")).toBe("https://example.com/photo.jpg");
+      // The webview never loads the remote URL: no src until the broker answers.
+      expect(img!.hasAttribute("src")).toBe(false);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), {
+        url: "https://example.com/photo.jpg",
+      });
+      const src = await awaitImgSrc(wrap);
+      expect(src).toBe(createObjectURLMock.mock.results[0]!.value);
     });
 
     it("sets default min-height of 200px when no cached height", () => {
@@ -260,11 +293,12 @@ describe("media.ts", () => {
       expect(wrap.style.minHeight).toBe("200px");
     });
 
-    it("uses cached height for subsequent renders of the same URL", () => {
+    it("uses cached height for subsequent renders of the same URL", async () => {
       const url = "https://example.com/cached.jpg";
       // First render: trigger load to cache height
       const wrap1 = renderInlineImage(url);
       document.body.appendChild(wrap1);
+      await awaitImgSrc(wrap1);
 
       // Simulate offsetHeight by defining the property
       Object.defineProperty(wrap1, "offsetHeight", { value: 150, configurable: true });
@@ -275,9 +309,10 @@ describe("media.ts", () => {
       expect(wrap2.style.minHeight).toBe("150px");
     });
 
-    it("clears min-height on successful image load", () => {
+    it("clears min-height on successful image load", async () => {
       const wrap = renderInlineImage("https://example.com/load.png");
       document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
 
       Object.defineProperty(wrap, "offsetHeight", { value: 100, configurable: true });
       fireImgLoad(wrap);
@@ -294,10 +329,26 @@ describe("media.ts", () => {
       expect(wrap.style.minHeight).toBe("");
     });
 
-    it("does not cache height of 0", () => {
+    it("collapses the min-height reservation and sets no src when the broker refuses", async () => {
+      imageMock.mockResolvedValue({ ok: false, failure: "blocked-destination" });
+      const url = "https://example.com/refused.png";
+      const wrap = renderInlineImage(url);
+      document.body.appendChild(wrap);
+      expect(wrap.style.minHeight).toBe("200px");
+
+      await vi.waitFor(() => {
+        expect(wrap.style.minHeight).toBe("");
+      });
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      expect(wrap.querySelector("img")!.hasAttribute("src")).toBe(false);
+      expect(createObjectURLMock).not.toHaveBeenCalled();
+    });
+
+    it("does not cache height of 0", async () => {
       const url = "https://example.com/zero-height.png";
       const wrap = renderInlineImage(url);
       document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
 
       Object.defineProperty(wrap, "offsetHeight", { value: 0, configurable: true });
       fireImgLoad(wrap);
@@ -307,71 +358,91 @@ describe("media.ts", () => {
       expect(wrap2.style.minHeight).toBe("200px");
     });
 
-    it("adds crossorigin attribute for GIF URLs", () => {
-      const wrap = renderInlineImage("https://example.com/anim.gif");
+    it("fetches GIF URLs through the broker as a same-origin blob: (no crossorigin)", async () => {
+      imageMock.mockResolvedValue(imageResponse("image/gif"));
+      const url = "https://example.com/anim.gif";
+      const wrap = renderInlineImage(url);
+      const src = await awaitImgSrc(wrap);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
       const img = wrap.querySelector("img")!;
-      expect(img.getAttribute("crossorigin")).toBe("anonymous");
+      expect(src).toMatch(/^blob:/);
+      expect(img.hasAttribute("crossorigin")).toBe(false);
     });
 
-    it("does not add crossorigin attribute for non-GIF URLs", () => {
+    it("does not add crossorigin attribute for non-GIF URLs", async () => {
       const wrap = renderInlineImage("https://example.com/photo.png");
+      await awaitImgSrc(wrap);
       const img = wrap.querySelector("img")!;
       expect(img.hasAttribute("crossorigin")).toBe(false);
     });
 
-    it("calls observeMedia for GIF after load (animateGifs enabled)", () => {
+    it("calls observeMedia for GIF after load (animateGifs enabled)", async () => {
       loadPrefMock.mockImplementation((key: string, fallback: unknown) => {
         if (key === "animateGifs") return true;
         return fallback;
       });
       syncPrefCache();
+      imageMock.mockResolvedValue(imageResponse("image/gif"));
 
       const url = "https://example.com/animated.gif";
       const wrap = renderInlineImage(url);
       document.body.appendChild(wrap);
+      const src = await awaitImgSrc(wrap);
 
       const img = wrap.querySelector("img")!;
       // Fire load - the second "load" listener (GIF-specific) should call observeMedia
       img.dispatchEvent(new Event("load"));
 
-      expect(observeMediaMock).toHaveBeenCalledWith(img, url, wrap, false);
+      expect(observeMediaMock).toHaveBeenCalledWith(img, src, wrap, false);
     });
 
-    it("calls observeMedia with startFrozen=true when animateGifs is disabled", () => {
+    it("calls observeMedia with startFrozen=true when animateGifs is disabled", async () => {
       loadPrefMock.mockImplementation((key: string, fallback: unknown) => {
         if (key === "animateGifs") return false;
         return fallback;
       });
       syncPrefCache();
+      imageMock.mockResolvedValue(imageResponse("image/gif"));
 
       const url = "https://example.com/frozen.gif";
       const wrap = renderInlineImage(url);
       document.body.appendChild(wrap);
+      const src = await awaitImgSrc(wrap);
 
       const img = wrap.querySelector("img")!;
       img.dispatchEvent(new Event("load"));
 
-      expect(observeMediaMock).toHaveBeenCalledWith(img, url, wrap, true);
+      expect(observeMediaMock).toHaveBeenCalledWith(img, src, wrap, true);
     });
 
-    it("does not call observeMedia for non-GIF images", () => {
+    it("does not call observeMedia for non-GIF images", async () => {
       const wrap = renderInlineImage("https://example.com/photo.png");
       document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
 
       fireImgLoad(wrap);
 
       expect(observeMediaMock).not.toHaveBeenCalled();
     });
 
-    it("opens lightbox on image click", () => {
+    it("opens lightbox on image click with the blob: URL", async () => {
       const wrap = renderInlineImage("https://example.com/click.jpg");
       document.body.appendChild(wrap);
+      const src = await awaitImgSrc(wrap);
 
       const img = wrap.querySelector("img")!;
       img.click();
 
       const lightbox = document.body.querySelector(".image-lightbox");
       expect(lightbox).not.toBeNull();
+      expect(lightbox!.querySelector("img")!.getAttribute("src")).toBe(src);
+    });
+
+    it("adds the Klipy watermark for Klipy CDN images only", () => {
+      const klipy = renderInlineImage("https://static.klipy.com/gifs/cat.gif");
+      expect(klipy.querySelector(".klipy-watermark")).not.toBeNull();
+      const other = renderInlineImage("https://example.com/cat.gif");
+      expect(other.querySelector(".klipy-watermark")).toBeNull();
     });
   });
 
@@ -380,15 +451,20 @@ describe("media.ts", () => {
   // =========================================================================
 
   describe("image height cache eviction", () => {
-    it("evicts the oldest entry when cache exceeds MAX_IMAGE_HEIGHT_CACHE", () => {
+    it("evicts the oldest entry when cache exceeds MAX_IMAGE_HEIGHT_CACHE", async () => {
       // Fill the cache with 500 entries then add one more
+      const wraps: HTMLDivElement[] = [];
       for (let i = 0; i < 501; i++) {
-        const url = `https://example.com/img-${i}.jpg`;
-        const wrap = renderInlineImage(url);
+        const wrap = renderInlineImage(`https://example.com/img-${i}.jpg`);
         document.body.appendChild(wrap);
+        wraps.push(wrap);
+      }
+      // Load listeners attach once the broker answers; wait for every src.
+      await Promise.all(wraps.map(awaitImgSrc));
+      wraps.forEach((wrap, i) => {
         Object.defineProperty(wrap, "offsetHeight", { value: 100 + i, configurable: true });
         fireImgLoad(wrap);
-      }
+      });
 
       // The first URL should have been evicted - renders with default 200px
       const wrap = renderInlineImage("https://example.com/img-0.jpg");
@@ -405,24 +481,26 @@ describe("media.ts", () => {
   // =========================================================================
 
   describe("isGifUrl (indirect)", () => {
-    it("identifies .gif extension as GIF", () => {
-      const wrap = renderInlineImage("https://example.com/img.gif");
-      expect(wrap.querySelector("img")!.getAttribute("crossorigin")).toBe("anonymous");
+    /** Render, let the broker answer, fire load; report whether observeMedia ran. */
+    async function treatedAsGif(url: string): Promise<boolean> {
+      const wrap = renderInlineImage(url);
+      await awaitImgSrc(wrap);
+      fireImgLoad(wrap);
+      return observeMediaMock.mock.calls.length > 0;
+    }
+
+    it("identifies .gif extension as GIF", async () => {
+      expect(await treatedAsGif("https://example.com/img.gif")).toBe(true);
     });
 
-    it("does not identify .png as GIF", () => {
-      const wrap = renderInlineImage("https://example.com/img.png");
-      expect(wrap.querySelector("img")!.hasAttribute("crossorigin")).toBe(false);
+    it("does not identify .png as GIF", async () => {
+      expect(await treatedAsGif("https://example.com/img.png")).toBe(false);
     });
 
-    it("handles malformed URL gracefully in GIF check", () => {
-      // isGifUrl catches URL parse errors — this should not throw
-      // We test by providing a URL that fails new URL() but still works
-      // for image rendering. Since renderInlineImage doesn't validate URLs,
-      // it just passes through. The isGifUrl uses a placeholder base.
-      const wrap = renderInlineImage("https://example.com/image.GIF");
-      // .GIF (uppercase) should be detected as GIF because pathname.toLowerCase()
-      expect(wrap.querySelector("img")!.getAttribute("crossorigin")).toBe("anonymous");
+    it("handles malformed URL gracefully in GIF check", async () => {
+      // isGifUrl uses a placeholder base and pathname.toLowerCase(), so
+      // .GIF (uppercase) should be detected as GIF.
+      expect(await treatedAsGif("https://example.com/image.GIF")).toBe(true);
     });
   });
 
@@ -432,7 +510,7 @@ describe("media.ts", () => {
 
   describe("renderYouTubeEmbed", () => {
     it("renders a YouTube embed with thumbnail and play button", () => {
-      fetchMock.mockResolvedValue(oembedResponse("Test Video"));
+      previewMock.mockResolvedValue(oembedResponse("Test Video"));
 
       const embed = renderYouTubeEmbed("abc123", "https://www.youtube.com/watch?v=abc123");
       document.body.appendChild(embed);
@@ -444,7 +522,7 @@ describe("media.ts", () => {
     });
 
     it("shows 'Loading...' while fetching the title", () => {
-      fetchMock.mockReturnValue(new Promise(() => {})); // Never resolves
+      previewMock.mockReturnValue(new Promise(() => {})); // Never resolves
 
       const embed = renderYouTubeEmbed("pending", "https://www.youtube.com/watch?v=pending");
       const title = embed.querySelector(".msg-embed-yt-title");
@@ -452,10 +530,14 @@ describe("media.ts", () => {
     });
 
     it("updates title when oembed fetch succeeds", async () => {
-      fetchMock.mockResolvedValue(oembedResponse("My Great Video"));
+      previewMock.mockResolvedValue(oembedResponse("My Great Video"));
 
       const embed = renderYouTubeEmbed("success1", "https://www.youtube.com/watch?v=success1");
       document.body.appendChild(embed);
+      expect(previewMock).toHaveBeenCalledWith(
+        expect.any(String),
+        "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=success1&format=json",
+      );
 
       const title = embed.querySelector(".msg-embed-yt-title")!;
       await vi.waitFor(() => {
@@ -464,7 +546,7 @@ describe("media.ts", () => {
     });
 
     it("caches the title and reuses it on subsequent renders", async () => {
-      fetchMock.mockResolvedValue(oembedResponse("Cached Title"));
+      previewMock.mockResolvedValue(oembedResponse("Cached Title"));
 
       const embed1 = renderYouTubeEmbed("cached1", "https://www.youtube.com/watch?v=cached1");
       document.body.appendChild(embed1);
@@ -476,14 +558,11 @@ describe("media.ts", () => {
       // Second render should use cache
       const embed2 = renderYouTubeEmbed("cached1", "https://www.youtube.com/watch?v=cached1");
       expect(embed2.querySelector(".msg-embed-yt-title")?.textContent).toBe("Cached Title");
-      expect(fetchMock).toHaveBeenCalledTimes(1); // Only one fetch
+      expect(previewMock).toHaveBeenCalledTimes(1); // Only one fetch
     });
 
     it("falls back to 'YouTube Video' when oembed returns no title", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      });
+      previewMock.mockResolvedValue(oembedResponse(null));
 
       const embed = renderYouTubeEmbed("notitle", "https://www.youtube.com/watch?v=notitle");
       document.body.appendChild(embed);
@@ -493,10 +572,10 @@ describe("media.ts", () => {
       });
     });
 
-    it("falls back to 'YouTube Video' when oembed returns null", async () => {
-      fetchMock.mockResolvedValue({
+    it("falls back to 'YouTube Video' when the preview carries only non-title fields", async () => {
+      previewMock.mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue(null),
+        value: { title: null, description: "desc", siteName: "YouTube", image: null },
       });
 
       const embed = renderYouTubeEmbed("nulldata", "https://www.youtube.com/watch?v=nulldata");
@@ -507,8 +586,8 @@ describe("media.ts", () => {
       });
     });
 
-    it("falls back to 'YouTube Video' when oembed fetch fails (non-ok)", async () => {
-      fetchMock.mockResolvedValue(oembedFail());
+    it("falls back to 'YouTube Video' when the broker refuses the oembed URL", async () => {
+      previewMock.mockResolvedValue(oembedFail("blocked-destination"));
 
       const embed = renderYouTubeEmbed("fail1", "https://www.youtube.com/watch?v=fail1");
       document.body.appendChild(embed);
@@ -518,8 +597,8 @@ describe("media.ts", () => {
       });
     });
 
-    it("falls back to 'YouTube Video' when oembed fetch rejects (network error)", async () => {
-      fetchMock.mockRejectedValue(new Error("Network error"));
+    it("falls back to 'YouTube Video' when the broker reports the oembed unavailable", async () => {
+      previewMock.mockResolvedValue(oembedFail("unavailable"));
 
       const embed = renderYouTubeEmbed("neterr", "https://www.youtube.com/watch?v=neterr");
       document.body.appendChild(embed);
@@ -544,7 +623,7 @@ describe("media.ts", () => {
     });
 
     it("replaces thumbnail with iframe on click", () => {
-      fetchMock.mockResolvedValue(oembedResponse("Click Test"));
+      previewMock.mockResolvedValue(oembedResponse("Click Test"));
 
       const embed = renderYouTubeEmbed("click1", "https://www.youtube.com/watch?v=click1");
       document.body.appendChild(embed);
@@ -564,7 +643,7 @@ describe("media.ts", () => {
     });
 
     it("only replaces thumbnail once (click handler is {once: true})", () => {
-      fetchMock.mockResolvedValue(oembedResponse("Once Test"));
+      previewMock.mockResolvedValue(oembedResponse("Once Test"));
 
       const embed = renderYouTubeEmbed("once1", "https://www.youtube.com/watch?v=once1");
       document.body.appendChild(embed);
@@ -583,7 +662,7 @@ describe("media.ts", () => {
     it("evicts oldest YouTube title cache entry when exceeding limit", async () => {
       // Fill ytTitleCache to its max (200) and verify eviction
       for (let i = 0; i < 201; i++) {
-        fetchMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
+        previewMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
         const embed = renderYouTubeEmbed(`vid${i}`, `https://www.youtube.com/watch?v=vid${i}`);
         document.body.appendChild(embed);
       }
@@ -598,7 +677,7 @@ describe("media.ts", () => {
     it("evicts oldest cache entry on catch branch too", async () => {
       // First fill 200 entries via successful fetches
       for (let i = 0; i < 200; i++) {
-        fetchMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
+        previewMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
         const embed = renderYouTubeEmbed(`errv${i}`, `https://www.youtube.com/watch?v=errv${i}`);
         document.body.appendChild(embed);
       }
@@ -610,8 +689,8 @@ describe("media.ts", () => {
         expect(link?.textContent).toBe("Title 199");
       });
 
-      // Now add one more that fails (triggers catch branch)
-      fetchMock.mockRejectedValueOnce(new Error("fail"));
+      // Now add one more that the broker fails (the failure branch)
+      previewMock.mockResolvedValueOnce(oembedFail());
       const failEmbed = renderYouTubeEmbed("errv200", "https://www.youtube.com/watch?v=errv200");
       document.body.appendChild(failEmbed);
 
@@ -622,7 +701,7 @@ describe("media.ts", () => {
 
     it("uses fallback title when cache generation changes during successful fetch", async () => {
       let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | null = null;
-      fetchMock.mockImplementationOnce(
+      previewMock.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             resolveFetch = resolve;
@@ -647,11 +726,11 @@ describe("media.ts", () => {
     });
 
     it("uses fallback title when cache generation changes during failed fetch", async () => {
-      let rejectFetch: ((reason: Error) => void) | null = null;
-      fetchMock.mockImplementationOnce(
+      let resolveFetch: ((value: ReturnType<typeof oembedFail>) => void) | null = null;
+      previewMock.mockImplementationOnce(
         () =>
-          new Promise((_resolve, reject) => {
-            rejectFetch = reject;
+          new Promise((resolve) => {
+            resolveFetch = resolve;
           }),
       );
 
@@ -659,25 +738,30 @@ describe("media.ts", () => {
       document.body.appendChild(embed);
 
       clearMediaCaches();
-      rejectFetch!(new Error("Network error"));
+      resolveFetch!(oembedFail());
 
       await vi.waitFor(() => {
         expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
       });
     });
 
-    it("sets thumbnail image src and alt correctly", () => {
-      fetchMock.mockResolvedValue(oembedResponse("Thumb Test"));
+    it("sets thumbnail image src and alt correctly", async () => {
+      previewMock.mockResolvedValue(oembedResponse("Thumb Test"));
 
       const embed = renderYouTubeEmbed("thumb1", "https://www.youtube.com/watch?v=thumb1");
       const thumb = embed.querySelector(".msg-embed-thumb") as HTMLImageElement;
-      expect(thumb.src).toContain("thumb1");
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), {
+        url: "https://img.youtube.com/vi/thumb1/mqdefault.jpg",
+      });
+      await vi.waitFor(() => {
+        expect(thumb.getAttribute("src")).toBe(createObjectURLMock.mock.results[0]!.value);
+      });
       expect(thumb.getAttribute("alt")).toBe("YouTube video");
       expect(thumb.getAttribute("loading")).toBe("lazy");
     });
 
     it("title link has correct href and target attributes", () => {
-      fetchMock.mockResolvedValue(oembedResponse("Link Test"));
+      previewMock.mockResolvedValue(oembedResponse("Link Test"));
       const originalUrl = "https://www.youtube.com/watch?v=link1";
 
       const embed = renderYouTubeEmbed("link1", originalUrl);
@@ -1281,7 +1365,7 @@ describe("media.ts", () => {
   describe("renderUrlEmbeds", () => {
     it("renders YouTube embed for YouTube URLs", () => {
       loadPrefMock.mockImplementation((key: string, fallback: unknown) => fallback);
-      fetchMock.mockResolvedValue(oembedResponse("YT Video"));
+      previewMock.mockResolvedValue(oembedResponse("YT Video"));
 
       const fragment = renderUrlEmbeds("Check this: https://www.youtube.com/watch?v=test1");
 
@@ -1391,7 +1475,7 @@ describe("media.ts", () => {
 
     it("renders multiple different embed types in a single message", () => {
       loadPrefMock.mockImplementation((key: string, fallback: unknown) => fallback);
-      fetchMock.mockResolvedValue(oembedResponse("Video"));
+      previewMock.mockResolvedValue(oembedResponse("Video"));
 
       const fragment = renderUrlEmbeds(
         "Video: https://www.youtube.com/watch?v=multi1 Image: https://example.com/pic.jpg Article: https://example.com/news",
@@ -1420,11 +1504,12 @@ describe("media.ts", () => {
   // =========================================================================
 
   describe("clearMediaCaches", () => {
-    it("clears image height cache", () => {
+    it("clears image height cache", async () => {
       const url = "https://example.com/clear-test.jpg";
       // First render and cache height
       const wrap = renderInlineImage(url);
       document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
       Object.defineProperty(wrap, "offsetHeight", { value: 250, configurable: true });
       fireImgLoad(wrap);
 
@@ -1441,7 +1526,7 @@ describe("media.ts", () => {
     });
 
     it("clears YouTube title cache", async () => {
-      fetchMock.mockResolvedValueOnce(oembedResponse("Original Title"));
+      previewMock.mockResolvedValueOnce(oembedResponse("Original Title"));
 
       const embed1 = renderYouTubeEmbed("clear1", "https://www.youtube.com/watch?v=clear1");
       document.body.appendChild(embed1);
@@ -1453,7 +1538,7 @@ describe("media.ts", () => {
       clearMediaCaches();
 
       // After clearing, should fetch again
-      fetchMock.mockResolvedValueOnce(oembedResponse("New Title"));
+      previewMock.mockResolvedValueOnce(oembedResponse("New Title"));
 
       const embed2 = renderYouTubeEmbed("clear1", "https://www.youtube.com/watch?v=clear1");
       document.body.appendChild(embed2);

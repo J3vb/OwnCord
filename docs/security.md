@@ -285,10 +285,10 @@ The Tauri desktop client implements the following security measures:
 
 - Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
 - DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
-- HTTP fetch is restricted to `https://` origins plus `http://127.0.0.1:*` (the Rust TOFU proxy's loopback tunnel), and **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` — no legitimate flow reaches loopback over https, so the deny list keeps the renderer from probing other local services
+- HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
-- The `https://*` wildcard cannot be removed today: link previews (`embeds.ts`) fetch arbitrary user-posted URLs by design, and Tauri scopes per _command_, not per JS caller. Bounded in TypeScript by `isPrivateHost`/`isBlockedForPreview`, a 5 s timeout and a 50 KB body cap; the response is regex-scraped for `og:` tags and never executed
-- Regression-guarded by `tests/unit/capabilities-scope.test.ts`; rationale and the follow-up that would remove the wildcard are in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
+- The `https://*` wildcard was removed in B7-16: link previews, external images, GIFs and external avatars are fetched by the native external-content broker (`src-tauri/src/external_content.rs`), and the CSP `img-src` no longer allows `https:`. The broker's policy is in [trust-model.md](trust-model.md) §"Desktop preview destination policy (C-09)"
+- Regression-guarded by `tests/unit/capabilities-scope.test.ts` and `tests/unit/tauri-conf-csp.test.ts`; the original rationale is in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
 
 ### TLS and Certificate Pinning (TOFU)
 
@@ -327,7 +327,7 @@ The Tauri desktop client implements the following security measures:
 ## Known Limitations
 
 - Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
-- CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time). Because of this, narrowing the Tauri `http:allow-fetch` scope alone would not bound exfiltration from a compromised renderer — the webview's own `fetch` reaches the same hosts without going through the plugin. Closing that requires narrowing `connect-src` and moving the link-preview fetch into Rust in the same change
+- CSP `connect-src` still allows `https:` to any host, because the LiveKit SDK makes its own renderer fetches to the operator's LiveKit host. The narrowed `http:allow-fetch` scope therefore does not bound exfiltration from a compromised renderer — the webview's own `fetch` reaches any https host without going through the plugin. Narrowing `connect-src` needs the LiveKit direct-URL path to go through a proxy first
 
 ## Security Hardening Checklist for Operators
 

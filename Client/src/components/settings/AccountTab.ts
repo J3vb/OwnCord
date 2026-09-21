@@ -10,7 +10,11 @@ import { createLogger } from "@lib/logger";
 import { authStore } from "@stores/auth.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 
 const log = createLogger("AccountTab");
@@ -104,6 +108,7 @@ function paintAvatar(
   void fetchImageAsDataUrl(url).then((dataUrl) => {
     if (dataUrl === null || !target.isConnected) return;
     const img = createElement("img", { class: "avatar-img", src: dataUrl, alt });
+    recoverEvictedImage(img, { url });
     target.replaceChildren(img);
     target.style.background = "transparent";
   });

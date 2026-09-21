@@ -11,6 +11,7 @@ import { autostart } from "./autostart";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
+import { externalContent } from "./externalContent";
 import { fileSaver } from "./fileSave";
 import { http } from "./http";
 import { identity } from "./identity";
@@ -34,6 +35,7 @@ export const desktop: Platform = {
   credentials,
   deepLinks,
   devTools,
+  externalContent,
   fileSaver,
   http,
   identity,

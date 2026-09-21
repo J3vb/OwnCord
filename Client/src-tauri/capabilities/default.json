@@ -17,12 +17,6 @@
       "identifier": "http:allow-fetch",
       "allow": [
         {
-          "url": "https://*:*"
-        },
-        {
-          "url": "https://*"
-        },
-        {
           "url": "http://127.0.0.1:*"
         }
       ],

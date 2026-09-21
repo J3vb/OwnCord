@@ -199,7 +199,13 @@ import { membersStore, updateMemberProfile } from "../../src/stores/members.stor
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
-import { openImageLightbox } from "../../src/components/message-list/media";
+import { openImageLightbox, renderYouTubeEmbed } from "../../src/components/message-list/media";
+import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
+import {
+  externalPartition,
+  fetchExternalImage,
+} from "../../src/components/message-list/attachments";
+import { desktop } from "../../src/platform/desktop";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 
@@ -933,6 +939,64 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
 
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
+  });
+
+  it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
+    const preview = vi.spyOn(desktop.externalContent!, "preview").mockResolvedValue({
+      ok: true,
+      value: { title: "T", description: null, siteName: null, image: null },
+    });
+    const image = vi
+      .spyOn(desktop.externalContent!, "image")
+      .mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:teardown");
+    URL.revokeObjectURL = vi.fn();
+    const pageUrl = "https://news.example.com/teardown";
+    const imageUrl = "https://img.example.com/teardown.png";
+    const asked = (url: string): number => preview.mock.calls.filter((c) => c[1] === url).length;
+    const fetched = (url: string): number =>
+      image.mock.calls.filter((c) => "url" in c[1] && c[1].url === url).length;
+    const oembed = (): number =>
+      preview.mock.calls.filter((c) => c[1].includes("oembed") && c[1].includes("tdvid")).length;
+    try {
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+
+      // Fill each external cache once, and prove a re-render is served from it.
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      await vi.waitFor(() => expect(asked(pageUrl) + oembed()).toBe(2));
+      await new Promise((r) => setTimeout(r, 0));
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      expect(asked(pageUrl)).toBe(1);
+      expect(oembed()).toBe(1);
+      expect(fetched(imageUrl)).toBe(1);
+      const partitionBefore = externalPartition();
+
+      page.destroy?.();
+
+      // Every one of them is asked for again, under a fresh broker partition.
+      expect(externalPartition()).not.toBe(partitionBefore);
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      await vi.waitFor(() => {
+        expect(asked(pageUrl)).toBe(2);
+        expect(oembed()).toBe(2);
+      });
+      expect(fetched(imageUrl)).toBe(2);
+      expect(image).toHaveBeenLastCalledWith(externalPartition(), { url: imageUrl });
+    } finally {
+      preview.mockRestore();
+      image.mockRestore();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
   });
 
   it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", () => {

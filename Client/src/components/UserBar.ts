@@ -19,7 +19,11 @@ import {
   saveUserStatus,
 } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "@components/message-list/attachments";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence";
 
@@ -106,6 +110,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         src: dataUrl,
         alt: subject.username,
       });
+      recoverEvictedImage(img, { url });
       avatarImgEl = img;
       if (avatarTextEl !== null) avatarTextEl.style.display = "none";
       avatarEl.style.background = "transparent";

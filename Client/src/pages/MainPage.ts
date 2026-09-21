@@ -38,8 +38,12 @@ import {
   setOnError as setVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
-import { clearAttachmentCaches } from "@components/message-list/attachments";
-import { closeActiveLightbox } from "@components/message-list/media";
+import {
+  clearAttachmentCaches,
+  clearExternalImageCache,
+} from "@components/message-list/attachments";
+import { clearEmbedCaches } from "@components/message-list/embeds";
+import { clearMediaCaches, closeActiveLightbox } from "@components/message-list/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -952,6 +956,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // clip viewed this session stays pinned (as a blob: URL or a cached
       // data: URI) past logout.
       clearAttachmentCaches();
+      // External content (link previews, YouTube titles, image heights, and
+      // broker-fetched images) was fetched for this server. Clearing it here
+      // — and moving the broker to a fresh partition — is what keeps one
+      // server's previews from being served on the next (B7-16).
+      clearEmbedCaches();
+      clearMediaCaches();
+      clearExternalImageCache();
       // The lightbox is a module-level overlay appended straight to
       // document.body — renderPage only clears #app, so a forced logout with
       // it open would otherwise leave it floating over the login screen with

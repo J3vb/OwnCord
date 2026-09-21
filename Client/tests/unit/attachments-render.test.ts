@@ -7,10 +7,15 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, saveMock, writeFileMock } = vi.hoisted(() => ({
+const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
   saveMock: vi.fn(),
   writeFileMock: vi.fn(),
+  brokerImageMock: vi.fn(),
+}));
+
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -18,7 +23,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 }));
 
 // The HTTP TOFU proxy resolves a server host to a fixed loopback origin so
-// server-bound fetches are cert-pinned; external URLs bypass it.
+// server-bound fetches are cert-pinned; external URLs go to the broker instead.
 vi.mock("@lib/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
@@ -391,7 +396,7 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
   it("returns null and logs error when fetch throws", async () => {
     fetchMock.mockRejectedValue(new Error("network failure"));
-    const result = await fetchImageAsDataUrl("https://example.com/img.png");
+    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
     expect(result).toBeNull();
   });
 
@@ -402,7 +407,7 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://example.com/img.png");
+    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
     expect(result).not.toBeNull();
     // Should use application/octet-stream, not text/html
     expect(result!.startsWith("data:application/octet-stream;")).toBe(true);
@@ -415,12 +420,12 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://example.com/img.jpg");
+    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.jpg");
     expect(result).not.toBeNull();
     expect(result!.startsWith("data:image/jpeg;")).toBe(true);
   });
 
-  it("routes server URLs through the cert-pinned proxy and external URLs directly", async () => {
+  it("routes server URLs through the cert-pinned proxy and external URLs to the broker", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       headers: { get: () => "image/png" },
@@ -435,14 +440,14 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
     fetchMock.mockReset();
     clearAttachmentCaches();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: { get: () => "image/png" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    brokerImageMock.mockResolvedValue({ ok: false, failure: "blocked-destination" });
 
-    // A third-party URL is fetched directly with normal TLS validation.
-    await fetchImageAsDataUrl("https://cdn.example.com/img.png");
-    expect(fetchMock).toHaveBeenCalledWith("https://cdn.example.com/img.png");
+    // A third-party URL never reaches a direct fetch: the external-content
+    // broker owns it (B7-16), and a refusal there is simply no image.
+    await expect(fetchImageAsDataUrl("https://cdn.example.com/img.png")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
+      url: "https://cdn.example.com/img.png",
+    });
   });
 });

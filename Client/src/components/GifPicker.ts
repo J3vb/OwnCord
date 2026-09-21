@@ -7,6 +7,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
+import { fetchExternalImage, recoverEvictedImage } from "@components/message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,11 +131,16 @@ export function createGifPicker(options: GifPickerOptions): {
         // listener above) instead of a per-cell listener.
         "data-full-url": gif.fullUrl,
       });
+      // Klipy's CDN is still an external host: the thumbnail arrives through
+      // the external-content broker, not as a URL the webview loads itself.
       const img = createElement("img", {
         class: "gp-img",
-        src: gif.url,
         alt: gif.title || "GIF",
         loading: "lazy",
+      });
+      recoverEvictedImage(img, { url: gif.url });
+      void fetchExternalImage({ url: gif.url }).then((src) => {
+        if (src !== null) img.src = src;
       });
       item.appendChild(img);
 

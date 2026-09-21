@@ -14,7 +14,11 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "./message-list/attachments";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 
 // ---------------------------------------------------------------------------
@@ -186,6 +190,7 @@ export function createDmProfileSidebar(
           alt: resolveDisplayName(user),
           class: "dps-avatar-img",
         });
+        recoverEvictedImage(img, { url: resolved });
         letter.remove();
         wrapper.style.background = "transparent";
         wrapper.insertBefore(img, wrapper.firstChild);

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn<any>(),
+const { previewMock, imageMock } = vi.hoisted(() => ({
+  previewMock: vi.fn<any>(),
+  imageMock: vi.fn<any>(),
 }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: fetchMock,
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -14,6 +15,9 @@ vi.mock("@lib/logger", () => ({
 
 vi.mock("../../src/components/message-list/attachments", () => ({
   isSafeUrl: () => true,
+  externalPartition: () => "test#0",
+  fetchExternalImage: () => Promise.resolve(null),
+  recoverEvictedImage: () => {},
 }));
 
 vi.mock("../../src/components/message-list/embeds", () => ({
@@ -23,22 +27,20 @@ vi.mock("../../src/components/message-list/embeds", () => ({
 import { clearMediaCaches, renderYouTubeEmbed } from "../../src/components/message-list/media";
 
 function oembedResponse(title: string) {
-  return {
-    ok: true,
-    json: vi.fn().mockResolvedValue({ title }),
-  };
+  return { ok: true, value: { title, description: null, siteName: null, image: null } };
 }
 
 describe("media cache clearing", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
+    previewMock.mockReset();
+    imageMock.mockReset();
     clearMediaCaches();
     document.body.innerHTML = "";
   });
 
   it("replaces a stale loading title with a fallback when the cache is cleared mid-fetch", async () => {
     let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(
+    previewMock.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           resolveFetch = resolve;

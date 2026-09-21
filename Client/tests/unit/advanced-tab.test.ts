@@ -8,6 +8,7 @@ const {
   mockClearAttachmentCaches,
   mockClearEmbedCaches,
   mockClearMediaCaches,
+  mockClearExternalImageCache,
   deleteDbState,
   mockIsEnabled,
   mockEnable,
@@ -20,6 +21,7 @@ const {
   mockClearAttachmentCaches: vi.fn(),
   mockClearEmbedCaches: vi.fn(),
   mockClearMediaCaches: vi.fn(),
+  mockClearExternalImageCache: vi.fn(),
   deleteDbState: {
     mode: "success" as
       | "success"
@@ -69,6 +71,7 @@ vi.mock("@lib/logPersistence", () => ({
 
 vi.mock("@components/message-list/attachments", () => ({
   clearAttachmentCaches: mockClearAttachmentCaches,
+  clearExternalImageCache: mockClearExternalImageCache,
 }));
 
 vi.mock("@components/message-list/embeds", () => ({
@@ -149,6 +152,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     mockClearAttachmentCaches.mockReset();
     mockClearEmbedCaches.mockReset();
     mockClearMediaCaches.mockReset();
+    mockClearExternalImageCache.mockReset();
   });
 
   afterEach(() => {
@@ -259,6 +263,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     expect(mockClearAttachmentCaches).toHaveBeenCalledTimes(1);
     expect(mockClearEmbedCaches).toHaveBeenCalledTimes(1);
     expect(mockClearMediaCaches).toHaveBeenCalledTimes(1);
+    expect(mockClearExternalImageCache).toHaveBeenCalledTimes(1);
     expect(btn.textContent).toBe("Cleared!");
   });
 
@@ -274,6 +279,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     expect(mockClearAttachmentCaches).toHaveBeenCalledTimes(1);
     expect(mockClearEmbedCaches).toHaveBeenCalledTimes(1);
     expect(mockClearMediaCaches).toHaveBeenCalledTimes(1);
+    expect(mockClearExternalImageCache).toHaveBeenCalledTimes(1);
   });
 
   it("shows Failed when image cache deletion remains blocked", async () => {
@@ -288,6 +294,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     expect(mockClearAttachmentCaches).not.toHaveBeenCalled();
     expect(mockClearEmbedCaches).not.toHaveBeenCalled();
     expect(mockClearMediaCaches).not.toHaveBeenCalled();
+    expect(mockClearExternalImageCache).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
