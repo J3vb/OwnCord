@@ -126,7 +126,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       log.debug(`${label} →`, { method, path });
       let res: Response;
       try {
-        res = await owner.run(desktop.http!.fetch(`${origin}${prefix}${path}`, init));
+        res = await owner.run(desktop.http.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
@@ -651,7 +651,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         const origin = await owner.run(ensureHttpProxy(targetHost));
         owner.assertCurrent();
         const res = await owner.run(
-          desktop.http!.fetch(`${origin}/api/v1/health`, { signal: transport.signal }),
+          desktop.http.fetch(`${origin}/api/v1/health`, { signal: transport.signal }),
         );
         owner.assertCurrent();
         if (!res.ok) {

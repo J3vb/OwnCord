@@ -110,23 +110,15 @@ export default tseslint.config(
     },
   },
   // --- Native imports stay behind the desktop seam (B7-1) ---
-  // The files below are the ones that still import @tauri-apps statically;
-  // B7-4/B7-5 delete entries as their call sites move behind src/platform/.
-  // The other native importers use dynamic `import()`, which this rule cannot
-  // see — tests/unit/platform-contracts-counts.test.ts guards those, and
-  // leaving them out of `ignores` means a new *static* import in them is still
-  // rejected.
+  // B7-5 moved the last call site behind src/platform/, so the seam is the only
+  // exemption. no-restricted-imports covers static imports and
+  // no-restricted-syntax covers a dynamic `import()`.
   {
     files: ["src/**/*.ts"],
     ignores: [
       // The seam itself: the desktop implementations are the only place a
-      // static native import belongs.
+      // native import belongs.
       "src/platform/desktop/**",
-      "src/components/settings/AdvancedTab.ts",
-      "src/lib/httpProxy.ts",
-      "src/lib/livekitUrlResolver.ts",
-      "src/lib/updater.ts",
-      "src/main.ts",
     ],
     rules: {
       "no-restricted-imports": [
@@ -139,6 +131,14 @@ export default tseslint.config(
                 "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
             },
           ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportExpression[source.value=/^@tauri-apps\\//]",
+          message:
+            "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
         },
       ],
     },

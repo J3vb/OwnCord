@@ -199,7 +199,7 @@ export function isTrustedServerUrl(url: string): boolean {
  * no credentials.
  */
 async function fetchServerFile(url: string): Promise<Response> {
-  if (!isServerUrl(url)) return desktop.http!.fetch(url);
+  if (!isServerUrl(url)) return desktop.http.fetch(url);
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
@@ -207,7 +207,7 @@ async function fetchServerFile(url: string): Promise<Response> {
   if (token !== null) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return desktop.http!.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
+  return desktop.http.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
@@ -645,7 +645,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
-    const filePath = await desktop.fileSaver!.pickSaveLocation(filename);
+    const filePath = await desktop.fileSaver.pickSaveLocation(filename);
     if (filePath === null) return; // User cancelled
 
     // Fetch file data — server downloads go through the cert-pinned HTTP proxy
@@ -658,7 +658,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     }
 
     const buffer = await res.arrayBuffer();
-    await desktop.fileSaver!.writeFile(filePath, new Uint8Array(buffer));
+    await desktop.fileSaver.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
     alert(`Download failed for ${filename} — check logs for details`);

@@ -1,3 +1,20 @@
+# B7-8: the `mutation` job below is the sharded full-client mutation baseline.
+#
+# INERT ON dev UNTIL CARRIED TO main (owner decision, B7-8 Q1). This is stronger
+# than "the cron does not fire": GitHub registers a workflow only when it exists
+# on the default branch, so a dev-only file is not listed by the Actions API and
+# neither the schedule NOR a manual dispatch can start it. Verified 2026-09-20:
+#   gh workflow list        -> nightly-test-depth.yml absent (nightly-docker-smoke.yml
+#                              and load-baseline.yml, both on main, are present)
+#   gh workflow run nightly-test-depth.yml --ref dev
+#                           -> HTTP 404: workflow ... not found on the default branch
+# The owner has deferred the carry to main until the beta release, so there is no
+# way to run this nightly at all until then. The `workflow_dispatch:` trigger is
+# kept, and the definition below is complete and correct, so the later carry is a
+# verbatim copy and the job is then runnable on demand against dev.
+# Do NOT add a substitute trigger (e.g. a schedule on ci.yml) to make it fire:
+# see nightly-docker-smoke.yml:1-15 for why a scheduled run on the default
+# branch's tip would poison release gate-evidence.
 name: Nightly Test Depth
 
 on:
@@ -14,6 +31,45 @@ concurrency:
 
 jobs:
   mutation:
+    name: Nightly mutation baseline (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    # The owner's ceiling is 90 min wall-clock per night. Shards run as parallel
+    # jobs, so this bounds one shard's wall time; the longest measured shard
+    # (livekit, 49 m 34 s on a 16-vCPU container, 2026-09-20) is inside it with
+    # margin for the repeated npm ci + initial test run. Enforced, not hoped for.
+    timeout-minutes: 90
+    strategy:
+      # One failing shard must not cancel the others: the baseline is only
+      # meaningful if every shard reports.
+      fail-fast: false
+      matrix:
+        shard: [livekit, audio-media, transport-auth, lib-rest, stores]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - run: npm ci
+        working-directory: Client
+      - run: node scripts/check-mutation-shards.mjs
+        working-directory: Client
+      - name: Run mutation shard
+        working-directory: Client
+        env:
+          STRYKER_SHARD: ${{ matrix.shard }}
+        run: npx stryker run stryker.shard.config.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutation-report-${{ matrix.shard }}
+          path: Client/reports/mutation/${{ matrix.shard }}/
+          retention-days: 7
+
+  mutation-permissions:
     name: Nightly permission mutation testing
     runs-on: ubuntu-latest
     timeout-minutes: 25

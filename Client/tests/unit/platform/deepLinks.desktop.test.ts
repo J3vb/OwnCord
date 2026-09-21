@@ -1,6 +1,7 @@
-// Legacy binding for the DeepLinks suite: today's `lib/deep-link.ts` export,
-// wrapped with no cast against the contract. B7-5 re-runs
-// `deepLinks.suite.ts` against `platform/desktop` instead of this file.
+// Desktop binding for the DeepLinks suite: `platform/desktop`'s deep-link
+// wiring. B7-5 re-runs the same suite file the legacy binding ran against
+// `lib/deep-link.ts`'s `initDeepLinks`; that export is now internal to the
+// desktop adapter, so the legacy binding is deleted with this commit.
 //
 // Each test needs a fresh module instance and a fresh `vi.doMock` of the
 // native plugin — `vi.resetModules()` alone does not reliably force a
@@ -17,15 +18,15 @@ vi.mock("@lib/logger", () => ({
 
 describeDeepLinksSuite(async () => {
   vi.resetModules();
-  const legacy: DeepLinks = {
+  const desktopBinding: DeepLinks = {
     init: async (onInvite, onMessage) => {
-      const mod = await import("../../../src/lib/deep-link");
-      return mod.initDeepLinks(onInvite, onMessage);
+      const mod = await import("../../../src/platform/desktop/deepLinks");
+      return mod.deepLinks.init(onInvite, onMessage);
     },
   };
 
   return {
-    subject: legacy,
+    subject: desktopBinding,
     native: {
       coldStartLinks(urls: readonly string[]) {
         vi.doMock("@tauri-apps/plugin-deep-link", () => ({

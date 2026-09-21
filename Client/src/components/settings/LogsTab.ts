@@ -15,6 +15,7 @@ import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
+import { desktop } from "../../platform/desktop";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -132,12 +133,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       "Client version: loading...",
     );
     section.appendChild(versionEl);
-    void import("@tauri-apps/api/app")
-      .then(({ getVersion }) =>
-        getVersion().then((v) => {
-          versionEl.textContent = `Client version: v${v}`;
-        }),
-      )
+    void desktop.appMetadata
+      .getVersion()
+      .then((v) => {
+        versionEl.textContent = `Client version: v${v}`;
+      })
       .catch(() => {
         versionEl.textContent = "Client version: unknown";
       });

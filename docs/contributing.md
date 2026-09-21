@@ -110,6 +110,15 @@ next section, and using them directly is equally correct.
 | `npm run test:mutate:dry`  | Stryker dry-run (no mutations applied) |
 | `npm run test:browser`     | Vitest browser-mode tests              |
 
+PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
+`src/lib/permissions.ts`). The full-client mutation baseline
+(`src/lib/**` + `src/stores/**`, 76 files / 12 387 mutants) is the sharded
+`mutation` job in `.github/workflows/nightly-test-depth.yml`, driven locally
+with `cd Client && STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores>
+npx stryker run stryker.shard.config.mjs`. `Client/scripts/check-mutation-shards.mjs`
+proves the shard union still equals the configured surface. The measured score
+is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
+
 **Type checking, linting & formatting**
 
 | Command                   | Description                                                    |

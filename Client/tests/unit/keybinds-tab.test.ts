@@ -5,9 +5,13 @@ const mockUpdatePttKey = vi.fn();
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
 vi.mock("@lib/ptt", () => ({
-  captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
-  updatePttKey: (...args: unknown[]) => mockUpdatePttKey(...args),
   vkName: (vk: number) => mockVkName(vk),
+}));
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: {
+    captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
+    updateKey: (...args: unknown[]) => mockUpdatePttKey(...args),
+  },
 }));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";

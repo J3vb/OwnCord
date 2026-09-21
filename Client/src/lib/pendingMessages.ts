@@ -205,7 +205,7 @@ export function activatePendingMessages(
   void activeQueue?.deactivate(false);
   activeQueue = new PendingMessageQueue(
     owner,
-    desktop.pendingMessages!,
+    desktop.pendingMessages,
     serializePendingWrites,
     (draft) => {
       addOptimisticMessage({

@@ -1,11 +1,13 @@
 /**
- * Push-to-talk. Seam: `initPtt`, `stopPtt`, `updatePttKey` and
- * `captureKeyPress` are the four native-touching exports of `lib/ptt.ts`
- * (`vkName` is a pure display helper, not part of the native seam), so each
- * contract method below has that function's exact signature. Mirrors those
- * four functions, not `lib/ptt.ts`'s module state (the binding/generation
- * bookkeeping, mute-ownership latch) — that orchestration stays in
- * `lib/ptt.ts` and keeps calling this contract's methods after B7-5.
+ * Push-to-talk. The four methods have the exact signatures of `lib/ptt.ts`'s
+ * former `initPtt`, `stopPtt`, `updatePttKey` and `captureKeyPress`
+ * (`vkName` is a pure display helper and stays there). `pushToTalk.suite.ts`
+ * binds `init()` to the persisted key and `stop()`/`updateKey()` to the
+ * binding's polling state, so B7-5 moved the whole service with its native
+ * calls — the binding/generation bookkeeping and the mute-ownership latch
+ * included — to `platform/desktop/pushToTalkService.ts`, loaded lazily by the
+ * registered facade (`pushToTalk.ts`) because it gates the mic through the
+ * voice store.
  */
 export interface PushToTalk {
   init(): Promise<void>;

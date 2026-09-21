@@ -1,11 +1,13 @@
 # Platform contract map — desktop and browser
 
-**Kind:** target-state map. **Status:** design record only — the seam described
-here **does not exist in the code yet**.
-**Measured against:** B7-4 (branch `feat/b7-4-adapter-connectivity-identity`,
-2026-09-20), which moved twelve of the twenty-one native importers behind
-the seam; the three counts above are re-derived from the tree by
-`Client/tests/unit/platform-contracts-counts.test.ts`.
+**Kind:** target-state map. **Status:** the desktop half is implemented — B7-3
+wrote the contracts and B7-4/B7-5 moved every native call behind
+`Client/src/platform/desktop/`; the `browser/` half is B8, deferred.
+**Measured against:** B7-5 (branch `fm/b7-5-impl`, 2026-09-21), which moved
+the last native importers behind the seam, so all twenty now live under
+`platform/desktop/`; the three counts below are re-derived from the tree by
+`Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
+static or dynamic native import anywhere else.
 **Closes:** `RL-02` / `L-02` (B1-8). **Executed by:** B7.
 
 OwnCord is a Tauri desktop app whose frontend talks to native APIs directly.
@@ -51,13 +53,13 @@ Measured with `git grep`, not estimated:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 19    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 20    |
 | Distinct `invoke` command names called from `Client/src/`  | 28    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 33    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
-| Files under `Client/src/platform/`                         | 27    |
+| Files under `Client/src/platform/`                         | 42    |
 
 The handler count covers both attribute spellings — 21 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
@@ -103,8 +105,10 @@ to desktop/browser branching.
 
 ## Proposed contracts
 
-Fifteen capability clusters. Each becomes one file under `contracts/`, with
-matching implementations under `desktop/` and `browser/`.
+Sixteen capability clusters. Each becomes one file under `contracts/` (a few
+split across two or three), with matching implementations under `desktop/` and
+`browser/`. Since B7-5 the "Files today" column names the app-side callers; the
+native surface itself lives only in `platform/desktop/`.
 
 | Contract          | Files today                                                                   | Native surface                                       | Browser outlook                                           |
 | ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
@@ -117,12 +121,20 @@ matching implementations under `desktop/` and `browser/`.
 | Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                              | in-memory ring buffer + download                          |
 | Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                         | mostly unsupported; degrade                               |
 | Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`     | unsupported — the page reloads instead                    |
+| Tray status       | `main.ts`                                                                     | `api/event` (`status-change`)                        | unsupported — there is no tray                            |
 | Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                      | `window.open`                                             |
 | File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                         | `<a download>` / File System Access API                   |
 | Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                   | ⚠ see hard cases                                          |
 | Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                   | URL routing                                               |
 | App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                            | build-time constant                                       |
-| Dev tools         | `main.ts:86-89`, `settings/AdvancedTab.ts:70`                                 | `api/core` (`open_devtools`)                         | unsupported — the browser has its own devtools already    |
+| Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                         | unsupported — the browser has its own devtools already    |
+
+**Media devices are not on this map, deliberately.** No `@tauri-apps` surface
+exists for them: every media-device call site (`lib/deviceManager.ts`,
+`lib/connectionDiagnostics.ts`, `components/settings/VoiceAudioTab.ts`) is the
+Web API `navigator.mediaDevices`, and no Rust command touches devices. A
+contract would wrap a web API that already works unchanged in a browser, so
+B7-5 closed the PRD's "media and devices" clause with this finding instead.
 
 Two files appear under more than one contract (`lib/profiles.ts` does HTTP and
 settings; `settings/AdvancedTab.ts` spans four). That is expected — the clusters
@@ -158,10 +170,11 @@ behaviour.
 ## Contracts (B7-3)
 
 B7-3 implemented this design. `Client/src/platform/contracts/` holds one
-type-only file per row of the map above (17 files, `index.ts` re-exporting
-each and a `Platform` interface with one readonly member per interface), and
-`Client/src/platform/desktop/index.ts` is a typed `Partial<Platform>` that
-B7-4/B7-5 fill in one capability at a time.
+type-only file per row of the map above (17 files at B7-3, 19 since B7-5
+added two; `index.ts` re-exporting each and a `Platform` interface with one
+readonly member per interface), and `Client/src/platform/desktop/index.ts` was
+a typed `Partial<Platform>` that B7-4/B7-5 filled in one capability at a time —
+a full `Platform` since B7-5.
 
 **B7-4 moved eight of them** (`Client/src/lib/`, `Client/src/components/`):
 HTTP, WebSocket, credentials, identity, pending messages, settings,
@@ -173,10 +186,34 @@ seam first, then again against the desktop binding, and the four that had none
 got one written the same way. The rows still on `lib/` are the ones B7-5 owns
 (media, LiveKit's proxies, push-to-talk, notifications, window state, deep
 links, updater, app metadata, dev tools, the shell opener), plus the LiveKit
-half of `NativeProxies`. `Client/eslint.config.js` carries the seam as a rule:
-`src/platform/desktop/**` is the only path under `src/` allowed a static
-`@tauri-apps` import, and the eleven files that still have one are listed there
-by name.
+half of `NativeProxies`.
+
+**B7-5 moved the rest**, and added two contracts the map lacked:
+`contracts/appProcess.ts` (`AppProcess.relaunch()`, for the Advanced tab's
+"Clear & Restart" — the updater's own relaunch is internal to
+`downloadAndInstallUpdate`) and `contracts/trayStatus.ts` (one named
+subscription to the tray's `status-change`, not a by-name event bus).
+`desktop/index.ts` is now a full `Platform`, and no file outside
+`platform/desktop/` imports `@tauri-apps` — `main.ts` included; it is a
+consumer of the registry, not an exception. `Client/eslint.config.js` carries
+the seam as a rule: `src/platform/desktop/**` is the only path under `src/`
+allowed a static `@tauri-apps` import.
+
+Three shapes recur in B7-5's moves, worth knowing before adding a member:
+
+- **The registry is in the startup chunk.** `desktop` is statically reachable
+  from the entry, so a native module that was a lazy `import()` before its
+  move (deep link, notification, window, process, autostart, app) stays one
+  inside the desktop method.
+- **An adapter that needs app state loads lazily.** Push-to-talk gates the mic
+  through the voice store, whose import graph reaches back into the registry.
+  `desktop/pushToTalk.ts` is a facade over `desktop/pushToTalkService.ts`,
+  loaded on first use, so the static graph gains no import cycle.
+- **Where a `lib/` export keeps callers, it stays as a thin delegate**
+  (`lib/updater.ts`, `lib/httpProxy.ts`, `LiveKitUrlResolver`), and its legacy
+  suite binding stays with it. Where the export went internal (deep links,
+  push-to-talk, and every capability whose seam was lifted in place), the
+  legacy binding was deleted in the same commit.
 
 Six rules the reviewer checked, kept here because they hold for every future
 addition to `contracts/`, not just B7-3's:
@@ -230,11 +267,15 @@ in the same commit rather than left asserting what the desktop binding already
 covers. `LogFiles.clearAll` is the same story inside a row that already had a
 suite: no exported seam until B7-4, so its coverage lands with the move.
 
-`Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs all twelve
-suites against a null subject; the twelve are the eight rows above plus the
-four B7-4 created. The remaining rows (and the no-seam half of the two split
-rows) are contract-only until the milestone that creates their seam writes the
-suite.
+`Client/tests/unit/platform/suites-are-falsifiable.test.ts` runs all
+twenty-one suites against a null subject: the eight rows above, the four B7-4
+created, and nine from B7-5. Seven of those nine were written against a seam
+lifted in place first (notifications, window, opener, app metadata, dev tools,
+autostart, the LiveKit half of the proxies), exactly as B7-4 did; `AppProcess`
+was lifted the same way. `TrayStatus` has no legacy binding — the subscription
+was inline in `main.ts`, which cannot be imported on its own — so its oracle
+for the move is `tests/unit/main.test.ts`'s tray tests (OC-0037, OC-0176),
+green before and after.
 
 **Suite coverage gaps.** A round-3 adversarial review found suite tests whose
 only assertion a completely inert, do-nothing subject also satisfies —
@@ -251,16 +292,14 @@ green that means nothing:
   calling either callback is exactly what a subject that does nothing at all
   also does; the cold-start paths (invite, message permalink) are still
   covered.
+- `NativeProxies.stopLiveKitProxy()` — fire-and-forget, it hands the caller
+  nothing back; the resolve paths are covered.
 
-`Client/knip.json` still ignores `src/platform/**`. B7-3's note said B7-4
-would remove that ignore the moment the first production call site imports
-from `platform/desktop`; B7-4 did not, because `Client/knip.json` is outside
-its file table, and it is not needed: knip runs green with the ignore in
-place, and it still reports a genuine dead export from the files that _consume_
-the seam (that is how an unused re-export of the desktop socket transport was
-caught during B7-4). Removing the ignore now means auditing the exports under
-`platform/` that exist for B7-5's consumers; that belongs to B7-5, which adds
-them.
+`Client/knip.json` no longer ignores `src/platform/**` (B7-5). Removing it
+surfaced one class of dead export: `contracts/index.ts` re-exported every
+contract's auxiliary types (options, results, events) that no caller imports
+through it, so it now re-exports only the capability interfaces, and
+`contracts/window.ts`'s unused `WindowRect` is gone.
 
 ## Ownership
 

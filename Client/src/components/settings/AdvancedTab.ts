@@ -4,7 +4,6 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
@@ -66,7 +65,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     devtoolsBtn.addEventListener(
       "click",
       () => {
-        void invoke("open_devtools").catch((err: unknown) => {
+        void desktop.devTools.open().catch((err: unknown) => {
           log.warn("DevTools not available", {
             error: err instanceof Error ? err.message : String(err),
           });
@@ -131,7 +130,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           // pending buffer is drained here, through this module's export;
           // clearAll() drains it again, which is a no-op.
           await clearPendingPersistedLogs();
-          await desktop.logFiles!.clearAll();
+          await desktop.logFiles.clearAll();
           btn.textContent = "Cleared!";
           setTimeout(() => {
             btn.textContent = "Clear";
@@ -184,12 +183,11 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           // pending buffer is drained here, through this module's export;
           // clearAll() drains it again, which is a no-op.
           await clearPendingPersistedLogs();
-          await desktop.logFiles!.clearAll();
+          await desktop.logFiles.clearAll();
           clearLocalStoragePreservingUserData();
           sessionStorage.clear();
           log.info("All cache cleared, restarting app");
-          const { relaunch } = await import("@tauri-apps/plugin-process");
-          await relaunch();
+          await desktop.appProcess.relaunch();
         } catch (err) {
           log.error("Failed to clear all cache", err);
           btn.textContent = "Failed";
@@ -239,9 +237,8 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
       touched = true;
       void (async () => {
         try {
-          const { enable, disable } = await import("@tauri-apps/plugin-autostart");
-          if (nowOn) await enable();
-          else await disable();
+          if (nowOn) await desktop.autostart.enable();
+          else await desktop.autostart.disable();
           enabled = nowOn;
         } catch (err) {
           // The OS change didn't take — revert the visual state.
@@ -256,8 +253,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
 
   void (async () => {
     try {
-      const { isEnabled } = await import("@tauri-apps/plugin-autostart");
-      const initialEnabled = await isEnabled();
+      const initialEnabled = await desktop.autostart.isEnabled();
       // If the user already toggled this before the read-back resolved,
       // their change (and whatever it settles to) wins — don't overwrite it
       // with the value read before that change was applied.

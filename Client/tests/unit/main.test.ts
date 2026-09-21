@@ -42,7 +42,9 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("@lib/ptt", () => ({ initPtt: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
+}));
 vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
@@ -54,7 +56,11 @@ vi.mock("@lib/credentials", () => ({
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
 vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@lib/deep-link", () => ({ initDeepLinks: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/plugin-deep-link", () => ({
+  register: vi.fn().mockResolvedValue(undefined),
+  getCurrent: vi.fn().mockResolvedValue(null),
+  onOpenUrl: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),

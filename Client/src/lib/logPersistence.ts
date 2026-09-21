@@ -6,7 +6,7 @@ import { desktop } from "../platform/desktop";
 
 /** Cancel a pending flush timer and await one already in flight. */
 export async function clearPendingPersistedLogs(): Promise<void> {
-  return desktop.logFiles!.clearPending();
+  return desktop.logFiles.clearPending();
 }
 
 /**
@@ -14,7 +14,7 @@ export async function clearPendingPersistedLogs(): Promise<void> {
  * Returns a cleanup function to remove the logger listener.
  */
 export async function initLogPersistence(): Promise<() => void> {
-  return desktop.logFiles!.init();
+  return desktop.logFiles.init();
 }
 
 /**
@@ -22,7 +22,7 @@ export async function initLogPersistence(): Promise<() => void> {
  * Best-effort — may not complete if called during window teardown.
  */
 export async function flushLogs(): Promise<void> {
-  return desktop.logFiles!.flush();
+  return desktop.logFiles.flush();
 }
 
 /**
@@ -31,5 +31,5 @@ export async function flushLogs(): Promise<void> {
  * @public
  */
 export function getLogDir(): string | null {
-  return desktop.logFiles!.getDir();
+  return desktop.logFiles.getDir();
 }

@@ -20,7 +20,7 @@ export async function saveCredential(
   password?: string,
   clearPassword = false,
 ): Promise<boolean> {
-  return desktop.credentials!.save(host, username, token, password, clearPassword);
+  return desktop.credentials.save(host, username, token, password, clearPassword);
 }
 
 /**
@@ -91,15 +91,15 @@ export async function loginWithSavedPassword(
   host: string,
   username: string,
 ): Promise<SavedLoginResponse | null> {
-  return desktop.credentials!.loginWithSavedPassword(host, username);
+  return desktop.credentials.loginWithSavedPassword(host, username);
 }
 
 /** Load the credential stored for `host`, or null when there is none. */
 export async function loadCredential(host: string): Promise<SavedCredential | null> {
-  return desktop.credentials!.load(host);
+  return desktop.credentials.load(host);
 }
 
 /** Delete the credential stored for `host`. */
 export async function deleteCredential(host: string): Promise<boolean> {
-  return desktop.credentials!.delete(host);
+  return desktop.credentials.delete(host);
 }
