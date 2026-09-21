@@ -23,14 +23,7 @@ export type { AppMetadata } from "./appMetadata";
 export type { DevTools } from "./devTools";
 export type { AppProcess } from "./appProcess";
 export type { TrayStatus } from "./trayStatus";
-export type {
-  ExternalContentBroker,
-  ExternalContentFailure,
-  ExternalContentResult,
-  ExternalImageHandle,
-  ExternalImageSource,
-  ExternalPreview,
-} from "./externalContent";
+export type { ExternalContentBroker } from "./externalContent";
 
 import type { HttpClient } from "./http";
 import type { SocketTransport } from "./socket";

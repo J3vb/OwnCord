@@ -740,13 +740,13 @@ the same PR as the broker.
   is unchanged, and `tauri-conf-csp.test.ts` pins that it still carries
   `https:` so any later change is a decision. Narrowing it needs the LiveKit
   direct-URL path to go through a proxy first.
-- **`Client/knip.json`'s `src/platform/**` ignore is not stale yet, and was
-  left alone (B7-5 owns it).** With the ignore removed, knip reports 22 unused
-  exported types, all type re-exports from `platform/contracts/index.ts` (five
-  of them this milestone's `ExternalContent*` types, the rest pre-existing)
-  plus `WindowRect` in `contracts/window.ts`. Removing the ignore therefore
-  still means deciding what `index.ts` re-exports; nothing about this broker
-  makes that easier or harder.
+- **`Client/knip.json`'s `src/platform/**` ignore: B7-5 removed it** before
+  this branch merged, and `knip` is part of `check:client`. It then flagged
+  five of this milestone's type re-exports from `platform/contracts/index.ts`
+  (`ExternalContentFailure`, `ExternalContentResult`, `ExternalImageHandle`,
+  `ExternalImageSource`, `ExternalPreview`) as unused — every consumer imports
+  them from `contracts/externalContent.ts` directly — so `index.ts` re-exports
+  only `ExternalContentBroker`, the one `Platform` needs.
 - **The User-Agent is the bare `facebookexternalhit/1.1` token**, without the
   crawler's `(+http://www.facebook.com/…)` comment: `src-tauri/src/config_gates.rs`
   forbids third-party host literals anywhere in the crate, and sites key on
