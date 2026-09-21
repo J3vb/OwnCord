@@ -12,8 +12,43 @@ import { clearAttachmentCaches } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import type { DevTools } from "../../platform/contracts/devTools";
+import type { AppProcess } from "../../platform/contracts/appProcess";
+import type { Autostart } from "../../platform/contracts/updater";
 
 const log = createLogger("AdvancedTab");
+
+// The native halves of this tab — dev tools, relaunch and autostart. Lifted in
+// place (B7-5) so their suites can bind them before they move behind
+// `platform/desktop`.
+
+export const nativeDevTools: DevTools = {
+  async open(): Promise<void> {
+    await invoke("open_devtools");
+  },
+};
+
+export const nativeAppProcess: AppProcess = {
+  async relaunch(): Promise<void> {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  },
+};
+
+export const nativeAutostart: Autostart = {
+  async isEnabled(): Promise<boolean> {
+    const { isEnabled } = await import("@tauri-apps/plugin-autostart");
+    return isEnabled();
+  },
+  async enable(): Promise<void> {
+    const { enable } = await import("@tauri-apps/plugin-autostart");
+    await enable();
+  },
+  async disable(): Promise<void> {
+    const { disable } = await import("@tauri-apps/plugin-autostart");
+    await disable();
+  },
+};
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
 
 export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
@@ -66,7 +101,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     devtoolsBtn.addEventListener(
       "click",
       () => {
-        void invoke("open_devtools").catch((err: unknown) => {
+        void nativeDevTools.open().catch((err: unknown) => {
           log.warn("DevTools not available", {
             error: err instanceof Error ? err.message : String(err),
           });
@@ -188,8 +223,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           clearLocalStoragePreservingUserData();
           sessionStorage.clear();
           log.info("All cache cleared, restarting app");
-          const { relaunch } = await import("@tauri-apps/plugin-process");
-          await relaunch();
+          await nativeAppProcess.relaunch();
         } catch (err) {
           log.error("Failed to clear all cache", err);
           btn.textContent = "Failed";
@@ -239,9 +273,8 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
       touched = true;
       void (async () => {
         try {
-          const { enable, disable } = await import("@tauri-apps/plugin-autostart");
-          if (nowOn) await enable();
-          else await disable();
+          if (nowOn) await nativeAutostart.enable();
+          else await nativeAutostart.disable();
           enabled = nowOn;
         } catch (err) {
           // The OS change didn't take — revert the visual state.
@@ -256,8 +289,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
 
   void (async () => {
     try {
-      const { isEnabled } = await import("@tauri-apps/plugin-autostart");
-      const initialEnabled = await isEnabled();
+      const initialEnabled = await nativeAutostart.isEnabled();
       // If the user already toggled this before the read-back resolved,
       // their change (and whatever it settles to) wins — don't overwrite it
       // with the value read before that change was applied.

@@ -16,6 +16,18 @@
  */
 
 import { bracketBareIPv6Host } from "./ws";
+import type { UrlOpener } from "../platform/contracts/opener";
+
+/**
+ * The native shell opener. Lifted in place (B7-5) so the `UrlOpener` suite can
+ * bind it before it moves behind `platform/desktop`.
+ */
+export const nativeUrlOpener: UrlOpener = {
+  async open(url: string): Promise<void> {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  },
+};
 
 /** The admin-panel URL for `host`, deep-linked to `section` when given. */
 export function adminPanelUrl(host: string, section?: string): string {
@@ -36,6 +48,5 @@ export function adminPanelUrl(host: string, section?: string): string {
  * URL builder tested) in an environment with no Tauri runtime.
  */
 export async function openAdminPanel(host: string, section?: string): Promise<void> {
-  const { openUrl } = await import("@tauri-apps/plugin-opener");
-  await openUrl(adminPanelUrl(host, section));
+  await nativeUrlOpener.open(adminPanelUrl(host, section));
 }

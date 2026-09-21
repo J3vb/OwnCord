@@ -30,6 +30,8 @@ export type { PushToTalk } from "./pushToTalk";
 export type { DeepLinks } from "./deepLinks";
 export type { AppMetadata } from "./appMetadata";
 export type { DevTools } from "./devTools";
+export type { AppProcess } from "./appProcess";
+export type { TrayStatus } from "./trayStatus";
 
 import type { HttpClient } from "./http";
 import type { SocketTransport } from "./socket";
@@ -48,6 +50,8 @@ import type { PushToTalk } from "./pushToTalk";
 import type { DeepLinks } from "./deepLinks";
 import type { AppMetadata } from "./appMetadata";
 import type { DevTools } from "./devTools";
+import type { AppProcess } from "./appProcess";
+import type { TrayStatus } from "./trayStatus";
 
 /** Every platform capability, one readonly member per contract interface. */
 export interface Platform {
@@ -69,4 +73,6 @@ export interface Platform {
   readonly deepLinks: DeepLinks;
   readonly appMetadata: AppMetadata;
   readonly devTools: DevTools;
+  readonly appProcess: AppProcess;
+  readonly trayStatus: TrayStatus;
 }

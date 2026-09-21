@@ -1,4 +1,4 @@
-// This file proves the eight `describe<Name>Suite` functions can actually
+// This file proves every `describe<Name>Suite` function can actually
 // fail. Each is run once with `expectEveryTestToFail: true` against a "null
 // subject" — a contract implementation whose every method is an inert no-op
 // and a native handle whose every member is an inert no-op — so every test
@@ -53,6 +53,30 @@ import { describeSocketTransportSuite } from "./socket.suite";
 import type { NativeControl as SocketTransportNativeControl } from "./socket.suite";
 import { describeAppUpdaterSuite } from "./updater.suite";
 import type { NativeControl as AppUpdaterNativeControl } from "./updater.suite";
+import type { AppMetadata } from "../../../src/platform/contracts/appMetadata";
+import type { AppProcess } from "../../../src/platform/contracts/appProcess";
+import type { DevTools } from "../../../src/platform/contracts/devTools";
+import type { Notifier } from "../../../src/platform/contracts/notifications";
+import type { UrlOpener } from "../../../src/platform/contracts/opener";
+import type { TrayStatus } from "../../../src/platform/contracts/trayStatus";
+import type { Autostart } from "../../../src/platform/contracts/updater";
+import type { WindowControl } from "../../../src/platform/contracts/window";
+import { describeAppMetadataSuite } from "./appMetadata.suite";
+import type { NativeControl as AppMetadataNativeControl } from "./appMetadata.suite";
+import { describeAppProcessSuite } from "./appProcess.suite";
+import type { NativeControl as AppProcessNativeControl } from "./appProcess.suite";
+import { describeAutostartSuite } from "./autostart.suite";
+import type { NativeControl as AutostartNativeControl } from "./autostart.suite";
+import { describeDevToolsSuite } from "./devTools.suite";
+import type { NativeControl as DevToolsNativeControl } from "./devTools.suite";
+import { describeNotifierSuite } from "./notifier.suite";
+import type { NativeControl as NotifierNativeControl } from "./notifier.suite";
+import { describeUrlOpenerSuite } from "./opener.suite";
+import type { NativeControl as UrlOpenerNativeControl } from "./opener.suite";
+import { describeTrayStatusSuite } from "./trayStatus.suite";
+import type { NativeControl as TrayStatusNativeControl } from "./trayStatus.suite";
+import { describeWindowControlSuite } from "./window.suite";
+import type { NativeControl as WindowControlNativeControl } from "./window.suite";
 
 const failEveryTest = { expectEveryTestToFail: true };
 
@@ -248,6 +272,99 @@ describeLiveKitProxiesSuite(async () => {
   const native: LiveKitProxiesNativeControl = {
     succeedWith: () => undefined,
     failWith: () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeNotifierSuite(async () => {
+  const subject = {
+    permissionGranted: async () => undefined,
+    requestPermission: async () => undefined,
+    show: async () => undefined,
+    flashTaskbar: async () => undefined,
+  } as unknown as Notifier;
+  const native: NotifierNativeControl = {
+    permissionIs: () => undefined,
+    userAnswers: () => undefined,
+    unavailable: () => undefined,
+    shown: () => [],
+    attentionRequests: () => 0,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeWindowControlSuite(async () => {
+  const subject = {
+    isMaximized: async () => undefined,
+    availableMonitors: async () => undefined,
+    outerPosition: async () => undefined,
+    outerSize: async () => undefined,
+    center: async () => undefined,
+  } as unknown as WindowControl;
+  const native: WindowControlNativeControl = {
+    maximized: () => undefined,
+    monitors: () => undefined,
+    monitorsFailWith: () => undefined,
+    placedAt: () => undefined,
+    centered: () => 0,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeUrlOpenerSuite(async () => {
+  const subject = { open: async () => undefined } as unknown as UrlOpener;
+  const native: UrlOpenerNativeControl = {
+    failWith: () => undefined,
+    opened: () => [],
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeAppMetadataSuite(async () => {
+  const subject = { getVersion: async () => undefined } as unknown as AppMetadata;
+  const native: AppMetadataNativeControl = {
+    version: () => undefined,
+    failWith: () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeDevToolsSuite(async () => {
+  const subject = { open: async () => undefined } as unknown as DevTools;
+  const native: DevToolsNativeControl = {
+    failWith: () => undefined,
+    opened: () => 0,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeAutostartSuite(async () => {
+  const subject = {
+    isEnabled: async () => undefined,
+    enable: async () => undefined,
+    disable: async () => undefined,
+  } as unknown as Autostart;
+  const native: AutostartNativeControl = {
+    enabledIs: () => undefined,
+    failWith: () => undefined,
+    state: () => false,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeAppProcessSuite(async () => {
+  const subject = { relaunch: async () => undefined } as unknown as AppProcess;
+  const native: AppProcessNativeControl = {
+    failWith: () => undefined,
+    relaunches: () => 0,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeTrayStatusSuite(async () => {
+  const subject = { onStatusChange: () => () => undefined } as unknown as TrayStatus;
+  const native: TrayStatusNativeControl = {
+    emits: async () => undefined,
   };
   return { subject, native };
 }, failEveryTest);

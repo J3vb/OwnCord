@@ -15,6 +15,7 @@ import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
 import { resolveAuthor } from "@components/message-list/formatting";
 import { resolveDisplayName } from "@lib/avatar";
+import type { Notifier, NotifierShowOptions } from "../platform/contracts/notifications";
 
 const log = createLogger("notifications");
 
@@ -141,21 +142,45 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 }
 
+/**
+ * The native notifier: the notification plugin and the window's attention
+ * request. Lifted in place (B7-5) so the `Notifier` suite can bind it before
+ * it moves behind `platform/desktop`.
+ */
+export const nativeNotifier: Notifier = {
+  async permissionGranted(): Promise<boolean> {
+    const { isPermissionGranted } = await import("@tauri-apps/plugin-notification");
+    return isPermissionGranted();
+  },
+  async requestPermission(): Promise<boolean> {
+    const { requestPermission } = await import("@tauri-apps/plugin-notification");
+    const result = await requestPermission();
+    return result === "granted";
+  },
+  async show(title: string, body: string, options?: NotifierShowOptions): Promise<void> {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    sendNotification(
+      options?.icon === undefined ? { title, body } : { title, body, icon: options.icon },
+    );
+  },
+  async flashTaskbar(): Promise<void> {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    await win.requestUserAttention(2); // Informational attention
+  },
+};
+
 /** Fire a Tauri desktop notification. Falls back to Web Notification API. */
 function fireDesktopNotification(title: string, body: string): void {
   void (async () => {
     try {
-      const { isPermissionGranted, requestPermission, sendNotification } =
-        await import("@tauri-apps/plugin-notification");
-
-      let permitted = await isPermissionGranted();
+      let permitted = await nativeNotifier.permissionGranted();
       if (!permitted) {
-        const result = await requestPermission();
-        permitted = result === "granted";
+        permitted = await nativeNotifier.requestPermission();
       }
 
       if (permitted) {
-        sendNotification({ title, body });
+        await nativeNotifier.show(title, body);
       }
     } catch (err) {
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
@@ -180,9 +205,7 @@ function fireDesktopNotification(title: string, body: string): void {
 function flashTaskbar(): void {
   void (async () => {
     try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      await win.requestUserAttention(2); // Informational attention
+      await nativeNotifier.flashTaskbar();
     } catch (err) {
       log.debug("Taskbar flash not available", err);
     }

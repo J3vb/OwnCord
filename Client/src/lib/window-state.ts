@@ -10,6 +10,7 @@
  */
 
 import { createLogger } from "./logger";
+import type { WindowControl } from "../platform/contracts/window";
 
 const log = createLogger("window-state");
 
@@ -50,26 +51,42 @@ export function isRectOnScreen(monitors: readonly MonitorRect[], rect: WindowRec
 }
 
 /**
+ * The native window operations the guard below needs. Lifted in place (B7-5)
+ * so the `WindowControl` suite can bind them before they move behind
+ * `platform/desktop`; the guard itself is behaviour and stays here.
+ */
+export const nativeWindow: WindowControl = {
+  async isMaximized() {
+    return (await import("@tauri-apps/api/window")).getCurrentWindow().isMaximized();
+  },
+  async availableMonitors() {
+    return (await import("@tauri-apps/api/window")).availableMonitors();
+  },
+  async outerPosition() {
+    return (await import("@tauri-apps/api/window")).getCurrentWindow().outerPosition();
+  },
+  async outerSize() {
+    return (await import("@tauri-apps/api/window")).getCurrentWindow().outerSize();
+  },
+  async center() {
+    await (await import("@tauri-apps/api/window")).getCurrentWindow().center();
+  },
+};
+
+/**
  * After `tauri-plugin-window-state` restores the window, re-center it if it
  * landed off-screen. Fire-and-forget; a no-op outside Tauri. Fails open: if
  * monitors can't be queried the plugin's placement is left untouched.
  */
 export async function initWindowState(): Promise<void> {
-  let tauriWindow: typeof import("@tauri-apps/api/window");
-  try {
-    tauriWindow = await import("@tauri-apps/api/window");
-  } catch {
-    return;
-  }
-
-  const win = tauriWindow.getCurrentWindow();
+  const win = nativeWindow;
   try {
     // A maximized window fills a monitor by definition — nothing to correct.
     if (await win.isMaximized()) return;
 
-    let monitors: MonitorRect[];
+    let monitors: readonly MonitorRect[];
     try {
-      monitors = await tauriWindow.availableMonitors();
+      monitors = await win.availableMonitors();
     } catch (err) {
       log.warn("Could not query monitors; leaving restored window as-is", {
         error: String(err),

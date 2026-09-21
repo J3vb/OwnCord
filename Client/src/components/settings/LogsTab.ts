@@ -15,6 +15,18 @@ import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
+import type { AppMetadata } from "../../platform/contracts/appMetadata";
+
+/**
+ * The native app metadata. Lifted in place (B7-5) so the `AppMetadata` suite
+ * can bind it before it moves behind `platform/desktop`.
+ */
+export const nativeAppMetadata: AppMetadata = {
+  async getVersion(): Promise<string> {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return getVersion();
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -132,12 +144,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       "Client version: loading...",
     );
     section.appendChild(versionEl);
-    void import("@tauri-apps/api/app")
-      .then(({ getVersion }) =>
-        getVersion().then((v) => {
-          versionEl.textContent = `Client version: v${v}`;
-        }),
-      )
+    void nativeAppMetadata
+      .getVersion()
+      .then((v) => {
+        versionEl.textContent = `Client version: v${v}`;
+      })
       .catch(() => {
         versionEl.textContent = "Client version: unknown";
       });
