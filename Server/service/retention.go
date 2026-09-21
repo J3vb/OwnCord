@@ -105,6 +105,12 @@ type RetentionPolicy struct {
 	Channels   []db.ChannelRetention `json:"channels"`
 }
 
+// ServerDays returns only the server-default message window. Zero means keep
+// indefinitely; channel overrides remain on the admin-only Policy path.
+func (s *RetentionService) ServerDays(ctx context.Context) (int, error) {
+	return s.st.ServerRetentionDays(ctx)
+}
+
 // Policy returns the current policy.
 func (s *RetentionService) Policy(ctx context.Context) (*RetentionPolicy, error) {
 	days, err := s.st.ServerRetentionDays(ctx)

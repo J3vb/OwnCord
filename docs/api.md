@@ -2785,24 +2785,36 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 
 ### GET /api/v1/server-info
 
-Answers "what is this server, and is the browser client on" in one call, so a
-client can decide whether it can connect before opening a WebSocket.
+Reports server identity, connection compatibility, registration mode and the
+server-default message retention window before sign-in.
 
 **Auth:** None
 
-| Field                    | Type    | Meaning                                                                                       |
-| ------------------------ | ------- | --------------------------------------------------------------------------------------------- |
-| `name`                   | string  | The operator's server name (`server.name`)                                                    |
-| `protocol_epoch`         | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect       |
-| `browser_client_enabled` | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`) |
+| Field                     | Type    | Meaning                                                                                                                                                 |
+| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                    | string  | The operator's server name (`server.name`)                                                                                                              |
+| `protocol_epoch`          | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                 |
+| `browser_client_enabled`  | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                           |
+| `registration_mode`       | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                            |
+| `retention`               | object  | Server-default message retention only; channel overrides are not disclosed                                                                              |
+| `retention.messages_days` | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window |
 
 ```json
 {
   "name": "My OwnCord Server",
   "protocol_epoch": 1,
-  "browser_client_enabled": false
+  "browser_client_enabled": false,
+  "registration_mode": "invite",
+  "retention": {
+    "messages_days": 0
+  }
 }
 ```
+
+The response is cached server-side for **5 seconds**, so setting changes may
+take that long to appear. A hard settings-read failure returns **500** with a
+generic `INTERNAL_ERROR`; failures are also cached for 5 seconds. Missing,
+malformed or out-of-range retention settings report `0` (keep indefinitely).
 
 **No version is returned**, here or on `/api/v1/info` or `/health`. C-2 keeps
 build identity off every unauthenticated endpoint so a server cannot be matched
