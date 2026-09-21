@@ -758,6 +758,11 @@ the same PR as the broker.
   the epoch and immediately send an empty-URL preview under the new partition,
   which is refused before any network work — so the handler count still moves
   by exactly two.
+- **A sixth refusal class, `expired-handle`.** The broker keeps at most 4096
+  image handles and forgets the oldest; `image()` on a forgotten
+  handle is refused as `expired-handle` rather than `unavailable`, so the
+  renderer re-asks for the preview (once per URL per cache epoch) only when a
+  fresh handle can actually help.
 - **Tasks 3–5 landed as one commit**: the classifier, the vetted fetch, the
   OG/oEmbed parser and the two commands are one module whose tests need each
   other's types.

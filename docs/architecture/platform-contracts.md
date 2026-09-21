@@ -290,7 +290,7 @@ client for content other users named, so the shape makes a raw URL result
 unrepresentable. `preview(partition, url)` returns the typed minimum (title,
 description, site name, dimensions, and an opaque image handle) and
 `image(partition, source)` returns the bytes of a handle or of a URL the caller
-already holds, both as a result union whose failure is one of five refusal
+already holds, both as a result union whose failure is one of six refusal
 classes rather than a thrown error. Two methods, two native commands
 (`external_preview` returns JSON, `external_image` returns raw IPC bytes over
 `tauri::ipc::Response`), because a raw-bytes response cannot also carry the
