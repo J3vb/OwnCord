@@ -15,7 +15,7 @@ import {
   setEncryptionDegraded,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
-import { parseUserId } from "@lib/livekitSession";
+import { parseUserId } from "../features/voice/sessionState";
 import type { AudioElements } from "@lib/audioElements";
 
 const log = createLogger("roomEventHandlers");

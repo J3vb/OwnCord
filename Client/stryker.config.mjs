@@ -18,7 +18,14 @@ const config = {
   vitest: {
     configFile: "vitest.config.ts",
   },
-  mutate: ["src/lib/**/*.ts", "src/stores/**/*.ts", "!src/lib/types.ts", "!src/**/*.d.ts"],
+  mutate: [
+    "src/lib/**/*.ts",
+    "src/stores/**/*.ts",
+    "src/features/**/*.ts",
+    "!src/lib/types.ts",
+    "!src/**/*.d.ts",
+    "!src/**/*.test.ts",
+  ],
   reporters: ["html", "clear-text", "progress"],
   htmlReporter: {
     fileName: "reports/mutation/index.html",

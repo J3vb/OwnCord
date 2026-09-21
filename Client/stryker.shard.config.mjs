@@ -15,6 +15,11 @@ export const shards = {
     "src/lib/livekitUrlResolver.ts",
     "src/lib/roomEventHandlers.ts",
     "src/lib/screenShare.ts",
+    "src/features/voice/sessionState.ts",
+    "src/features/voice/joinOrchestration.ts",
+    "src/features/voice/roomLifecycle.ts",
+    "src/features/voice/mediaControl.ts",
+    "src/features/voice/remoteTracks.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",

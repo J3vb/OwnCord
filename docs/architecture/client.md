@@ -39,7 +39,7 @@ flowchart TB
         API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
         DISP["dispatcher.ts<br/>34 msg types → store mutators"]
-        LKS["livekitSession.ts (1.4k LOC)<br/>voice state machine"]
+        LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
         LKE["livekitE2EE.ts<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
 
