@@ -469,6 +469,7 @@ describe("API Client", () => {
         created_at: "2026-01-01T00:00:00Z",
         last_used: "2026-01-02T00:00:00Z",
         is_current: true,
+        unseen: true,
       };
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
       const result = await api.getSessions();
@@ -479,6 +480,14 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.revokeSession(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions/42");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("revokeAllSessions calls DELETE /users/me/sessions and returns the body", async () => {
+      const body = { sessions_revoked: 3, current_session_revoked: true };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.revokeAllSessions()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
   });

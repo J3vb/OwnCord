@@ -71,6 +71,11 @@ function makeOptions(overrides: Partial<SettingsOverlayOptions> = {}): SettingsO
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
     onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onListSessions: vi.fn().mockResolvedValue([]),
+    onRevokeSession: vi.fn().mockResolvedValue(undefined),
+    onRevokeAllSessions: vi
+      .fn()
+      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
   };
 }

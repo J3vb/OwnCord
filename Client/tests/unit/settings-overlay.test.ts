@@ -83,6 +83,11 @@ describe("SettingsOverlay", () => {
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
     onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onListSessions: vi.fn().mockResolvedValue([]),
+    onRevokeSession: vi.fn().mockResolvedValue(undefined),
+    onRevokeAllSessions: vi
+      .fn()
+      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
   };
 
   beforeEach(() => {
@@ -1255,6 +1260,11 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onConfirmTotp: vi.fn().mockResolvedValue(undefined),
       onDisableTotp: vi.fn().mockResolvedValue(undefined),
       onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+      onListSessions: vi.fn().mockResolvedValue([]),
+      onRevokeSession: vi.fn().mockResolvedValue(undefined),
+      onRevokeAllSessions: vi
+        .fn()
+        .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     });
 
     overlay.mount(localContainer);

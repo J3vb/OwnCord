@@ -10,6 +10,7 @@ import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
+import type { RevokeAllSessionsResponse, SessionInfo } from "@lib/api";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { buildAccountTab } from "./settings/AccountTab";
@@ -59,6 +60,13 @@ export interface SettingsOverlayOptions {
   /** Re-read the 2FA state from GET /users/me, the only response that
    *  carries it, and put it in the auth store (OC-0354). */
   onRefreshTotpStatus(): Promise<void>;
+  /** List the account's signed-in devices (GET /users/me/sessions). */
+  onListSessions(): Promise<readonly SessionInfo[]>;
+  /** Sign one device out; it can no longer connect. */
+  onRevokeSession(id: number): Promise<void>;
+  /** Sign out every device, this one included. The page clears local auth
+   *  when the response reports the current session revoked. */
+  onRevokeAllSessions(): Promise<RevokeAllSessionsResponse>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
 }

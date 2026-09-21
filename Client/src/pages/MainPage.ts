@@ -17,9 +17,10 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
-import { closeSettings, uiStore } from "@stores/ui.store";
+import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
@@ -78,6 +79,8 @@ import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 const log = createLogger("main-page");
+/** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
+const SESSION_NOTICE_TOAST_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Options
@@ -386,6 +389,33 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     banner = createServerBanner();
     root.appendChild(banner.element);
 
+    // "Use here" takes the connection back: this device connects again and
+    // the server displaces the other one (last connect wins).
+    const useHere = (): void => {
+      const token = authStore.getState().token;
+      if (token === null) return;
+      setSessionReplaced(false);
+      ws.connect({ host: api.getConfig().host, token });
+    };
+    // Signed-in-elsewhere outranks the connection status it leaves behind
+    // ("disconnected"), so every banner refresh goes through here.
+    const syncBanner = (): void => {
+      if (banner === null) return;
+      const state = uiStore.getState();
+      if (state.sessionReplaced) banner.showSignedInElsewhere(useHere);
+      else applyConnectionStatus(banner, state.connectionStatus);
+    };
+    unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
+
+    // A sign-in not yet reviewed: listed on connect and on window focus.
+    const sessionNotice = new AbortController();
+    unsubscribers.push(() => sessionNotice.abort());
+    const pollSessions = startSessionNotice({
+      fetchSessions: (signal) => api.getSessions(signal),
+      notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),
+      signal: sessionNotice.signal,
+    });
+
     // Banner reacts to the store-backed connection status (single source of
     // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
     // — a fatal drop navigates away via clearAuth, and anything short of that
@@ -395,9 +425,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.connectionStatus,
         (status) => {
           try {
-            if (status === "connected") restoreSavedPresence();
-            if (banner === null) return;
-            applyConnectionStatus(banner, status);
+            if (status === "connected") {
+              restoreSavedPresence();
+              pollSessions();
+            }
+            syncBanner();
           } catch (err) {
             log.error("Connection status handler error", err);
           }
@@ -408,7 +440,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // current value and only fires on change, so a MainPage mounted mid-outage
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
-    applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+    syncBanner();
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
@@ -431,7 +463,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
               // actually dropped). Re-sync to the real connection status
               // instead of letting showRestart's countdown fall straight
               // through to a permanent "Reconnecting..." banner.
-              applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+              syncBanner();
             } else {
               banner.showRestart(payload.delay_seconds);
             }
@@ -603,6 +635,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onStatusChange: (status) => applyPresence(status),
+      onListSessions: () => api.getSessions(),
+      onRevokeSession: (id) => api.revokeSession(id),
+      onRevokeAllSessions: async () => {
+        const result = await api.revokeAllSessions();
+        // The token died with the response: leave for the connect page now
+        // rather than let the next request fail with a 401.
+        if (result.current_session_revoked) clearAuth();
+        return result;
+      },
     });
     settingsOverlay.mount(root);
     children.push(settingsOverlay);

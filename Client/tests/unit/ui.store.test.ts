@@ -17,6 +17,7 @@ function resetStore(): void {
     settingsOpen: false,
     connectionStatus: "disconnected" as const,
     transientError: null,
+    sessionReplaced: false,
     updateRequiredHost: null,
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,

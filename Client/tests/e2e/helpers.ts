@@ -441,7 +441,9 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 // ---------------------------------------------------------------------------
 
 export function buildTauriMockScript(opts: {
-  httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
+  /** `method`, when set, restricts a route to that HTTP method — for one path
+   *  that answers GET and DELETE differently. */
+  httpRoutes: Array<{ pattern: string; status: number; body: unknown; method?: string }>;
   simulateWsFlow: boolean;
   deferReady?: boolean;
   echoChatSend?: boolean;
@@ -526,9 +528,9 @@ export function buildTauriMockScript(opts: {
     // Sort routes by pattern length (longest first) to match most specific route
     HTTP_ROUTES.sort((a, b) => b.pattern.length - a.pattern.length);
 
-    function matchRoute(url) {
+    function matchRoute(url, method) {
       for (const route of HTTP_ROUTES) {
-        if (url.includes(route.pattern)) return route;
+        if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
       return null;
     }
@@ -583,7 +585,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "plugin:http|fetch") {
           const url = args?.clientConfig?.url || args?.url || "";
           const rid = __nextRid++;
-          const route = matchRoute(url);
+          const route = matchRoute(url, args?.clientConfig?.method || "GET");
           __pendingFetch[rid] = { url, route };
           return rid;
         }
@@ -890,6 +892,53 @@ export const mockTauriFullSessionWithAutoConnect = mock({
       ],
     },
   },
+});
+
+/** This device and one other desktop, whose sign-in nobody has reviewed. */
+export const MOCK_SESSIONS = [
+  {
+    id: 9,
+    device: "tauri-plugin-http/2.6.0",
+    ip: "198.51.100.2",
+    created_at: "2026-09-21 08:00:00",
+    last_used: "2026-09-21 08:30:00",
+    is_current: false,
+    unseen: true,
+  },
+  {
+    id: 7,
+    device: "OwnCord-Client/1.4.0",
+    ip: "203.0.113.5",
+    created_at: "2026-09-20 10:00:00",
+    last_used: "2026-09-21 09:00:00",
+    is_current: true,
+    unseen: true,
+  },
+];
+
+/** Full session with the device list: GET lists, DELETE {id} signs one out,
+ *  DELETE on the collection signs out everywhere (this device included). */
+export const mockTauriFullSessionWithSessions = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
+    ROUTE_MESSAGES,
+    ROUTE_PINS,
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "GET",
+      status: 200,
+      body: { sessions: MOCK_SESSIONS },
+    },
+    { pattern: "/api/v1/users/me/sessions/9", method: "DELETE", status: 204, body: null },
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "DELETE",
+      status: 200,
+      body: { sessions_revoked: 2, current_session_revoked: true },
+    },
+  ],
+  simulateWsFlow: true,
 });
 
 export const mockTauriFullSessionWithMessages = mock({

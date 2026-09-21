@@ -10,6 +10,12 @@ export interface UiState {
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   /**
+   * The server displaced this device's socket because the same account
+   * connected from another device (SESSION_REPLACED). The client stays signed
+   * in but does not reconnect until the user chooses "Use here".
+   */
+  readonly sessionReplaced: boolean;
+  /**
    * A server that refused this client's protocol epoch. `host` is the server;
    * the two epochs say which side updates. main.ts consumes it when the
    * connect page mounts, to offer the update there — the main page's own
@@ -38,6 +44,7 @@ const INITIAL_STATE: UiState = {
   settingsOpen: false,
   connectionStatus: "disconnected",
   transientError: null,
+  sessionReplaced: false,
   updateRequiredHost: null,
   collapsedCategories: new Set(),
   sidebarMode: "channels",
@@ -67,7 +74,14 @@ export function setConnectionStatus(status: "connected" | "reconnecting" | "disc
   uiStore.setState((prev) => ({
     ...prev,
     connectionStatus: status,
+    // A live connection means this device is the one in use again.
+    sessionReplaced: status === "connected" ? false : prev.sessionReplaced,
   }));
+}
+
+/** Mark this device as signed in elsewhere (or clear it). */
+export function setSessionReplaced(replaced: boolean): void {
+  uiStore.setState((prev) => ({ ...prev, sessionReplaced: replaced }));
 }
 
 /** Set a transient (auto-dismissable) error message. */

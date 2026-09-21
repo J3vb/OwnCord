@@ -65,6 +65,8 @@ export type WsErrorCode =
   | "CONFLICT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
+  // The same account connected from another device and displaced this socket.
+  | "SESSION_REPLACED"
   // Kept for older servers / existing call sites.
   | "INVALID_INPUT"
   | "SERVER_ERROR";
