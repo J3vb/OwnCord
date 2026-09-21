@@ -19,7 +19,7 @@ import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
-import { closeSettings, uiStore } from "@stores/ui.store";
+import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
@@ -386,6 +386,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     banner = createServerBanner();
     root.appendChild(banner.element);
 
+    // "Use here" takes the connection back: this device connects again and
+    // the server displaces the other one (last connect wins).
+    const useHere = (): void => {
+      const token = authStore.getState().token;
+      if (token === null) return;
+      setSessionReplaced(false);
+      ws.connect({ host: api.getConfig().host, token });
+    };
+    // Signed-in-elsewhere outranks the connection status it leaves behind
+    // ("disconnected"), so every banner refresh goes through here.
+    const syncBanner = (): void => {
+      if (banner === null) return;
+      const state = uiStore.getState();
+      if (state.sessionReplaced) banner.showSignedInElsewhere(useHere);
+      else applyConnectionStatus(banner, state.connectionStatus);
+    };
+    unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
+
     // Banner reacts to the store-backed connection status (single source of
     // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
     // — a fatal drop navigates away via clearAuth, and anything short of that
@@ -396,8 +414,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (status) => {
           try {
             if (status === "connected") restoreSavedPresence();
-            if (banner === null) return;
-            applyConnectionStatus(banner, status);
+            syncBanner();
           } catch (err) {
             log.error("Connection status handler error", err);
           }
@@ -408,7 +425,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // current value and only fires on change, so a MainPage mounted mid-outage
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
-    applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+    syncBanner();
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
@@ -431,7 +448,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
               // actually dropped). Re-sync to the real connection status
               // instead of letting showRestart's countdown fall straight
               // through to a permanent "Reconnecting..." banner.
-              applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+              syncBanner();
             } else {
               banner.showRestart(payload.delay_seconds);
             }

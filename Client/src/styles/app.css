@@ -3822,6 +3822,16 @@ ul.md-list-nested {
 .reconnecting-banner.visible {
   display: block;
 }
+.reconnecting-banner-action {
+  margin-left: 8px;
+  padding: 1px 10px;
+  border: 1px solid #1e1f22;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 
 /* ── Search Overlay ── */
 .search-overlay {

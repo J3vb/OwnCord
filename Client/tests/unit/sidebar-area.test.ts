@@ -203,6 +203,7 @@ function resetStores(): void {
     theme: "dark" as const,
     connectionStatus: "disconnected" as const,
     transientError: null,
+    sessionReplaced: false,
     persistentError: null,
     updateRequiredHost: null,
     collapsedCategories: new Set<string>(),
