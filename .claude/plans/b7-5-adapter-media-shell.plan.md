@@ -340,8 +340,8 @@ supersede the proposed defaults this section first carried.
       a web API that needs no adapter.
 - [x] **`relaunch`.** Its own one-method contract,
       `AppProcess { relaunch(): Promise<void> }`
-      (`contracts/appProcess.ts`), with its own `Platform` member, suite and null subject — not an `AppUpdater` method. The
-      updater's relaunch is internal to `downloadAndInstallUpdate` and moves
+      (`contracts/appProcess.ts`), with its own `Platform` member, suite
+      and null subject — not an `AppUpdater` method. The updater's relaunch is internal to `downloadAndInstallUpdate` and moves
       verbatim with no contract method; the only public caller is "Clear &
       Restart" (`AdvancedTab.ts:191-192`), which has nothing to do with
       updating. A B8 browser adapter has a real `relaunch`
