@@ -180,26 +180,26 @@ split (Windows reuses CDP, Linux needs a driver, ARM64 media needs archives).
 
 Touch only these. Anything else → record **BLOCKED**.
 
-| Path                                                                 | Change                                                                                             |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `Server/updater/assets.go`                                           | add the `windows-aarch64-nsis` row (decision 4)                                                    |
-| `Server/updater/coverage_boost_test.go`                              | the arch row in `TestFindClientAssets_ByTarget` and the negative case                              |
-| `Server/api/client_update_test.go`                                   | the arm64 target returns the arm64 artifact, not 204                                               |
-| `.github/workflows/release.yml`                                      | the Windows ARM64 client build job; arch-parameterized staging; collect + publish the arm64 assets |
-| `.github/workflows/client-artifact-smoke.yml`                        | **new**: reusable smoke workflow (`workflow_call`/`schedule`/`workflow_dispatch`)                  |
-| `Client/tests/e2e/artifact-smoke/**.spec.ts`                         | **new**: the install/boot/connect/update/rollback/media/recovery specs, parameterized by artifact  |
-| `Client/tests/e2e/scripts/run-artifact-smoke.mjs`                    | **new**: resolve/download/install the artifact, then drive Playwright                              |
-| `Client/tests/e2e/scripts/install-livekit.mjs`                       | add the arm64 archives + digests so media runs on ARM64 (row 11)                                   |
-| `Client/tests/e2e/support/native-app.ts`                             | accept an installed-artifact path (Windows) without changing the existing CDP semantics            |
-| `Client/tests/e2e/support/artifact-app.ts`                           | **new**: the Linux (tauri-driver/WebKitWebDriver) driver, Windows-shaped API                       |
-| `Client/playwright.config.artifact.ts`                               | **new**: the artifact-smoke project set                                                            |
-| `Client/package.json`                                                | one `test:e2e:artifact` script                                                                     |
-| `Client/tests/e2e/support/native-update-server.ts`                   | generalize the fixture to AppImage + NSIS targets (update/rollback)                                |
-| `scripts/ci-select.mjs`, `scripts/ci-select.test.mjs`                | a capability/selection for the PR-time smoke leg **only if** Open question 1 chooses one           |
-| `docs/contributing.md`                                               | the new smoke script/workflow in the Build & dev and check tables                                  |
-| `docs/architecture/desktop-release.md` (or the existing release doc) | where the artifact matrix and its evidence live                                                    |
-| `docs/plans/beta-requirements-traceability-2026-08-23.md`            | the BPR-010 evidence block (`:56`), a dated append                                                 |
-| `docs/plans/repo-health-issue-register-2026-08-23.md`                | BG-04's B7-half closure note (`:298`), a dated append                                              |
+| Path                                                      | Change                                                                                             |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `Server/updater/assets.go`                                | add the `windows-aarch64-nsis` row (decision 4)                                                    |
+| `Server/updater/coverage_boost_test.go`                   | the arch row in `TestFindClientAssets_ByTarget` and the negative case                              |
+| `Server/api/client_update_test.go`                        | the arm64 target returns the arm64 artifact, not 204                                               |
+| `.github/workflows/release.yml`                           | the Windows ARM64 client build job; arch-parameterized staging; collect + publish the arm64 assets |
+| `.github/workflows/client-artifact-smoke.yml`             | **new**: reusable smoke workflow (`workflow_call`/`schedule`/`workflow_dispatch`)                  |
+| `Client/tests/e2e/artifact-smoke/**.spec.ts`              | **new**: the install/boot/connect/update/rollback/media/recovery specs, parameterized by artifact  |
+| `Client/tests/e2e/scripts/run-artifact-smoke.mjs`         | **new**: resolve/download/install the artifact, then drive Playwright                              |
+| `Client/tests/e2e/scripts/install-livekit.mjs`            | add the arm64 archives + digests so media runs on ARM64 (row 11)                                   |
+| `Client/tests/e2e/support/native-app.ts`                  | accept an installed-artifact path (Windows) without changing the existing CDP semantics            |
+| `Client/tests/e2e/support/artifact-app.ts`                | **new**: the Linux (tauri-driver/WebKitWebDriver) driver, Windows-shaped API                       |
+| `Client/playwright.config.artifact.ts`                    | **new**: the artifact-smoke project set                                                            |
+| `Client/package.json`                                     | one `test:e2e:artifact` script                                                                     |
+| `Client/tests/e2e/support/native-update-server.ts`        | generalize the fixture to AppImage + NSIS targets (update/rollback)                                |
+| `scripts/ci-select.mjs`, `scripts/ci-select.test.mjs`     | a capability/selection for the PR-time smoke leg **only if** Open question 1 chooses one           |
+| `docs/contributing.md`                                    | the new smoke script/workflow in the Build & dev and check tables                                  |
+| `docs/architecture/client.md`                             | the testing/release narrative (`:118-128`) gains the four-artifact smoke matrix                    |
+| `docs/plans/beta-requirements-traceability-2026-08-23.md` | the BPR-010 evidence block (`:56`), a dated append                                                 |
+| `docs/plans/repo-health-issue-register-2026-08-23.md`     | BG-04's B7-half closure note (`:298`), a dated append                                              |
 
 **Never** edit `Server/db/dbgen/`, `Server/ws/message_types.go`,
 `Client/src/lib/protocolTypes.ts`, `protocol/schema.json`, `gendocs:*` blocks,
@@ -239,7 +239,7 @@ commit, no `Co-Authored-By` trailer. Every commit must leave
   table plus the negative case so an unknown target still returns empty.
 - **Why:** decision 4 requires the row, and without it the Windows ARM64 client
   the new build job produces can never be offered an update — the server answers
-  204 for every target it does not know (`Server/api/client_update.go:91-97`).
+  204 for every target it does not know (`Server/api/client_update.go:76-81`).
 - **Validate:** `cd Server && go test ./updater/ ./api/ -run 'FindClientAssets|ClientUpdate'` green;
   add one `client_update_test.go` case asserting the arm64 target serves the
   arm64 `.nsis.zip` pair and that a `.sig`-only asset still yields no update.
@@ -277,7 +277,7 @@ read`, `persist-credentials: false` and `package-manager-cache: false`.
   app. On Windows reuse `native-app.ts` (row 7); add `artifact-app.ts` for Linux
   using `tauri-driver` + `webkit2gtk-driver` under `xvfb-run`. The spec asserts
   the app boots to the connect page and logs in (the `nativeLogin` shape,
-  `Client/tests/e2e/native/helpers.ts:55-88`).
+  `Client/tests/e2e/native/helpers.ts:55-89`).
 - **Why:** this is the milestone's core — "exercised by CI, not just built".
 - **Gotcha:** do not modify `native-app.ts`'s existing CDP path or the required
   native job; add an installed-binary parameter and leave every default
@@ -298,7 +298,7 @@ typecheck:e2e` and `lint` clean; `npx prettier --check` on the new files.
   a voice channel and assert decoded media, reusing the native
   `voice-controls.spec.ts` control assertions (`:8-47`) and, where a second
   client is available, the fullstack decoded-media shape
-  (`Client/tests/e2e/fullstack/media.spec.ts:11-23`).
+  (`Client/tests/e2e/fullstack/media.spec.ts:8-23`).
 - **Why:** row 11 — the media helper refuses non-x64 today, so without this the
   ARM64 legs could only claim "booted", not "used media", which BPR-010
   explicitly requires (`beta-requirements-traceability-2026-08-23.md:56`).
@@ -315,7 +315,7 @@ typecheck:e2e` and `lint` clean; `npx prettier --check` on the new files.
   pair for Linux — so the fixture's `/api/v1/client-update/{target}/{current}`
   answers the target under test. Add `artifact-smoke/update.spec.ts`: install
   the artifact built for the **previous** published release (resolved the way
-  `upgrade-rehearsal.yml:119-144` resolves it, with `gh`), boot it, point it at
+  `upgrade-rehearsal.yml:135-144` resolves it, with `gh`), boot it, point it at
   the fixture gateway, update to the artifact built for this commit, assert the
   version changed and the session/profile persisted, then **roll back** by
   reinstalling the previous artifact and asserting the version returned and the
@@ -325,9 +325,9 @@ typecheck:e2e` and `lint` clean; `npx prettier --check` on the new files.
   rejection already has coverage (`packaged-update.spec.ts:57-75`); what is
   missing is the reverse direction and the shipped artifacts.
 - **Gotcha:** the client updater refuses a foreign installer and a target with no
-  artifact (`Server/api/client_update.go:88-97`); the fixture must serve the
+  artifact (`Server/api/client_update.go:76-81`); the fixture must serve the
   exact `{os}-{arch}-{installer}` the binary requests (row 18). A `.deb` install
-  must get 204, never the AppImage (`update_commands.rs:195-208`).
+  must get 204, never the AppImage (`update_commands.rs:193-205`).
 - **Validate:** the update leg asserts a concrete version change and a rollback
   to the prior version, not just "no error"; the fixture is observed serving 204
   for a mismatched target. Commit.
@@ -358,10 +358,12 @@ typecheck:e2e` and `lint` clean; `npx prettier --check` on the new files.
   (`windows-latest`/`windows-11-arm`, `ubuntu-22.04`/`ubuntu-22.04-arm`), each
   job following the release-workflow hardening (row 12) and running
   `run-artifact-smoke.mjs`. Call it from `release.yml` as a job that `needs` the
-  four client build jobs and gates `release-server-docker`/`publish` (mirroring
-  `upgrade-rehearsal`'s placement, `release.yml:601-618`). Its job name is
-  **not** a required context. Apply Open question 1's answer for any per-PR leg
-  (which may add a `ci-select.mjs` capability, with its unit case).
+  four client build jobs (downloading their uploaded artifacts), and add it to
+  `publish.needs` so nothing is published before the four artifacts have booted
+  — mirroring `upgrade-rehearsal`'s placement, which gates the push and the
+  release the same way (`release.yml:601-618`). Its job name is **not** a
+  required context. Apply Open question 1's answer for any per-PR leg (which may
+  add a `ci-select.mjs` capability, with its unit case).
 - **Why:** the smoke is only "exercised by CI" if a workflow actually runs it,
   and it must not re-run at tag time a job whose bugs were never seen pre-merge
   (row 16). The reusable shape keeps the nightly and the release on one harness.
