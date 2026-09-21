@@ -29,6 +29,7 @@ import {
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { E2EEIdentity, rawFromBase64 } from "../features/voice/e2eeIdentity";
+import { E2EEEpoch } from "../features/voice/e2eeEpoch";
 
 const log = createLogger("livekitE2EE");
 
@@ -57,9 +58,49 @@ export class E2EEManager {
   private set _ecdhKeyPair(value: CryptoKeyPair | null) {
     this._identity.ecdhKeyPair = value;
   }
-  /** The 256-bit symmetric room key (plaintext). Only held by the key holder
-   *  initially; other participants receive it via ECDH-wrapped offers. */
-  private _roomKey: Uint8Array | null = null;
+  /** Room key, epoch, offer high-water marks and rotation. See e2eeEpoch.ts. */
+  private _epoch = new E2EEEpoch({
+    isKeyHolder: () => this._isKeyHolder,
+    getChannelId: () => this._channelId,
+    getCurrentChannelId: () => this.deps.getCurrentChannelId(),
+    getSessionGeneration: () => this._sessionGeneration,
+    getEcdhKeyPair: () => this._ecdhKeyPair,
+    getPeerPublicKeys: () => this._peerPublicKeys,
+    applyRoomKey: (roomKey) => this.applyRoomKey(roomKey),
+    distributeRoomKey: (keypair, roomKey, peers) => this.distributeRoomKey(keypair, roomKey, peers),
+  });
+  /** The 256-bit symmetric room key (plaintext). */
+  private get _roomKey(): Uint8Array | null {
+    return this._epoch.roomKey;
+  }
+  private set _roomKey(value: Uint8Array | null) {
+    this._epoch.roomKey = value;
+  }
+  /** Highest offer epoch applied per sender (OC-0001). */
+  private get _peerOfferEpochs(): Map<number, number> {
+    return this._epoch.peerOfferEpochs;
+  }
+  /** True while a key rotation is in progress. */
+  private get _rotatingKey(): boolean {
+    return this._epoch.rotatingKey;
+  }
+  private set _rotatingKey(value: boolean) {
+    this._epoch.rotatingKey = value;
+  }
+  /** A keyed-peer leave deferred a rekey behind an in-flight rotation. */
+  private get _rotationPending(): boolean {
+    return this._epoch.rotationPending;
+  }
+  private set _rotationPending(value: boolean) {
+    this._epoch.rotationPending = value;
+  }
+  /** Monotonic rotation counter. */
+  private get _e2eeEpoch(): number {
+    return this._epoch.epoch;
+  }
+  private set _e2eeEpoch(value: number) {
+    this._epoch.epoch = value;
+  }
   /** Peer ECDH public keys indexed by userId. */
   private _peerPublicKeys: Map<number, CryptoKey> = new Map();
   /** Invalidates work for a departed membership while allowing a fresh rejoin. */
@@ -70,11 +111,6 @@ export class E2EEManager {
    *  replay of a key we already moved a peer off of from overwriting their
    *  current live key (OC-0011). */
   private _retiredPeerKeys: Map<number, Set<string>> = new Map();
-  /** Highest offer epoch applied per sender (OC-0001). The holder binds its
-   *  epoch into every wrapped room key; an offer below this mark is a
-   *  superseded key and is discarded. Per sender because each client's epoch
-   *  counter is local; reset when that sender's ephemeral key is replaced. */
-  private _peerOfferEpochs: Map<number, number> = new Map();
   /** True if this client is the key holder (longest-present participant). */
   private _isKeyHolder = false;
   /** Channel this exchange runs in, set at setupKeyExchange entry. The session
@@ -85,15 +121,6 @@ export class E2EEManager {
   /** Resolver/rejector for non-key-holders waiting to receive the room key via offer. */
   private _roomKeyResolver: (() => void) | null = null;
   private _roomKeyRejector: ((err: Error) => void) | null = null;
-  /** Guard: true while a key rotation is in progress (prevents concurrent rotations). */
-  private _rotatingKey = false;
-  /** Set when a keyed-peer leave coincides with an in-flight rotation: the rekey
-   *  is deferred (not dropped) and re-run when the current rotation finishes, so
-   *  a member that left mid-rotation is excluded from the fresh room key. */
-  private _rotationPending = false;
-  /** Monotonic counter incremented on every key rotation. handleOffer captures the
-   *  epoch before async work and discards the result if epoch changed (stale offer). */
-  private _e2eeEpoch = 0;
   /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
   private _pendingAnnounces: Array<{
     userId: number;
@@ -109,10 +136,6 @@ export class E2EEManager {
    *  simply overwrites the previous one. Cleared in clearState(). */
   private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
     new Map();
-  /** Periodic key rotation timer — fires every KEY_ROTATION_INTERVAL_MS when key holder. */
-  private _keyRotationTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Interval between periodic key rotations (5 minutes). */
-  private static readonly KEY_ROTATION_INTERVAL_MS = 5 * 60 * 1000;
   /** Bumped every time clearState() tears down a session. An in-flight
    *  setupKeyExchange/reannounceForReconnect captures this before its first
    *  await and re-checks it before publishing to this._ecdhKeyPair — a plain
@@ -234,7 +257,7 @@ export class E2EEManager {
       await this.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
       if (this._sessionGeneration !== myGeneration) return false;
       log.info("E2EE: key holder — generated room key", { channelId });
-      this.startKeyRotationTimer();
+      this._epoch.startKeyRotationTimer();
     }
 
     // And once more after keyProvider.setKey's await: a torn-down attempt
@@ -844,7 +867,7 @@ export class E2EEManager {
       const myUserId = authStore.getState().user?.id ?? 0;
       if (this._isKeyHolder && myUserId !== 0 && userId < myUserId) {
         this._isKeyHolder = false;
-        this.clearKeyRotationTimer();
+        this._epoch.clearKeyRotationTimer();
         log.info("E2EE: stood down as key holder — announcing peer has a lower user id", {
           userId,
           myUserId,
@@ -1034,7 +1057,7 @@ export class E2EEManager {
       // handleParticipantLeft can still re-promote us later.
       if (this._isKeyHolder) {
         this._isKeyHolder = false;
-        this.clearKeyRotationTimer();
+        this._epoch.clearKeyRotationTimer();
         log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
           fromUserId,
         });
@@ -1221,14 +1244,6 @@ export class E2EEManager {
     }
   }
 
-  /** Install a fresh key before distribution; return null when superseded. */
-  private async rotateRoomKey(): Promise<Uint8Array | null> {
-    this._e2eeEpoch++;
-    const roomKey = generateRoomKey();
-    this._roomKey = roomKey;
-    return (await this.applyRoomKey(roomKey)) ? roomKey : null;
-  }
-
   /**
    * Handle a participant leaving the voice channel. If we become the new key
    * holder, rotate the room key and distribute to remaining peers. If we are
@@ -1365,7 +1380,7 @@ export class E2EEManager {
 
       // Rotate the room key — generate a new one and distribute to all remaining peers.
       try {
-        const roomKey = await this.rotateRoomKey();
+        const roomKey = await this._epoch.rotateRoomKey();
         if (roomKey === null) {
           // Superseded while setKey was in flight — the now-current session
           // owns its own key-holder role and rotation; nothing left to do.
@@ -1414,7 +1429,7 @@ export class E2EEManager {
         if (this._sessionGeneration === myGeneration) {
           this._rotatingKey = false;
           // A leave during this rotation may have deferred another rekey.
-          await this.drainPendingRotationOrArmTimer();
+          await this._epoch.drainPendingRotationOrArmTimer();
         }
       }
     } else if (wasKeyHolder && hadPeerKey) {
@@ -1430,80 +1445,14 @@ export class E2EEManager {
         // when the in-flight rotation completes, excluding them.
         this._rotationPending = true;
       } else {
-        await this.rotateKeyPeriodically();
+        await this._epoch.rotateKeyPeriodically();
       }
     }
   }
 
-  // ── Periodic key rotation ──────────────────────────────────────────────────
-
-  /** Start the periodic key rotation timer (only meaningful for key holders). */
-  private startKeyRotationTimer(): void {
-    this.clearKeyRotationTimer();
-    if (!this._isKeyHolder) return;
-    this._keyRotationTimer = setTimeout(() => {
-      this._keyRotationTimer = null;
-      void this.rotateKeyPeriodically();
-    }, E2EEManager.KEY_ROTATION_INTERVAL_MS);
-    log.debug("E2EE: key rotation timer started", {
-      intervalMs: E2EEManager.KEY_ROTATION_INTERVAL_MS,
-    });
-  }
-
-  private clearKeyRotationTimer(): void {
-    if (this._keyRotationTimer !== null) {
-      clearTimeout(this._keyRotationTimer);
-      this._keyRotationTimer = null;
-    }
-  }
-
-  /** Rotate the room key on a timer tick (forward secrecy improvement). */
-  async rotateKeyPeriodically(): Promise<void> {
-    if (!this._isKeyHolder || this._rotatingKey) return;
-    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
-    if (!channelId) return;
-
-    const myGeneration = this._sessionGeneration;
-    this._rotatingKey = true;
-    try {
-      const roomKey = await this.rotateRoomKey();
-      if (roomKey === null) {
-        // Superseded while setKey was in flight — the now-current session
-        // owns its own key-holder role and rotation; nothing left to do.
-        return;
-      }
-      log.info("E2EE: periodic key rotation", { channelId, epoch: this._e2eeEpoch });
-
-      const keypair = this._ecdhKeyPair;
-      if (keypair) {
-        const peerCount = this._peerPublicKeys.size;
-        // Pass the live map (not a snapshot): peers that arrive mid-loop are
-        // still visited, matching the original behavior — only the
-        // keypair/room-key ownership check is new here.
-        await this.distributeRoomKey(keypair, roomKey, this._peerPublicKeys);
-        log.info("E2EE: distributed periodically rotated key", { peerCount });
-      }
-    } catch (err) {
-      log.error("E2EE: periodic key rotation failed", err);
-    } finally {
-      if (this._sessionGeneration === myGeneration) {
-        this._rotatingKey = false;
-        // Also drain when another current-session key superseded this one.
-        await this.drainPendingRotationOrArmTimer();
-      }
-    }
-  }
-
-  /** After a rotation completes: if a keyed-peer leave coincided with it (its
-   *  rekey was deferred, not dropped), run one more rotation to exclude the
-   *  departed member; otherwise re-arm the periodic rotation timer. */
-  private async drainPendingRotationOrArmTimer(): Promise<void> {
-    if (this._rotationPending) {
-      this._rotationPending = false;
-      await this.rotateKeyPeriodically();
-      return;
-    }
-    this.startKeyRotationTimer();
+  /** Rotate the room key on a timer tick. See E2EEEpoch.rotateKeyPeriodically. */
+  rotateKeyPeriodically(): Promise<void> {
+    return this._epoch.rotateKeyPeriodically();
   }
 
   /** Clear all E2EE state (called on voice leave). The long-term identity
@@ -1532,7 +1481,7 @@ export class E2EEManager {
     // fresh channel gets a fresh bucket server-side, so stale timestamps
     // from the old channel must not throttle the new one.
     this._offerSendTimes.length = 0;
-    this.clearKeyRotationTimer();
+    this._epoch.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a
     // silent success with no room key.
