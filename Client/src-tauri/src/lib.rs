@@ -6,6 +6,7 @@ mod constants;
 mod credentials;
 #[cfg(windows)]
 mod dpapi;
+mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod http_proxy;
@@ -105,6 +106,7 @@ pub fn run() {
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
+        .manage(external_content::ExternalContentState::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
@@ -136,6 +138,8 @@ pub fn run() {
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
             http_proxy::stop_http_proxy,
+            external_content::external_preview,
+            external_content::external_image,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

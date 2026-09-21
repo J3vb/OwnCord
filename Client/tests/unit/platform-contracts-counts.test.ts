@@ -36,8 +36,8 @@ const invokeNames = new Set(
   ),
 ).size;
 
-// Both spellings count: 21 `#[tauri::command]` plus 13
-// `#[tauri::command(async)]`. Matching the exact bracket form undercounts to 21.
+// Both spellings count: 23 `#[tauri::command]` plus 12
+// `#[tauri::command(async)]`. Matching the exact bracket form undercounts to 23.
 const commandHandlers = readSources(srcTauri, /\.rs$/).reduce(
   (total, text) => total + (text.match(/#\[tauri::command/g)?.length ?? 0),
   0,
@@ -56,7 +56,7 @@ describe("platform-contracts count table matches the tree", () => {
   it("counts what the table says it counts", () => {
     expect(tauriImporters).toBe(20);
     expect(invokeNames).toBe(28);
-    expect(commandHandlers).toBe(33);
+    expect(commandHandlers).toBe(35);
   });
 
   it("states those same counts in the table", () => {
