@@ -10,7 +10,12 @@
 // fallback (deprecated but widely supported).
 // =============================================================================
 
-import { createRNNWasmModule } from "@jitsi/rnnoise-wasm";
+// Deep import, not the barrel (B7-7 / C-07): the barrel also re-exports
+// createRNNWasmModuleSync, and the package has no `sideEffects` field, so the
+// sync variant — ~1.9 MB with the WASM embedded as base64 — ships in the
+// livekitSession chunk even though nothing calls it. Only the async factory is
+// used; its WASM is still fetched at runtime via locateFile below.
+import createRNNWasmModule from "@jitsi/rnnoise-wasm/dist/rnnoise";
 import { Track, type TrackProcessor, type AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
 

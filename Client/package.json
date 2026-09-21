@@ -13,6 +13,8 @@
     "dev:desktop": "vite --config vite.config.desktop.ts",
     "build": "npm run build:desktop",
     "build:desktop": "tsc -p tsconfig.build.json && vite build --config vite.config.desktop.ts",
+    "build:budget": "vite build --config vite.config.desktop.ts --manifest --outDir dist-budget --emptyOutDir",
+    "check:budgets": "node scripts/bundle-budget.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

@@ -139,6 +139,11 @@ const CHECK_CLIENT = [
   step("npm", ["run", "lint"], "Client"),
   step("npm", ["run", "knip"], "Client"),
   step("npm", ["run", "test:coverage"], "Client"),
+  // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
+  // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs
+  // identically on every platform — no optional() probe needed.
+  step("npm", ["run", "build:budget"], "Client"),
+  step("npm", ["run", "check:budgets"], "Client"),
 ];
 
 // Matches ci.yml's Rust Unit Tests job exactly: --lib for tests, --all-targets

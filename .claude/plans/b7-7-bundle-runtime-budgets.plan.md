@@ -5,6 +5,22 @@
 > **Branch:** `feat/b7-7-bundle-runtime-budgets`.
 > **Worktree:** `.claude/worktrees/b7-7`.
 > **Drafted:** 2026-09-20. **Base commit:** `3634cb0d` (`dev`).
+> **Amended 2026-09-20 (owner answers to the five open questions, applied in
+> the implementation PR):** Q1 — the PRD's three stale startup-path claims are
+> amended in-tree in the same PR (outcome cell, bundle-facts paragraph, risk
+> row), with dated notes in the PRD's existing convention. Q2 — the
+> `livekitSession` budget is **800 kB now** (not 1,400: that ceiling passes
+> the exact barrel regression this milestone fixes at 1,358 kB CLI gzip-9),
+> plus a `forbidEmbeddedWasm` assertion over **every** JS chunk, generalising
+> `forbidWasmInStartup`, so the regression is caught exactly rather than by
+> size. No improvised tighter number — the ratchet rule leaves the real
+> ceiling to B7-9. Q3 — the startup boundary is the entry's **static
+> closure**, not a fixed file list; measured 87,982 B zlib-9, so the 90 kB
+> ceiling has only ~2 kB headroom. Q4 — Node `zlib.gzipSync` level 9 is
+> authoritative, amending decision 10's `gzip -9` (implementation only, level
+> and format unchanged); both figures are recorded once in the B7-0 baseline
+> appendix as a bridge. Q5 — "runtime" is bundle-size-only; no
+> runtime-timing gate.
 
 ## Summary
 
@@ -105,9 +121,10 @@ Touch only these. Anything else → record **BLOCKED**.
 | `docs/plans/b7-0-client-baseline-2026-09-19.md` | append the B7-7 re-measured budget baseline (measurement record, not a status row) |
 
 **Never** edit generated files, `Server/**`, `Client/vite.config*.ts` build
-semantics, `docs/plans/b7-shared-client-platform-desktop-parity.prd.md` beyond
-the one B7-7 plan-link cell (the orchestrator owns the outcome wording),
-`CHANGELOG.md`, or any status row.
+semantics, `CHANGELOG.md`, or any status row. The PRD's B7-7 outcome cell,
+bundle-facts paragraph and bundle-budget risk row are amended in this PR per
+the Q1 owner answer (dated factual-correction notes, the PRD's existing
+convention); every other PRD edit still belongs to the orchestrator.
 
 ## Tasks
 
@@ -117,26 +134,31 @@ commit, no `Co-Authored-By` trailer.
 ### Task 0: Baseline and recount
 
 - **Action:** build with the manifest and record every number row 3 asserts,
-  using the documented `gzip -9 -c FILE | wc -c` method. Record the startup
-  closure (entry + static imports + linked CSS), each named chunk, and the
-  `MainPage` static closure. Confirm rows 1, 2 and 4 with the commands in the
-  table.
+  with **both** the documented `gzip -9 -c FILE | wc -c` method and Node
+  `zlib.gzipSync` level 9 (Q4 — zlib is authoritative, the CLI figures are the
+  one-time bridge to the B7-0 record). Record the startup closure (entry +
+  static imports + linked CSS), each named chunk, and the `MainPage` static
+  closure. Confirm rows 1, 2 and 4 with the commands in the table.
 - **Why:** the budgets this milestone writes are derived from these numbers, and
   the milestone's second clause is only knowable from them.
-- **Validate:** the recorded `livekitSession` is ~1,358 kB, not ~1,345 kB — the
-  1 % spread of row 10 proves which tool produced it. Keep the listing; Task 4
-  diffs against it.
+- **Validate:** the recorded zlib-9 `livekitSession` is ~1,344.5 kB and the
+  CLI bridge figure ~1,358 kB — the spread of row 10 proves both tools were
+  run. Keep the listing; Task 4 diffs against it.
 
 ### Task 1: The budget gate
 
-- **Action:** write `Client/bundle-budgets.json` with the decision-10 figures —
-  startup closure ≤ 90 kB, `MainPage` ≤ 60 kB, `livekit` ≤ 135 kB **and lazy**,
-  `livekitSession` ≤ 1,400 kB (Task 4 re-tightens it), plus a `lazy` list for
-  `livekit`/`livekitSession` and a `forbidWasmInStartup` assertion. Write
-  `Client/scripts/bundle-budget.mjs` to read the built manifest, compute the
-  entry's **static closure** (not just `index`+`style`, see the open question),
-  gzip each file, compare against the JSON, and exit 2 when the manifest or a
-  named chunk is missing. It must print one line per budget with
+- **Action:** write `Client/bundle-budgets.json` with the amended decision-10
+  figures — startup closure ≤ 90 kB (the entry's static closure, Q3), `MainPage`
+  ≤ 60 kB, `livekit` ≤ 135 kB **and lazy**, `livekitSession` ≤ **800 kB** (Q2,
+  not the 1,400 kB placeholder — 1,400 passes the barrel regression at 1,358 kB;
+  Task 4 would have re-tightened it, the answer adopts the tight figure from the
+  start), plus a `lazy` list for `livekit`/`livekitSession` and a
+  `forbidEmbeddedWasm` assertion over every JS chunk (Q2's generalisation of
+  `forbidWasmInStartup`). Write `Client/scripts/bundle-budget.mjs` to read the
+  built manifest, compute the entry's **static closure** (not just
+  `index`+`style`), gzip each file with Node `zlib.gzipSync` level 9 (Q4 — no
+  CLI, no `optional()` probe), compare against the JSON, and exit 2 when the
+  manifest or a named chunk is missing. It must print one line per budget with
   actual/budget/verdict.
 - **Why:** C-08's closure line is "Recorded gzip budgets fail CI on regression
   and distinguish startup from lazy feature cost"
@@ -172,10 +194,8 @@ commit, no `Co-Authored-By` trailer.
   (`ci-select.mjs:161-169`); `Client/scripts/` selects only `client`. Do not
   move it.
 - **Gotcha:** `gzip` is on `ubuntu-latest` but not guaranteed on a Windows dev
-  box. If the script shells to `gzip`, mirror `run.mjs`'s `optional()` probe so
-  the local task prints a SKIP rather than a false failure; in CI it always
-  runs. (If the owner picks the Node-zlib method in the open question, this
-  disappears.)
+  box. **Resolved (Q4):** the script uses Node `zlib.gzipSync` level 9, so the
+  `optional()` probe is unnecessary — the gate runs identically everywhere.
 - **Validate:** `node scripts/run.mjs check:client` exits 0 and its output shows
   the budget build and the budget lines. `npx actionlint` is skipped locally on
   Windows only; CI runs it. Commit.
@@ -203,13 +223,15 @@ commit, no `Co-Authored-By` trailer.
   is 0; `npm --prefix Client test` count does not drop; `typecheck` and
   `typecheck:build` clean. Commit.
 
-### Task 4: Re-baseline and tighten the ratchet
+### Task 4: Re-baseline and record the ratchet
 
-- **Action:** with the fix landed, re-measure every chunk and rewrite
-  `Client/bundle-budgets.json` against the fixed bundle. Replace the
-  `livekitSession` 1,400 kB placeholder with the owner's chosen figure (open
-  question 2 — the recommended default is decision 10's post-decomposition ≤
-  800 kB, now met pre-decomposition). Append the before/after table to
+- **Action:** with the fix landed, re-measure every chunk and record the
+  measured values in `Client/bundle-budgets.json`'s notes and the budget
+  baseline appendix of `docs/plans/b7-0-client-baseline-2026-09-19.md`
+  (before/after table, both the zlib-9 figures and the one-time CLI bridge
+  figures, Q4). The `livekitSession` budget is the owner's 800 kB (Q2) —
+  adopted in Task 1, verified here; no improvised tighter value (Q2/ratchet
+  rule). Append the before/after table to
   `docs/plans/b7-0-client-baseline-2026-09-19.md`.
 - **Why:** a gate set 70× above the measured value cannot catch a regression —
   the "gate that cannot fail" anti-pattern B7-3 and B7-6 both name. The
@@ -217,9 +239,10 @@ commit, no `Co-Authored-By` trailer.
 - **Gotcha:** the ratchet rule (decision 9,
   `b7-shared-client-platform-desktop-parity.prd.md:385`) moves thresholds only
   with a decomposition milestone. This is **not** a decomposition; it is a
-  tree-shake fix, so the tightened number must be the one the owner already
-  chose (≤ 800 kB), not an improvised tighter value. Record the measured value
-  beside the budget so B7-9 can ratchet further.
+  tree-shake fix, so the number is the owner's own post-decomposition ≤ 800 kB,
+  not a new one. Record the measured ~20 kB beside the budget so B7-9 can
+  ratchet further. The startup closure ceiling stays 90 kB with only ~2 kB
+  headroom (Q3) — that tightness is the point.
 - **Validate:** `node scripts/bundle-budget.mjs` exits 0 at the new numbers;
   prove red by lowering one by 1, restore. `npm --prefix Client run build:desktop`
   still exits 0. Commit.
@@ -229,7 +252,8 @@ commit, no `Co-Authored-By` trailer.
 - **Action:** add `build:budget` and `check:budgets` to the Build & dev table
   (`docs/contributing.md:87-88`) and the budget gate to the `check:client` row
   (`:36`). Ensure the appended `docs/plans/b7-0-client-baseline-2026-09-19.md`
-  section states the method (`gzip -9 -c`, decision 10) and the before/after.
+  section states the method (Node `zlib.gzipSync` level 9, Q4 — recorded as
+  amending decision 10's `gzip -9` implementation) and the before/after.
 - **Why:** B7-1 set the precedent that a new gate is documented where the
   commands live; B7-0 set the precedent that budget numbers are recorded once.
 - **Validate:** `npx prettier --check --ignore-unknown` on the changed files
@@ -263,14 +287,14 @@ npm run check:hygiene
 
 ## Risks
 
-| Risk                                                                                                   | Likelihood | Impact | Mitigation                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------ | ---------- | ------ | --------------------------------------------------------------------------------------------------------------------------- |
-| The gate is green only because the budgets sit just above today's value, and cannot catch a regression | High       | Medium | Task 1 proves red by lowering a budget; Task 4 tightens `livekitSession` to the owner's figure and records headroom         |
-| The gzip tool drifts between the number recorded and the number checked (1 % spread, row 10)           | Medium     | Medium | Pin one tool in the script and in `bundle-budgets.json`'s method note; the open question settles which                      |
-| The deep RNNoise import changes runtime behavior instead of only the bundle                            | Low        | High   | Lift only the specifier; `noise-suppression-restart` and `rnnoise-worklet` suites stay green; WASM still fetched at runtime |
-| `--manifest` leaks into the shipped desktop build and moves `dist/`                                    | Medium     | Medium | `build:budget` is a separate script writing to `dist-budget/`; `build:desktop` is untouched                                 |
-| The budget step silently never runs because it lands in a skipped job                                  | Low        | High   | It rides `client-check`, the required `Client Static Checks` context, selected by every `Client/**` change (row 9)          |
-| A chunk is renamed and the budget file stops matching it                                               | Medium     | Low    | The script exits 2 on a missing named chunk rather than passing over an empty set                                           |
+| Risk                                                                                                   | Likelihood | Impact | Mitigation                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------ | ---------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The gate is green only because the budgets sit just above today's value, and cannot catch a regression | High       | Medium | Task 1 proves red by lowering a budget; Task 4 tightens `livekitSession` to the owner's figure and records headroom                                                  |
+| The gzip tool drifts between the number recorded and the number checked (1 % spread, row 10)           | Medium     | Medium | Resolved by Q4: Node `zlib.gzipSync` level 9 is pinned in the script and named in `bundle-budgets.json`'s method note — identical on every platform, no CLI to drift |
+| The deep RNNoise import changes runtime behavior instead of only the bundle                            | Low        | High   | Lift only the specifier; `noise-suppression-restart` and `rnnoise-worklet` suites stay green; WASM still fetched at runtime                                          |
+| `--manifest` leaks into the shipped desktop build and moves `dist/`                                    | Medium     | Medium | `build:budget` is a separate script writing to `dist-budget/`; `build:desktop` is untouched                                                                          |
+| The budget step silently never runs because it lands in a skipped job                                  | Low        | High   | It rides `client-check`, the required `Client Static Checks` context, selected by every `Client/**` change (row 9)                                                   |
+| A chunk is renamed and the budget file stops matching it                                               | Medium     | Low    | The script exits 2 on a missing named chunk rather than passing over an empty set                                                                                    |
 
 ## Out of scope
 
@@ -279,56 +303,78 @@ npm run check:hygiene
 - **Decomposing `livekitSession.ts`.** B7-9. This milestone only stops the
   barrel from shipping dead WASM.
 - **A real "runtime" budget** (startup time, memory, main-thread work). B7-0
-  proved neither is measurable in this environment (`:205-216`); long-session
-  runtime evidence is B7-11's. See open question 5.
+  recorded the method and a real-desktop measurement now exists (owner
+  amendment 2026-09-20); it needs a human on a real desktop and is handled
+  separately. B7-7 is bundle-size-only — no runtime-timing gate (Q5). Long-session
+  runtime evidence is B7-11's.
 - **Raising the `index`/`livekit` budgets.** Ratchet-only per decision 9/10.
 - **`build:web` or any browser target.** B8, deferred post-beta.
-- **The PRD outcome wording and the register rows.** The orchestrator owns
-  `prd.md` and the register; this plan only links itself into the B7-7 cell.
+- **The PRD outcome wording and the register rows.** The register rows stay the
+  orchestrator's; the three stale startup-path claims in the PRD are amended
+  in this PR (Q1, dated notes).
 
 ## Open questions for the owner
 
-- [ ] **The milestone outcome's second clause is already true.** At `3634cb0d`,
+**Resolved 2026-09-20 — the owner accepted the review's answers to all five;**
+they are applied in the implementation PR and the affected tasks are amended
+above. Summary: (1) the PRD is amended in-tree, with dated notes; (2) 800 kB
+now, plus the no-embedded-WASM assertion over every chunk; (3) the startup
+boundary is the entry's static closure (~2 kB headroom under 90 kB); (4) Node
+`zlib.gzipSync` level 9 is authoritative, recorded as amending decision 10's
+`gzip -9` implementation; (5) bundle-size-only, no runtime-timing gate.
+
+- [x] **The milestone outcome's second clause is already true.** At `3634cb0d`,
       `livekit`/`livekitSession` are `dynamicImports`, not startup imports (row 2),
       and the PRD's bundle-facts paragraph (`:82-85`) says they "currently load on
       the startup path". Amend the B7-7 outcome at PR time to name only enforcement
       (and C-07's closure), or leave the wording and record the refutation in the
-      PR description? **Proposed default:** record the refutation in the PR
-      description and have the orchestrator amend the row when it links this plan —
-      do not rebuild a relocation that already happened.
-- [ ] **`livekitSession` budget after the tree-shake.** Decision 10 sets 1,400 kB
+      PR description? **Resolved:** amend the PRD in-tree (outcome cell,
+      bundle-facts paragraph, risk row) with dated notes — a PR description is not
+      enough; B7-18's reconciliation and HP-7 read the PRD.
+- [x] **`livekitSession` budget after the tree-shake.** Decision 10 sets 1,400 kB
       until B7-9, then 800 kB. The fix lands the chunk at ~20 kB, so 1,400 kB is
       ~70× headroom and barely a gate. Keep 1,400 kB as literally decided, or adopt
       the already-decided 800 kB now since it is met pre-decomposition?
-      **Proposed default:** adopt ≤ 800 kB (the owner's own post-decomposition
-      figure), record the measured ~20 kB beside it, and let B7-9 ratchet further.
-      That honours the decision rather than inventing a new number.
-- [ ] **Startup budget definition.** Decision 10 defines startup as "`index` +
+      **Resolved:** 800 kB now. 1,400 kB passes the exact barrel regression this
+      milestone fixes (1,358 kB CLI gzip-9); the looser number cannot detect the
+      bug. Alongside it, assert no JS chunk contains the `AGFzbQ` embedded-WASM
+      marker, so that regression is caught exactly rather than by size. 800 kB is
+      ~40× the measured 20 kB; B7-9 sets the real ceiling from measurement.
+- [x] **Startup budget definition.** Decision 10 defines startup as "`index` +
       `style`" (`:386`). Recounted, the entry's static closure also contains a
       1,193 B `core` chunk (`index.html` preloads it), so the true startup payload is
       87,801 B, not 86,608 B. Gate on `index` + `style` literally, or on the entry's
-      full static closure? **Proposed default:** the closure — otherwise a future
-      eagerly-imported chunk escapes the budget, which is the exact drift a startup
-      budget exists to catch.
-- [ ] **Which gzip is authoritative.** Decision 10 says `gzip -9` "as in the
+      full static closure? **Resolved:** the closure — a fixed list cannot see a new
+      eagerly-imported chunk, which is the one thing a startup budget exists to
+      catch. Measured closure is `index` + `style` + `core`, 87,982 B zlib-9; the 90 kB
+      ceiling keeps only ~2 kB headroom.
+- [x] **Which gzip is authoritative.** Decision 10 says `gzip -9` "as in the
       B7-0 baseline"; the B7-0 numbers used `gzip -9 -c FILE`. Node's `zlib` is
       cross-platform and gives ~1 % lower numbers (row 10), and `run.mjs`'s first
       rule is cross-platform steps. Match the baseline with the `gzip` CLI (ubuntu
       in CI, probed locally), or switch to Node `zlib` and re-baseline?
-      **Proposed default:** match the baseline with the `gzip` CLI so the recorded
-      numbers stay comparable to B7-0 and decision 10, and probe it locally.
-- [ ] **"Runtime" in the milestone name.** No runtime metric is enforceable in
+      **Resolved:** Node `zlib.gzipSync` level 9 — the owner's explicit call,
+      amending the earlier recorded decision's implementation (level and format
+      unchanged). The CLI is not a pinned implementation (GNU, macOS and busybox
+      differ), the plan itself concedes a CLI gate prints SKIP on a Windows dev
+      box, and for a Windows-first desktop app a gate people first meet in CI is a
+      bad gate. The "zlib is ~1 % lower" premise is not general — on this chunk
+      zlib is higher (20,192 vs 20,142) — and the spread is well inside the
+      headroom. Both figures are recorded once in the baseline appendix as a
+      bridge.
+- [x] **"Runtime" in the milestone name.** No runtime metric is enforceable in
       CI (B7-0 could not measure startup or memory). Confirm B7-7 is bundle-only,
       with runtime evidence deferred to B7-11's long-session work?
-      **Proposed default:** yes — bundle-only enforcement, and say so in the plan's
-      Out of scope and the PR description, so the milestone name is not a promise a
-      later reader assumes was kept.
+      **Resolved:** yes — bundle-size-only, no runtime-timing gate. The
+      startup-time and memory half has a defined method in the B7-0 record and
+      needs a human on a real desktop; it is handled separately.
 
 ## Acceptance
 
-- [ ] `Client/bundle-budgets.json` records the startup closure, `MainPage`,
-      `livekit` (+ lazy), `livekitSession`, and the no-WASM-on-startup assertion,
-      each with the method stated
+- [ ] `Client/bundle-budgets.json` records the startup closure (90 kB,
+      entry's static closure), `MainPage`, `livekit` (+ lazy), `livekitSession`
+      (800 kB, Q2), and the no-embedded-WASM assertion over every JS chunk,
+      each with the method stated (Node zlib-9, Q4)
 - [ ] `Client/scripts/bundle-budget.mjs` reads the built Vite manifest, fails
       closed (exit 2) on a missing input, and exits 1 above a budget
 - [ ] The gate was **observed failing** on a lowered budget before being trusted

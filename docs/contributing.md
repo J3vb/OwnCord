@@ -28,18 +28,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command                       | Description                                                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `npm run bootstrap`           | `npm ci` in all three package roots                                                                           |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                                  |
-| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                               |
-| `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests |
-| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                 |
-| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render             |
-| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                                          |
-| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                                        |
-| `npm run release:preflight`   | `check` plus a client production build                                                                        |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                            |
+| Command                       | Description                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                                                                           |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                                                                  |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                                               |
+| `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests, bundle budgets |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                                 |
+| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render                             |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                                                          |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                                                        |
+| `npm run release:preflight`   | `check` plus a client production build                                                                                        |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                                            |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.
@@ -80,14 +80,16 @@ next section, and using them directly is equally correct.
 
 **Build & dev**
 
-| Command                 | Description                                                          |
-| ----------------------- | -------------------------------------------------------------------- |
-| `npm run dev`           | Start Vite dev server with hot reload (alias for `dev:desktop`)      |
-| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)    |
-| `npm run build`         | TypeScript check + Vite production build (alias for `build:desktop`) |
-| `npm run build:desktop` | TypeScript check + production build of the Tauri target              |
-| `npm run tauri dev`     | Launch Tauri app in dev mode                                         |
-| `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)     |
+| Command                 | Description                                                               |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `npm run dev`           | Start Vite dev server with hot reload (alias for `dev:desktop`)           |
+| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)         |
+| `npm run build`         | TypeScript check + Vite production build (alias for `build:desktop`)      |
+| `npm run build:desktop` | TypeScript check + production build of the Tauri target                   |
+| `npm run build:budget`  | Scratch `--manifest` build into `dist-budget/` (input to `check:budgets`) |
+| `npm run check:budgets` | Bundle budget gate — gzip sizes vs `bundle-budgets.json`, fails closed    |
+| `npm run tauri dev`     | Launch Tauri app in dev mode                                              |
+| `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)          |
 
 **Tests**
 

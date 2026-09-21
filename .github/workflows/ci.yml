@@ -544,6 +544,13 @@ jobs:
       - name: Desktop build (Tauri target)
         run: npm run build:desktop
 
+      # B7-7 bundle budgets. A separate scratch build (--manifest writes
+      # dist-budget/, never the shipped dist/ that beforeBuildCommand emits)
+      # followed by the gate. Fails closed: a missing manifest or a renamed
+      # chunk is exit 2, over-budget is exit 1.
+      - name: Bundle budgets
+        run: npm run build:budget && npm run check:budgets
+
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
   # and must stay green — never "fix" a failing test by editing its assertions.
