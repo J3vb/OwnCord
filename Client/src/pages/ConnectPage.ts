@@ -109,7 +109,10 @@ export function createConnectPage(
 
   function selectHost(host: string): void {
     const known = compatibilityByHost.get(host);
-    if (known && (known.compatibility === "client-older" || known.compatibility === "server-older")) {
+    if (
+      known &&
+      (known.compatibility === "client-older" || known.compatibility === "server-older")
+    ) {
       incompatibleNotice.show(host, known.serverEpoch, PROTOCOL_EPOCH);
     } else {
       incompatibleNotice.hide();
@@ -365,7 +368,11 @@ export function createConnectPage(
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),
-    updateCompatibility: (host: string, compatibility: Compatibility, serverEpoch: number | null) => {
+    updateCompatibility: (
+      host: string,
+      compatibility: Compatibility,
+      serverEpoch: number | null,
+    ) => {
       compatibilityByHost.set(host, { compatibility, serverEpoch });
       serverPanel.updateCompatibility(host, compatibility);
     },

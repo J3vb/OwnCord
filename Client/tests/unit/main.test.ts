@@ -115,9 +115,11 @@ vi.mock("@lib/api", async (importOriginal) => {
         }),
         login: (...args: unknown[]) => mockLogin(...args),
         getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
-        getServerInfo: vi
-          .fn()
-          .mockResolvedValue({ name: "Test Server", protocol_epoch: 1, browser_client_enabled: false }),
+        getServerInfo: vi.fn().mockResolvedValue({
+          name: "Test Server",
+          protocol_epoch: 1,
+          browser_client_enabled: false,
+        }),
       };
     }),
   };

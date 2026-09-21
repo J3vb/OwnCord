@@ -899,10 +899,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
       mountUpdateNotifier(required.host);
     };
-    const unsubUpdateRequired = uiStore.subscribeSelector(
-      (s) => s.updateRequiredHost,
-      offerUpdate,
-    );
+    const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
     offerUpdate(uiStore.getState().updateRequiredHost);
 
     // Periodic health check — re-run every 15s so offline servers update when they come back

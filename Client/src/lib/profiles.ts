@@ -52,7 +52,10 @@ export interface HealthStatus {
 export type Compatibility = "compatible" | "client-older" | "server-older" | "unreachable";
 
 /** Derive compatibility from a server epoch; `null` means the probe failed. */
-export function deriveCompatibility(serverEpoch: number | null, clientEpoch: number): Compatibility {
+export function deriveCompatibility(
+  serverEpoch: number | null,
+  clientEpoch: number,
+): Compatibility {
   if (serverEpoch === null) return "unreachable";
   if (serverEpoch === clientEpoch) return "compatible";
   return serverEpoch > clientEpoch ? "client-older" : "server-older";

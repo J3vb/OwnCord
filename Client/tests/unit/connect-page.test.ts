@@ -1164,9 +1164,9 @@ describe("ConnectPage", () => {
       page.updateCompatibility("localhost:8443", "compatible", 1);
       (container.querySelector(".server-item") as HTMLElement).click();
 
-      expect(
-        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
-      ).toBe(false);
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
 
       page.destroy?.();
     });
@@ -1182,9 +1182,9 @@ describe("ConnectPage", () => {
       expect(container.querySelector(".srv-compat-badge")!.textContent).toBe(
         "Client update needed",
       );
-      expect(
-        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
-      ).toBe(false);
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
 
       page.destroy?.();
     });
@@ -1223,14 +1223,14 @@ describe("ConnectPage", () => {
       page.mount(container);
 
       page.showIncompatible("localhost:8443", 2, 1);
-      expect(
-        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
-      ).toBe(true);
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        true,
+      );
 
       (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
-      expect(
-        container.querySelector(".incompatible-notice")!.classList.contains("visible"),
-      ).toBe(false);
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
 
       // The list is untouched: clicking the row still fills the form.
       (container.querySelector(".server-item") as HTMLElement).click();
