@@ -20,7 +20,6 @@ import type {
 
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
-import { openImageLightbox } from "./media";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -875,4 +874,167 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     log.error("Download failed", { filename, error: String(err) });
     alert(`Download failed for ${filename} — check logs for details`);
   }
+}
+
+// -- Lightbox -----------------------------------------------------------------
+
+// Store the cleanup function for the active lightbox so rapid reopens
+// properly remove document-level listeners from the previous instance.
+let activeLightboxClose: (() => void) | null = null;
+
+/** Close the active lightbox, if any. Called on page teardown (logout, page
+ *  swap) so an open overlay doesn't survive onto the next page with live
+ *  document listeners and a revoked blob URL. */
+export function closeActiveLightbox(): void {
+  activeLightboxClose?.();
+}
+
+/** Open a full-screen lightbox overlay with zoom and pan. */
+export function openImageLightbox(src: string, alt: string, external?: ExternalImageSource): void {
+  // Close any existing lightbox (including its document listeners)
+  if (activeLightboxClose !== null) {
+    activeLightboxClose();
+    activeLightboxClose = null;
+  }
+
+  const overlay = createElement("div", { class: "image-lightbox" });
+
+  const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
+  const img = createElement("img", { src, alt });
+  if (external !== undefined) recoverEvictedImage(img, external);
+  imgWrap.appendChild(img);
+  overlay.appendChild(imgWrap);
+
+  const closeBtn = createElement("button", { class: "image-lightbox-close" });
+  closeBtn.appendChild(createIcon("x", 20));
+  overlay.appendChild(closeBtn);
+
+  // Zoom & pan state
+  let scale = 1;
+  let panX = 0;
+  let panY = 0;
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+
+  function applyTransform(): void {
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  }
+
+  function resetZoom(): void {
+    scale = 1;
+    panX = 0;
+    panY = 0;
+    applyTransform();
+  }
+
+  function onMove(e: MouseEvent): void {
+    if (!isDragging) return;
+    panX = panStartX + (e.clientX - dragStartX);
+    panY = panStartY + (e.clientY - dragStartY);
+    applyTransform();
+  }
+
+  function onUp(): void {
+    if (isDragging) {
+      isDragging = false;
+      overlay.classList.remove("dragging");
+    }
+  }
+
+  function close(): void {
+    overlay.remove();
+    ac.abort();
+    if (activeLightboxClose === close) activeLightboxClose = null;
+  }
+
+  // Mouse wheel zoom
+  imgWrap.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    const newScale = Math.max(0.5, Math.min(10, scale + delta * scale));
+    // Zoom towards cursor position
+    const rect = img.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2;
+    const cy = e.clientY - rect.top - rect.height / 2;
+    const factor = newScale / scale;
+    panX = panX - cx * (factor - 1);
+    panY = panY - cy * (factor - 1);
+    scale = newScale;
+    applyTransform();
+  });
+
+  // Single click to toggle zoom, with drag detection to avoid zoom on pan
+  let clickStartX = 0;
+  let clickStartY = 0;
+
+  img.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    clickStartX = e.clientX;
+    clickStartY = e.clientY;
+
+    if (scale > 1.1) {
+      // Zoomed in — start panning
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      panStartX = panX;
+      panStartY = panY;
+      overlay.classList.add("dragging");
+    }
+  });
+
+  img.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // Only toggle zoom if mouse didn't move (not a pan gesture)
+    const dx = Math.abs(e.clientX - clickStartX);
+    const dy = Math.abs(e.clientY - clickStartY);
+    if (dx > 5 || dy > 5) return;
+
+    if (scale > 1.1) {
+      resetZoom();
+    } else {
+      // Zoom to 3x towards click position
+      const rect = img.getBoundingClientRect();
+      const cx = e.clientX - rect.left - rect.width / 2;
+      const cy = e.clientY - rect.top - rect.height / 2;
+      scale = 3;
+      panX = -cx * 2;
+      panY = -cy * 2;
+      applyTransform();
+    }
+  });
+
+  // Use AbortController for cleanup of document-level listeners to prevent leaks
+  const ac = new AbortController();
+  document.addEventListener("mousemove", onMove, { signal: ac.signal });
+  document.addEventListener("mouseup", onUp, { signal: ac.signal });
+
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    close();
+  });
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") close();
+    if (e.key === "+" || e.key === "=") {
+      scale = Math.min(10, scale * 1.3);
+      applyTransform();
+    }
+    if (e.key === "-") {
+      scale = Math.max(0.5, scale / 1.3);
+      applyTransform();
+    }
+    if (e.key === "0") resetZoom();
+  }
+  document.addEventListener("keydown", onKey, { signal: ac.signal });
+
+  activeLightboxClose = close;
+  document.body.appendChild(overlay);
 }
