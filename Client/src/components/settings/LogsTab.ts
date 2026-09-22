@@ -2,7 +2,7 @@
  * Logs settings tab — log viewer with filtering, level control, live updates.
  */
 
-import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setOwnedTimeout } from "@lib/dom";
 import {
   getLogBuffer,
   clearLogBuffer,
@@ -240,15 +240,23 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
           .writeText(text)
           .then(() => {
             copyBtn.textContent = "Copied!";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = "Copy All";
+              },
+              1500,
+            );
           })
           .catch(() => {
             copyBtn.textContent = "Failed to copy";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = "Copy All";
+              },
+              1500,
+            );
           });
       },
       { signal: buildSignal },
@@ -315,15 +323,23 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
           .writeText(diagPanel.textContent ?? "")
           .then(() => {
             diagCopy.textContent = "Copied!";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = "Copy Diagnostics";
+              },
+              1500,
+            );
           })
           .catch(() => {
             diagCopy.textContent = "Failed to copy";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = "Copy Diagnostics";
+              },
+              1500,
+            );
           });
       },
       { signal: buildSignal },

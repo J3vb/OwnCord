@@ -4,7 +4,7 @@
  * dismissal, and cleans up via AbortSignal.
  */
 
-import { createElement } from "./dom";
+import { createElement, setOwnedTimeout } from "./dom";
 
 export interface ContextMenuItem {
   readonly label: string;
@@ -83,19 +83,22 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   document.body.appendChild(menu);
 
   // Close on click outside (deferred so the opening click doesn't immediately close)
-  setTimeout(() => {
-    if (dismissAc.signal.aborted) return;
-    document.addEventListener(
-      "mousedown",
-      (e: MouseEvent) => {
-        if (!menu.contains(e.target as Node)) {
-          menu.remove();
-          dismissAc.abort();
-        }
-      },
-      { signal: dismissAc.signal },
-    );
-  }, 0);
+  setOwnedTimeout(
+    dismissAc.signal,
+    () => {
+      document.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+          if (!menu.contains(e.target as Node)) {
+            menu.remove();
+            dismissAc.abort();
+          }
+        },
+        { signal: dismissAc.signal },
+      );
+    },
+    0,
+  );
 
   // Clean up if parent component is destroyed. If the caller's signal is
   // already aborted, "abort" already fired and would never reach a listener

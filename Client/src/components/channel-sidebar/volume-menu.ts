@@ -3,7 +3,7 @@
  * everyone, plus a moderation section for users whose role holds MUTE_MEMBERS.
  */
 
-import { createElement, setText, appendChildren } from "@lib/dom";
+import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 
 /** Moderation section wiring. Passed only when the local user may moderate
@@ -121,19 +121,22 @@ export function showUserVolumeMenu(
   // Close on click outside — store controller on element for cleanup on re-open
   const dismissAc = new AbortController();
   (menu as HTMLElement & { dismissAc?: AbortController }).dismissAc = dismissAc;
-  setTimeout(() => {
-    if (dismissAc.signal.aborted) return;
-    document.addEventListener(
-      "mousedown",
-      (e: MouseEvent) => {
-        if (!menu.contains(e.target as Node)) {
-          menu.remove();
-          dismissAc.abort();
-        }
-      },
-      { signal: dismissAc.signal },
-    );
-  }, 0);
+  setOwnedTimeout(
+    dismissAc.signal,
+    () => {
+      document.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+          if (!menu.contains(e.target as Node)) {
+            menu.remove();
+            dismissAc.abort();
+          }
+        },
+        { signal: dismissAc.signal },
+      );
+    },
+    0,
+  );
 
   // Also clean up if the parent component is destroyed. Tied to dismissAc's
   // own signal (mirrors context-menu.ts's menuAc pattern) so this bridge

@@ -69,3 +69,19 @@ export function qs(selector: string, parent?: Element): Element | null;
 export function qs(selector: string, parent?: Element): Element | null {
   return (parent ?? document).querySelector(selector);
 }
+
+/**
+ * A deferred UI step (a label reset, a deferred listener) owned by `signal`:
+ * aborting clears it, so a torn-down owner never runs it against detached
+ * nodes. The abort registration is dropped when the timer fires, so re-arming
+ * never accumulates cleanups. Nothing is scheduled once `signal` has aborted.
+ */
+export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): void {
+  if (signal.aborted) return;
+  const clear = (): void => clearTimeout(timer);
+  const timer = setTimeout(() => {
+    signal.removeEventListener("abort", clear);
+    fn();
+  }, ms);
+  signal.addEventListener("abort", clear, { once: true });
+}

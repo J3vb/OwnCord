@@ -4,7 +4,7 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setText, setOwnedTimeout } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import {
@@ -329,9 +329,13 @@ function createMemberItem(
       // Close on outside click (deferred so this click doesn't close it)
       const dismiss = new Disposable();
       menuDismiss = dismiss;
-      setTimeout(() => {
-        document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
-      }, 0);
+      setOwnedTimeout(
+        dismiss.signal,
+        () => {
+          document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
+        },
+        0,
+      );
     },
     { signal },
   );

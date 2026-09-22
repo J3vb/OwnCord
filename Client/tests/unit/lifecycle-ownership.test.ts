@@ -183,90 +183,21 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
 // R3: discarded `setTimeout` handles (expression statement or `void`).
 const R3_ALLOWLIST: readonly R3Entry[] = [
   {
-    file: "components/MemberList.ts",
-    fn: "createMemberItem",
-    reason:
-      "deferred outside-click registration guarded by the signal; the node is owned by the menu",
-  },
-  {
     file: "components/Toast.ts",
     fn: "removeToast",
-    reason: "fallback removal after transitionend; touches only the node it removes",
-  },
-  {
-    file: "components/channel-sidebar/context-menu.ts",
-    fn: "attachChannelContextMenu",
-    reason: "deferred click registration guarded by menuAc; the menu owns its node",
-  },
-  {
-    file: "components/channel-sidebar/volume-menu.ts",
-    fn: "showUserVolumeMenu",
-    reason: "deferred mousedown registration guarded by dismissAc",
+    reason: "self-bounded: fallback removal after transitionend; touches only the node it removes",
   },
   {
     file: "components/message-list/content-parser.ts",
     fn: "renderCodeBlock",
-    reason: "copy-button label reset on a node the code block owns",
+    reason:
+      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
   {
     file: "components/message-list/content-parser.ts",
     fn: "renderCodeBlock",
-    reason: "copy-button label reset on a node the code block owns",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "lib/context-menu.ts",
-    fn: "showContextMenu",
-    reason: "deferred mousedown registration guarded by dismissAc",
-  },
-  {
-    file: "pages/connect-page/LoginForm.ts",
-    fn: "handleTotpSubmit",
-    reason: "input error-class removal 500ms after an invalid code",
+    reason:
+      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
 ];
 // R4: every `new AbortController` outside the two primitives.

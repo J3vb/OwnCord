@@ -10,7 +10,7 @@
  * called "owner" or "admin".
  */
 
-import { createElement } from "@lib/dom";
+import { createElement, setOwnedTimeout } from "@lib/dom";
 import type { Channel } from "@stores/channels.store";
 import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
@@ -201,10 +201,13 @@ export function attachChannelContextMenu(
       // re-render must not close it (OC-0282).
       lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuAc.signal });
       // Defer so this click event doesn't immediately close it
-      setTimeout(() => {
-        if (menuAc.signal.aborted) return;
-        document.addEventListener("click", closeMenu, { signal: menuAc.signal });
-      }, 0);
+      setOwnedTimeout(
+        menuAc.signal,
+        () => {
+          document.addEventListener("click", closeMenu, { signal: menuAc.signal });
+        },
+        0,
+      );
     },
     { signal },
   );

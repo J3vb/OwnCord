@@ -1,7 +1,7 @@
 // LoginForm — login/register form sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import { createElement, setText, appendChildren, qs } from "@lib/dom";
+import { createElement, setText, appendChildren, qs, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -887,7 +887,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (!TOTP_OR_RECOVERY_CODE.test(code)) {
       // Simple inline feedback — add error class to the input
       totpInput.classList.add("error");
-      setTimeout(() => totpInput.classList.remove("error"), 500);
+      setOwnedTimeout(signal, () => totpInput.classList.remove("error"), 500);
       return;
     }
 
