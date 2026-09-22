@@ -1040,10 +1040,35 @@ export async function switchSettingsTab(page: Page, tabName: string): Promise<vo
 }
 
 /**
+ * Wait until the transport's Tauri listener for `eventName` is registered.
+ *
+ * `setupEventListeners()` (platform/desktop/socket.ts) registers ws-message /
+ * ws-state / ws-error through an async `tauriListen` invoke roundtrip, so an
+ * event emitted straight after login can land before the listener exists and
+ * be dropped silently. Tests that emit a synthetic frame must wait for the
+ * listener instead of racing it.
+ */
+export async function waitForWsListeners(
+  page: Page,
+  eventName = "ws-message",
+  timeout = 10_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (name) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((window as any).__tauriEventListeners?.[name]?.length ?? 0) > 0,
+    eventName,
+    { timeout },
+  );
+}
+
+/**
  * Emit a WebSocket event from the mock server to the client.
- * Must be called after the page has loaded and WS listeners are registered.
+ * Waits for the transport listener first so the frame cannot be dropped by
+ * a listener-registration race (see waitForWsListeners).
  */
 export async function emitWsEvent(page: Page, eventName: string, payload: unknown): Promise<void> {
+  await waitForWsListeners(page, eventName);
   await page.evaluate(
     ({ event, data }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -4,7 +4,6 @@ import {
   mockTauriFullSessionWithMessagesAndEcho,
   mockTauriFullSessionWithFailingMessages,
   navigateToMainPage,
-  emitWsEvent,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -49,81 +48,45 @@ test.describe("Toast Notifications", () => {
     await expect(toast).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test("toast container exists after login", async ({ page }) => {
+  test("toast container is a polite live region for screen readers", async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
     const toastContainer = page.locator("[data-testid='toast-container']");
-    await expect(toastContainer).toBeAttached();
-
-    // Container should have the correct CSS class
-    await expect(toastContainer).toHaveClass(/toast-container/);
+    // The container carries the DC-13 announcement contract: a status live
+    // region that reads each appended toast without interrupting speech.
+    await expect(toastContainer).toHaveAttribute("role", "status");
+    await expect(toastContainer).toHaveAttribute("aria-live", "polite");
+    await expect(toastContainer).toHaveAttribute("aria-atomic", "false");
   });
 
-  test("toast can be triggered via show() and displays message text", async ({ page }) => {
-    await mockTauriFullSession(page);
+  test("distinct app toasts stack in the one container", async ({ page }) => {
+    await mockTauriFullSessionWithMessagesAndEcho(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    // Directly invoke the toast's show method via the DOM
-    // The toast container is a child of root; we can trigger a toast by
-    // simulating a WS disconnect which shows "Not connected" toast on send attempt
-    // Instead, we use page.evaluate to call show() on the toast container
-    await page.evaluate(() => {
-      // The toast container is accessible via the toast-container testid
-      const container = document.querySelector("[data-testid='toast-container']");
-      if (container === null) throw new Error("Toast container not found");
+    const ownMessage = page.locator("[data-testid='message-101']");
+    await ownMessage.hover();
 
-      // Create a toast element manually like the component does
-      const el = document.createElement("div");
-      el.className = "toast toast-info";
-      el.setAttribute("data-testid", "toast");
-      el.textContent = "Test info toast";
-      container.appendChild(el);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          el.classList.add("show");
-        });
-      });
+    // Two real app paths with distinct copy: pinning shows a success toast…
+    await page.locator("[data-testid='msg-pin-101']").click();
+    await expect(page.locator("[data-testid='toast']", { hasText: "Message pinned" })).toBeVisible({
+      timeout: 5_000,
     });
 
-    const toast = page.locator("[data-testid='toast']");
-    await expect(toast.first()).toBeVisible({ timeout: 3_000 });
-    await expect(toast.first()).toHaveText("Test info toast");
-    await expect(toast.first()).toHaveClass(/toast-info/);
-  });
-
-  test("multiple toasts can stack", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    // Inject multiple toast elements to verify stacking
-    await page.evaluate(() => {
-      const container = document.querySelector("[data-testid='toast-container']");
-      if (container === null) throw new Error("Toast container not found");
-
-      for (let i = 0; i < 3; i++) {
-        const el = document.createElement("div");
-        el.className = `toast toast-${i === 0 ? "error" : "info"}`;
-        el.setAttribute("data-testid", "toast");
-        el.textContent = `Toast message ${i + 1}`;
-        container.appendChild(el);
-        el.classList.add("show");
-      }
+    // …and the first delete click asks for confirmation, without replacing
+    // the pin toast — both live in the same container at once.
+    await page.locator("[data-testid='msg-delete-101']").click();
+    const deleteToast = page.locator("[data-testid='toast']", {
+      hasText: "Click delete again to confirm",
     });
+    await expect(deleteToast).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-testid='toast']")).toHaveCount(2);
 
-    const toasts = page.locator("[data-testid='toast']");
-    await expect(toasts).toHaveCount(3, { timeout: 3_000 });
-
-    // Verify each toast has distinct content
-    await expect(toasts.nth(0)).toHaveText("Toast message 1");
-    await expect(toasts.nth(1)).toHaveText("Toast message 2");
-    await expect(toasts.nth(2)).toHaveText("Toast message 3");
-
-    // First toast should be error type, others info
-    await expect(toasts.nth(0)).toHaveClass(/toast-error/);
-    await expect(toasts.nth(1)).toHaveClass(/toast-info/);
+    const containerChildren = page.locator(
+      "[data-testid='toast-container'] > [data-testid='toast']",
+    );
+    await expect(containerChildren).toHaveCount(2);
   });
 });
