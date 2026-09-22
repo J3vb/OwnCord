@@ -516,13 +516,23 @@ expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
 `documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
 tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
 
-**Idempotent DM retry** (`e02ef7ec` plus the working-tree change). The retried
-unit now returns at once when the DM header is already visible. So a retry
-after Message has switched the sidebar to DMs no longer waits for Bob's member
-row, which that switch removes. The DM view then gets the config's default 15 s
-to appear, outside the retry. One clean 20-cycle run passed with the same bars:
-nodes 3489 → 3453 (−3.6), listeners 192 → 193 (0.1), AbortControllers 20, heap
-slope 11 350.
+**Idempotent DM retry**, run once on `0c343204` and passed with the same bars
+(nodes −3.6, listeners 0.1, AbortControllers 20, heap slope 11 350). That
+version waited for the DM view outside the retry, so a Message click that
+silently did nothing was not retried.
+
+**DM open fully inside the retry** (`0c343204` plus the change committed on top
+of it by this review round). Each attempt returns at once if the DM header is
+already visible. So a retry after Message has switched the sidebar to DMs no
+longer waits for Bob's member row, which that switch removes. Otherwise the
+attempt opens the popup, clicks Message and waits up to the config's default
+15 s for the DM header, so a click that silently does nothing is retried. No
+step uses a fixed sleep. Two consecutive clean 20-cycle runs both passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 11 735     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 962     |
 
 **Owner decision: the five-run at-head calibration moves to B7-11c.** The
 intent asks for the 20-cycle soak to be run at least five times locally to show

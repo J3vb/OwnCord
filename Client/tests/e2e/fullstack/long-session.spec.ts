@@ -245,8 +245,8 @@ async function runCycle(
     const popup = page.locator("[data-testid='user-profile-popup'].open");
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await popup.locator("[data-testid='upp-message-btn']").click({ timeout: 5_000 });
+    await expect(dmHeader).toBeVisible({ timeout: 15_000 });
   }).toPass({ timeout: 60_000 });
-  await expect(dmHeader).toBeVisible();
   const dmText = `soak-dm-${cycle}-${crypto.randomUUID()}`;
   await page.locator("[data-testid='message-input'] textarea").fill(dmText);
   await page.locator("[data-testid='message-input'] textarea").press("Enter");
