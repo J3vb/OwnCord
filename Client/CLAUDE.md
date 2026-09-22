@@ -54,6 +54,17 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   as long as they only _read_ store state. Writing a store from one of those
   handlers is the violation, and `local/no-store-write-in-ws-on` now fails the
   build on it.
+- `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
+  runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
+  lower-level module has to trigger a higher one, invert the edge rather than
+  import upward: `stores/auth.store.ts` imports neither `voice.store` nor
+  `lib/notifications` — `voice.store.ts` registers its logout teardown through
+  `registerVoiceLogoutTeardown` at load, and `main.ts` registers the
+  notification-audio cleanup through `onAuthCleared`. In
+  `components/message-list/`, `attachments.ts` is the leaf every renderer
+  imports (it also owns the image lightbox, which `media.ts` re-exports), so it
+  must not import a sibling renderer. `madge` still lists cycles that close only
+  through a lazy `import()` or an `import type`; oxlint does not count those.
 - Voice sessions are superseded, not cancelled. `LiveKitSession` re-entry
   points check whether a newer attempt owns the shared state before tearing
   anything down, so cleanup in an aborted path must be scoped to that attempt's
