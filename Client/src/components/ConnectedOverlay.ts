@@ -4,6 +4,7 @@
  * Matches login-mockup.html connected overlay structure.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 
@@ -45,7 +46,7 @@ function serverIconColor(name: string): string {
 
 export function createConnectedOverlay(options: ConnectedOverlayOptions): ConnectedOverlayControl {
   const { serverName, username, motd, onReady } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   // Root overlay (hidden by default, .visible to show)
   const overlay = createElement("div", {
@@ -101,7 +102,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   }
 
   function markReady(): void {
-    if (ac.signal.aborted) return;
+    if (disposable.signal.aborted) return;
 
     spinner.style.display = "none";
     loaderText.textContent = "";
@@ -109,16 +110,16 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     loaderText.appendChild(document.createTextNode(" Ready!"));
 
     const timer = setTimeout(() => {
-      if (!ac.signal.aborted) {
+      if (!disposable.signal.aborted) {
         onReady();
       }
     }, READY_DELAY_MS);
 
-    ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+    disposable.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     overlay.remove();
   }
 

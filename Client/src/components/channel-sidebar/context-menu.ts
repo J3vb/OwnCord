@@ -10,6 +10,7 @@
  * called "owner" or "admin".
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import type { Channel } from "@stores/channels.store";
 import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
@@ -187,24 +188,24 @@ export function attachChannelContextMenu(
 
       document.body.appendChild(menu);
 
-      // Close menu on click elsewhere — use a per-menu AbortController
-      const menuAc = new AbortController();
+      // Close menu on click elsewhere — use a per-menu Disposable
+      const menuOwner = new Disposable();
       const closeMenu = (): void => {
         menu.remove();
-        menuAc.abort();
+        menuOwner.destroy();
       };
-      // Tie this bridge listener's own lifetime to menuAc so it does not
-      // outlive the menu it belongs to — closeMenu (which aborts menuAc)
+      // Tie this bridge listener's own lifetime to menuOwner so it does not
+      // outlive the menu it belongs to — closeMenu (which aborts menuOwner)
       // already fires far more often than the sidebar's own teardown.
       // lifetimeSignal (not the per-render `signal`): the menu is mounted on
       // document.body, independent of the row that opened it, so an unrelated
       // re-render must not close it (OC-0282).
-      lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuAc.signal });
+      lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuOwner.signal });
       // Defer so this click event doesn't immediately close it
       setOwnedTimeout(
-        menuAc.signal,
+        menuOwner.signal,
         () => {
-          document.addEventListener("click", closeMenu, { signal: menuAc.signal });
+          document.addEventListener("click", closeMenu, { signal: menuOwner.signal });
         },
         0,
       );

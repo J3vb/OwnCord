@@ -203,36 +203,6 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
   {
-    file: "components/AdminActions.ts",
-    fn: "createMemberContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/AdminActions.ts",
-    fn: "createChannelContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createCertMismatchModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createCertFirstUseModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createIdentityMismatchModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/ChannelSidebar.ts",
     fn: "createChannelSidebar",
     category: "component-lifetime",
@@ -244,24 +214,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     category: "per-render-child",
     reason:
       "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/ConnectedOverlay.ts",
-    fn: "createConnectedOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CreateChannelModal.ts",
-    fn: "createCreateChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/DeleteChannelModal.ts",
-    fn: "createDeleteChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
     file: "components/DmProfileSidebar.ts",
@@ -276,12 +228,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
-    file: "components/EditChannelModal.ts",
-    fn: "createEditChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/EmojiPicker.ts",
     fn: "createEmojiPicker",
     category: "component-lifetime",
@@ -290,18 +236,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
   {
     file: "components/GifPicker.ts",
     fn: "createGifPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/IncomingCallBanner.ts",
-    fn: "createIncomingCallBanner",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/InviteManager.ts",
-    fn: "createInviteManager",
     category: "component-lifetime",
     reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
@@ -332,46 +266,10 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
       "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
   },
   {
-    file: "components/NsfwGate.ts",
-    fn: "createNsfwGate",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/PinnedMessages.ts",
-    fn: "createPinnedMessages",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/QuickSwitchOverlay.ts",
-    fn: "createQuickSwitchOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/QuickSwitcher.ts",
-    fn: "createQuickSwitcher",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/SearchOverlay.ts",
-    fn: "createSearchOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/SearchOverlay.ts",
     fn: "doSearch",
     category: "cancellation-token",
     reason: "owner: the next search, which aborts this one",
-  },
-  {
-    file: "components/SettingsOverlay.ts",
-    fn: "createSettingsOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
     file: "components/SettingsOverlay.ts",
@@ -381,38 +279,14 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
       "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
   },
   {
-    file: "components/StatusPicker.ts",
-    fn: "createStatusPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/UserProfilePopup.ts",
-    fn: "createUserProfilePopup",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/VoiceWidget.ts",
     fn: "createVoiceWidget",
     category: "component-lifetime",
     reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
-    file: "components/channel-sidebar/context-menu.ts",
-    fn: "attachChannelContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/channel-sidebar/drag-reorder.ts",
     fn: "ensureGlobalDragListeners",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/channel-sidebar/volume-menu.ts",
-    fn: "showUserVolumeMenu",
     category: "component-lifetime",
     reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
@@ -455,18 +329,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
   {
     file: "lib/autoIdle.ts",
     fn: "startAutoIdle",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/context-menu.ts",
-    fn: "showContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/modalFactory.ts",
-    fn: "createModal",
     category: "component-lifetime",
     reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
