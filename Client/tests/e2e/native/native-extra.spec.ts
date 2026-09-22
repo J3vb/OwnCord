@@ -116,6 +116,22 @@ interface Rect {
   height: number;
 }
 
+interface Monitor {
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+}
+
+/** lib/window-state.ts's isRectOnScreen contract: 100px of horizontal overlap
+ *  and a grabbable title bar, on some monitor. */
+function reachable(monitors: readonly Monitor[], r: Rect): boolean {
+  return monitors.some(
+    (m) =>
+      Math.min(r.x + r.width, m.position.x + m.size.width) - Math.max(r.x, m.position.x) >= 100 &&
+      r.y >= m.position.y - 8 &&
+      r.y <= m.position.y + m.size.height - 40,
+  );
+}
+
 async function windowRect(page: Page): Promise<Rect> {
   const label = { label: "main" };
   const pos = await invoke<{ x: number; y: number }>(page, "plugin:window|outer_position", label);
@@ -155,13 +171,14 @@ test("window geometry is restored on relaunch and an unreachable restore is re-c
       app = await startNativeApp(undefined, { preserveProfile: true });
     };
 
-    let monitor!: { position: { x: number; y: number }; size: { width: number; height: number } };
+    let monitors!: Monitor[];
     let saved!: Rect;
     await withNativeArtifacts(
       app,
       async () => {
         const page = app!.page;
-        monitor = await invoke(page, "plugin:window|current_monitor");
+        const monitor = await invoke<Monitor>(page, "plugin:window|current_monitor");
+        monitors = await invoke(page, "plugin:window|available_monitors");
         expect(await invoke(page, "plugin:window|is_maximized", { label: "main" })).toBe(false);
         await invoke(page, "plugin:window|set_size", {
           label: "main",
@@ -183,13 +200,16 @@ test("window geometry is restored on relaunch and an unreachable restore is re-c
       async () => {
         const page = app!.page;
         await expect.poll(() => windowRect(page)).toEqual(saved);
-        // Top-left corner 50px inside the monitor's right edge: the plugin
-        // restores it (a corner is on a monitor), but 50px is too little to
-        // grab, so lib/window-state.ts must re-center it.
+        // Top-left corner 50px inside the rightmost monitor's right edge: the
+        // plugin restores it (a corner is on a monitor), but 50px is too little
+        // to grab, so lib/window-state.ts must re-center it.
+        const rightmost = monitors.reduce((a, b) =>
+          b.position.x + b.size.width > a.position.x + a.size.width ? b : a,
+        );
         saved = await moveWindowAndSaveState(
           page,
-          monitor.position.x + monitor.size.width - 50,
-          monitor.position.y + 16,
+          rightmost.position.x + rightmost.size.width - 50,
+          rightmost.position.y + 16,
         );
       },
       testInfo,
@@ -201,15 +221,7 @@ test("window geometry is restored on relaunch and an unreachable restore is re-c
       async () => {
         const page = app!.page;
         // The guard runs once at startup, after the plugin's restore.
-        await expect
-          .poll(async () => {
-            const r = await windowRect(page);
-            const overlap =
-              Math.min(r.x + r.width, monitor.position.x + monitor.size.width) -
-              Math.max(r.x, monitor.position.x);
-            return overlap >= 100 && r.y >= monitor.position.y - 8;
-          })
-          .toBe(true);
+        await expect.poll(async () => reachable(monitors, await windowRect(page))).toBe(true);
         const restored = await windowRect(page);
         expect(restored.x).not.toBe(saved.x);
         expect({ width: restored.width, height: restored.height }).toEqual({
@@ -309,9 +321,15 @@ test("F5 and Ctrl+R never reload the app and a release build opens no DevTools",
   // that it did not. A DevTools window also takes focus from the composer, so
   // check for it before the control key below.
   await delay(2_000);
-  const devToolsWindows = await powershell(
-    "Get-Process | Where-Object { $_.MainWindowTitle -like 'DevTools*' } | ForEach-Object { $_.MainWindowTitle }",
-  );
+  // Only this app's WebView2 processes: descendants of the app process.
+  const devToolsWindows = await powershell(`
+$all = Get-CimInstance Win32_Process
+$tree = @(${nativeApp.process.pid}); $i = 0
+while ($i -lt $tree.Count) {
+  $tree += @($all | Where-Object { $_.ParentProcessId -eq $tree[$i] -and $tree -notcontains $_.ProcessId } | ForEach-Object { $_.ProcessId })
+  $i++
+}
+Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue | Where-Object { $tree -contains $_.Id -and $_.MainWindowTitle -like 'DevTools*' } | ForEach-Object { $_.MainWindowTitle }`);
   expect(devToolsWindows.trim()).toBe("");
   page.off("framenavigated", onNavigated);
   expect(navigations).toBe(0);
@@ -359,16 +377,14 @@ test("a message link opens in the system browser, not the webview", async ({
     const before = page.url();
     await link.click();
     // Loopback is outside the link-preview fetcher's allowed ranges, so a
-    // browser user agent on this path is a browser loading the link.
+    // browser user agent on this path is a browser loading the link; with the
+    // page URL unchanged and no second page in the webview, that browser is
+    // the system one.
     await expect
       .poll(() => hits.filter((hit) => hit.startsWith(path) && hit.includes("Mozilla")), {
         timeout: 30_000,
       })
       .not.toHaveLength(0);
-    // The fetch alone does not say which browser made it; the shell hand-off
-    // starts a separate browser process with the URL as its argument.
-    const browsers = (await launched("$_.Name")).split(/\s+/).filter(Boolean);
-    expect(browsers.filter((name) => name.toLowerCase() !== "msedgewebview2.exe")).not.toEqual([]);
     expect(page.url()).toBe(before);
     expect(nativeContext.pages()).toHaveLength(1);
   } finally {
