@@ -154,7 +154,8 @@ so surrounding context and reply references stay intact.
 
 > **✓ Implemented (2026-08).** The pill toggles on the click:
 > `ReactionController.sendReaction` applies the toggle locally
-> (`addOptimisticReaction`, `stores/messages.store.ts`) under the send's WS
+> (`addOptimisticReaction`, `stores/messages.store.ts`; its reducer is in
+> `features/messaging/reactionState.ts`) under the send's WS
 > envelope id — the same correlation scheme as §3's optimistic rows.
 > `updateReaction` consumes the matching self-echo instead of re-applying it
 > (the delta arithmetic would double-count), other users' echoes apply
@@ -381,7 +382,7 @@ the same signal in future.
 `src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`,
 `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
-`src/stores/messages.store.ts`, `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
+`src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
 `src/components/message-list/content-parser.ts` (+ `markdown.ts`,

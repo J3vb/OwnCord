@@ -18,4 +18,7 @@ export interface LogFiles {
   getDir(): string | null;
   /** Delete every persisted log file from disk. */
   clearAll(): Promise<void>;
+  /** Every persisted log file, oldest first, read verbatim — the support
+   *  bundle's log half (B7-15c). Empty when no log directory exists yet. */
+  readAll(): Promise<readonly { readonly name: string; readonly text: string }[]>;
 }

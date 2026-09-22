@@ -93,6 +93,7 @@ export const shards = {
     "src/lib/read-state.ts",
     "src/lib/safe-render.ts",
     "src/lib/store.ts",
+    "src/lib/supportBundle.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",
     "src/lib/updater.ts",
@@ -109,6 +110,12 @@ export const shards = {
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",
     "src/stores/voice.store.ts",
+    "src/features/messaging/messageModel.ts",
+    "src/features/messaging/echoReconcile.ts",
+    "src/features/messaging/liveMessages.ts",
+    "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/messageEdits.ts",
+    "src/features/messaging/reactionState.ts",
   ], // 1918 mutants
 };
 
