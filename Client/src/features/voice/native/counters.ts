@@ -14,6 +14,10 @@ export const nativeCounters = {
   openRooms: 0,
   /** Tauri `native-voice` subscriptions currently registered. */
   listeners: 0,
+  /** Remote video renderers (one frame socket and GL context each) alive. */
+  videoRenderers: 0,
+  /** Camera frame pumps (one frame socket each) alive. */
+  cameraUplinks: 0,
   /** Last Rust-reported snapshot, null before the first report. */
   rust: null as NativeVoiceResources | null,
 };

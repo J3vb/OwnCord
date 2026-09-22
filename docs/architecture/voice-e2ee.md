@@ -105,8 +105,8 @@ with no behaviour change.
 
 The dependency is Linux-only (`[target.'cfg(target_os = "linux")'.dependencies]`
 in `Client/src-tauri/Cargo.toml`); the backend lives in
-`Client/src-tauri/src/native_voice/` (`session.rs` is the room, `mod.rs` the
-Tauri commands and state). The build prerequisite — clang >= 21 and a prebuilt
+`Client/src-tauri/src/native_voice/` (`session.rs` is the room, `video.rs`
+the frame socket, `mod.rs` the Tauri commands and state). The build prerequisite — clang >= 21 and a prebuilt
 libwebrtc — is documented in [contributing.md](../contributing.md#client-tauri-v2)
 and installed by `Client/scripts/linux-webrtc-toolchain.sh`.
 
@@ -227,12 +227,137 @@ stream → `NativeAudioSource`, the report's 1b sketch) or a patched
 instead, and the settings tab hides the Input Volume, Input Sensitivity, Output
 Volume and Enhanced Noise Suppression controls there with a note pointing at
 the system mixer; the three APM toggles stay and apply at the next join. Per-user volume (no per-track gain in the
-module), camera and screen share also remain later phases. rust-sdks #1408
+module) remains a later phase; camera and remote video are phase 2 (below),
+screen share phase 3. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
 (PR livekit/rust-sdks#1408, open, CLA unsigned) that detaches the frame
 transformer in `FrameCryptor`'s destructor; carrying it means a vendored
 `webrtc-sys` under `[patch.crates-io]`, which is the follow-up if the soak
 needs it before upstream lands.
+
+### Phase 2: camera and remote video
+
+**Frames never cross IPC.** On WebKitGTK the invoke path serialises binary as
+JSON (one 720p I420 frame took 53 ms, about 19 fps at best), so each native
+session binds its own **frame socket**: a WebSocket listener on `127.0.0.1`
+with a random 256-bit token (`video.rs`). Its URL, token included, reaches
+the webview only as the `native_voice_connect` result
+(`NativeVoiceConnected.frames`); the handshake is refused unless the request
+path starts with the token (compared in constant time), so no other local
+process or web page can read or inject frames. Closing the session drops the
+server, which aborts the listener and every connection it accepted. Two
+routes:
+
+- `/<token>/remote/<track sid>`: one subscribed remote video track's decoded
+  frames, native to webview, as width, height and the three I420 planes
+  packed tightly. The backend keeps only the latest frame, so a slow renderer
+  drops frames instead of queueing them. The remote track table is updated
+  from the room's events before they are forwarded, so the webview never asks
+  for a track the socket does not know.
+- `/<token>/camera`: the local camera, webview to native: a header (format,
+  size, plane offsets and strides) and the `VideoFrame.copyTo` bytes. RGBA,
+  RGBX, BGRA, BGRX, I420 and NV12 are converted to I420 with libyuv, after a
+  bounds check (libyuv itself only checks `stride × rows`). A frame with no
+  CPU layout is read back through a 2D canvas as RGBA.
+
+**Remote video.** On `trackSubscribed` for a video track, `NativeRoom` opens a
+`NativeVideoRenderer` (`features/voice/native/videoRenderer.ts`): it draws each
+frame with a WebGL2 I420→RGB shader (BT.601 limited range) and exposes the
+canvas as a `MediaStreamTrack` (`canvas.captureStream()`). The adapter raises
+`RoomEvent.TrackSubscribed` with that track, so `roomEventHandlers`, the video
+grid, stream previews and `getRemoteVideoStream` consume a MediaStream exactly
+as they do on Windows. `trackUnsubscribed`, `trackUnpublished` and a
+participant leaving dispose the renderer and raise `TrackUnsubscribed`
+(before `ParticipantDisconnected`, as livekit-client does); `disconnect()`
+disposes every renderer.
+
+**Camera.** `getUserMedia` works in WebKitGTK (only WebRTC is missing), so the
+shared `enableCamera` runs unchanged: livekit-client's `createLocalVideoTrack`
+captures in the webview (the saved device, permissions, and the self-view
+preview are that track), and `NativeRoom.localParticipant.publishTrack` calls
+`native_voice_publish_camera` with the track's size and the web path's bitrate,
+framerate and simulcast options. The backend publishes a `NativeVideoSource`
+(VP8, as livekit-client defaults to) and a `CameraUplink`
+(`features/voice/native/cameraUplink.ts`) pumps the webview track's frames up
+the camera route. It drops rather than queues: one copy in flight, nothing
+sent while the socket has unsent bytes, and no faster than the max
+framerate. Camera off unpublishes (`native_voice_unpublish_camera`), as the
+web path does, so remote tiles close the same way. Screen share still refuses
+on Linux (phase 3).
+
+**E2EE covers video exactly as audio.** The camera is published into the same
+room, whose single key provider and `KEY_INDEX` 0 already cover every sender
+and receiver cryptor; nothing video-specific touches keys. The interop test
+proves it both ways (below).
+
+**Lifecycle (B7-11).** The renderer and the uplink are owned by `NativeRoom`
+and disposed with their track or in `disconnect()`. `getSessionDebugInfo().native`
+also reports `videoRenderers` and `cameraUplinks` (TS) and the backend's
+`videoSockets` (open frame-socket connections), and the backend's
+`localTracks` counts the camera. No lifecycle-inventory entries were added:
+the socket and GL listeners live on objects the renderer owns, and the frame
+callback is cancelled in `dispose()`.
+
+**Interop test (CI), video.** Two more cases in `interop.spec.ts`. With
+`--video 640x360`, the example publishes moving bars as the camera through the
+frame socket's camera route, as RGBA, which is the path the webview's frames
+take, and reads every subscribed remote video track back through the remote
+route. Measured 2026-09-22: Chromium decodes the native camera at 640×360,
+about 28 fps (143 frames in 5 s), with 0 encryption errors; the native side
+reads Chromium's fake camera through the socket at about 20 fps (the fake
+device's rate); the socket is bound to 127.0.0.1, refuses a reversed or
+missing token, and is gone after close. **Negative control:** with a
+different key, Chromium decodes **0** video frames and counts decryption
+errors, and the native side, which subscribed and opened its socket, reads
+**0** frames of Chromium's camera.
+
+**CPU at 720p (measured 2026-09-22).** Harness: a release build of the
+interop example as the app's native session (`--video 1280x720
+--external-camera`), a second native peer publishing 720p30 moving bars, and a
+WebKitGTK 2.52.6 view (python-gi, the system webview the app uses) running the
+app's own `NativeVideoRenderer` and `CameraUplink` (the TS modules, bundled)
+against that session's frame socket, with WebKit's mock 1280×720 camera. The
+host was 16 vCPUs of a Ryzen 9 5900X, under Xvfb **with no GPU**: WebGL and
+compositing ran in software (llvmpipe). Figures are % of one core over 15 s:
+
+| Scenario                                                     | Native session | WebKitWebProcess | WebKitNetworkProcess | Xvfb | Total |
+| ------------------------------------------------------------ | -------------- | ---------------- | -------------------- | ---- | ----- |
+| 720p30 remote → WebGL → captureStream tile (30.1 fps drawn)  | 21             | 116              | 9                    | 3    | 149   |
+| same, canvas shown directly (no captureStream)               | 20             | 107              | 9                    | 3    | 139   |
+| mock 720p camera + preview only (no upload, no remote drawn) | 18¹            | 60               | –                    | 2    | 80    |
+| 720p30 remote + 720p camera preview + upload                 | 35             | 233              | 19                   | 6    | 293   |
+
+¹ The native session still decodes the subscribed 720p remote video with no
+renderer attached.
+
+In the last row the remote still draws at 30.1 fps, the preview at 19.7 fps
+(WebKit's mock camera delivers about 20 fps), and the other peer decodes the
+uploaded camera at 20 fps and 1280×720, which is the uplink proven end to end
+through WebKitGTK. Reading the rows: the native side costs about 20% for a
+720p30 receive (VP8 decode, decrypt, pack) and about 15% more for the camera
+(convert, encode, encrypt). `captureStream` adds about 8% over drawing the
+canvas directly. The camera upload (`copyTo` of RGBA plus the socket send)
+adds about 58% in the webview, and the WebSocket relay through WebKit's
+network process adds about 10% per direction. Most of the webview figure is
+software GL, which a desktop GPU takes over.
+
+**Not exercised on real hardware:** a physical camera (WebKitGTK's GStreamer
+capture from V4L2 or PipeWire, whose `VideoFrame`s are likely I420 or NV12
+rather than the mock's RGBA; both conversions are unit-tested in `video.rs`),
+GPU-accelerated WebGL, a real Wayland or X11 session, and the packaged Tauri
+app driving the flow end to end (the unit tests cover `NativeRoom` and the
+contract, and the harness covers the renderer and uplink against a real
+session). CI exercises the native video path and E2EE with synthetic sources
+only; the CPU harness is not in CI.
+
+**Known leak, measured.** Every camera off/on republishes, and each publish is
+a new sender: 5 cycles grew the process by **+3 idle threads per cycle**. That
+is the sender's `FrameCryptor` thread (rust-sdks #1408) plus the
+`VideoEncoderQueue` and `VideoFrameTransformer` threads it keeps alive. The
+interop test pins that rate. Muting in place instead, as the microphone does,
+would avoid it but would leave a frozen tile on remote clients where the web
+path closes it. The #1408 fix (a vendored `webrtc-sys`, above) is the
+follow-up.
 
 **Phase 0 verification.** The Linux client was built on GitHub-hosted
 `ubuntu-22.04` and `ubuntu-22.04-arm` runners, before (`dev` at `dba68fe8`)

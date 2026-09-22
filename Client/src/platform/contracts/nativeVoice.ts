@@ -7,8 +7,11 @@
  * key (`setRoomKey`), which the backend derives from exactly as a browser
  * client would. Every room event arrives on one subscription (`onEvent`),
  * tagged with the session it belongs to, and `disconnect` is scoped to a
- * session id so a superseded join tears down only its own room. Browser
- * outlook: not applicable — a browser has its own WebRTC.
+ * session id so a superseded join tears down only its own room. Video
+ * frames never cross IPC: each session serves them on a loopback WebSocket
+ * whose token-carrying URL arrives only in the `connect` result
+ * (`NativeVoiceConnected.frames`). Browser outlook: not applicable — a
+ * browser has its own WebRTC.
  */
 export interface NativeVoiceAudioOptions {
   echoCancellation: boolean;
@@ -21,6 +24,8 @@ export interface NativeVoiceResources {
   rooms: number;
   localTracks: number;
   admRefs: number;
+  /** Open frame-socket connections (remote renderers plus camera upload). */
+  videoSockets: number;
   /** Process thread count, the observable for a leaked frame-cryptor thread. */
   threads: number;
 }
@@ -74,6 +79,19 @@ export interface NativeVoiceConnected {
   session: number;
   /** Our LiveKit identity in the room (`user-<id>…`). */
   identity: string;
+  /** The session's frame-socket base URL, token included: append
+   *  `/remote/<track sid>` to read a remote video track (I420 frames) or
+   *  `/camera` to upload the local camera. */
+  frames: string;
+}
+
+/** How the camera is published: the web path's `publishTrack` options. */
+export interface NativeVoiceCameraOptions {
+  width: number;
+  height: number;
+  maxBitrate: number;
+  maxFramerate: number;
+  simulcast: boolean;
 }
 
 export interface NativeVoice {
@@ -90,6 +108,10 @@ export interface NativeVoice {
   disconnect(session: number): Promise<NativeVoiceResources>;
   setMicrophone(session: number, enabled: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
+  /** Publish (or replace) the camera; its frames then go up the session's
+   *  frame socket. E2EE covers it with the room key, as for the microphone. */
+  publishCamera(session: number, options: NativeVoiceCameraOptions): Promise<void>;
+  unpublishCamera(session: number): Promise<void>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;

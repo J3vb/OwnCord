@@ -10,8 +10,9 @@ import type {
 } from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
-  /** The host answers the next connect with this session and identity. */
-  connectsAs(session: number, identity: string): void;
+  /** The host answers the next connect with this session, identity and
+   *  frame-socket URL. */
+  connectsAs(session: number, identity: string, frames: string): void;
   /** The host reports these devices on the next enumeration. */
   hasDevices(devices: NativeVoiceDevices): void;
   /** Every host command issued so far, as `[name, payload]`. */
@@ -45,11 +46,12 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
-    check("connect resolves the host's session id and identity", async () => {
-      ctx.native.connectsAs(7, "user-42");
+    check("connect resolves the host's session id, identity and frame socket", async () => {
+      ctx.native.connectsAs(7, "user-42", "ws://127.0.0.1:9/token");
       await expect(ctx.subject.connect("ws://127.0.0.1:7881/lk", "tok", audio)).resolves.toEqual({
         session: 7,
         identity: "user-42",
+        frames: "ws://127.0.0.1:9/token",
       });
       expect(ctx.native.commands()).toEqual([
         ["native_voice_connect", { url: "ws://127.0.0.1:7881/lk", token: "tok", audio }],
@@ -69,6 +71,22 @@ export function describeNativeVoiceSuite(
         ],
         ["native_voice_disconnect", { session: 7 }],
         ["native_voice_clear_key", undefined],
+      ]);
+    });
+
+    check("publishes and unpublishes the camera per session", async () => {
+      const camera = {
+        width: 1280,
+        height: 720,
+        maxBitrate: 1_700_000,
+        maxFramerate: 30,
+        simulcast: true,
+      };
+      await ctx.subject.publishCamera(7, camera);
+      await ctx.subject.unpublishCamera(7);
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_publish_camera", { session: 7, options: camera }],
+        ["native_voice_unpublish_camera", { session: 7 }],
       ]);
     });
 

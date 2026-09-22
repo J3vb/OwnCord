@@ -8,7 +8,7 @@ import { describeNativeVoiceSuite } from "./nativeVoice.suite";
 
 const state = vi.hoisted(() => ({
   commands: [] as Array<[string, unknown]>,
-  connected: { session: 1, identity: "user-1" },
+  connected: { session: 1, identity: "user-1", frames: "" },
   devices: { inputs: [], outputs: [] } as unknown,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
@@ -38,8 +38,8 @@ describeNativeVoiceSuite(async () => {
   return {
     subject: desktopBinding,
     native: {
-      connectsAs(session, identity) {
-        state.connected = { session, identity };
+      connectsAs(session, identity, frames) {
+        state.connected = { session, identity, frames };
       },
       hasDevices(devices) {
         state.devices = devices;

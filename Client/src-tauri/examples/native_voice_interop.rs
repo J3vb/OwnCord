@@ -18,6 +18,19 @@
 //! `--mute-cycles N` mutes and unmutes the published microphone N times the
 //! way the app does, printing the thread count before and after: an in-place
 //! mute creates no new cryptor, so the count must stay flat.
+//! `--video WxH` also publishes a camera the way the app does: moving bars
+//! (a synthetic source: CI has no camera) uploaded as RGBA over the
+//! session's frame socket, exactly the route the webview's camera takes. It
+//! reads every subscribed remote video track back through that socket and
+//! reports decoded frames per second, and it checks the socket itself: a
+//! wrong token is refused, and after close the listener is gone.
+//! `--camera-cycles N` (with `--video`) first turns the camera off and on
+//! N times the way the app does (unpublish, publish), printing the thread
+//! count before and after: each publish is a new frame cryptor.
+//! `--external-camera` (with `--video`) publishes the camera but leaves its
+//! frames to someone else: it prints the frame socket's URL, token included,
+//! so a webview harness can run the app's own renderer and camera pump
+//! against this session (the CPU measurement in docs/architecture/voice-e2ee.md).
 #[cfg(target_os = "linux")]
 mod linux {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,8 +44,9 @@ mod linux {
     use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
     use livekit::webrtc::audio_stream::native::NativeAudioStream;
     use owncord_client_lib::native_voice::session::{
-        process_threads, shared_key_material, Event, NativeSession,
+        process_threads, shared_key_material, CameraOptions, Event, NativeSession,
     };
+    use tokio_tungstenite::tungstenite::Message;
 
     const SAMPLE_RATE: u32 = 48_000;
     const FRAME_MS: u64 = 10;
@@ -108,6 +122,77 @@ mod linux {
         }
     }
 
+    /// Upload moving bars as the camera over the frame socket, the way
+    /// `cameraUplink.ts` uploads an RGBA `VideoFrame` (format 1), until the
+    /// socket closes or the task is aborted.
+    async fn play_bars(camera_url: String, width: u32, height: u32) {
+        let Ok((mut ws, _)) = tokio_tungstenite::connect_async(&camera_url).await else {
+            emit(
+                serde_json::json!({ "event": { "type": "error", "detail": "camera upload refused" } }),
+            );
+            return;
+        };
+        let (w, h) = (width as usize, height as usize);
+        let mut ticker = tokio::time::interval(Duration::from_millis(33));
+        let mut n = 0usize;
+        loop {
+            ticker.tick().await;
+            let mut frame = Vec::with_capacity(36 + w * h * 4);
+            for v in [1, width, height, 0, width * 4, 0, 0, 0, 0] {
+                frame.extend_from_slice(&v.to_le_bytes());
+            }
+            for y in 0..h {
+                let shade = (((y + n * 4) / 16) % 2 * 200 + 30) as u8;
+                for _ in 0..w {
+                    frame.extend_from_slice(&[shade, 255 - shade, 128, 255]);
+                }
+            }
+            n += 1;
+            if futures_util::SinkExt::send(&mut ws, Message::Binary(frame.into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+
+    /// Read one remote video track back through the frame socket and report
+    /// frames per second and the last frame's size.
+    async fn watch(identity: String, url: String) {
+        let Ok((mut ws, _)) = tokio_tungstenite::connect_async(&url).await else {
+            emit(
+                serde_json::json!({ "event": { "type": "error", "detail": "remote video socket refused" } }),
+            );
+            return;
+        };
+        // Proves the socket opened even when no frame ever decodes (wrong key).
+        emit(serde_json::json!({ "event": { "type": "videoWatch", "identity": identity } }));
+        let (mut frames, mut size) = (0u64, (0u32, 0u32));
+        let mut last = tokio::time::Instant::now();
+        while let Some(Ok(msg)) = ws.next().await {
+            let Message::Binary(data) = msg else { continue };
+            if data.len() >= 8 {
+                let at =
+                    |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                size = (at(0), at(4));
+                frames += 1;
+            }
+            if last.elapsed() >= Duration::from_secs(1) {
+                emit(serde_json::json!({
+                    "event": { "type": "video", "identity": identity, "frames": frames, "width": size.0, "height": size.1 }
+                }));
+                frames = 0;
+                last = tokio::time::Instant::now();
+            }
+        }
+    }
+
+    /// Whether a WebSocket handshake to `url` is refused.
+    async fn refused(url: &str) -> bool {
+        tokio_tungstenite::connect_async(url).await.is_err()
+    }
+
     pub async fn run() -> Result<(), String> {
         let url = arg("--url").ok_or("--url required")?;
         let token = arg("--token").ok_or("--token required")?;
@@ -127,6 +212,16 @@ mod linux {
             .unwrap_or("0")
             .parse()
             .map_err(|_| "--mute-cycles")?;
+        let video: Option<(u32, u32)> = match arg("--video") {
+            None => None,
+            Some(v) => {
+                let (w, h) = v.split_once('x').ok_or("--video WxH")?;
+                Some((
+                    w.parse().map_err(|_| "--video")?,
+                    h.parse().map_err(|_| "--video")?,
+                ))
+            }
+        };
 
         if cycles > 0 {
             emit(
@@ -169,6 +264,66 @@ mod linux {
             .await?;
         let sine = tokio::spawn(play_sine(source));
 
+        let frames_url = session.frames_url().to_string();
+        let mut bars = None;
+        if let Some((width, height)) = video {
+            session
+                .publish_camera(CameraOptions {
+                    width,
+                    height,
+                    max_bitrate: 1_700_000,
+                    max_framerate: 30.0,
+                    simulcast: false,
+                })
+                .await?;
+            let camera_cycles: u32 = arg("--camera-cycles")
+                .as_deref()
+                .unwrap_or("0")
+                .parse()
+                .map_err(|_| "--camera-cycles")?;
+            if camera_cycles > 0 {
+                let options = CameraOptions {
+                    width,
+                    height,
+                    max_bitrate: 1_700_000,
+                    max_framerate: 30.0,
+                    simulcast: false,
+                };
+                emit(
+                    serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
+                );
+                for _ in 0..camera_cycles {
+                    session.unpublish_camera().await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    session.publish_camera(options).await?;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                emit(
+                    serde_json::json!({ "event": { "type": "threads", "phase": "camera-after", "cycles": camera_cycles, "count": process_threads() } }),
+                );
+            }
+            if std::env::args().any(|a| a == "--external-camera") {
+                emit(serde_json::json!({ "event": { "type": "frames", "url": frames_url } }));
+            } else {
+                bars = Some(tokio::spawn(play_bars(
+                    format!("{frames_url}/camera"),
+                    width,
+                    height,
+                )));
+            }
+            // The socket is loopback-only and refuses a path without the
+            // session's token (the token is the last path segment of the base).
+            let (base, token) = frames_url.rsplit_once('/').ok_or("frames url")?;
+            let wrong: String = token.chars().rev().collect();
+            emit(serde_json::json!({ "event": {
+                "type": "frameSocket",
+                "loopback": base.starts_with("ws://127.0.0.1:"),
+                "wrongTokenRefused": refused(&format!("{base}/{wrong}/camera")).await,
+                "noTokenRefused": refused(&format!("{base}/camera")).await,
+            } }));
+        }
+
         if mute_cycles > 0 {
             emit(
                 serde_json::json!({ "event": { "type": "threads", "phase": "mute-before", "count": process_threads() } }),
@@ -195,20 +350,31 @@ mod linux {
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), participant, .. }) => {
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
+                    Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(_), publication, participant }) => {
+                        let url = format!("{frames_url}/remote/{}", publication.sid());
+                        meters.push(tokio::spawn(watch(participant.identity().to_string(), url)));
+                    }
                     Some(_) => {}
                     None => break,
                 },
             }
         }
         sine.abort();
-        for m in meters {
-            m.abort();
-        }
         emit(
             serde_json::json!({ "event": { "type": "resources", "resources": session.resources() } }),
         );
+        for m in meters {
+            m.abort();
+        }
+        if let Some(bars) = bars {
+            bars.abort();
+        }
         session.close().await;
-        emit(serde_json::json!({ "event": { "type": "closed", "threads": process_threads() } }));
+        emit(serde_json::json!({ "event": {
+            "type": "closed",
+            "threads": process_threads(),
+            "frameSocketGone": refused(&format!("{frames_url}/camera")).await,
+        } }));
         Ok(())
     }
 }
