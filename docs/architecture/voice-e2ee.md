@@ -86,3 +86,49 @@ and surface a blocking mismatch modal if it later changes (see
 `Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
+
+## Linux: native LiveKit in the Rust backend
+
+No mainstream WebKitGTK build ships WebRTC — the system webview's
+`RTCPeerConnection` is `undefined` on Ubuntu, Debian, Fedora, Arch and the
+GNOME Flatpak runtime alike — so on Linux the `livekit-client` JS path cannot
+run at all. Even a custom WebKitGTK build cannot do LiveKit E2EE, because its
+GStreamer encoded-transform backend is a stub.
+
+The fix is to run LiveKit's **Rust SDK** in the Tauri backend on Linux only,
+with the webview kept as the UI and driven over IPC behind the same
+`livekitSession` facade. The TS E2EE key exchange
+(`livekitE2EE.ts` and `features/voice/e2ee*.ts`) stays unchanged; only the
+final room key crosses IPC, so the frame format, KDF and cipher remain
+byte-compatible with Windows clients. Windows keeps the current webview path
+with no behaviour change.
+
+The dependency is Linux-only (`[target.'cfg(target_os = "linux")'.dependencies]`
+in `Client/src-tauri/Cargo.toml`), and the module and Tauri command live in
+`Client/src-tauri/src/native_voice.rs`. The build prerequisite — clang >= 21
+and a prebuilt libwebrtc — is documented in
+[contributing.md](../contributing.md#client-tauri-v2) and installed by
+`Client/scripts/linux-webrtc-toolchain.sh`.
+
+**Status.** Phase 0 (this plumbing) is landed and links the SDK; it ships no
+user-visible voice. The actual E2EE connect/audio/video path, and B7-17's Linux
+release smoke, are later phases.
+
+**Phase 0 verification.** The Linux client was built on GitHub-hosted
+`ubuntu-22.04` and `ubuntu-22.04-arm` runners, before (`dev` at `dba68fe8`)
+and after this change, with clang 21.1.8 from apt.llvm.org (package
+`1:21.1.8~++20251221032842+2078da43e25a-1~exp1~20251221153008.77`) on both
+architectures; all four legs passed
+([run 35715158290](https://github.com/J3vb/OwnCord/actions/runs/35715158290)).
+Stripped `owncord-client` sizes, in bytes:
+
+| Arch  | Before     | After      | Delta    |
+| ----- | ---------- | ---------- | -------- |
+| x64   | 23,697,480 | 24,135,520 | +438,040 |
+| arm64 | 21,311,640 | 21,629,784 | +318,144 |
+
+Unstripped, x64 grew 35,109,848 → 35,977,288 (+867,440) and arm64 33,693,744 →
+34,310,096 (+616,352); gzip-6 of the stripped binary grew by 162,390 (x64) and
+52,288 (arm64). `Client/scripts/check-glibc-floor.sh` on the built binaries
+reports a highest strong requirement of GLIBC_2.34 on both architectures,
+within the Ubuntu 22.04 floor of 2.35.

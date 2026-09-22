@@ -43,6 +43,31 @@ ignore = [
   # GTK stack that pins glib, and ships no code into the client.
   { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
 ]
+# --- Linux native voice (livekit), added with the phase-0 build plumbing ---
+#
+# No new ignore is needed. The whole Linux-only tree — livekit 0.9.1 and its
+# livekit-* crates, webrtc-sys, libwebrtc — is Apache-2.0, already allowed
+# above; prost/pbjson/zip/scratch and the rest are Apache-2.0 or MIT. The
+# scanner is clean on them, so an exception here would be an unused entry that
+# only rots.
+#
+# What cargo-deny CANNOT see, and why no allow entry exists for it: webrtc-sys
+# statically links a prebuilt libwebrtc.a that bundles third-party C/C++
+# libraries — BoringSSL (OpenSSL-derived), ffmpeg (its archive reproduces both
+# its GPL and LGPL terms; `ffmpeg_branding="Chrome"` adds the H.264 codec),
+# openh264 (BSD-2-Clause), dav1d (BSD-2-Clause), opus (BSD-3-Clause), libvpx
+# (BSD-3-Clause), zlib, libjpeg-turbo, libyuv, libsrtp and others. The
+# authoritative texts ship inside the archive at lib/LICENSE.md. They are not
+# crates, so they never enter this graph and there is nothing for the `allow`
+# list to admit.
+#
+# LGPL stays OFF the allow list, per the phase-0 brief. No crate needs it (the
+# one LGPL term reachable in the graph, r-efi's LGPL-2.1-or-later, is an OR
+# satisfied by MIT). The bundled components above reach the binary only through
+# the owner-accepted prebuilt artifact ("ship the prebuilt libwebrtc as-is for
+# now, including its H.264 codec"), not as cargo crates the policy can gate. If
+# a future CRATE requires LGPL on its own, stop and escalate rather than adding
+# it here.
 
 [licenses]
 # Explicitly allowed SPDX terms, read off the resolved graph with `cargo deny

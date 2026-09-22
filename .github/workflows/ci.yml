@@ -913,6 +913,26 @@ jobs:
             libssl-dev \
             librsvg2-dev
 
+      # The Linux client links livekit, whose webrtc-sys crate needs clang >= 21
+      # and the prebuilt libwebrtc (~148 MB download, ~800 MB extracted). The
+      # libwebrtc archive is cached here — an ordinary PR/branch cache — because
+      # this job runs on every client change, and a cold download is the slow
+      # part. clang-21 is an apt package and is installed fresh every run.
+      #
+      # The trust boundary is deliberate: this cache is populated by the same
+      # kind of branch/PR runs that consume it, and this workflow neither is
+      # tag-triggered nor publishes a runtime artifact. release.yml, which does
+      # publish, restores NO cache (zizmor cache-poisoning, #1656) — it always
+      # downloads and verifies the pinned sha256.
+      - name: Cache libwebrtc
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/owncord-linux-webrtc
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+
+      - name: Install native-voice build prerequisites
+        run: bash ../scripts/linux-webrtc-toolchain.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -922,6 +942,12 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+
+      # Self-test the glibc-floor matcher before trusting it (the same rule the
+      # count/citation/migration matchers follow): a gate whose parser silently
+      # stopped finding versions would pass every binary.
+      - name: Self-test the glibc-floor matcher
+        run: bash ../scripts/check-glibc-floor.sh --selftest
 
       # Ahead of clippy: a formatting failure is cheap to produce and cheap to
       # fix, and there is no reason to spend a clippy pass to surface one.
@@ -1190,6 +1216,18 @@ jobs:
             librsvg2-dev \
             xdg-utils
 
+      # Same clang + libwebrtc prerequisite as rust-tests, libwebrtc cached per arch.
+      - name: Cache libwebrtc
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/owncord-linux-webrtc
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+
+      - name: Install native-voice build prerequisites
+        if: startsWith(matrix.os, 'ubuntu')
+        run: bash scripts/linux-webrtc-toolchain.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -1221,6 +1259,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
+
+      # The release build host is Ubuntu 22.04 precisely so the shipped binary
+      # starts on older distros. Linking the prebuilt libwebrtc could raise that
+      # floor without anything else noticing, so assert it on the binary this
+      # leg just produced — and on arm64, where the artefact differs.
+      - name: Check the binary's glibc floor
+        if: startsWith(matrix.os, 'ubuntu')
+        working-directory: Client/
+        run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
   client-fullstack:
     name: Client E2E (real server and media)
