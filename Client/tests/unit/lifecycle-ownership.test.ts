@@ -248,7 +248,8 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     file: "pages/main-page/ChannelController.ts",
     fn: "mountChannel",
     category: "cancellation-token",
-    reason: "owner: the next channel switch, which aborts the previous channel's work",
+    reason:
+      "owner: the next channel switch (destroyChannel), which aborts the previous channel's work. Not forked from the SessionScope in 11b: a fork would also cancel in-flight channel loads at logout, where today they run to a guarded no-op (a Task 12 candidate)",
   },
 ];
 
