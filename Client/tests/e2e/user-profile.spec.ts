@@ -294,6 +294,7 @@ test.describe("DM profile sidebar", () => {
 
     const note = page.locator("[data-testid='dps-note']");
     await expect(note).toHaveAttribute("placeholder", "Click to add a note");
+    const fetchesBefore = (await fetchCalls(page)).length;
     await note.fill("Ping me about the deploy");
 
     // Close and reopen: the note is read back from local storage.
@@ -301,6 +302,16 @@ test.describe("DM profile sidebar", () => {
     await expect(profileSidebar(page)).toHaveCount(0);
     await openDmProfile(page);
     await expect(note).toHaveValue("Ping me about the deploy");
+
+    // Local-only: writing the note sent nothing to the server, over HTTP or WS.
+    const writes = (await fetchCalls(page)).slice(fetchesBefore).filter((c) => c.method !== "GET");
+    expect(writes).toEqual([]);
+    const wsSends = await page.evaluate(() =>
+      (window as unknown as { __invokeLog: InvokeEntry[] }).__invokeLog
+        .filter((e) => e.cmd === "ws_send")
+        .map((e) => e.args?.message ?? ""),
+    );
+    expect(wsSends.filter((m) => m.includes("Ping me about the deploy"))).toEqual([]);
 
     // A different DM partner must not inherit that note.
     await page.locator("[data-testid='dps-close']").click();
