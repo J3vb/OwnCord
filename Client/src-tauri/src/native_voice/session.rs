@@ -12,6 +12,7 @@ use livekit::prelude::*;
 use livekit::rtc_engine::lk_runtime::LkRuntime;
 use livekit::webrtc::audio_source::RtcAudioSource;
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
