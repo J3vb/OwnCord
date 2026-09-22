@@ -159,17 +159,39 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     // step already runs pwsh, while this job's only powershell.exe start is
     // cold and took up to 30s on loaded runners. Get-Process filters by name
     // before reading paths; a Win32_Process scan reads every process's path.
+    // A local machine without PowerShell 7 falls back to Windows PowerShell,
+    // whose .NET Framework Process has no tree Kill, so taskkill /t does it.
     await progress("terminating installed successor");
-    await exec(
-      "pwsh",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process -Name owncord-client -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $path } | ForEach-Object { try { $_.Kill($true) } catch [InvalidOperationException] {}; $_.WaitForExit() }",
-      ],
-      { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe }, timeout: 30_000 },
-    );
+    const eachInstalled =
+      "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process -Name owncord-client -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $path } | ForEach-Object";
+    const killOptions = {
+      env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
+      timeout: 30_000,
+    };
+    try {
+      await exec(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${eachInstalled} { try { $_.Kill($true) } catch [InvalidOperationException] {}; $_.WaitForExit() }`,
+        ],
+        killOptions,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await exec(
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${eachInstalled} { taskkill /pid $_.Id /t /f | Out-Null; $_.WaitForExit() }`,
+        ],
+        killOptions,
+      );
+    }
     await progress("closing original app and profile");
     await app?.close();
     await progress("closing gateway");
