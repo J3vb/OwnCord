@@ -296,16 +296,30 @@ fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool)
     }
 }
 
-/// Select a device the way `PlatformAudio`'s hot-swap does (stop, select,
-/// re-init and restart a stream that was running), but by index. The stream
-/// is restarted even when the selection fails.
+/// A selected device: its name (empty: the default) and the device-module
+/// index last applied for it, which a hot-plug can shift.
+#[derive(Default)]
+struct Selection {
+    name: String,
+    index: Option<u16>,
+}
+
+/// Select device `index` the way `PlatformAudio`'s hot-swap does (stop,
+/// select, re-init and restart a stream that was running), but by index. The
+/// stream is restarted even when the selection fails, and left untouched when
+/// `index` is the one already `applied`.
 fn switch_stream(
+    applied: Option<u16>,
+    index: u16,
     running: bool,
     stop: impl Fn() -> bool,
     select: impl Fn() -> bool,
     init: impl Fn() -> bool,
     start: impl Fn() -> bool,
 ) -> Result<(), String> {
+    if applied == Some(index) {
+        return Ok(());
+    }
     if running && !stop() {
         return Err("stopping the audio stream failed".into());
     }
@@ -358,10 +372,8 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
-    /// The selected capture and playout devices' names (empty: the default).
-    /// The device module keeps indexes, which a hot-plug can shift.
-    input_name: String,
-    output_name: String,
+    input: Selection,
+    output: Selection,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -396,8 +408,8 @@ impl NativeSession {
             key_provider,
             audio: None,
             mic: None,
-            input_name: String::new(),
-            output_name: String::new(),
+            input: Selection::default(),
+            output: Selection::default(),
             forwarder,
         })
     }
@@ -477,21 +489,21 @@ impl NativeSession {
 
     /// Point a stopped capture or playout stream at the selected device's
     /// current index before it starts again.
-    fn reselect(&self, kind: DeviceKind) {
+    fn reselect(&mut self, kind: DeviceKind) {
         let Some(audio) = &self.audio else { return };
         let runtime = LkRuntime::instance();
         let f = runtime.pc_factory();
         let listed = devices_of(audio);
-        let (running, name, devices, what) = match kind {
+        let (running, selection, devices, what) = match kind {
             DeviceKind::Input => (
                 f.recording_is_initialized(),
-                &self.input_name,
+                &mut self.input,
                 listed.inputs,
                 "capture",
             ),
             DeviceKind::Output => (
                 f.playout_is_initialized(),
-                &self.output_name,
+                &mut self.output,
                 listed.outputs,
                 "playout",
             ),
@@ -499,15 +511,19 @@ impl NativeSession {
         if running {
             return;
         }
-        let (index, fell_back) = resolve_device(name, &devices);
+        let (index, fell_back) = resolve_device(&selection.name, &devices);
         if fell_back {
-            log::warn!("[native_voice] {what} device {name} not found; using the default");
+            log::warn!(
+                "[native_voice] {what} device {} not found; using the default",
+                selection.name
+            );
         }
         let Some(index) = index else { return };
         let selected = match kind {
             DeviceKind::Input => f.set_recording_device(index),
             DeviceKind::Output => f.set_playout_device(index),
         };
+        selection.index = selected.then_some(index);
         if !selected {
             log::warn!("[native_voice] selecting {what} device {index} failed");
         }
@@ -535,7 +551,7 @@ impl NativeSession {
 
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
-        &self,
+        &mut self,
         identity: &str,
         sid: &str,
         subscribed: bool,
@@ -573,9 +589,9 @@ impl NativeSession {
             .as_ref()
             .ok_or("no audio device module — platform audio unavailable")?;
         let listed = devices_of(audio);
-        let (devices, what) = match kind {
-            DeviceKind::Input => (listed.inputs, "capture"),
-            DeviceKind::Output => (listed.outputs, "playout"),
+        let (devices, what, selection) = match kind {
+            DeviceKind::Input => (listed.inputs, "capture", &mut self.input),
+            DeviceKind::Output => (listed.outputs, "playout", &mut self.output),
         };
         let (index, fell_back) = resolve_device(device_id, &devices);
         let index = index.ok_or(format!("no {what} device"))?;
@@ -583,8 +599,11 @@ impl NativeSession {
         // runtime its device module lives in exposes the index-based calls.
         let runtime = LkRuntime::instance();
         let f = runtime.pc_factory();
+        let applied = selection.index;
         let switched = match kind {
             DeviceKind::Input => switch_stream(
+                applied,
+                index,
                 f.recording_is_initialized(),
                 || f.stop_recording(),
                 || f.set_recording_device(index),
@@ -592,6 +611,8 @@ impl NativeSession {
                 || f.start_recording(),
             ),
             DeviceKind::Output => switch_stream(
+                applied,
+                index,
                 f.playout_is_initialized(),
                 || f.stop_playout(),
                 || f.set_playout_device(index),
@@ -599,12 +620,9 @@ impl NativeSession {
                 || f.start_playout(),
             ),
         };
+        selection.index = switched.is_ok().then_some(index);
         switched?;
-        let name = match kind {
-            DeviceKind::Input => &mut self.input_name,
-            DeviceKind::Output => &mut self.output_name,
-        };
-        *name = if fell_back {
+        selection.name = if fell_back {
             String::new()
         } else {
             device_id.to_string()
@@ -754,6 +772,8 @@ mod tests {
             }
         };
         let result = switch_stream(
+            None,
+            2,
             true,
             step("stop", true),
             step("select", false),
@@ -765,6 +785,8 @@ mod tests {
 
         calls.borrow_mut().clear();
         let result = switch_stream(
+            None,
+            2,
             false,
             step("stop", true),
             step("select", true),
@@ -773,6 +795,42 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(*calls.borrow(), ["select"]);
+    }
+
+    #[test]
+    fn an_unchanged_index_leaves_the_running_stream_alone() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let step = |name: &'static str| {
+            let calls = &calls;
+            move || {
+                calls.borrow_mut().push(name);
+                true
+            }
+        };
+        let result = switch_stream(
+            Some(2),
+            2,
+            true,
+            step("stop"),
+            step("select"),
+            step("init"),
+            step("start"),
+        );
+        assert!(result.is_ok());
+        assert!(calls.borrow().is_empty());
+
+        let result = switch_stream(
+            Some(3),
+            2,
+            true,
+            step("stop"),
+            step("select"),
+            step("init"),
+            step("start"),
+        );
+        assert!(result.is_ok());
+        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
     }
 
     #[test]
