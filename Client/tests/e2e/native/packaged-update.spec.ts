@@ -157,13 +157,14 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     // in this test's unique installation directory, then terminate its tree
     // and wait for it to exit. pwsh, not Windows PowerShell: every Actions
     // step already runs pwsh, while this job's only powershell.exe start is
-    // cold and took up to 30s on loaded runners. Get-Process filters by name
-    // before reading paths; a Win32_Process scan reads every process's path.
+    // cold and took up to 30s on loaded runners. The name check runs before
+    // reading paths; a Win32_Process scan reads every process's path. Not
+    // `Get-Process -Name`: with no match it exits 1 and this finally throws.
     // A local machine without PowerShell 7 falls back to Windows PowerShell,
     // whose .NET Framework Process has no tree Kill, so taskkill /t does it.
     await progress("terminating installed successor");
     const eachInstalled =
-      "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process -Name owncord-client -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $path } | ForEach-Object";
+      "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process | Where-Object { $_.ProcessName -eq 'owncord-client' -and $_.Path -eq $path } | ForEach-Object";
     const killOptions = {
       env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
       timeout: 30_000,
