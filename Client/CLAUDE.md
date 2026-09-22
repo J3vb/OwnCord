@@ -70,7 +70,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `Client/scripts/linux-webrtc-toolchain.sh` fetches libwebrtc and uses
   `CC`/`CXX`, an installed clang >= 21, or (Debian/Ubuntu only) apt.llvm.org's
   clang-21, in that order. Every Linux leg that builds the crate runs it (see
-  the root CLAUDE.md for the local invocation). A non-Linux build is unaffected: the dependency is behind
+  the root CLAUDE.md for the local invocation). A non-Linux build is
+  unaffected: the dependency is behind
   `[target.'cfg(target_os = "linux")'.dependencies]`. Design:
   [docs/architecture/voice-e2ee.md](../docs/architecture/voice-e2ee.md).
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.

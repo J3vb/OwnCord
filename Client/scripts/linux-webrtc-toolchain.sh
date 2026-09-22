@@ -26,8 +26,9 @@
 #     installed clang++-21 or clang++ (in that order) reporting major >= 21;
 #     otherwise, on a Debian/Ubuntu release apt.llvm.org publishes, clang-21
 #     from its llvm-toolchain-<codename>-21 channel (what CI and release jobs
-#     get on both architectures: their runners have no clang >= 21). That channel is a moving ref (whatever 21.x point
-#     release it currently publishes), trusted through the repository's GPG
+#     get on both architectures: their runners have no clang >= 21). That
+#     channel is a moving ref (whatever 21.x point release it currently
+#     publishes), trusted through the repository's GPG
 #     signature: its signing key is pinned by full fingerprint and the script
 #     fails if the downloaded key differs. The exact installed version is
 #     printed so every build log records which compiler produced it.

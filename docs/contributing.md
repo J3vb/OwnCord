@@ -109,8 +109,8 @@ apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads
 libwebrtc once into `~/.cache/owncord-linux-webrtc`, and prints the
 environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a
 new terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`;
-ci.yml caches the libwebrtc directory, and clang is installed fresh each run. Windows client builds and
-server-only work need none of this. Design and rationale:
+ci.yml caches the libwebrtc directory, and clang is installed fresh each run.
+Windows client builds and server-only work need none of this. Design and rationale:
 [docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md); the phase that
 ships the user-visible voice path is a separate change.
 
