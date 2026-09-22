@@ -77,34 +77,29 @@ test.describe("Voice widget", () => {
     await navigateToMainPageReady(page);
   });
 
-  test("voice widget exists in DOM", async ({ page }) => {
-    // The voice widget is always in the DOM but only visible when
-    // connected to a voice channel via LiveKit (not via WS mock alone).
-    // In mock mode, the widget exists but currentChannelId is null.
+  test("joining voice reveals the widget with its full, usable control set", async ({ page }) => {
+    // The widget's controls only mean something in the connected state; assert
+    // them there (the old rows checked attachment while hidden, which passes
+    // even if the controls never become reachable).
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toBeAttached();
-  });
+    await expect(widget).not.toHaveClass(/visible/);
 
-  test("voice widget has correct control buttons", async ({ page }) => {
-    const widget = page.locator("[data-testid='voice-widget']");
-    // Even when hidden, the buttons should exist in the DOM
-    await expect(widget.locator("button[aria-label='Mute']")).toBeAttached();
-    await expect(widget.locator("button[aria-label='Deafen']")).toBeAttached();
-    await expect(widget.locator("button[aria-label='Camera']")).toBeAttached();
-    await expect(widget.locator("button[aria-label='Screenshare']")).toBeAttached();
-    await expect(widget.locator("button[aria-label='Disconnect']")).toBeAttached();
-  });
+    await joinVoiceChannelByName(page);
+    await expect(widget).toHaveClass(/visible/);
 
-  test("voice widget has grant mic button (hidden by default)", async ({ page }) => {
-    const grantMicBtn = page.locator(".vw-grant-mic");
-    // Should exist but be hidden (listenOnly is false)
-    await expect(grantMicBtn).toBeAttached();
-    await expect(grantMicBtn).toBeHidden();
-  });
+    // All five controls are visible and enabled once connected.
+    for (const label of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
+      const btn = widget.locator(`button[aria-label='${label}']`);
+      await expect(btn).toBeVisible();
+      await expect(btn).toBeEnabled();
+    }
 
-  test("voice widget has signal quality indicator", async ({ page }) => {
-    const signal = page.locator(".vw-signal");
-    await expect(signal).toBeAttached();
+    // The grant-mic control stays hidden outside listen-only mode.
+    await expect(widget.locator(".vw-grant-mic")).toBeHidden();
+
+    // The signal-quality indicator is present and clickable into the stats pane
+    // (its toggle behaviour is asserted in the widget describe below).
+    await expect(widget.locator(".vw-signal")).toBeVisible();
   });
 
   test("voice widget stats pane toggles on signal click", async ({ page }) => {

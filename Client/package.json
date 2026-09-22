@@ -36,7 +36,7 @@
     "lint": "npm run lint:ox && npm run lint:cycles && eslint src/",
     "lint:fix": "eslint src/ --fix",
     "lint:ox": "oxlint --deny-warnings src/",
-    "lint:cycles": "oxlint -c .oxlintrc.cycles.json --tsconfig tsconfig.json --max-warnings=21 src/",
+    "lint:cycles": "oxlint -c .oxlintrc.cycles.json --tsconfig tsconfig.json --max-warnings=0 src/",
     "knip": "knip",
     "test:mutate": "stryker run",
     "test:mutate:dry": "stryker run --dryRunOnly",

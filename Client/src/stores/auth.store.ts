@@ -5,12 +5,10 @@
 
 import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
-import { resetVoiceStore, voiceStore } from "@stores/voice.store";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetChannelsStore } from "@stores/channels.store";
 import { resetBlocksStore } from "@stores/blocks.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { cleanupNotificationAudio } from "@lib/notifications";
 import { clearNsfwAcknowledgements } from "@lib/nsfw-gate";
 import { createLogger } from "@lib/logger";
 
@@ -69,6 +67,25 @@ export function onAuthCleared(listener: (reason: LogoutReason) => void): () => v
   return () => authCleanupListeners.delete(listener);
 }
 
+// voice.store.ts registers its logout teardown here at module load instead of
+// this store importing it: voice.store imports this store, so the direct import
+// was a cycle. main.ts imports voice.store statically, so it is registered
+// before any clearAuth can run; a store that never loaded holds nothing to reset.
+interface VoiceLogoutTeardown {
+  /** Read before `reset` — the last moment the pre-logout state is knowable. */
+  readonly snapshot: () => {
+    readonly currentChannelId: number | null;
+    readonly voiceStatus: string;
+  };
+  readonly reset: () => void;
+}
+let voiceLogoutTeardown: VoiceLogoutTeardown | null = null;
+
+/** Called once by voice.store.ts at module load. */
+export function registerVoiceLogoutTeardown(teardown: VoiceLogoutTeardown): void {
+  voiceLogoutTeardown = teardown;
+}
+
 /** Populate auth state after a successful auth_ok message. */
 export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
   authStore.setState((prev) => ({
@@ -123,16 +140,16 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // joined voice would pull in the whole LiveKit SDK on every logout/401.
   // When a voice session exists the module is necessarily already loaded, so
   // this import resolves from the module cache in a microtask.
-  const voice = voiceStore.getState();
-  // Snapshot BEFORE resetVoiceStore() below clears it — this is the last
+  const voice = voiceLogoutTeardown?.snapshot();
+  // Snapshot BEFORE the voice reset below clears it — this is the last
   // moment the pre-logout voice state is knowable.
-  const wasInVoice = voice.currentChannelId !== null;
-  if (voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
+  const wasInVoice = voice !== undefined && voice.currentChannelId !== null;
+  if (voice !== undefined && voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
     void import("@lib/livekitSession")
       .then(({ leaveVoice }) => leaveVoice(false))
       .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
   }
-  resetVoiceStore();
+  voiceLogoutTeardown?.reset();
   resetMessagesStore();
   resetChannelsStore();
   resetBlocksStore();
@@ -142,7 +159,6 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // acks and the age gate silently never appears for them. Host-scoping the
   // keys cannot cover that case — only clearing on logout can.
   clearNsfwAcknowledgements();
-  cleanupNotificationAudio();
   authStore.setState(() => ({
     ...INITIAL_STATE,
     logoutReason: reason,

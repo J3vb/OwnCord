@@ -12,7 +12,7 @@ import type {
   VoiceSpeakersPayload,
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
+import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -157,6 +157,8 @@ export function resetVoiceStore(): void {
     peerVerifications: new Map(),
   }));
 }
+
+registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState(), reset: resetVoiceStore });
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
