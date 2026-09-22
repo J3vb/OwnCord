@@ -24,7 +24,7 @@ import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from ".
 /** livekit-client's package exports hide dist/; the spec runs from Client/. */
 const livekitDist = resolve("node_modules/livekit-client/dist");
 
-const API_KEY = "e2e-key";
+const KEY_ID = "e2e-key";
 const API_SECRET = "e2e-secret-at-least-32-characters-long";
 const ROOM = "native-interop";
 /** 440 Hz sine, amplitude 8000 of 32768: RMS = 8000/32768/sqrt(2). */
@@ -47,7 +47,7 @@ function joinToken(identity: string): string {
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = b64url(
     JSON.stringify({
-      iss: API_KEY,
+      iss: KEY_ID,
       sub: identity,
       nbf: now - 10,
       exp: now + 600,
@@ -104,7 +104,7 @@ test.beforeAll(async () => {
   const config = join(dataDir, "livekit.yaml");
   await writeFile(
     config,
-    `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n  ips:\n    includes: [127.0.0.1/32]\nlogging:\n  level: warn\nkeys:\n  ${API_KEY}: ${API_SECRET}\n`,
+    `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n  ips:\n    includes: [127.0.0.1/32]\nlogging:\n  level: warn\nkeys:\n  ${KEY_ID}: ${API_SECRET}\n`,
   );
   livekit = startProcess(resolve(livekitBinary!), ["--config", config], dataDir);
   await waitForHttp(`http://127.0.0.1:${livekitPort}`, livekit);
