@@ -132,13 +132,13 @@ test.describe("video grid — chat/grid toggle", () => {
     await row.click();
     await expect(gridSlot(page)).toBeVisible({ timeout: 5_000 });
 
-    // The peer leaves voice entirely — with no stream left there is nothing
-    // for the grid to show, so it must close itself rather than sit empty.
-    await emitWsMessage(page, {
-      type: "voice_leave",
-      payload: { user_id: CAMERA_USER_ID, channel_id: VOICE_CHANNEL_ID },
-    });
+    // The peer turns their camera off but stays in voice — with no stream
+    // left there is nothing for the grid to show, so it must close itself
+    // rather than sit empty.
+    await emitWsMessage(page, voiceState(CAMERA_USER_ID, { camera: false }));
 
+    await expect(row.locator(".vu-status")).toHaveCount(0, { timeout: 5_000 });
+    await expect(row).toBeVisible();
     await expect(gridSlot(page)).toBeHidden({ timeout: 5_000 });
     await expect(messagesSlot(page)).toBeVisible();
   });

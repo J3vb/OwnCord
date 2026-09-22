@@ -17,7 +17,7 @@ test.setTimeout(180_000);
 // the outgoing WS frames the client actually sent — never on a test hook.
 // ---------------------------------------------------------------------------
 
-/** The local user's own camera tile id, and the offset screenshare tiles use. */
+/** Offset added to a user id to form their screenshare tile id. */
 const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
 
 /** Remote mic volume the app actually applied, from its own debug introspection
@@ -93,7 +93,9 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   await expectDecodedMedia(alice, true);
 
   // The sidebar watch affordance focuses the peer's tile.
-  await alice.locator(".voice-user-item[data-voice-uid='2']").click();
+  const bobRow = alice.locator(".voice-user-item[data-voice-uid='2']");
+  await expect(bobRow.locator(".vu-status")).toBeVisible({ timeout: 10_000 });
+  await bobRow.click();
   const grid = alice.locator("[data-testid='video-grid']");
   await expect(grid).toHaveClass(/focus-mode/, { timeout: 5_000 });
   await expect(alice.locator(".video-focus-main .video-cell[data-user-id='2']")).toHaveClass(
@@ -142,7 +144,7 @@ test("a tile's mute button and volume slider change the peer's real playback vol
   await expect(muteBtn).toHaveAttribute("aria-label", "Mute");
   await expect.poll(() => remoteMicVolume(alice, 2), { timeout: 5_000 }).toBe(1);
 
-  // The slider drives the real volume: 50/200 → 0.5.
+  // The slider drives the real volume: gain is value/100, so 50 → 0.5.
   const slider = tile.locator(".tile-volume-slider");
   await slider.evaluate((el: HTMLInputElement) => {
     el.value = "50";
@@ -189,7 +191,9 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
 
   // Remote side: the peer can watch the real screenshare and actually decodes
   // its video frames.
-  await bob.locator(".voice-user-item[data-voice-uid='1']").click();
+  const aliceRow = bob.locator(".voice-user-item[data-voice-uid='1']");
+  await expect(aliceRow.locator(".vu-live-badge")).toBeVisible({ timeout: 10_000 });
+  await aliceRow.click();
   await expect(bob.locator("[data-testid='video-grid-slot']")).toBeVisible({ timeout: 5_000 });
   const bobScreen = bob.locator(
     "[data-testid='video-grid'] .video-cell[data-stream-type='screenshare']",
