@@ -388,10 +388,12 @@ across them (run-to-run spread 0 on all counts):
 
 `documents` 1, `intervals` 1, `timeouts` 1, and sockets/peerConnections/tracks/
 audioContexts 0 in every run, all flat. The **LiveKit `error reading from signal
-stream … WS closed unexpectedly with code 1006`** console line did **not** appear
-in any of the five runs: it is intermittent, emitted when the every-5th-cycle
-application reconnect drops the socket LiveKit's signaling connection rides on,
-and it is expected because that step deliberately severs the transport. It is on
+stream … WS closed unexpectedly`** console line did **not** appear in any of the
+five runs: it is intermittent, emitted when the every-5th-cycle application
+reconnect drops the socket LiveKit's signaling connection rides on, and it is
+expected because that step deliberately severs the transport. It has been seen
+with close code 1006 and, in a later at-head run, 1000; the pattern accepts
+either code. It is on
 the named expected-line list (with `[ws] ws_send failed {error: WS is not open}`)
 so a run that does see it still passes, while any other `console.error` fails.
 
@@ -496,6 +498,26 @@ failure comes from the bars, and nothing was tuned.
    `error reading from signal stream … WS closed unexpectedly with code 1000`,
    and the expected-line pattern accepts only code 1006.
 
-So the 20-cycle PR soak is currently flaky in its interaction and console
-steps, which conflicts with the "run at least five times, not flaky"
-acceptance criterion even though the leak bars are stable.
+Both failures came from the soak's interaction and console steps, not from the
+leak bars.
+
+**Stabilised soak, two consecutive clean runs** (`cbccfb8e` plus the working-tree
+change that retries the DM step as one unit and accepts close code 1000; bars
+and ceilings unchanged). The DM step now closes any popup, clicks Bob's row,
+waits for the popup's `.open` card and clicks its Message button, retrying the
+whole sequence until the DM header shows. No step uses a fixed sleep. The LiveKit
+expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 828     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 896     |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
+
+**Owner decision: the five-run at-head calibration moves to B7-11c.** The
+intent asks for the 20-cycle soak to be run at least five times locally to show
+it is not flaky. The five recorded calibration runs predate the DM-step and
+console-pattern changes. For 11a the at-head evidence is these two consecutive
+passing runs, and 11c re-runs the five at its head.

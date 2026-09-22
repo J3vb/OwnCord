@@ -68,7 +68,7 @@ const EXPECTED_CONSOLE_ERRORS = [
   /\[ws\] ws_send failed \{error: WS is not open/,
   // LiveKit's signaling socket, dropped by the every-5th-cycle reconnect; the
   // message's own text, not a bare "reconnect" substring.
-  /error reading from signal stream \{room: channel-\d+.*WS closed unexpectedly with code 1006/,
+  /error reading from signal stream \{room: channel-\d+.*WS closed unexpectedly with code 100[06]/,
 ];
 
 const test = base.extend<{ alice: Page }>({
@@ -237,9 +237,14 @@ async function runCycle(
   await expect(page.locator("[data-testid='channel-context-menu']")).not.toBeVisible();
 
   // 4. Open the DM with Bob, send one message, close it.
-  await page.locator(".member-item", { hasText: "bob" }).first().click();
-  await page.locator("[data-testid='upp-message-btn']").click();
-  await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
+  await expect(async () => {
+    await page.keyboard.press("Escape");
+    await page.locator(".member-item", { hasText: "bob" }).first().click({ timeout: 5_000 });
+    const popup = page.locator("[data-testid='user-profile-popup'].open");
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator("[data-testid='upp-message-btn']").click({ timeout: 5_000 });
+    await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 60_000 });
   const dmText = `soak-dm-${cycle}-${crypto.randomUUID()}`;
   await page.locator("[data-testid='message-input'] textarea").fill(dmText);
   await page.locator("[data-testid='message-input'] textarea").press("Enter");
