@@ -137,6 +137,19 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
+# WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
+# so on Linux the LiveKit SDK runs in this Rust backend instead of the webview
+# and the webview stays the UI; the TS E2EE key exchange still runs in the
+# frontend and only the final room key crosses IPC. See
+# docs/architecture/voice-e2ee.md and Client/src-tauri/src/native_voice.rs.
+#
+# Exact-pinned on purpose: the SDK is 0.x, its API churns, and webrtc-sys
+# downloads a prebuilt libwebrtc (webrtc-89d790b) whose C++ ABI is tied to the
+# crate version, so a patch bump must be a deliberate, re-verified change.
+# Default features only — no TLS backend, because the native room dials the
+# plain ws:// loopback that livekit_proxy already exposes.
+livekit = "=0.9.1"
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),

@@ -188,6 +188,15 @@ jobs:
             librsvg2-dev \
             xdg-utils
 
+      # clang >= 21 plus the prebuilt libwebrtc the Linux client links against
+      # (livekit -> webrtc-sys). Deliberately NO actions/cache restore here:
+      # this workflow publishes runtime artifacts and is tag-triggered, so a
+      # poisoned cache is exactly the risk zizmor's cache-poisoning audit names
+      # (#1656). The installer downloads and verifies a pinned sha256 instead,
+      # so a clean runner pays the ~148 MB and nothing can seed it.
+      - name: Install native-voice build prerequisites
+        run: bash Client/scripts/linux-webrtc-toolchain.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
@@ -207,6 +216,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --bundles appimage,deb
+
+      # Fail closed on the shipped binary's glibc floor: the prebuilt libwebrtc
+      # this now links could raise it and nothing in the bundle declares one.
+      # The same script is exercised on every PR by ci.yml's rust-tests
+      # selftest and tauri-build's Linux legs, so it is not untested code
+      # running first at tag time (the ci-check rule).
+      - name: Check the binary's glibc floor
+        working-directory: Client
+        run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
       # linuxdeploy bundles the runner's libwayland-* into the AppImage, which
       # breaks Mesa EGL init on newer hosts (white window on Arch/Fedora —
@@ -413,6 +431,13 @@ jobs:
             librsvg2-dev \
             xdg-utils
 
+      # Same prerequisite and same no-cache rule as the x86_64 job — see the
+      # comment there. On arm64 the installer takes apt.llvm.org's clang-21
+      # (the archive's declared floor; there is no Chromium arm64-host tarball)
+      # and the arm64 libwebrtc zip, both verified by pinned sha256.
+      - name: Install native-voice build prerequisites
+        run: bash Client/scripts/linux-webrtc-toolchain.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
@@ -432,6 +457,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --bundles appimage,deb
+
+      # Same floor check as the x86_64 job — the arm64 libwebrtc artifact
+      # differs, so a floor it raises would not show up on x64.
+      - name: Check the binary's glibc floor
+        working-directory: Client
+        run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
       # Same strip + re-sign as the x86_64 job — see the comment there.
       - name: Strip host-incompatible libs from AppImage and re-sign

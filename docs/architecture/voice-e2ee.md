@@ -86,3 +86,30 @@ and surface a blocking mismatch modal if it later changes (see
 `Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
+
+## Linux: native LiveKit in the Rust backend
+
+No mainstream WebKitGTK build ships WebRTC — the system webview's
+`RTCPeerConnection` is `undefined` on Ubuntu, Debian, Fedora, Arch and the
+GNOME Flatpak runtime alike — so on Linux the `livekit-client` JS path cannot
+run at all. Even a custom WebKitGTK build cannot do LiveKit E2EE, because its
+GStreamer encoded-transform backend is a stub.
+
+The fix is to run LiveKit's **Rust SDK** in the Tauri backend on Linux only,
+with the webview kept as the UI and driven over IPC behind the same
+`livekitSession` facade. The TS E2EE key exchange
+(`livekitE2EE.ts` and `features/voice/e2ee*.ts`) stays unchanged; only the
+final room key crosses IPC, so the frame format, KDF and cipher remain
+byte-compatible with Windows clients. Windows keeps the current webview path
+with no behaviour change.
+
+The dependency is Linux-only (`[target.'cfg(target_os = "linux")'.dependencies]`
+in `Client/src-tauri/Cargo.toml`), and the module and Tauri command live in
+`Client/src-tauri/src/native_voice.rs`. The build prerequisite — clang >= 21
+and a prebuilt libwebrtc — is documented in
+[contributing.md](../contributing.md#client-tauri-v2) and installed by
+`Client/scripts/linux-webrtc-toolchain.sh`.
+
+**Status.** Phase 0 (this plumbing) is landed and links the SDK; it ships no
+user-visible voice. The actual E2EE connect/audio/video path, and B7-17's Linux
+release smoke, are later phases.

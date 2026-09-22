@@ -13,6 +13,8 @@ mod http_proxy;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+#[cfg(target_os = "linux")]
+mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
@@ -140,6 +142,8 @@ pub fn run() {
             http_proxy::stop_http_proxy,
             external_content::external_preview,
             external_content::external_image,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_build_info,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
