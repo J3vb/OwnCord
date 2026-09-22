@@ -91,7 +91,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
   contract, and audio device lists come from `native/devices.ts` (the device
-  module's GUIDs, not the webview's). Keep the state machine platform-blind:
+  module's device names, not the webview's). Keep the state machine platform-blind:
   a Linux-only behaviour belongs in the adapter or the Rust session, never as
   a branch in `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and

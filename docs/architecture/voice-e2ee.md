@@ -202,8 +202,10 @@ switches in place; an empty id is the module's default (its first device).
 `NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
 saved-device switches at join and the settings tab's selectors work unchanged;
 `features/voice/native/devices.ts` gives the settings tab and the device
-manager the native list on Linux (the ids are the module's GUIDs, not the
-webview's) and is null everywhere else, leaving the web enumeration untouched.
+manager the native list on Linux (the ids are the module's device names —
+the Linux device modules report no GUIDs — not the webview's; a switch
+resolves the name to the module's index, first match wins, and an unknown
+name falls back to the default and reports it) and is null everywhere else, leaving the web enumeration untouched.
 Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
 re-list through the native backend.
 

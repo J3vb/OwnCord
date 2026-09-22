@@ -186,12 +186,6 @@ pub async fn native_voice_connect<R: Runtime>(
         Ok(Some(k)) => session.set_key(k),
         Ok(None) => {}
     }
-    if let Some((old, s)) = inner.session.take() {
-        // Only possible if a newer connect already stored — excluded above —
-        // or a stale entry; close it rather than leak it.
-        log::warn!("[native_voice] closing unexpected live session {old}");
-        s.close().await;
-    }
     log::info!("[native_voice] session {id} connected as {identity}");
     inner.session = Some((id, session));
     Ok(Connected {

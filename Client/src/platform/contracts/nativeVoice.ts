@@ -58,7 +58,7 @@ export interface NativeVoiceEnvelope {
 }
 
 export interface NativeVoiceDevice {
-  /** The host device module's stable identifier (a GUID on desktop). */
+  /** The host device module's identifier (the device name on Linux). */
   id: string;
   name: string;
 }

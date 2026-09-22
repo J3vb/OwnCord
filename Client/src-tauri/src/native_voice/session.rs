@@ -9,6 +9,7 @@ use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::TrackPublishOptions;
 use livekit::prelude::*;
+use livekit::rtc_engine::lk_runtime::LkRuntime;
 use livekit::webrtc::audio_source::RtcAudioSource;
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
 use serde::Serialize;
@@ -246,8 +247,12 @@ pub struct Resources {
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
+    /// The device name: the Linux device modules leave the GUID empty.
     pub id: String,
     pub name: String,
+    /// The device module's index, what a switch selects by.
+    #[serde(skip)]
+    pub index: u16,
 }
 
 /// The platform's capture and playout devices, in the device module's order
@@ -264,28 +269,54 @@ fn devices_of(audio: &PlatformAudio) -> Devices {
         inputs: audio
             .recording_devices()
             .map(|d| DeviceInfo {
-                id: d.id.as_str().to_string(),
+                id: d.name.clone(),
                 name: d.name,
+                index: d.index as u16,
             })
             .collect(),
         outputs: audio
             .playout_devices()
             .map(|d| DeviceInfo {
-                id: d.id.as_str().to_string(),
+                id: d.name.clone(),
                 name: d.name,
+                index: d.index as u16,
             })
             .collect(),
     }
 }
 
-/// The id to switch to: `requested` when `listed` has it, otherwise the
-/// module's default (the first listed), flagged as a fallback unless the
-/// default was what was asked for (an empty id). `None` when nothing is listed.
-fn resolve_device<'a>(requested: &str, listed: &'a [String]) -> (Option<&'a str>, bool) {
-    match listed.iter().find(|id| *id == requested) {
-        Some(id) => (Some(id.as_str()), false),
-        None => (listed.first().map(String::as_str), !requested.is_empty()),
+/// The index to switch to: the first device whose id is `requested`,
+/// otherwise the module's default (the first listed), flagged as a fallback
+/// unless the default was what was asked for (an empty id). `None` when
+/// nothing is listed.
+fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
+    match listed.iter().find(|d| d.id == requested) {
+        Some(d) => (Some(d.index), false),
+        None => (listed.first().map(|d| d.index), !requested.is_empty()),
     }
+}
+
+/// Select a device the way `PlatformAudio`'s hot-swap does (stop, select,
+/// re-init and restart a stream that was running), but by index. The stream
+/// is restarted even when the selection fails.
+fn switch_stream(
+    running: bool,
+    stop: impl Fn() -> bool,
+    select: impl Fn() -> bool,
+    init: impl Fn() -> bool,
+    start: impl Fn() -> bool,
+) -> Result<(), String> {
+    if running && !stop() {
+        return Err("stopping the audio stream failed".into());
+    }
+    let selected = select();
+    if running && !(init() && start()) {
+        return Err("restarting the audio stream failed".into());
+    }
+    if !selected {
+        return Err("selecting the audio device failed".into());
+    }
+    Ok(())
 }
 
 /// Enumerate with a device module that lives only for the call (no session).
@@ -491,25 +522,34 @@ impl NativeSession {
             .audio
             .as_ref()
             .ok_or("no audio device module — platform audio unavailable")?;
-        // The switch stops the running stream first and never restarts it on
-        // an unknown id, so only ever hand it an id the module listed.
         let listed = devices_of(audio);
-        let (ids, what) = match kind {
+        let (devices, what) = match kind {
             DeviceKind::Input => (listed.inputs, "capture"),
             DeviceKind::Output => (listed.outputs, "playout"),
         };
-        let ids: Vec<String> = ids.into_iter().map(|d| d.id).collect();
-        let (target, fell_back) = resolve_device(device_id, &ids);
-        let target = target.ok_or(format!("no {what} device"))?;
+        let (index, fell_back) = resolve_device(device_id, &devices);
+        let index = index.ok_or(format!("no {what} device"))?;
+        // PlatformAudio only switches by GUID, which is empty on Linux; the
+        // runtime its device module lives in exposes the index-based calls.
+        let runtime = LkRuntime::instance();
+        let f = runtime.pc_factory();
         let switched = match kind {
-            DeviceKind::Input => {
-                audio.switch_recording_device(&RecordingDeviceId::from_unchecked_guid(target))
-            }
-            DeviceKind::Output => {
-                audio.switch_playout_device(&PlayoutDeviceId::from_unchecked_guid(target))
-            }
+            DeviceKind::Input => switch_stream(
+                f.recording_is_initialized(),
+                || f.stop_recording(),
+                || f.set_recording_device(index),
+                || f.init_recording(),
+                || f.start_recording(),
+            ),
+            DeviceKind::Output => switch_stream(
+                f.playout_is_initialized(),
+                || f.stop_playout(),
+                || f.set_playout_device(index),
+                || f.init_playout(),
+                || f.start_playout(),
+            ),
         };
-        switched.map_err(|e| e.to_string())?;
+        switched?;
         if fell_back {
             return Err(format!(
                 "{what} device {device_id} not found; switched to the default"
@@ -609,32 +649,69 @@ mod tests {
     fn devices_serialize_camel_case() {
         let json = serde_json::to_string(&Devices {
             inputs: vec![DeviceInfo {
-                id: "guid-1".into(),
+                id: "Mic".into(),
                 name: "Mic".into(),
+                index: 3,
             }],
             outputs: vec![],
         })
         .unwrap();
         assert_eq!(
             json,
-            r#"{"inputs":[{"id":"guid-1","name":"Mic"}],"outputs":[]}"#
+            r#"{"inputs":[{"id":"Mic","name":"Mic"}],"outputs":[]}"#
         );
     }
 
     #[test]
     fn unknown_device_ids_fall_back_to_the_default() {
-        let listed = vec!["usb-mic".to_string(), "built-in".to_string()];
-        assert_eq!(
-            resolve_device("built-in", &listed),
-            (Some("built-in"), false)
-        );
-        assert_eq!(resolve_device("", &listed), (Some("usb-mic"), false));
-        assert_eq!(
-            resolve_device("unplugged", &listed),
-            (Some("usb-mic"), true)
-        );
+        let device = |name: &str, index| DeviceInfo {
+            id: name.into(),
+            name: name.into(),
+            index,
+        };
+        let listed = vec![
+            device("USB Mic", 0),
+            device("Built-in", 1),
+            device("Built-in", 2),
+        ];
+        assert_eq!(resolve_device("Built-in", &listed), (Some(1), false));
+        assert_eq!(resolve_device("", &listed), (Some(0), false));
+        assert_eq!(resolve_device("unplugged", &listed), (Some(0), true));
         assert_eq!(resolve_device("unplugged", &[]), (None, true));
         assert_eq!(resolve_device("", &[]), (None, false));
+    }
+
+    #[test]
+    fn a_failed_selection_still_restarts_the_running_stream() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let step = |name: &'static str, ok: bool| {
+            let calls = &calls;
+            move || {
+                calls.borrow_mut().push(name);
+                ok
+            }
+        };
+        let result = switch_stream(
+            true,
+            step("stop", true),
+            step("select", false),
+            step("init", true),
+            step("start", true),
+        );
+        assert!(result.is_err());
+        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
+
+        calls.borrow_mut().clear();
+        let result = switch_stream(
+            false,
+            step("stop", true),
+            step("select", true),
+            step("init", true),
+            step("start", true),
+        );
+        assert!(result.is_ok());
+        assert_eq!(*calls.borrow(), ["select"]);
     }
 
     #[test]
