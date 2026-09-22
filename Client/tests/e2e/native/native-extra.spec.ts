@@ -2,7 +2,8 @@
  * Native E2E: the desktop-only surface a browser build cannot reach — window
  * geometry restore and its off-screen guard (lib/window-state.ts), the tray's
  * Status submenu events (main.ts → platform/desktop/trayStatus.ts), the
- * reload/DevTools keyboard handling and external-link routing in main.ts, and
+ * reload/DevTools keyboard handling in main.ts, external links (main.ts routes
+ * them, backed by tauri-plugin-opener's injected click handler), and
  * push-to-talk driven by the real GetAsyncKeyState poller
  * (platform/desktop/pushToTalkService.ts).
  *
