@@ -1,0 +1,25 @@
+{
+  "_doc": "Test files the lifecycle guard reports as leaking at the 11a base. This list only shrinks: 11b adds each file's missing destroy()/dispose() teardown and removes the entry, and the guard fails a listed file that runs clean. The plan's row 10 counted 20 files with a throwaway probe that did not release a signal-owned listener when its signal aborted; Task 2 re-derives the list with the real guard, which does, so the measured floor is 14 files. Keys are paths relative to Client/. `reasons` names why a non-11a-base entry is listed.",
+  "files": [
+    "tests/unit/cert-mismatch-modal.test.ts",
+    "tests/unit/channel-mutes.test.ts",
+    "tests/unit/identity-mismatch-modal.test.ts",
+    "tests/unit/media-visibility.test.ts",
+    "tests/unit/media.test.ts",
+    "tests/unit/member-picker-group.test.ts",
+    "tests/unit/modal-factory.test.ts",
+    "tests/unit/renderers.test.ts",
+    "tests/unit/server-panel.test.ts",
+    "tests/unit/settings-overlay.test.ts",
+    "tests/unit/updater.test.ts",
+    "tests/unit/user-status.test.ts",
+    "tests/unit/voice.store.test.ts",
+    "tests/unit/volume-menu.test.ts",
+    "tests/unit/voice-audio-tab.test.ts",
+    "src/features/voice/e2eeWorker.test.ts"
+  ],
+  "reasons": {
+    "tests/unit/voice-audio-tab.test.ts": "Leaks one live window:owncord:pref-change listener (the Voice & Audio settings pane). Arrived on the dev base after 11a started (Linux voice 1b, https://github.com/J3vb/OwnCord/pull/1700), so it is not in the 11a base. 11b owns the fix.",
+    "src/features/voice/e2eeWorker.test.ts": "Leaks one live window:owncord:pref-change listener (the E2EE worker's native-backend path). Arrived on the dev base after 11a started (Linux voice 1b, https://github.com/J3vb/OwnCord/pull/1700), so it is not in the 11a base. 11b owns the fix."
+  }
+}

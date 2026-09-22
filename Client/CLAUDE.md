@@ -97,6 +97,23 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
   (built with `cargo build --example native_voice_interop`).
+- **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
+  (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
+  `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
+  `tests/unit/lifecycle-ownership.test.ts` classifies every production site
+  from the syntax tree and fails on an unowned one that is not on an exact,
+  shrink-only allowlist (R1 long-lived-target listeners need `signal`/`once`;
+  R2 intervals keep their handle and clear it in-file; R3 `setTimeout` keeps
+  its handle; R4 `new AbortController` is only for the primitives and named
+  cancellation tokens). A stale entry also fails, so the lists only shrink.
+  `tests/helpers/lifecycle.ts` installs a guard from `tests/setup.ts` that
+  fails a unit test leaving a bare `window`/`document` listener or a real
+  interval alive, unless its file is on the shrink-only
+  `tests/lifecycle-guard-baseline.json`. The list is empty only after 11c; do
+  not add an entry without a reason. The runtime proof is the CDP soak
+  (`tests/e2e/support/lifecycle-probe.ts`,
+  `tests/e2e/fullstack/long-session.spec.ts`), which needs
+  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR.
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.
