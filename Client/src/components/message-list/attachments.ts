@@ -1008,7 +1008,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     }
   });
 
-  // Use AbortController for cleanup of document-level listeners to prevent leaks
+  // Use a Disposable for cleanup of document-level listeners to prevent leaks
   const disposable = new Disposable();
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });

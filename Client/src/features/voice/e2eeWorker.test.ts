@@ -11,6 +11,11 @@ vi.mock("../../lib/e2eeCrypto", () => ({
 }));
 
 import { E2EEWorker } from "./e2eeWorker";
+// vi.resetModules() below would hand the re-imported module a fresh logger,
+// which re-installs the logger's app-lifetime pref-change listener on every
+// reset. Those tests re-import against this already-loaded instance instead,
+// so the singleton stays one.
+import * as appLogger from "../../lib/logger";
 
 function setup() {
   const state = { generation: 0, roomKey: null as Uint8Array | null };
@@ -117,6 +122,7 @@ describe("E2EEWorker.applyCurrentRoomKey", () => {
 describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
   it("sends the same base64 text to the native key provider, not the web one", async () => {
     vi.resetModules();
+    vi.doMock("../../lib/logger", () => appLogger);
     vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
     const setRoomKey = vi.fn(async () => undefined);
     vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { setRoomKey } } }));
@@ -128,12 +134,14 @@ describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
     expect(setKey).not.toHaveBeenCalled();
     vi.doUnmock("./native/platform");
     vi.doUnmock("../../platform/desktop");
+    vi.doUnmock("../../lib/logger");
   });
 });
 
 describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
   it("lands before the next session's key, even when the clear is slow", async () => {
     vi.resetModules();
+    vi.doMock("../../lib/logger", () => appLogger);
     vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
     const order: string[] = [];
     const clearing = deferred();
@@ -159,5 +167,6 @@ describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
     expect(order).toEqual(["clear", "set b64:7"]);
     vi.doUnmock("./native/platform");
     vi.doUnmock("../../platform/desktop");
+    vi.doUnmock("../../lib/logger");
   });
 });

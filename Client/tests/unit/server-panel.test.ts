@@ -29,8 +29,14 @@ import { loadCredential } from "@lib/credentials";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Every page signal makeAc hands out, aborted in afterEach: the connect page's
+// teardown, so an Add Server modal left open does not outlive its test.
+const pageControllers: AbortController[] = [];
+
 function makeAc(): AbortController {
-  return new AbortController();
+  const ac = new AbortController();
+  pageControllers.push(ac);
+  return ac;
 }
 
 function makeOpts(overrides: Partial<ServerPanelOptions> = {}): ServerPanelOptions {
@@ -80,6 +86,7 @@ describe("ServerPanel", () => {
   });
 
   afterEach(() => {
+    for (const ac of pageControllers.splice(0)) ac.abort();
     container.remove();
   });
 
