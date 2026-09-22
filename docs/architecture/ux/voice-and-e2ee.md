@@ -144,11 +144,11 @@ PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
 The channel's voice roster renders from `voiceUsers`. Each participant tile
 reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 
-| Signal            | Tile reaction                                                                                                                                         |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `voice_state`     | Add/update the participant with their flags                                                                                                           |
-| `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already the `voice_leave` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                                   |
+| Signal            | Tile reaction                                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `voice_state`     | Add/update the participant with their flags                                                                                         |
+| `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already `handleVoiceLeave`, `features/voice/wsHandlers.ts`) |
+| key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                 |
 
 Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store).
 

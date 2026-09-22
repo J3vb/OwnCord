@@ -374,3 +374,76 @@ then reverted:
   `e2eePeerState.ts` `setPeerVerificationIfCurrent` call.
 - `local/no-identity-scope-fallback`: `myUserId ?? 0` passed to
   `getOrCreateIdentityKeyPair` in `e2eeIdentity.ts`.
+
+## B7-10a post-split measurement (evidence append, 2026-09-21)
+
+B7-10a (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+Tasks 0–8) moved the WebSocket handler bodies out of `src/lib/dispatcher.ts`
+into plain functions in `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
+plus `src/features/connection/dispatchContext.ts`. `dispatcher.ts` keeps every
+`ws.on(...)` registration and the `ready`/`error` ordering. Same machine, Node
+26.9.0 and Stryker 10.0.0 as B7-9, from `Client/`:
+
+```bash
+# before: dev at be7a0594 (B7-14 and B7-9b merged) (13 m 41 s)
+npx stryker run --mutate "src/lib/dispatcher.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+# after: fm/b7-10a-impl after Task 7 (5 m 59 s)
+npx stryker run --mutate "src/lib/dispatcher.ts,src/features/connection/*.ts,src/features/direct-messages/*.ts,src/features/channels/*.ts,src/features/messaging/wsHandlers.ts,src/features/voice/wsHandlers.ts,!src/**/*.test.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+| Scope                                   | Before: mutants / errors / score | After: mutants / errors / score |
+| --------------------------------------- | -------------------------------: | ------------------------------: |
+| `dispatcher` (facade + extracted files) |              864 / 231 / 79.46 % |             939 / 233 / 81.73 % |
+
+The before run is at `be7a0594`, not the plan's base `92242f4a`: B7-14 added
+the `SESSION_REPLACED` branch in between (851 → 864 mutants; the plan
+re-measured 80.23 % on the older file). **The pass rule holds** against both:
+81.73 % is 2.27 points above this run's before-number and 1.50 above the
+plan's, not more than 1 point below either.
+
+**The mutant total rose 8.7 %, outside the plan's 3 % band**, and none of it
+is rewritten code. The valid (non-error) mutants rose by 73, and they are
+wiring that did not exist before the split. Stryker's `CallExpression`
+mutator removes a statement-level call. The `ready` and `error` handlers are
+now ordered call lists (`applyReadyChannels(payload);`,
+`handleVoiceJoinRollback();`, …), and every registration is now
+`unsubs.push(ws.on(S.X, handleX))`. `dispatcher.ts` alone went 22 → 72
+mutants, 39 of them `CallExpression`. Each extracted function also adds one
+`BlockStatement` mutant, and each `handle…Error` adds its `return true` /
+`return false` `BooleanLiteral`s.
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file. The before run's mutants are bucketed by the original line
+range each moved block came from:
+
+| Module (after)                        | Before, same code |    After |     Δ |
+| ------------------------------------- | ----------------: | -------: | ----: |
+| `features/connection/wsHandlers`      |           80.85 % |  82.69 % |  +1.8 |
+| `features/connection/dispatchContext` |          100.00 % | 100.00 % |     0 |
+| `features/direct-messages/wsHandlers` |           68.75 % |  76.00 % |  +7.3 |
+| `features/channels/wsHandlers`        |           74.38 % |  76.42 % |  +2.0 |
+| `features/messaging/wsHandlers`       |           78.57 % |  79.68 % |  +1.1 |
+| `features/voice/wsHandlers`           |           85.39 % |  85.53 % |  +0.1 |
+| `lib/dispatcher` (composition)        |           71.43 % |  87.30 % | +15.9 |
+
+- **No module dropped.** The rises are the colocated
+  `src/features/*/wsHandlers.test.ts` suites. `tests/unit/dispatcher.test.ts`
+  (188 cases) is unchanged, and so are `tests/integration/stores.test.ts` (22)
+  and `tests/unit/session-replaced.test.ts` (3). Examples: `mapDmPayload`'s
+  pre-group fallback, and `applyReadyDms` keeping state identity when nothing
+  changed.
+- **The composition's new survivors are all wiring.** They are the
+  `CallExpression` removal of `activateReadyPendingMessages(api, payload)` and
+  of the `voice_e2ee_announce`/`voice_e2ee_offer` registrations. The frozen
+  suite never asserted those paths before the split either: the pending
+  activation block's 5 valid mutants all survived, and the announce/offer
+  bodies had no coverage. The other survivors are the same mutants, surviving
+  the same way, as on the pre-split lines: the `setActiveChannelProvider(null)`
+  cleanup arrow and the two log-payload literals.
+- **Errors stay excluded from the denominator** (231 → 233), the same
+  `CompileError` class as caveat 2 above.
+
+`stryker.ci.config.mjs` is unchanged. The new modules are in the
+`transport-auth` shard list, and `check-mutation-shards.mjs` reports the union
+exact (93 files). Client suite: 257 files / 5 911 passed + 140 expected fail
+at `be7a0594`; 264 / 5 955 + 140 after.

@@ -115,7 +115,8 @@ source of truth in `ui.store.connectionStatus`
 ## 4. Global event → reaction map
 
 The dispatcher (`src/lib/dispatcher.ts`) is the single fan-in from the socket to
-the stores. Target: **every** inbound message type produces a defined store
+the stores: it holds every `ws.on(...)` registration, and the handler bodies it
+calls live in `src/features/*/wsHandlers.ts`. Target: **every** inbound message type produces a defined store
 mutation _and_, where user-visible, a defined UI reaction. The per-flow docs
 detail each; this is the index.
 
