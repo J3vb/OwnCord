@@ -1,6 +1,7 @@
 // ConnectPage — login/register page component.
 // Thin composition shell that wires ServerPanel and LoginForm together.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger } from "@lib/logger";
@@ -90,8 +91,8 @@ export function createConnectPage(
   let root: HTMLDivElement;
 
   // Cleanup tracking
-  const abortController = new AbortController();
-  const { signal } = abortController;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   // --- Create sub-components ---
 
@@ -355,7 +356,7 @@ export function createConnectPage(
 
   function destroy(): void {
     // Abort all event listeners registered with the signal
-    abortController.abort();
+    disposable.destroy();
     unsubSettingsOpen?.();
     unsubSettingsOpen = null;
     unsubTransientError?.();

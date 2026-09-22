@@ -144,7 +144,7 @@ export function createSettingsOverlay(
    * against `disposable.signal` directly, and nothing ever aborted a stale build's
    * registrations short of `destroy()`.
    */
-  let renderAC: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, disposable.signal);
@@ -169,10 +169,10 @@ export function createSettingsOverlay(
   function renderActiveTab(): void {
     if (contentArea === null) return;
     // Drop the previous build's listeners before replacing its DOM — see
-    // the `renderAC` comment above.
-    renderAC?.abort();
-    renderAC = new AbortController();
-    const buildSignal = AbortSignal.any([disposable.signal, renderAC.signal]);
+    // the `renderOwner` comment above.
+    renderOwner?.destroy();
+    renderOwner = new Disposable();
+    const buildSignal = AbortSignal.any([disposable.signal, renderOwner.signal]);
     clearChildren(contentArea);
     if (pageTitle === null) return;
     pageTitle.textContent = activeTab;
@@ -224,7 +224,7 @@ export function createSettingsOverlay(
     // The hidden pane is rebuilt on reopen (contentLive), so drop its build
     // now: anything shown once (recovery codes, a recovery kit secret) is
     // wiped from the DOM on abort rather than lingering while closed.
-    renderAC?.abort();
+    renderOwner?.destroy();
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;

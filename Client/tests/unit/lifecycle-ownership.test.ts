@@ -203,104 +203,10 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
   {
-    file: "components/ChannelSidebar.ts",
-    fn: "createChannelSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/ChannelSidebar.ts",
-    fn: "renderChannels",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/DmProfileSidebar.ts",
-    fn: "createDmProfileSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/DmSidebar.ts",
-    fn: "createDmSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/EmojiPicker.ts",
-    fn: "createEmojiPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/GifPicker.ts",
-    fn: "createGifPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MemberList.ts",
-    fn: "render",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/MessageInput.ts",
-    fn: "createMessageInput",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MessageList.ts",
-    fn: "createMessageList",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MessageList.ts",
-    fn: "beginRowRender",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
     file: "components/SearchOverlay.ts",
     fn: "doSearch",
     category: "cancellation-token",
     reason: "owner: the next search, which aborts this one",
-  },
-  {
-    file: "components/SettingsOverlay.ts",
-    fn: "renderActiveTab",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/VoiceWidget.ts",
-    fn: "createVoiceWidget",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/channel-sidebar/drag-reorder.ts",
-    fn: "ensureGlobalDragListeners",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/inline-autocomplete.ts",
-    fn: "createInlineAutocomplete",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/message-list/attachments.ts",
-    fn: "openImageLightbox",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
     file: "components/settings/ConnectionDiagnosticsPanel.ts",
@@ -327,18 +233,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/autoIdle.ts",
-    fn: "startAutoIdle",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/os-motion.ts",
-    fn: "syncOsMotionListener",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "lib/profiles.ts",
     fn: "pingHost",
     category: "cancellation-token",
@@ -351,41 +245,10 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the next attempt, which aborts this one",
   },
   {
-    file: "pages/ConnectPage.ts",
-    fn: "createConnectPage",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "pages/MainPage.ts",
-    fn: "mount",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "pages/connect-page/ServerPanel.ts",
-    fn: "renderServerProfiles",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "pages/connect-page/ServerPanel.ts",
-    fn: "handleAddServer",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "pages/main-page/ChannelController.ts",
     fn: "mountChannel",
     category: "cancellation-token",
     reason: "owner: the next channel switch, which aborts the previous channel's work",
-  },
-  {
-    file: "pages/main-page/SidebarMemberSection.ts",
-    fn: "createSidebarMemberSection",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
 ];
 

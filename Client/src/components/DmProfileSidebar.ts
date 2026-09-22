@@ -10,6 +10,7 @@
  * focus first focusable on open.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
@@ -146,8 +147,8 @@ const makeDivider = (): HTMLDivElement => createElement("div", { class: "dps-div
 export function createDmProfileSidebar(
   options: DmProfileSidebarOptions,
 ): DmProfileSidebarComponent {
-  const ac = new AbortController();
-  const { signal } = ac;
+  const disposable = new Disposable();
+  const { signal } = disposable;
   const { onClose, host = "" } = options;
   let user = options.user;
 
@@ -347,7 +348,7 @@ export function createDmProfileSidebar(
 
   function destroy(): void {
     open = false;
-    ac.abort();
+    disposable.destroy();
     if (panel !== null) {
       panel.remove();
       panel = null;

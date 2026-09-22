@@ -4,6 +4,7 @@
  * Gated on MANAGE_CHANNELS, like every other channel-management affordance.
  */
 
+import { Disposable } from "@lib/disposable";
 import { channelsStore, updateChannelPosition } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { ChannelReorderData } from "../ChannelSidebar";
@@ -33,7 +34,7 @@ let activeDrag: DragState | null = null;
  *  {@link ../../lib/disposable} — so there is no separate release call to
  *  forget or miscount. */
 const listenerOwners = new Set<AbortSignal>();
-let globalDragAc: AbortController | null = null;
+let globalDragOwner: Disposable | null = null;
 
 function releaseOwner(owner: AbortSignal): void {
   listenerOwners.delete(owner);
@@ -47,9 +48,9 @@ function releaseOwner(owner: AbortSignal): void {
     });
     activeDrag = null;
   }
-  if (listenerOwners.size === 0 && globalDragAc !== null) {
-    globalDragAc.abort();
-    globalDragAc = null;
+  if (listenerOwners.size === 0 && globalDragOwner !== null) {
+    globalDragOwner.destroy();
+    globalDragOwner = null;
   }
 }
 
@@ -92,10 +93,10 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
   }
   listenerOwners.add(owner);
   owner.addEventListener("abort", () => releaseOwner(owner), { once: true });
-  if (globalDragAc !== null) {
+  if (globalDragOwner !== null) {
     return;
   }
-  globalDragAc = new AbortController();
+  globalDragOwner = new Disposable();
 
   document.addEventListener(
     "mousemove",
@@ -124,7 +125,7 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
         }
       }
     },
-    { signal: globalDragAc.signal },
+    { signal: globalDragOwner.signal },
   );
 
   document.addEventListener(
@@ -222,7 +223,7 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
         drag.onReorder(reorders);
       }
     },
-    { signal: globalDragAc.signal },
+    { signal: globalDragOwner.signal },
   );
 }
 

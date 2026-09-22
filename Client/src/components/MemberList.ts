@@ -484,17 +484,17 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   // addEventListener({ signal }) keeps a detached row alive via that signal's
   // own retained "abort" listener list until it fires, so every rebuild would
   // otherwise leak one full set of detached rows (OC-0295), exactly the
-  // defect already fixed in ChannelSidebar (renderAc, OC-0229) and
-  // MessageList (OC-0286). renderAc is aborted and replaced at the top of
+  // defect already fixed in ChannelSidebar (renderOwner, OC-0229) and
+  // MessageList (OC-0286). renderOwner is aborted and replaced at the top of
   // every render, so only the CURRENT render's rows stay reachable.
-  let renderAc: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   function render(): void {
     if (root === null) return;
-    renderAc?.abort();
-    const currentRenderAc = new AbortController();
-    renderAc = currentRenderAc;
-    renderList(root, opts, currentRenderAc.signal, rowsByUserId);
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
+    renderList(root, opts, currentRender.signal, rowsByUserId);
   }
 
   function mount(container: Element): void {
@@ -537,8 +537,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     closeActivePopup();
     releaseMenuDismiss();
     disposable.destroy();
-    renderAc?.abort();
-    renderAc = null;
+    renderOwner?.destroy();
+    renderOwner = null;
     rowsByUserId.clear();
     if (root !== null) {
       root.remove();

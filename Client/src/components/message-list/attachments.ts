@@ -3,6 +3,7 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
@@ -946,7 +947,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function close(): void {
     overlay.remove();
-    ac.abort();
+    disposable.destroy();
     if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
@@ -1008,9 +1009,9 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   });
 
   // Use AbortController for cleanup of document-level listeners to prevent leaks
-  const ac = new AbortController();
-  document.addEventListener("mousemove", onMove, { signal: ac.signal });
-  document.addEventListener("mouseup", onUp, { signal: ac.signal });
+  const disposable = new Disposable();
+  document.addEventListener("mousemove", onMove, { signal: disposable.signal });
+  document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1033,7 +1034,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     }
     if (e.key === "0") resetZoom();
   }
-  document.addEventListener("keydown", onKey, { signal: ac.signal });
+  document.addEventListener("keydown", onKey, { signal: disposable.signal });
 
   activeLightboxClose = close;
   document.body.appendChild(overlay);

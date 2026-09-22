@@ -198,8 +198,8 @@ function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
 }
 
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
   let root: HTMLDivElement | null = null;
   let state = {
     replyTo: null as { messageId: number; username: string } | null,
@@ -1075,7 +1075,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
-    ac.abort();
+    disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
     pendingAttachments.length = 0;
