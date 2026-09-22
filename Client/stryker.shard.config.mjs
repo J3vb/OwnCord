@@ -110,6 +110,7 @@ export const shards = {
     "src/stores/ui.store.ts",
     "src/stores/voice.store.ts",
     "src/features/messaging/messageModel.ts",
+    "src/features/messaging/echoReconcile.ts",
   ], // 1918 mutants
 };
 
