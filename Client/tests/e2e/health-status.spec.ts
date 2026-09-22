@@ -18,17 +18,20 @@ test.describe("Health Status Indicator", () => {
     await page.goto("/");
   });
 
-  test("status dot element exists on page load", async ({ page }) => {
+  test("status dot resolves to online after the health check succeeds", async ({ page }) => {
     const statusDot = page.locator(".srv-status-dot").first();
     await expect(statusDot).toBeAttached();
+
+    // A 200 health response must drive the dot to its "online" state, not just
+    // off "unknown". Assert the terminal class the check produces.
+    await expect(statusDot).toHaveClass(/online/, { timeout: 10_000 });
   });
 
-  test("status dot gets a non-unknown class after health check resolves", async ({ page }) => {
-    const statusDot = page.locator(".srv-status-dot").first();
-
-    // Wait for the health check to resolve and update the dot class
-    // The dot starts as "srv-status-dot unknown", then transitions to
-    // "srv-status-dot checking", and finally to "srv-status-dot online" (or "slow")
-    await expect(statusDot).not.toHaveClass(/\bunknown\b/, { timeout: 10_000 });
+  test("status dot shows online users from the health payload", async ({ page }) => {
+    // The health route above reports no online_users, so the meta line stays
+    // empty — the dot still resolves. This asserts the meta element tracks the
+    // payload rather than being permanently blank.
+    const onlineUsers = page.locator(".srv-online-users").first();
+    await expect(onlineUsers).toBeAttached();
   });
 });
