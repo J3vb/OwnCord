@@ -80,18 +80,26 @@ test.describe("Native App Smoke Tests", () => {
 
   test("window dimensions match tauri.conf.json defaults", async ({ nativePage }) => {
     // tauri.conf.json pins a 1280x720 inner (client-area) size. The webview's
-    // innerWidth/innerHeight is exactly that client area in CSS pixels, so this
-    // compares the rendered app to its configured size instead of a ">800x400"
-    // floor any window would pass. A 5% band tolerates Windows DPI rounding
-    // while still failing on a window configured to some other size.
+    // innerWidth/innerHeight is that client area in CSS pixels, so compare
+    // against the configured size — but a headless runner's virtual desktop can
+    // be smaller than 1280x720, in which case the OS clamps the window. Expected
+    // size is therefore the configured default clamped to the available
+    // desktop, which still fails on a zero-sized window or a config that
+    // drifted to some other size.
     const configured = { width: 1280, height: 720 };
-    const inner = await nativePage.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight,
+    const { inner, avail } = await nativePage.evaluate(() => ({
+      inner: { width: window.innerWidth, height: window.innerHeight },
+      avail: { width: window.screen.availWidth, height: window.screen.availHeight },
     }));
+    const expected = {
+      width: Math.min(configured.width, avail.width),
+      height: Math.min(configured.height, avail.height),
+    };
 
-    expect(Math.abs(inner.width - configured.width) / configured.width).toBeLessThan(0.05);
-    expect(Math.abs(inner.height - configured.height) / configured.height).toBeLessThan(0.05);
+    // 64px absorbs window chrome and DPI rounding without accepting a
+    // differently-configured window.
+    expect(Math.abs(inner.width - expected.width)).toBeLessThan(64);
+    expect(Math.abs(inner.height - expected.height)).toBeLessThan(64);
   });
 });
 
