@@ -352,36 +352,58 @@ Linux x86_64 Chromium, ~2.3 minutes for the 20-cycle test (the whole
 `client-fullstack` suite is 6.0 minutes, inside the config's 20-minute
 `globalTimeout`, so no `playwright.config.fullstack.ts` change was needed).
 
-Bars: counts final ≤ warm and slope ≤ 0.05 per cycle; heap final ≤ warm × 1.10
-and slope ≤ 25 KB per cycle; `documents` and `intervals` exactly equal. Warm is
-the cycle-5 sample.
+**Bars and why they are phase-grouped.** The plan's cycle logs out and back in
+every 10 cycles and samples every 5, so the raw sample series alternates between
+the settled mid-session state and the torn-down post-logout state. A single
+least-squares slope over that would read the reset, not the app, and give the
+mid-session sample no weight (review finding `soak-mid-session-blind`). The bars
+therefore group samples like-for-like by their phase in the 10-cycle login
+generation (`cycle % 10`): the 5/15/25 series is one mid-session line, the
+10/20 series the post-logout line. A metric passes only when every series' slope
+is within its ceiling; `documents` and `intervals` must be exactly flat in every
+series; heap uses the same per-series last ≤ first × 1.10 with a 25 KB/cycle
+slope. Slopes are regressed on the cycle number, so the "per cycle" label is
+literal (review finding `slope-units`).
 
-Three 20-cycle runs were identical on every metric (run-to-run spread 0). At the
-base the asserted metrics all pass. Two are listed in `PENDING_METRICS` for
-11c's Task 12:
+**Ceilings.** `nodes` and `listeners` carry the known logout-path leak (below),
+so rather than leaving them at the plan's 0.05 they are ratcheted at the
+decision's example ceilings — listeners 0.5/cycle and nodes 8/cycle, about 5× the
+measured 0.1 and 1.6. Any growth past that fails the PR soak; 11c's Task 12
+fixes the leak and removes the ceilings, returning both to 0.05.
 
-| Metric                                             | Warm      | Final     | Slope   | Bar                                      |
-| -------------------------------------------------- | --------- | --------- | ------- | ---------------------------------------- |
-| documents                                          | 1         | 1         | 0.000   | exactly 1 (pass)                         |
-| nodes                                              | 3489      | 2118      | 8.000   | final ≤ warm, slope ≤ 0.05 — **pending** |
-| listeners                                          | 211       | 193       | 0.500   | final ≤ warm, slope ≤ 0.05 — **pending** |
-| AbortControllers                                   | 39        | 20        | 0.000   | pass                                     |
-| intervals                                          | 1         | 1         | 0.000   | exactly 1 (pass)                         |
-| timeouts                                           | 1         | 1         | 0.000   | pass                                     |
-| sockets / peerConnections / tracks / audioContexts | 0         | 0         | 0.000   | pass                                     |
-| heapUsed                                           | 8 090 252 | 4 543 780 | −43 802 | pass                                     |
+**Five 20-cycle runs at the final head** (`03570460`; run after the fix commit
+was authored, before it was committed — the code under test is the branch's
+final state). All five passed; every count metric was identical across them
+(run-to-run spread 0 on all counts):
 
-The two pending metrics fail because the logout/login path leaks, not from
-noise. Over 40 cycles the post-logout samples grow monotonically while the
-mid-session samples stay flat:
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 464      |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 788      |
+| 3   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 391      |
+| 4   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 560      |
+| 5   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 12 431     |
+
+`documents` 1, `intervals` 1, `timeouts` 1, and sockets/peerConnections/tracks/
+audioContexts 0 in every run, all flat. The **LiveKit `error reading from signal
+stream … WS closed unexpectedly with code 1006`** console line did **not** appear
+in any of the five runs: it is intermittent, emitted when the every-5th-cycle
+application reconnect drops the socket LiveKit's signaling connection rides on,
+and it is expected because that step deliberately severs the transport. It is on
+the named expected-line list (with `[ws] ws_send failed {error: WS is not open}`)
+so a run that does see it still passes, while any other `console.error` fails.
+
+**The known leak.** Over 40 cycles with post-reset sampling, the post-logout
+series grows monotonically while the mid-session series is flat:
 
 | Cycle (phase)     | nodes                     | listeners             |
 | ----------------- | ------------------------- | --------------------- |
 | 5 / 15 / 25 / 35  | 3453                      | 211                   |
 | 10 / 20 / 30 / 40 | 2102 → 2118 → 2134 → 2150 | 192 → 193 → 194 → 195 |
 
-That is about one listener and 1.6 nodes per logout/login. The soak is the
-finding's evidence; 11c writes the regression test and fixes it.
+That is about one listener and 1.6 nodes per logout/login. The soak (and the
+ratchet ceilings) are the finding's evidence; 11c writes the regression test and
+fixes it.
 
 Two measurement fixes the calibration needed, both in the probe: quiesce drains
 one second before sampling (leaving a voice room and closing a socket finish on
@@ -390,6 +412,8 @@ are counted by `!signal.aborted` rather than reachability (the media probe keeps
 every peer, track and socket it sees, so "reachable" never falls — the plan's
 own trap).
 
-The soak was proved able to fail: a throwaway `window.addEventListener("resize",
-…)` in the Account tab raised listeners 211 → 217 and nodes 3489 → 6087 and the
-assertions reported the bars red, before the plant was removed.
+**Proved able to fail.** A throwaway `window.addEventListener("resize", …)` in
+the Account tab's mount (added on every settings visit, so every cycle) drove the
+mid-session nodes slope to 12/cycle, past the 8/cycle ceiling, and the soak
+reported the nodes bar red (`phase 5: 6087→6207`). The plant was then removed; no
+production file is changed in 11a.

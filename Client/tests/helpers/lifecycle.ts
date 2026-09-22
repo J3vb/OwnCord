@@ -5,12 +5,14 @@
 // teardown: a unit test must not leave a bare `window`/`document` listener or a
 // real interval alive when it ends.
 //
-// It records only registrations that carry neither `once: true` nor a
-// `signal` — those are the ones no teardown can be trusted to run. A
-// registration that passes a `signal` releases its entry when the signal
-// aborts, so a correctly-owned listener never trips it. `setTimeout` is out of
-// scope: a pending timeout is a scheduling fact, not a retained owner, and the
-// soak's timeout ledger is where that is measured.
+// It records every non-`once` registration and releases each entry when it is
+// removed or its `signal` aborts. A `signal`-owned registration is therefore
+// still recorded until its signal fires: a component that was never destroyed
+// leaves its signal un-aborted and its listener live, which is the OC-0335
+// class (a listener on a signal that outlives what it served). `once: true` is
+// skipped because that listener removes itself. `setTimeout` is out of scope: a
+// pending timeout is a scheduling fact, not a retained owner, and the soak's
+// timeout ledger is where that is measured.
 //
 // It is installed from tests/setup.ts, directly after `installConsoleGuard()`,
 // and it copies the console guard's three load-bearing properties:
@@ -42,7 +44,9 @@ interface IntervalEntry {
 
 // The real functions, captured once at module load — before any test file has
 // had a chance to replace them — so the wrappers always delegate to the
-// platform and afterEach can put the originals back.
+// platform. The wrappers are re-installed in beforeEach and stay in place for
+// the file's lifetime; the originals are the stable delegates, not something
+// afterEach restores.
 const realAdd = {
   window: window.addEventListener.bind(window),
   document: document.addEventListener.bind(document),
