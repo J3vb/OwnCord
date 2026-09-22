@@ -32,22 +32,18 @@ import {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/** #general carries a 1-second slow mode so the cooldown can expire inside a
- *  test; the server's ceiling is 21600s but the client only reads the number. */
+/** #general carries a slow mode long enough that the cooldown cannot expire
+ *  during a test, so a "still enabled / still disabled" assertion cannot pass
+ *  merely because the window elapsed; the release is driven by `page.clock`. */
 const SLOW_CHANNEL = {
   id: 1,
   name: "general",
   type: "text",
   position: 0,
   category: null,
-  slow_mode: 1,
+  slow_mode: 300,
   can_send: true,
 };
-
-/** A slow mode long enough that the cooldown cannot expire during a test, so a
- *  "still enabled / still disabled" assertion cannot pass merely because the
- *  window elapsed. */
-const LONG_SLOW_CHANNEL = { ...SLOW_CHANNEL, slow_mode: 300 };
 
 /** #general with the server's `can_send: false` — the composer must pre-disable. */
 const NO_SEND_CHANNEL = {
@@ -376,6 +372,7 @@ test.describe("Composer gating — slow mode", () => {
   test("an accepted send starts a live countdown that releases when the cooldown expires", async ({
     page,
   }) => {
+    await page.clock.install();
     await boot(page, {
       channels: [SLOW_CHANNEL],
       wsHandlers: [chatSendOkHandler()],
@@ -397,7 +394,8 @@ test.describe("Composer gating — slow mode", () => {
     // produce a second chat_send frame.
     await expect.poll(async () => (await chatSendFrames(page)).length).toBe(1);
 
-    // The ticker releases the composer once the 1s window elapses.
+    // The ticker releases the composer once the 300s window elapses.
+    await page.clock.fastForward("05:01");
     await expect(textarea(page)).toBeEnabled({ timeout: 5_000 });
     await expect(textarea(page)).toHaveAttribute("placeholder", "Message #general");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);
@@ -421,19 +419,19 @@ test.describe("Composer gating — slow mode", () => {
 
   test("a moderator holding MANAGE_MESSAGES is not gated by slow mode", async ({ page }) => {
     await boot(page, {
-      channels: [LONG_SLOW_CHANNEL],
-      wsHandlers: [chatSendOkHandler({ messageId: 9001, echoMessage: true })],
+      channels: [SLOW_CHANNEL],
+      wsHandlers: [chatSendOkHandler({ messageId: 9001, echoMessage: false })],
     });
     // The admin fixture role holds ADMINISTRATOR, which implies MANAGE_MESSAGES.
 
     await sendMessage(page, "mod message");
 
-    // The server echo is the positive control that the ack was processed: a
-    // 300s window would already have disabled the composer if the bypass were
-    // missing (the ack lands before the echo in the handler).
-    await expect(page.locator(".msg-text", { hasText: "mod message" }).first()).toBeVisible({
-      timeout: 5_000,
-    });
+    // With no echo, only the ack can confirm the row to id 9001, in the same
+    // dispatch that would start slow mode: a 300s window would already have
+    // disabled the composer if the bypass were missing.
+    const confirmed = page.locator("[data-testid='message-9001']");
+    await expect(confirmed).toBeVisible({ timeout: 5_000 });
+    await expect(confirmed).not.toHaveClass(/pending/);
     await expect(textarea(page)).toBeEnabled();
     await expect(textarea(page)).toHaveAttribute("placeholder", "Message #general");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);

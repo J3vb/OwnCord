@@ -88,12 +88,16 @@ test.describe("Composer gating agreement (real server)", () => {
     await composer(bob).press("Enter");
     await expect(bob.locator(".msg-text", { hasText: text })).toBeVisible({ timeout: 10_000 });
 
-    const history = (await server.api(
-      `/api/v1/channels/${general.id}/messages`,
-      undefined,
-      owner,
-    )) as { messages: Array<{ content: string }> };
-    expect(history.messages.filter((m) => m.content === text)).toHaveLength(1);
+    await expect
+      .poll(async () => {
+        const history = (await server.api(
+          `/api/v1/channels/${general.id}/messages`,
+          undefined,
+          owner,
+        )) as { messages: Array<{ content: string }> };
+        return history.messages.filter((m) => m.content === text).length;
+      })
+      .toBe(1);
   });
 
   test("slow mode set on the server gates bob's composer after one accepted send", async ({
