@@ -213,13 +213,6 @@ function slope(points: readonly { x: number; y: number }[]): number {
   return den === 0 ? 0 : num / den;
 }
 
-/**
- * The metrics also regressed within one page. The soak's re-login navigates, so
- * every 10-cycle generation starts on a fresh page and a leak the navigation
- * releases never reaches a phase series; the page series (c5 and c9) sees it.
- */
-const WITHIN_PAGE_METRICS: readonly CountMetric[] = ["nodes", "listeners"];
-
 const COUNT_METRICS: readonly CountMetric[] = [
   "documents",
   "nodes",
@@ -240,13 +233,13 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * series alternates between two ages-since-login and a single least-squares
  * slope would read the reset (and give the mid-session sample no weight), not
  * the app. Samples are therefore grouped by their phase in the 10-cycle login
- * generation (`cycle % 10`): cycles 5/15/25 and 9/19/29 are like-for-like
- * mid-session series, cycles 10/20 are the post-logout series. The re-login
- * navigates, so a phase series only sees growth that survives the navigation.
- * For `WITHIN_PAGE_METRICS` the mid-session samples of one page (cycles 5 and 9,
- * 15 and 19) are also regressed as a page series, which sees growth the
- * navigation releases. A metric passes only when *every* series' per-cycle
- * slope is within its ceiling.
+ * generation (`cycle % 10`): cycles 5/15/25 are one like-for-like mid-session
+ * series, cycles 10/20 are the post-logout series. A metric passes only when
+ * *every* group's per-cycle slope is within its ceiling. The soak's re-login
+ * navigates, so every series compares samples from different pages: growth that
+ * survives the navigation fails the gate, but growth confined to one page (and
+ * released by the navigation) is invisible to it. That within-page case is
+ * deferred to B7-11c.
  *
  * `slopeCeilings` is the ratchet for a metric with a known, recorded base leak
  * (the logout-path listeners/nodes leak): the gate still fails on any growth past
@@ -268,28 +261,15 @@ export function evaluateBars(
     groups.set(phase, [...(groups.get(phase) ?? []), sample]);
   }
 
-  const pages = new Map<number, LifecycleSample[]>();
-  for (const sample of post) {
-    if (sample.cycle % 10 === 0) continue;
-    const page = Math.floor(sample.cycle / 10);
-    pages.set(page, [...(pages.get(page) ?? []), sample]);
-  }
-
   const results: BarResult[] = [];
   for (const metric of COUNT_METRICS) {
-    const series = [
-      ...[...groups].map(([phase, group]) => [`phase ${phase}`, group] as const),
-      ...(WITHIN_PAGE_METRICS.includes(metric)
-        ? [...pages].map(([page, group]) => [`page ${page}`, group] as const)
-        : []),
-    ];
     const ceiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
     const exact = metric === "documents" || metric === "intervals";
     const failures: string[] = [];
     let worstSlope = 0;
     let lastWarm: number | null = null;
     let lastFinal = 0;
-    for (const [label, group] of series) {
+    for (const [phase, group] of groups) {
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -299,14 +279,16 @@ export function evaluateBars(
       }
       const flat = values.every((v) => v === values[0]);
       const ok = exact ? flat : measuredSlope <= ceiling;
-      if (!ok) failures.push(`${label}: ${values.join("→")}`);
+      if (!ok) failures.push(`phase ${phase}: ${values.join("→")}`);
     }
     const result: BarResult = {
       metric,
       warm: lastWarm,
       final: lastFinal,
       slope: worstSlope,
-      bar: exact ? "every series exactly flat" : `every series slope <= ${ceiling}/cycle`,
+      bar: exact
+        ? "every generation series exactly flat"
+        : `every generation series slope <= ${ceiling}/cycle`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;

@@ -5,15 +5,15 @@
  * a real server and real encrypted media, sampling Chromium's own counters
  * after a forced GC. It is the runtime half of the milestone: the static
  * inventory (tests/unit/lifecycle-ownership.test.ts) cannot see a listener on a
- * signal that outlives the thing it served (OC-0335/0336/0365); this sees one
- * that accumulates per cycle as listener and node growth.
+ * signal that outlives the thing it served (OC-0335/0336/0365). This sees such
+ * a leak only when its growth survives the re-login: `login()` navigates, so
+ * every 10-cycle generation starts on a fresh page. A listener leak that
+ * accumulates within one page and is released by that navigation is not yet
+ * covered; by owner decision that is deferred to B7-11c.
  *
  * The pass bar is "no net growth after warm-up" (tests/e2e/support/
- * lifecycle-probe.ts). Samples are taken at cycle 0, cycle 5 (warm), every 5
- * cycles after, and at every cycle 9 (the last cycle before the logout). The
- * re-login navigates, so the cycle-5/9 pair of each page is what sees a leak the
- * navigation would release; `evaluateBars` regresses it for nodes and
- * listeners. The series is attached to the Playwright report as JSON, so a
+ * lifecycle-probe.ts). Samples are taken at cycle 0, cycle 5 (warm) and every 5
+ * cycles after. The series is attached to the Playwright report as JSON, so a
  * failure shows the curve.
  *
  * Env:
@@ -43,13 +43,15 @@ const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
 /**
  * The per-cycle slope ceiling for a metric with a known base leak.
  *
- * `evaluateBars` groups samples by their phase in the 10-cycle login generation
- * and, for these two metrics, by page, so the post-logout series (cycles 10/20)
- * carries the known logout-path leak: about one listener and 1.6 nodes per
- * logout/login. Rather than leaving the two
+ * `evaluateBars` groups samples by their phase in the 10-cycle login generation,
+ * so the post-logout series (cycles 10/20) carries the known logout-path leak:
+ * about one listener and 1.6 nodes per logout/login. Rather than leaving the two
  * metrics at the plan's 0.05, each is ratcheted a small margin above that
  * measured per-cycle slope, so any further growth fails the PR soak. The
- * calibration runs, the planted-listener control and the at-head runs are in
+ * planted-listener control (a per-cycle unowned `window` listener) is caught by
+ * the nodes bar, not the listeners bar: its listeners are released by the
+ * re-login navigation, while the nodes it retains show in the phase-5 series.
+ * The calibration runs, the planted-listener control and the at-head runs are in
  * docs/plans/b7-0-client-baseline-2026-09-19.md ("Soak calibration"). 11c's
  * Task 12 fixes the leak and removes these entries, returning both to the plan
  * bar.
@@ -330,7 +332,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         ).toBeVisible();
       }
 
-      if (cycle % 5 === 0 || cycle % 10 === 9) {
+      if (cycle % 5 === 0) {
         await quiesce(alice);
         samples.push(await sampleLifecycle(alice, cdp, cycle));
         if (process.env.OWNCORD_SOAK_LISTENERS === "1") {

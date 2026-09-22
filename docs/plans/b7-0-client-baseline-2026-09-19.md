@@ -429,17 +429,17 @@ sets these ceilings; nothing else differs):
   starts on a fresh page and the plant's listeners are dropped. The phase-grouped
   bars compare c5 against c15, both 5 cycles into a fresh page, so a leak that
   only lives within one page cannot move them. Only growth that outlives the
-  navigation is visible. This is unresolved in 11a and left to the owner. The
-  likely fix is an in-app re-login with no navigation, which needs a fresh
-  calibration. The plant was then removed; no production file is changed in 11a.
+  navigation is visible (see the owner decision below). The plant was then
+  removed; no production file is changed in 11a.
 - **Clean 20-cycle soak, passed.** nodes 3489 → 3453 (−3.6), listeners 192 → 193
   (0.1), AbortControllers 20, heap slope 11 762; documents, intervals and timeouts
   1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
   the five calibration runs.
 
-**Runs with the within-page series** (`fa8c72a3` plus the working-tree change
-that adds a cycle-9 sample and regresses each page's cycle-5/9 pair for nodes
-and listeners; ceilings still 0.15/2). **Needs a decision: the clean run fails.**
+**Trial: a within-page series** (`fa8c72a3` plus a working-tree change, later
+committed as `80f1dcbb`, that added a cycle-9 sample and regressed each page's
+cycle-5/9 pair for nodes and listeners; ceilings still 0.15/2). The clean run
+failed, so the trial was reverted (below).
 
 - **Planted control, failed on both bars.** The same Account-tab resize plant
   failed listeners (`page 0: 217→261; page 1: 217→261`, 11/cycle) and nodes
@@ -464,7 +464,38 @@ and listeners; ceilings still 0.15/2). **Needs a decision: the clean run fails.*
   cycle within one page, and the navigation at every re-login had been hiding
   it from the phase series. The ceilings were not loosened. The cycle-5 sample
   follows the every-5th-cycle reconnect and the cycle-9 sample does not, so
-  some of the rise may be state the reconnect resets rather than a leak. The
-  owner has to decide how to proceed: treat it as a leak for 11b/11c and ratchet
-  it, sample a like-for-like pre-logout point after the cycle-10 reconnect, or
-  move to an in-app re-login.
+  some of the rise may be state the reconnect resets rather than a leak.
+
+**Owner decision: deviation from plan Task 3.** Task 3 asks to observe the
+listener bar go red on the PR soak. In 11a it does not: the cycle-9 sample and
+the within-page series were reverted, and the soak keeps the phase-only
+evaluation with ceilings listeners 0.15 and nodes 2 per cycle. The planted
+control is caught by the nodes bar only. A listener leak that accumulates within
+one page lifetime and is released by the re-login navigation is **not covered**
+by the 11a soak; by owner decision that coverage is deferred to B7-11c.
+
+**Open question for 11c.** Between c5 and c9 of one page the clean client grew
+listeners about 211 → 251 (10/cycle), nodes about 227/cycle and live
+AbortControllers 39 → 55, identically on both pages. The comparison is not
+like-for-like (c5 follows a reconnect, c9 does not), so whether this is a leak
+or state the reconnect resets is unanswered. 11c answers it before it adds
+within-page coverage.
+
+**At-head clean runs after the revert** (`80f1dcbb` plus the working-tree change
+that reverts its spec and probe to the phase-only evaluation, with only comments
+differing from `fa8c72a3`). **Needs a decision: neither run passed.** Neither
+failure comes from the bars, and nothing was tuned.
+
+1. **Timed out** at the 13-minute test timeout in a cycle's DM step. The
+   `upp-message-btn` in Bob's profile popup kept going unstable and detaching,
+   so `click()` never landed. The bars were never evaluated.
+2. **Every bar passed** (nodes 3489 → 3453, −3.6; listeners 192 → 193, 0.1;
+   AbortControllers 20; heap slope 11 771; documents, intervals and timeouts 1;
+   sockets/peerConnections/tracks/audioContexts 0), matching the calibration
+   runs. The run still failed the console check: LiveKit logged
+   `error reading from signal stream … WS closed unexpectedly with code 1000`,
+   and the expected-line pattern accepts only code 1006.
+
+So the 20-cycle PR soak is currently flaky in its interaction and console
+steps, which conflicts with the "run at least five times, not flaky"
+acceptance criterion even though the leak bars are stable.
