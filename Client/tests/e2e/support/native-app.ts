@@ -1,4 +1,12 @@
-import { chromium, expect, type ConsoleMessage, type TestInfo } from "@playwright/test";
+import {
+  chromium,
+  expect,
+  type BrowserContext,
+  type ConsoleMessage,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
+import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,10 +32,21 @@ export async function startNativeApp(
       await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
   };
   if (!options.preserveProfile) await clearProfiles();
+  // One budget for the whole app start. The first launch of a freshly built
+  // exe on a cold Windows runner takes up to ~30s more than a warm one, and the
+  // WebView2 browser process opens the CDP port well before the renderer
+  // attaches its page target, so the page wait must share the same deadline.
+  const startupDeadline = Date.now() + 60_000;
+  const started = Date.now();
   const running = startProcess(exe, [], directory);
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
-    await waitForHttp(`http://127.0.0.1:${port}/json/version`, running);
+    await waitForHttp(
+      `http://127.0.0.1:${port}/json/version`,
+      running,
+      startupDeadline - Date.now(),
+    );
+    const cdpReady = Date.now() - started;
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     const context = browser.contexts()[0];
     if (!context) throw new Error("WebView2 did not create a context");
@@ -35,8 +54,8 @@ export async function startNativeApp(
     // not applied by the built-in browser fixture.
     context.setDefaultTimeout(30_000);
     context.setDefaultNavigationTimeout(45_000);
-    await expect.poll(() => context.pages().length).toBeGreaterThan(0);
-    const page = context.pages()[0]!;
+    const page = await waitForFirstPage(context, running, startupDeadline - Date.now());
+    console.log(`native app ready: CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`);
     return {
       cdpURL: `http://127.0.0.1:${port}`,
       page,
@@ -64,6 +83,27 @@ export async function startNativeApp(
 }
 
 export type NativeApp = Awaited<ReturnType<typeof startNativeApp>>;
+
+/** The WebView2 page target, or a prompt failure when the app dies first. */
+async function waitForFirstPage(
+  context: BrowserContext,
+  running: ReturnType<typeof startProcess>,
+  timeout: number,
+): Promise<Page> {
+  const existing = context.pages()[0];
+  if (existing) return existing;
+  const aborter = new AbortController();
+  try {
+    return await Promise.race([
+      context.waitForEvent("page", { timeout }),
+      once(running.child, "exit", { signal: aborter.signal }).then(() => {
+        throw new Error(`Process exited before WebView2 created a page\n${running.log()}`);
+      }),
+    ]);
+  } finally {
+    aborter.abort();
+  }
+}
 
 /** Finish recording before the worker disconnects CDP or terminates WebView2. */
 export async function withNativeArtifacts(
