@@ -11,6 +11,7 @@ import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { cleanupNotificationAudio } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
@@ -153,6 +154,9 @@ function handleUnauthorized(): void {
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 configureConnectionDiagnostics(api, ws);
+// Registered here rather than imported by auth.store: notifications imports
+// auth.store, so that import was a cycle.
+onAuthCleared(cleanupNotificationAudio);
 onAuthCleared((reason) => {
   // Server switches retain their account-scoped drafts. Explicit logout and
   // invalid credentials discard pending sends.
