@@ -47,6 +47,17 @@ impl Inner {
             _ => Err(format!("native voice session {id} is not current")),
         }
     }
+    /// After an unlocked connect of session `id` with `connected_key`: the
+    /// key it must switch to (`Some` when a rotation landed meanwhile), or
+    /// an error when a newer connect or a leave (cleared key) superseded it.
+    fn key_after_connect(&self, id: u64, connected_key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        match &self.key {
+            Some(k) if self.next_id == id => Ok((k.as_slice() != connected_key).then(|| k.clone())),
+            _ => Err(format!(
+                "native voice session {id} superseded during connect"
+            )),
+        }
+    }
     fn resources(&self) -> Resources {
         match &self.session {
             Some((_, s)) => s.resources(),
@@ -122,6 +133,12 @@ pub struct Connected {
 }
 
 /// Connect a new session, superseding any live one.
+///
+/// The state lock is held only to take the key, retire the old session and
+/// allocate the id — never across the network connect — so a leave, a key
+/// rotation or a device switch during a slow join is not blocked behind it.
+/// A connect that loses the race to a newer one closes its own room and
+/// reports it, the same supersession outcome the facade's checkpoints expect.
 #[tauri::command]
 pub async fn native_voice_connect<R: Runtime>(
     app: AppHandle<R>,
@@ -130,23 +147,26 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
-    let mut inner = state.inner.lock().await;
-    let key = inner
-        .key
-        .clone()
-        .ok_or("no E2EE room key installed before connect")?;
-    if let Some((old, s)) = inner.session.take() {
-        log::info!("[native_voice] superseding session {old}");
-        s.close().await;
-    }
-    inner.next_id += 1;
-    let id = inner.next_id;
+    let (id, key) = {
+        let mut inner = state.inner.lock().await;
+        let key = inner
+            .key
+            .clone()
+            .ok_or("no E2EE room key installed before connect")?;
+        if let Some((old, s)) = inner.session.take() {
+            log::info!("[native_voice] superseding session {old}");
+            s.close().await;
+        }
+        inner.next_id += 1;
+        (inner.next_id, key)
+    };
     let sink_app = app.clone();
     let on_event = std::sync::Arc::new(move |event: Event| {
         if let Err(e) = sink_app.emit(EVENT_NAME, Envelope { session: id, event }) {
             log::warn!("[native_voice] event emit failed: {e}");
         }
     });
+    let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
     // Playout needs the ADM even for a listen-only join. A headless box has
     // no sound server: log and carry on, the mic publish reports it again.
@@ -154,12 +174,56 @@ pub async fn native_voice_connect<R: Runtime>(
         log::warn!("[native_voice] platform audio unavailable: {e}");
     }
     let identity = session.local_identity();
+    let mut inner = state.inner.lock().await;
+    let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
+    wipe(&mut connected_key);
+    match rotated {
+        Err(e) => {
+            log::info!("[native_voice] {e}");
+            session.close().await;
+            return Err(e);
+        }
+        Ok(Some(k)) => session.set_key(k),
+        Ok(None) => {}
+    }
     log::info!("[native_voice] session {id} connected as {identity}");
     inner.session = Some((id, session));
     Ok(Connected {
         session: id,
         identity,
     })
+}
+
+/// Enumerate the platform audio devices. Uses the live session's device
+/// module when there is one, otherwise a transient one (the settings tab
+/// lists devices outside a call).
+#[tauri::command]
+pub async fn native_voice_list_devices(
+    state: tauri::State<'_, NativeVoiceState>,
+) -> Result<session::Devices, String> {
+    let inner = state.inner.lock().await;
+    match &inner.session {
+        Some((_, s)) => s.devices(),
+        None => session::list_devices_transient(),
+    }
+}
+
+/// Select the capture (`kind == "audioinput"`) or playout (`"audiooutput"`)
+/// device by the id `native_voice_list_devices` reported; an empty id means
+/// the platform default.
+#[tauri::command]
+pub async fn native_voice_set_device(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    kind: String,
+    device_id: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_device(&kind, &device_id)
 }
 
 /// Close session `session` if it is still the live one.
@@ -236,6 +300,21 @@ mod tests {
         let mut key = Some(vec![7u8; 4]);
         wipe(&mut key);
         assert!(key.is_none());
+    }
+
+    #[test]
+    fn key_after_connect_applies_a_rotation_and_rejects_supersession() {
+        let mut inner = Inner {
+            key: Some(vec![1]),
+            session: None,
+            next_id: 3,
+        };
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
+        inner.key = Some(vec![2]);
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(Some(vec![2])));
+        assert!(inner.key_after_connect(2, &[1]).is_err());
+        inner.key = None;
+        assert!(inner.key_after_connect(3, &[1]).is_err());
     }
 
     #[test]

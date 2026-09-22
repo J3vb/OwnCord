@@ -9,8 +9,10 @@ use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::TrackPublishOptions;
 use livekit::prelude::*;
+use livekit::rtc_engine::lk_runtime::LkRuntime;
 use livekit::webrtc::audio_source::RtcAudioSource;
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -243,6 +245,118 @@ pub struct Resources {
     pub threads: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    /// The device name: the Linux device modules leave the GUID empty.
+    pub id: String,
+    pub name: String,
+    /// The device module's index, what a switch selects by.
+    #[serde(skip)]
+    pub index: u16,
+}
+
+/// The platform's capture and playout devices, in the device module's order
+/// (the first entry is what it uses by default).
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Devices {
+    pub inputs: Vec<DeviceInfo>,
+    pub outputs: Vec<DeviceInfo>,
+}
+
+fn devices_of(audio: &PlatformAudio) -> Devices {
+    Devices {
+        inputs: audio
+            .recording_devices()
+            .map(|d| DeviceInfo {
+                id: d.name.clone(),
+                name: d.name,
+                index: d.index as u16,
+            })
+            .collect(),
+        outputs: audio
+            .playout_devices()
+            .map(|d| DeviceInfo {
+                id: d.name.clone(),
+                name: d.name,
+                index: d.index as u16,
+            })
+            .collect(),
+    }
+}
+
+/// The index to switch to: the first device whose id is `requested`,
+/// otherwise the module's default (the first listed), flagged as a fallback
+/// unless the default was what was asked for (an empty id). `None` when
+/// nothing is listed.
+fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
+    match listed.iter().find(|d| d.id == requested) {
+        Some(d) => (Some(d.index), false),
+        None => (listed.first().map(|d| d.index), !requested.is_empty()),
+    }
+}
+
+/// A selected device: its name (empty: the default) and the device-module
+/// index last applied for it, which a hot-plug can shift.
+#[derive(Default)]
+struct Selection {
+    name: String,
+    index: Option<u16>,
+}
+
+/// Select device `index` the way `PlatformAudio`'s hot-swap does (stop,
+/// select, re-init and restart a stream that was running), but by index. The
+/// stream is restarted even when the selection fails, and left untouched when
+/// `index` is the one already `applied`.
+fn switch_stream(
+    applied: Option<u16>,
+    index: u16,
+    running: bool,
+    stop: impl Fn() -> bool,
+    select: impl Fn() -> bool,
+    init: impl Fn() -> bool,
+    start: impl Fn() -> bool,
+) -> Result<(), String> {
+    if applied == Some(index) {
+        return Ok(());
+    }
+    if running && !stop() {
+        return Err("stopping the audio stream failed".into());
+    }
+    let selected = select();
+    if running && !(init() && start()) {
+        return Err("restarting the audio stream failed".into());
+    }
+    if !selected {
+        return Err("selecting the audio device failed".into());
+    }
+    Ok(())
+}
+
+/// Enumerate with a device module that lives only for the call (no session).
+pub fn list_devices_transient() -> Result<Devices, String> {
+    let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
+    Ok(devices_of(&audio))
+}
+
+/// The device kinds the web path's `switchActiveDevice` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Input,
+    Output,
+}
+
+impl DeviceKind {
+    pub fn parse(kind: &str) -> Result<Self, String> {
+        match kind {
+            "audioinput" => Ok(Self::Input),
+            "audiooutput" => Ok(Self::Output),
+            other => Err(format!("unsupported device kind {other}")),
+        }
+    }
+}
+
 pub fn process_threads() -> usize {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -259,6 +373,8 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
+    input: Selection,
+    output: Selection,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -293,6 +409,8 @@ impl NativeSession {
             key_provider,
             audio: None,
             mic: None,
+            input: Selection::default(),
+            output: Selection::default(),
             forwarder,
         })
     }
@@ -340,6 +458,9 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
+        if enabled {
+            self.reselect(DeviceKind::Input);
+        }
         let Some(publication) = &self.mic else {
             if !enabled {
                 return Ok(());
@@ -367,6 +488,48 @@ impl NativeSession {
         Ok(())
     }
 
+    /// Point a stopped capture or playout stream at the selected device's
+    /// current index before it starts again.
+    fn reselect(&mut self, kind: DeviceKind) {
+        let Some(audio) = &self.audio else { return };
+        let runtime = LkRuntime::instance();
+        let f = runtime.pc_factory();
+        let listed = devices_of(audio);
+        let (running, selection, devices, what) = match kind {
+            DeviceKind::Input => (
+                f.recording_is_initialized(),
+                &mut self.input,
+                listed.inputs,
+                "capture",
+            ),
+            DeviceKind::Output => (
+                f.playout_is_initialized(),
+                &mut self.output,
+                listed.outputs,
+                "playout",
+            ),
+        };
+        if running {
+            return;
+        }
+        let (index, fell_back) = resolve_device(&selection.name, &devices);
+        if fell_back {
+            log::warn!(
+                "[native_voice] {what} device {} not found; using the default",
+                selection.name
+            );
+        }
+        let Some(index) = index else { return };
+        let selected = match kind {
+            DeviceKind::Input => f.set_recording_device(index),
+            DeviceKind::Output => f.set_playout_device(index),
+        };
+        selection.index = selected.then_some(index);
+        if !selected {
+            log::warn!("[native_voice] selecting {what} device {index} failed");
+        }
+    }
+
     /// Publish any audio source as the microphone track. The app passes the
     /// ADM source; the interop example passes a synthetic sine.
     pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
@@ -389,7 +552,7 @@ impl NativeSession {
 
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
-        &self,
+        &mut self,
         identity: &str,
         sid: &str,
         subscribed: bool,
@@ -403,7 +566,73 @@ impl NativeSession {
         let publication = participant
             .get_track_publication(&track_sid)
             .ok_or_else(|| format!("unknown track {sid}"))?;
+        if subscribed {
+            self.reselect(DeviceKind::Output);
+        }
         publication.set_subscribed(subscribed);
+        Ok(())
+    }
+
+    pub fn devices(&self) -> Result<Devices, String> {
+        self.audio
+            .as_ref()
+            .map(devices_of)
+            .ok_or_else(|| "no audio device module — platform audio unavailable".to_string())
+    }
+
+    /// Switch the capture or playout device in place (the module restarts
+    /// the stream if it is running). An empty id selects the module's
+    /// default, its first enumerated device.
+    pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
+        let kind = DeviceKind::parse(kind)?;
+        let audio = self
+            .audio
+            .as_ref()
+            .ok_or("no audio device module — platform audio unavailable")?;
+        let listed = devices_of(audio);
+        let (devices, what, selection) = match kind {
+            DeviceKind::Input => (listed.inputs, "capture", &mut self.input),
+            DeviceKind::Output => (listed.outputs, "playout", &mut self.output),
+        };
+        let (index, fell_back) = resolve_device(device_id, &devices);
+        let index = index.ok_or(format!("no {what} device"))?;
+        // PlatformAudio only switches by GUID, which is empty on Linux; the
+        // runtime its device module lives in exposes the index-based calls.
+        let runtime = LkRuntime::instance();
+        let f = runtime.pc_factory();
+        let applied = selection.index;
+        let switched = match kind {
+            DeviceKind::Input => switch_stream(
+                applied,
+                index,
+                f.recording_is_initialized(),
+                || f.stop_recording(),
+                || f.set_recording_device(index),
+                || f.init_recording(),
+                || f.start_recording(),
+            ),
+            DeviceKind::Output => switch_stream(
+                applied,
+                index,
+                f.playout_is_initialized(),
+                || f.stop_playout(),
+                || f.set_playout_device(index),
+                || f.init_playout(),
+                || f.start_playout(),
+            ),
+        };
+        selection.index = switched.is_ok().then_some(index);
+        switched?;
+        selection.name = if fell_back {
+            String::new()
+        } else {
+            device_id.to_string()
+        };
+        if fell_back {
+            return Err(format!(
+                "{what} device {device_id} not found; switched to the default"
+            ));
+        }
         Ok(())
     }
 
@@ -485,6 +714,124 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+    }
+
+    #[test]
+    fn device_kinds_are_the_web_names() {
+        assert_eq!(DeviceKind::parse("audioinput"), Ok(DeviceKind::Input));
+        assert_eq!(DeviceKind::parse("audiooutput"), Ok(DeviceKind::Output));
+        assert!(DeviceKind::parse("videoinput").is_err());
+    }
+
+    #[test]
+    fn devices_serialize_camel_case() {
+        let json = serde_json::to_string(&Devices {
+            inputs: vec![DeviceInfo {
+                id: "Mic".into(),
+                name: "Mic".into(),
+                index: 3,
+            }],
+            outputs: vec![],
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"inputs":[{"id":"Mic","name":"Mic"}],"outputs":[]}"#
+        );
+    }
+
+    #[test]
+    fn unknown_device_ids_fall_back_to_the_default() {
+        let device = |name: &str, index| DeviceInfo {
+            id: name.into(),
+            name: name.into(),
+            index,
+        };
+        let listed = vec![
+            device("USB Mic", 0),
+            device("Built-in", 1),
+            device("Built-in", 2),
+        ];
+        assert_eq!(resolve_device("Built-in", &listed), (Some(1), false));
+        assert_eq!(resolve_device("", &listed), (Some(0), false));
+        assert_eq!(resolve_device("unplugged", &listed), (Some(0), true));
+        let shifted = vec![device("USB Mic", 0), device("Built-in", 3)];
+        assert_eq!(resolve_device("Built-in", &shifted), (Some(3), false));
+        assert_eq!(resolve_device("unplugged", &[]), (None, true));
+        assert_eq!(resolve_device("", &[]), (None, false));
+    }
+
+    #[test]
+    fn a_failed_selection_still_restarts_the_running_stream() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let step = |name: &'static str, ok: bool| {
+            let calls = &calls;
+            move || {
+                calls.borrow_mut().push(name);
+                ok
+            }
+        };
+        let result = switch_stream(
+            None,
+            2,
+            true,
+            step("stop", true),
+            step("select", false),
+            step("init", true),
+            step("start", true),
+        );
+        assert!(result.is_err());
+        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
+
+        calls.borrow_mut().clear();
+        let result = switch_stream(
+            None,
+            2,
+            false,
+            step("stop", true),
+            step("select", true),
+            step("init", true),
+            step("start", true),
+        );
+        assert!(result.is_ok());
+        assert_eq!(*calls.borrow(), ["select"]);
+    }
+
+    #[test]
+    fn an_unchanged_index_leaves_the_running_stream_alone() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let step = |name: &'static str| {
+            let calls = &calls;
+            move || {
+                calls.borrow_mut().push(name);
+                true
+            }
+        };
+        let result = switch_stream(
+            Some(2),
+            2,
+            true,
+            step("stop"),
+            step("select"),
+            step("init"),
+            step("start"),
+        );
+        assert!(result.is_ok());
+        assert!(calls.borrow().is_empty());
+
+        let result = switch_stream(
+            Some(3),
+            2,
+            true,
+            step("stop"),
+            step("select"),
+            step("init"),
+            step("start"),
+        );
+        assert!(result.is_ok());
+        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
     }
 
     #[test]

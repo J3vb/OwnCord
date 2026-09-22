@@ -133,6 +133,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setDevice: (...args: unknown[]) => {
+        host.commands.push(["setDevice", args]);
+        return Promise.resolve();
+      },
       debugInfo: () => {
         host.commands.push(["debugInfo", []]);
         return Promise.resolve({ rooms: 1, localTracks: 1, admRefs: 1, threads: 41 });
@@ -145,8 +149,9 @@ vi.mock("../../src/platform/desktop", () => ({
   },
 }));
 
+const prefs = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("@components/settings/helpers", () => ({
-  loadPref: (_key: string, defaultVal: unknown) => defaultVal,
+  loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: vi.fn(),
 }));
 vi.mock("@lib/logger", () => ({
@@ -196,6 +201,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.handlers.clear();
     host.nextSession = 1;
     host.connectFails = false;
+    prefs.clear();
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.currentChannelId = 1;
@@ -235,6 +241,17 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(session.getSessionDebugInfo()).toMatchObject({
       native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
+  });
+
+  it("honours the saved input and output devices at join through the native session", async () => {
+    prefs.set("audioInputDevice", "guid-mic");
+    prefs.set("audioOutputDevice", "guid-spk");
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    expect(host.commands.filter(([n]) => n === "setDevice")).toEqual([
+      ["setDevice", [1, "audioinput", "guid-mic"]],
+      ["setDevice", [1, "audiooutput", "guid-spk"]],
+    ]);
+    expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
   });
 
   it("joins listen-only when the native microphone is unavailable", async () => {

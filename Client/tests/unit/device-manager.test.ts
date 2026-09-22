@@ -42,6 +42,14 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
+const mockNativeAudioDevices = vi.hoisted(() =>
+  vi.fn(async (_kind: string): Promise<{ deviceId: string }[] | null> => null),
+);
+
+vi.mock("../../src/features/voice/native/devices", () => ({
+  nativeAudioDevices: (kind: string) => mockNativeAudioDevices(kind),
+}));
+
 import { DeviceManager, isMicPolicyGated } from "../../src/lib/deviceManager";
 
 describe("isMicPolicyGated", () => {
@@ -84,6 +92,7 @@ describe("DeviceManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mockNativeAudioDevices.mockImplementation(async () => null);
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.localServerMuted = false;
@@ -387,6 +396,46 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("handleDeviceChange", () => {
+    it("re-applies both saved devices on the native backend so shifted indexes refresh", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "Headset Mic";
+        if (key === "audioOutputDevice") return "Headset";
+        return defaultVal;
+      });
+      mockNativeAudioDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput"
+          ? [{ deviceId: "Built-in Mic" }, { deviceId: "Headset Mic" }]
+          : [{ deviceId: "Speakers" }, { deviceId: "Headset" }],
+      );
+
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "Headset Mic");
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "Headset");
+      expect(mockGetLocalDevices).not.toHaveBeenCalled();
+    });
+
+    it("does not re-apply saved devices on the web path", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "device-A";
+        if (key === "audioOutputDevice") return "device-B";
+        return defaultVal;
+      });
+      mockGetLocalDevices.mockImplementation((kind: string) =>
+        Promise.resolve([{ deviceId: kind === "audioinput" ? "device-A" : "device-B" }]),
+      );
+
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+    });
+
     it("skips device enumeration when room is null at change time", async () => {
       dm.setRoom(mockRoom);
       // Capture the handler

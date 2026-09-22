@@ -9,6 +9,7 @@ import { describeNativeVoiceSuite } from "./nativeVoice.suite";
 const state = vi.hoisted(() => ({
   commands: [] as Array<[string, unknown]>,
   connected: { session: 1, identity: "user-1" },
+  devices: { inputs: [], outputs: [] } as unknown,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, payload?: unknown) => {
     state.commands.push([cmd, payload]);
     if (cmd === "native_voice_connect") return Promise.resolve(state.connected);
+    if (cmd === "native_voice_list_devices") return Promise.resolve(state.devices);
     return Promise.resolve();
   },
 }));
@@ -38,6 +40,9 @@ describeNativeVoiceSuite(async () => {
     native: {
       connectsAs(session, identity) {
         state.connected = { session, identity };
+      },
+      hasDevices(devices) {
+        state.devices = devices;
       },
       commands: () => state.commands,
       async emits(envelope) {

@@ -28,6 +28,7 @@ export const shards = {
     "src/features/voice/native/platform.ts",
     "src/features/voice/native/counters.ts",
     "src/features/voice/native/nativeRoom.ts",
+    "src/features/voice/native/devices.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",

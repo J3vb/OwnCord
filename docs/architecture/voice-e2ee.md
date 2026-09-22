@@ -186,10 +186,53 @@ RMS 0 and counts decryption errors, and the native side hears silence.
   no sound server; `PlatformAudio::new()` failing is handled (listen-only, the
   existing toast) but the happy path on PulseAudio/PipeWire is untested here.
 
-**Not in phase 1** (tracked as 1b and later): input/output device selection
-(`switchActiveDevice` is a no-op on the native room), input volume and the
-VAD gate, per-user volume (the ADM mixes with no per-track gain), camera and
-screen share (`setCameraEnabled`/`publishTrack` reject on Linux).
+### Phase 1b: devices, detection, and what stays out
+
+**Platform detection is by host.** `isLinuxDesktop()` is true only inside the
+Tauri app (`__TAURI_INTERNALS__` present) on a Linux, non-Android user agent,
+whether or not that WebKitGTK exposes `RTCPeerConnection` — a build with
+WebRTC still cannot do LiveKit E2EE. A Linux browser has no Tauri host and
+keeps the web path; the browser e2e suites still pin a desktop Chrome user
+agent.
+
+**Device selection.** `native_voice_list_devices` enumerates the device
+module's capture and playout devices (through the live session's module, or a
+transient one outside a call) and `native_voice_set_device(session, kind, id)`
+switches in place; an empty id is the module's default (its first device).
+`NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
+saved-device switches at join and the settings tab's selectors work unchanged;
+`features/voice/native/devices.ts` gives the settings tab and the device
+manager the native list on Linux (the ids are the module's device names —
+the Linux device modules report no GUIDs — not the webview's; a switch
+resolves the name to the module's index, first match wins, and an unknown
+name falls back to the default and reports it) and is null everywhere else, leaving the web enumeration untouched.
+Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
+re-list through the native backend and re-applies both saved selections by
+name, which refreshes a device-module index the hot-plug shifted (an
+unchanged index leaves the running stream alone). Unmuting
+(`set_microphone(true)`) and resubscribing (`set_subscribed(true)`) also
+re-resolve the saved name before a stopped stream restarts.
+
+**Connect no longer holds the backend lock**: a leave, a key rotation or a
+device switch during a slow join proceeds, and a connect that a newer one
+superseded closes its own room and reports it.
+
+**Still out, by owner decision (2026-09-22).** Input volume and the
+sensitivity (VAD) gate: the device-module track is a plain libwebrtc
+`LocalAudioSource`, which never hands capture frames to a sink, so neither a
+gain stage nor a level gate can be applied on the native capture path without
+either the app's own capture pipeline (capture → gain/VAD → APM with a reverse
+stream → `NativeAudioSource`, the report's 1b sketch) or a patched
+`webrtc-sys`. Linux relies on the engine's automatic gain control and Opus DTX
+instead, and the settings tab hides the Input Volume, Input Sensitivity, Output
+Volume and Enhanced Noise Suppression controls there with a note pointing at
+the system mixer; the three APM toggles stay and apply at the next join. Per-user volume (no per-track gain in the
+module), camera and screen share also remain later phases. rust-sdks #1408
+stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
+(PR livekit/rust-sdks#1408, open, CLA unsigned) that detaches the frame
+transformer in `FrameCryptor`'s destructor; carrying it means a vendored
+`webrtc-sys` under `[patch.crates-io]`, which is the follow-up if the soak
+needs it before upstream lands.
 
 **Phase 0 verification.** The Linux client was built on GitHub-hosted
 `ubuntu-22.04` and `ubuntu-22.04-arm` runners, before (`dev` at `dba68fe8`)
