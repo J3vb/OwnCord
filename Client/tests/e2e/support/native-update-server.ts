@@ -9,8 +9,14 @@ import { X509Certificate } from "node:crypto";
 import type { PeerCertificate } from "node:tls";
 
 /** Real TLS + Rust updater and real OwnCord HTTP/WS. Only external release
- * metadata/downloads are supplied by the fixture, signed with the CI key. */
-export async function startNativeUpdateServer(server: TestServer, packageDir: string) {
+ * metadata/downloads are supplied by the fixture, signed with the CI key —
+ * or, given `release`, the shipped updater artifact and its release
+ * signature, offered only to the one target it was built for. */
+export async function startNativeUpdateServer(
+  server: TestServer,
+  packageDir: string,
+  release?: { archive: string; signature: string; version: string; target: string },
+) {
   const cert = await readFile(join(server.directory, "data/cert.pem"));
   const key = await readFile(join(server.directory, "data/key.pem"));
   // OwnCord's generated certificate has no DNS/IP SANs. Trust its exact
@@ -25,11 +31,15 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
       return undefined;
     },
   };
-  const data = await readFile(join(packageDir, "new/update.nsis.zip"));
-  const signature = (await readFile(join(packageDir, "new/update.nsis.zip.sig"), "utf8")).trim();
-  let fault: "corrupt" | "interrupted" | "none" = "corrupt";
+  const data = await readFile(release?.archive ?? join(packageDir, "new/update.nsis.zip"));
+  const signature = (
+    await readFile(release?.signature ?? join(packageDir, "new/update.nsis.zip.sig"), "utf8")
+  ).trim();
+  const version = release?.version ?? "1.2.0-alpha.5";
+  let fault: "corrupt" | "interrupted" | "none" = release ? "none" : "corrupt";
   let origin = "";
   let downloads = 0;
+  const targets: string[] = [];
   const sockets = new Set<Socket>();
   const track = (socket: Socket) => {
     sockets.add(socket);
@@ -40,7 +50,10 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
     const path = req.url ?? "/";
     if (path.startsWith("/api/v1/client-update/")) {
       const [target, current] = path.split("/").slice(4);
-      if (current === "1.2.0-alpha.5") {
+      targets.push(target!);
+      // A foreign target gets 204, as the real server answers it
+      // (Server/api/client_update.go): never another installer's artifact.
+      if (current === version || (release && target !== release.target)) {
         res.writeHead(204);
         res.end();
         return;
@@ -48,7 +61,7 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
-          version: "1.2.0-alpha.5",
+          version,
           notes: "Signed desktop test release",
           platforms: { [target!]: { signature, url: `${origin}/test-update.nsis.zip` } },
         }),
@@ -113,6 +126,8 @@ export async function startNativeUpdateServer(server: TestServer, packageDir: st
   return {
     origin,
     downloads: () => downloads,
+    /** Every updater target the client asked about, in order. */
+    targets: () => [...targets],
     fault(value: typeof fault) {
       fault = value;
     },
