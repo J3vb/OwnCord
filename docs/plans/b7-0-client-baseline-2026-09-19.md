@@ -436,3 +436,35 @@ sets these ceilings; nothing else differs):
   (0.1), AbortControllers 20, heap slope 11 762; documents, intervals and timeouts
   1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
   the five calibration runs.
+
+**Runs with the within-page series** (`fa8c72a3` plus the working-tree change
+that adds a cycle-9 sample and regresses each page's cycle-5/9 pair for nodes
+and listeners; ceilings still 0.15/2). **Needs a decision: the clean run fails.**
+
+- **Planted control, failed on both bars.** The same Account-tab resize plant
+  failed listeners (`page 0: 217→261; page 1: 217→261`, 11/cycle) and nodes
+  (`page 0: 6087→8728; page 1: 6207→8952`, plus `phase 5` and `phase 9`). The
+  plant was then removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, failed.** With no plant, the within-page series grow
+  on every page: listeners `211→251` (10/cycle) and nodes `3489→4398` and
+  `3453→4362` (about 227/cycle). The samples were:
+
+  | Cycle | nodes | listeners | AbortControllers | timeouts |
+  | ----- | ----- | --------- | ---------------- | -------- |
+  | 0     | 2072  | 190       | 20               | 2        |
+  | 5     | 3489  | 211       | 39               | 1        |
+  | 9     | 4398  | 251       | 55               | 1        |
+  | 10    | 2102  | 192       | 20               | 1        |
+  | 15    | 3453  | 211       | 39               | 1        |
+  | 19    | 4362  | 251       | 55               | 1        |
+  | 20    | 2118  | 193       | 20               | 1        |
+
+  The growth is identical on both pages, and AbortControllers (not
+  page-regressed) rise the same way (39 → 55). So the client does accumulate per
+  cycle within one page, and the navigation at every re-login had been hiding
+  it from the phase series. The ceilings were not loosened. The cycle-5 sample
+  follows the every-5th-cycle reconnect and the cycle-9 sample does not, so
+  some of the rise may be state the reconnect resets rather than a leak. The
+  owner has to decide how to proceed: treat it as a leak for 11b/11c and ratchet
+  it, sample a like-for-like pre-logout point after the cycle-10 reconnect, or
+  move to an in-app re-login.

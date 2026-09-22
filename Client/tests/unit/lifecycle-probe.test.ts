@@ -61,6 +61,25 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(bars, "listeners").pass).toBe(false);
   });
 
+  it("fails a within-page leak the re-login navigation releases (cycles 5 and 9)", () => {
+    // The planted control's shape: +1 listener per cycle on each page, reset by
+    // the navigation, so every phase series is flat.
+    const bars = evaluateBars(
+      [
+        sample(5, { listeners: 217, nodes: 6000 }),
+        sample(9, { listeners: 221, nodes: 8000 }),
+        sample(10, { listeners: 193, nodes: 2100 }),
+        sample(15, { listeners: 217, nodes: 6000 }),
+        sample(19, { listeners: 221, nodes: 8000 }),
+        sample(20, { listeners: 193, nodes: 2100 }),
+      ],
+      { listeners: 0.15, nodes: 2 },
+    );
+    expect(bar(bars, "listeners").pass).toBe(false);
+    expect(bar(bars, "listeners").bar).toContain("page 0: 217→221");
+    expect(bar(bars, "nodes").pass).toBe(false);
+  });
+
   it("fails a leak even when the last sample is below the first of the other series", () => {
     // A pooled slope over 50, 60, 50, 80 would be small; the phase split still
     // catches the cycle-10/20 growth.
