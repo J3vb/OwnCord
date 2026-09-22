@@ -283,18 +283,19 @@ test("F5 and Ctrl+R never reload the app and a release build opens no DevTools",
       [VK.Q],
     ),
   );
-  await expect(textarea).toHaveValue("q");
   // A reload or DevTools window would be started by the browser process after
   // the renderer declines the key; give it time to appear before asserting
-  // that it did not.
+  // that it did not. A DevTools window also takes focus from the composer, so
+  // check for it before the control key below.
   await delay(2_000);
-  page.off("framenavigated", onNavigated);
-  expect(navigations).toBe(0);
-  expect(await page.evaluate(() => (window as any).__nativeExtraDocument)).toBe(true);
   const devToolsWindows = await powershell(
     "Get-Process | Where-Object { $_.MainWindowTitle -like 'DevTools*' } | ForEach-Object { $_.MainWindowTitle }",
   );
   expect(devToolsWindows.trim()).toBe("");
+  page.off("framenavigated", onNavigated);
+  expect(navigations).toBe(0);
+  expect(await page.evaluate(() => (window as any).__nativeExtraDocument)).toBe(true);
+  await expect(textarea).toHaveValue("q");
   await textarea.fill("");
 
   // Neither the IPC command nor the Advanced tab's button exists in release.
