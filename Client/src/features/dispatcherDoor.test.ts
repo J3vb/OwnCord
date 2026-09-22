@@ -7,6 +7,7 @@
 // socket themselves, and the rule's single exemption has not grown.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
 const clientRoot = path.resolve(__dirname, "../..");
@@ -65,15 +66,14 @@ describe("the dispatcher door", () => {
     }
   });
 
-  it("local/no-store-write-in-ws-on still exempts only lib/dispatcher.ts", () => {
-    const config = readFileSync(path.join(clientRoot, "eslint.config.js"), "utf8");
-    const blocks = config
-      .split(/\n\s*\{\n/)
-      .filter((block) => block.includes('"local/no-store-write-in-ws-on"'));
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatch(/files:\s*\["src\/\*\*\/\*\.ts"\]/);
-    expect(blocks[0]!.match(/ignores:\s*\[([^\]]*)\]/)?.[1]?.trim()).toBe(
-      '"src/lib/dispatcher.ts"',
-    );
+  it("local/no-store-write-in-ws-on still exempts only lib/dispatcher.ts", async () => {
+    const eslint = new ESLint({ cwd: clientRoot });
+    const severity = async (file: string) =>
+      (await eslint.calculateConfigForFile(file))?.rules?.["local/no-store-write-in-ws-on"];
+
+    expect(await severity(path.join(srcDir, "lib/dispatcher.ts"))).toBeUndefined();
+    for (const file of sourceFiles.filter((f) => !f.endsWith(`lib${path.sep}dispatcher.ts`))) {
+      expect(await severity(file), path.relative(srcDir, file)).toEqual([2]);
+    }
   });
 });

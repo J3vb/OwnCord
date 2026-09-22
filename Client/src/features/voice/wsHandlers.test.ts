@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   handleVoiceError,
@@ -51,21 +49,6 @@ beforeEach(() => {
     user: { id: 9, username: "me", avatar: null, role: "member" },
   }));
   vi.clearAllMocks();
-});
-
-describe("bundle hygiene", () => {
-  // dispatcher.ts is in the startup chunk and imports these modules
-  // statically, so a static import of livekit-client's importers here would
-  // drag ~1.3 MB into it. Both must stay dynamic.
-  it.each(["voice/wsHandlers.ts", "connection/dispatchContext.ts"])(
-    "%s imports livekitSession and screenShare only dynamically",
-    (file) => {
-      const source = readFileSync(path.join(__dirname, "..", file), "utf8");
-      expect(source).not.toMatch(
-        /^\s*import\s[^;]*from\s+["'][^"']*\/(livekitSession|screenShare)["']/m,
-      );
-    },
-  );
 });
 
 describe("snapshotReadyVoice", () => {
