@@ -117,18 +117,22 @@ test.describe("Settings — Appearance Tab", () => {
     await switchSettingsTab(page, "Appearance");
   });
 
-  test("shows theme options", async ({ page }) => {
-    const themeOptions = page.locator(".theme-opt");
-    const count = await themeOptions.count();
-    expect(count).toBeGreaterThanOrEqual(2);
-  });
-
-  test("clicking theme option activates it", async ({ page }) => {
+  test("clicking theme option activates it and applies the body class", async ({ page }) => {
     const themeOptions = page.locator(".theme-opt");
     const second = themeOptions.nth(1);
     await second.click();
 
     await expect(second).toHaveClass(/active/);
+    // The activation is only real if it reaches the rendered document.
+    await expect(second).toHaveAttribute("aria-checked", "true");
+    const themeName = await second.evaluate((el) => {
+      for (const name of ["dark", "neon-glow", "midnight", "light"]) {
+        if (el.classList.contains(name)) return name;
+      }
+      return "";
+    });
+    expect(themeName).not.toBe("");
+    await expect(page.locator("body")).toHaveClass(new RegExp(`theme-${themeName}`));
   });
 
   test("shows font size slider", async ({ page }) => {
@@ -136,18 +140,21 @@ test.describe("Settings — Appearance Tab", () => {
     await expect(slider).toBeVisible();
   });
 
-  test("shows compact mode toggle", async ({ page }) => {
-    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
-    await expect(toggle).toBeVisible();
-  });
-
-  test("toggling compact mode changes toggle state", async ({ page }) => {
+  test("toggling compact mode changes toggle state and the document", async ({ page }) => {
     const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
+    const initialClass = await page.evaluate(() =>
+      document.documentElement.classList.contains("compact-mode"),
+    );
 
     await toggle.click();
+
     const afterOn = await toggle.evaluate((el) => el.classList.contains("on"));
     expect(afterOn).not.toBe(initialOn);
+    // The toggle is only real if it drives the document class it names.
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.classList.contains("compact-mode")))
+      .toBe(!initialClass);
   });
 });
 
@@ -164,19 +171,24 @@ test.describe("Settings — Notifications Tab", () => {
     await switchSettingsTab(page, "Notifications");
   });
 
-  test("shows notification toggles", async ({ page }) => {
-    const toggles = page.locator(".toggle");
-    const count = await toggles.count();
-    expect(count).toBeGreaterThanOrEqual(3);
-  });
+  test("notification toggles persist their state", async ({ page }) => {
+    // Named rows, not a bare count: the tab must render the documented toggles.
+    await expect(page.locator(".setting-row", { hasText: "Desktop Notifications" })).toBeVisible();
+    await expect(page.locator(".setting-row", { hasText: "Suppress @everyone" })).toBeVisible();
 
-  test("notification toggles are clickable", async ({ page }) => {
-    const toggle = page.locator(".toggle").first();
+    const row = page.locator(".setting-row", { hasText: "Desktop Notifications" });
+    const toggle = row.locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
 
     await toggle.click();
-    const afterOn = await toggle.evaluate((el) => el.classList.contains("on"));
-    expect(afterOn).not.toBe(initialOn);
+
+    await expect(toggle).toHaveClass(initialOn ? /(?!on)/ : /on/);
+    // A toggle that does not persist is not a settings control.
+    await expect
+      .poll(() =>
+        page.evaluate(() => localStorage.getItem("owncord:settings:desktopNotifications")),
+      )
+      .toBe(JSON.stringify(!initialOn));
   });
 });
 
@@ -193,10 +205,17 @@ test.describe("Settings — Voice & Audio Tab", () => {
     await switchSettingsTab(page, "Voice & Audio");
   });
 
-  test("shows device selectors", async ({ page }) => {
+  test("shows device selectors for input and output", async ({ page }) => {
+    // Named sections, not a bare select count: the tab must offer both the
+    // input and output device pickers.
+    const pane = page.locator(".settings-pane", { hasText: "Input Device" });
+    await expect(pane).toBeVisible();
+    await expect(page.locator("h3", { hasText: "Output Device" })).toBeVisible();
+
     const selects = page.locator("select.form-input");
-    const count = await selects.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    await expect(selects.first()).toBeVisible();
+    // Each selector has at least a Default option to choose.
+    await expect(selects.first().locator("option", { hasText: "Default" })).toHaveCount(1);
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {
@@ -206,8 +225,8 @@ test.describe("Settings — Voice & Audio Tab", () => {
 
   test("shows audio processing toggles", async ({ page }) => {
     const toggles = page.locator(".toggle");
-    const count = await toggles.count();
-    expect(count).toBeGreaterThanOrEqual(2);
+    await expect(toggles.first()).toBeVisible();
+    expect(await toggles.count()).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -224,15 +243,15 @@ test.describe("Settings — Keybinds Tab", () => {
     await switchSettingsTab(page, "Keybinds");
   });
 
-  test("shows keybind rows", async ({ page }) => {
-    const keybindRows = page.locator(".keybind-row");
-    const count = await keybindRows.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-  });
+  test("keybind rows show named actions and their shortcuts", async ({ page }) => {
+    // Push to Talk is a real rebindable row with a kbd chip.
+    const pttRow = page.locator(".keybind-row", { hasText: "Push to Talk" });
+    await expect(pttRow).toBeVisible();
+    await expect(pttRow.locator(".kbd")).toBeVisible();
 
-  test("keybind rows show keyboard shortcuts", async ({ page }) => {
-    const kbd = page.locator(".kbd").first();
-    await expect(kbd).toBeVisible();
+    // The shortcut rendered is the app's actual binding text, not a placeholder.
+    const kbd = pttRow.locator(".kbd");
+    await expect(kbd).not.toBeEmpty();
   });
 });
 
