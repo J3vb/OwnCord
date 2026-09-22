@@ -171,6 +171,22 @@ async function openDm(page: Page, index = 0): Promise<void> {
   await expect(page.locator("[data-testid='call-btn']")).toBeVisible({ timeout: 5_000 });
 }
 
+/**
+ * A stop is only provable across an interval: sample a full chime period (the
+ * repeat is 2000ms) and require silence. The wait is the observation window,
+ * not a substitute for a condition — callers first prove the chime was running.
+ */
+async function expectChimeSilent(page: Page): Promise<void> {
+  const stopped = await chimeCount(page);
+  await page.waitForTimeout(2_500);
+  expect(await chimeCount(page)).toBe(stopped);
+}
+
+async function expectRingingWithChime(page: Page): Promise<void> {
+  await expect(banner(page)).toBeVisible();
+  await expect.poll(() => chimeCount(page), { timeout: 3_000 }).toBeGreaterThan(0);
+}
+
 const banner = (page: Page) => page.locator("[data-testid='incoming-call-banner']");
 const voiceWidget = (page: Page) => page.locator("[data-testid='voice-widget'].visible");
 
@@ -224,8 +240,7 @@ test.describe("DM calls — incoming banner", () => {
   }) => {
     await boot(page, { chime: true });
     await emitWsMessage(page, incoming());
-    await expect(banner(page)).toBeVisible();
-    await expect.poll(() => chimeCount(page), { timeout: 3_000 }).toBeGreaterThan(0);
+    await expectRingingWithChime(page);
 
     await page.locator("[data-testid='incoming-call-accept']").click();
 
@@ -241,21 +256,15 @@ test.describe("DM calls — incoming banner", () => {
     await expect(voiceWidget(page)).toBeVisible({ timeout: 5_000 });
     await expect(voiceWidget(page).locator(".vw-channel")).toHaveText("otheruser");
 
-    // A stop is only provable across an interval: sample a full chime period
-    // (the repeat is 2000ms) and require silence. The wait is the observation
-    // window, not a substitute for a condition — the positive control above
-    // already proved the chime was running.
-    const stopped = await chimeCount(page);
-    await page.waitForTimeout(2_500);
-    expect(await chimeCount(page)).toBe(stopped);
+    await expectChimeSilent(page);
   });
 
-  test("Decline answers call_decline with the DM's channel and does not join voice", async ({
+  test("Decline answers call_decline with the DM's channel, silences the chime, and does not join voice", async ({
     page,
   }) => {
-    await boot(page);
+    await boot(page, { chime: true });
     await emitWsMessage(page, incoming());
-    await expect(banner(page)).toBeVisible();
+    await expectRingingWithChime(page);
 
     await page.locator("[data-testid='incoming-call-decline']").click();
 
@@ -267,6 +276,7 @@ test.describe("DM calls — incoming banner", () => {
       "declining must not join voice",
     ).toBe(false);
     await expect(voiceWidget(page)).toBeHidden();
+    await expectChimeSilent(page);
   });
 });
 
@@ -275,12 +285,12 @@ test.describe("DM calls — incoming banner", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("DM calls — ring cancellation", () => {
-  test("only the ringer's own call_declined cancels the ring, not a fellow callee's", async ({
+  test("only the ringer's own call_declined cancels the ring and chime, not a fellow callee's", async ({
     page,
   }) => {
-    await boot(page);
+    await boot(page, { chime: true });
     await emitWsMessage(page, incoming());
-    await expect(banner(page)).toBeVisible();
+    await expectRingingWithChime(page);
 
     // A different participant of the same (group) ring declines. The server
     // addresses call_declined to every other participant, so this client sees
@@ -297,12 +307,13 @@ test.describe("DM calls — ring cancellation", () => {
       payload: { channel_id: DM_CHANNEL_ID, from_user: OTHER_USER_ID, username: "otheruser" },
     });
     await expect(banner(page)).toBeHidden();
+    await expectChimeSilent(page);
   });
 
-  test("the ringer leaving the DM's voice channel stops the ring", async ({ page }) => {
-    await boot(page);
+  test("the ringer leaving the DM's voice channel stops the ring and chime", async ({ page }) => {
+    await boot(page, { chime: true });
     await emitWsMessage(page, incoming());
-    await expect(banner(page)).toBeVisible();
+    await expectRingingWithChime(page);
 
     // The ringer's voice_leave is the only "the call is over" signal there is,
     // because a call is presence, not a server-side record.
@@ -311,6 +322,7 @@ test.describe("DM calls — ring cancellation", () => {
       payload: { channel_id: DM_CHANNEL_ID, user_id: OTHER_USER_ID },
     });
     await expect(banner(page)).toBeHidden();
+    await expectChimeSilent(page);
   });
 
   test("a voice_leave for a different channel from the ringer leaves the ring up", async ({
@@ -353,14 +365,26 @@ test.describe("DM calls — starting a call", () => {
     await page.locator("[data-testid='call-btn']").click();
 
     // Joining first, then ringing — the caller must actually be in the room.
-    await sentTo(page, "voice_join", DM_CHANNEL_ID);
+    const join = await sentTo(page, "voice_join", DM_CHANNEL_ID);
     const ring = await sentTo(page, "call_ring", DM_CHANNEL_ID);
     expect(ring.payload).toEqual({ channel_id: DM_CHANNEL_ID });
+    const frames = await sentFrames(page);
+    expect(
+      frames.findIndex((f) => f.type === join.type && f.payload?.channel_id === DM_CHANNEL_ID),
+    ).toBeLessThan(
+      frames.findIndex((f) => f.type === ring.type && f.payload?.channel_id === DM_CHANNEL_ID),
+    );
     await expect(page.locator("[data-testid='toast']", { hasText: "Calling" })).toBeVisible();
 
     // Call state: the DM call is live in the voice widget.
     await expect(voiceWidget(page)).toBeVisible({ timeout: 5_000 });
     await expect(voiceWidget(page).locator(".vw-channel")).toHaveText("otheruser");
+
+    // Leaving the DM for a text channel takes the call affordance away again.
+    await page.locator("[data-testid='dm-back-header']").click();
+    await page.locator(".channel-item", { hasText: "general" }).first().click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
+    await expect(page.locator("[data-testid='call-btn']")).toBeHidden();
   });
 
   test("a ring for a DM you are not viewing still raises the banner", async ({ page }) => {
