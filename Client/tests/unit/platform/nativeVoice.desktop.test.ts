@@ -8,8 +8,9 @@ import { describeNativeVoiceSuite } from "./nativeVoice.suite";
 
 const state = vi.hoisted(() => ({
   commands: [] as Array<[string, unknown]>,
-  connected: { session: 1, identity: "user-1" },
+  connected: { session: 1, identity: "user-1", frames: "" },
   devices: { inputs: [], outputs: [] } as unknown,
+  cameraSid: "",
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     state.commands.push([cmd, payload]);
     if (cmd === "native_voice_connect") return Promise.resolve(state.connected);
     if (cmd === "native_voice_list_devices") return Promise.resolve(state.devices);
+    if (cmd === "native_voice_publish_camera") return Promise.resolve(state.cameraSid);
     return Promise.resolve();
   },
 }));
@@ -38,8 +40,11 @@ describeNativeVoiceSuite(async () => {
   return {
     subject: desktopBinding,
     native: {
-      connectsAs(session, identity) {
-        state.connected = { session, identity };
+      connectsAs(session, identity, frames) {
+        state.connected = { session, identity, frames };
+      },
+      publishesCameraAs(sid) {
+        state.cameraSid = sid;
       },
       hasDevices(devices) {
         state.devices = devices;

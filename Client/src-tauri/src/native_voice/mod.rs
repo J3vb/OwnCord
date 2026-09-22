@@ -13,11 +13,15 @@
 //! room (`native_voice_disconnect` is a no-op for any other id), mirroring
 //! the facade's "cleanup is scoped to the attempt's own room" rule.
 //! Room events reach the webview as one Tauri event, `native-voice`, whose
-//! payload carries the session id. Key material is never logged.
+//! payload carries the session id. Video frames do not cross IPC: each
+//! session serves them on its own token-authenticated loopback socket
+//! (`video.rs`), whose URL the connect result carries. Key material and the
+//! frame-socket token are never logged.
 pub mod session;
+pub mod video;
 
 use serde::Serialize;
-use session::{AudioOptions, Event, NativeSession, Resources};
+use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
 
@@ -130,6 +134,8 @@ pub struct Connected {
     session: u64,
     /// Our LiveKit identity (`user-<id>...`), for the participant model.
     identity: String,
+    /// The session's frame-socket base URL, token included.
+    frames: String,
 }
 
 /// Connect a new session, superseding any live one.
@@ -187,10 +193,12 @@ pub async fn native_voice_connect<R: Runtime>(
         Ok(None) => {}
     }
     log::info!("[native_voice] session {id} connected as {identity}");
+    let frames = session.frames_url().to_string();
     inner.session = Some((id, session));
     Ok(Connected {
         session: id,
         identity,
+        frames,
     })
 }
 
@@ -255,6 +263,42 @@ pub async fn native_voice_set_microphone(
         .current(session)?
         .set_microphone(enabled)
         .await
+}
+
+/// Publish (or replace) the camera; its frames then arrive on the session's
+/// frame socket. Returns the publication sid `native_voice_unpublish_camera`
+/// takes.
+#[tauri::command]
+pub async fn native_voice_publish_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    options: CameraOptions,
+) -> Result<String, String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .publish_camera(options)
+        .await
+}
+
+/// Unpublish camera `sid` if it is still the published one; a stale sid is a
+/// no-op.
+#[tauri::command]
+pub async fn native_voice_unpublish_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    sid: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .unpublish_camera(&sid)
+        .await;
+    Ok(())
 }
 
 #[tauri::command]
