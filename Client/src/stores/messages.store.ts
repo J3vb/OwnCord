@@ -2,6 +2,11 @@
  * Messages store — holds chat messages per channel, pending send tracking,
  * and load state for infinite scroll.
  * Immutable state updates only.
+ *
+ * The facade: the store instance, every mutator and selector, and the model
+ * types. The reducer bodies are pure functions in features/messaging/; import
+ * from here, never from there, so local/no-store-write-in-ws-on still sees
+ * every mutator call.
  */
 
 import { createStore } from "@lib/store";
@@ -36,6 +41,17 @@ import {
   reduceReattachToPresent,
   reducePrependMessages,
 } from "../features/messaging/historyWindows";
+import {
+  reduceEditMessage,
+  reduceDeleteMessage,
+  reduceBulkDeleteMessages,
+  reduceSetMessagePinned,
+} from "../features/messaging/messageEdits";
+import {
+  reduceAddOptimisticReaction,
+  reduceRollbackReaction,
+  reduceUpdateReaction,
+} from "../features/messaging/reactionState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
 /**
@@ -243,42 +259,12 @@ export function prependMessages(
 
 /** Update message content and editedAt from a chat_edited WS event. */
 export function editMessage(payload: ChatEditedPayload): void {
-  messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
-    if (!channelMessages) return prev;
-
-    const updatedList = channelMessages.map((msg) =>
-      msg.id === payload.message_id
-        ? {
-            ...msg,
-            content: payload.content,
-            editedAt: payload.edited_at,
-            mentions: payload.mentions,
-            mentionsEveryone: payload.mentions_everyone,
-          }
-        : msg,
-    );
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(payload.channel_id, updatedList);
-    return { ...prev, messagesByChannel: updatedMessages };
-  });
+  messagesStore.setState((prev) => reduceEditMessage(prev, payload));
 }
 
 /** Soft-delete: mark message as deleted but keep in array. */
 export function deleteMessage(payload: ChatDeletedPayload): void {
-  messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
-    if (!channelMessages) return prev;
-
-    const updatedList = channelMessages.map((msg) =>
-      msg.id === payload.message_id ? { ...msg, deleted: true } : msg,
-    );
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(payload.channel_id, updatedList);
-    return { ...prev, messagesByChannel: updatedMessages };
-  });
+  messagesStore.setState((prev) => reduceDeleteMessage(prev, payload));
 }
 
 /**
@@ -288,37 +274,12 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
  */
 export function bulkDeleteMessages(payload: ChatBulkDeletedPayload): void {
   if (payload.ids.length === 0) return;
-  messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
-    if (!channelMessages) return prev;
-
-    const purged = new Set(payload.ids);
-    if (!channelMessages.some((msg) => purged.has(msg.id) && !msg.deleted)) return prev;
-
-    const updatedList = channelMessages.map((msg) =>
-      purged.has(msg.id) ? { ...msg, deleted: true } : msg,
-    );
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(payload.channel_id, updatedList);
-    return { ...prev, messagesByChannel: updatedMessages };
-  });
+  messagesStore.setState((prev) => reduceBulkDeleteMessages(prev, payload));
 }
 
 /** Toggle the pinned state of a message (optimistic update after API call). */
 export function setMessagePinned(channelId: number, messageId: number, pinned: boolean): void {
-  messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(channelId);
-    if (!channelMessages) return prev;
-
-    const updatedList = channelMessages.map((msg) =>
-      msg.id === messageId ? { ...msg, pinned } : msg,
-    );
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, updatedList);
-    return { ...prev, messagesByChannel: updatedMessages };
-  });
+  messagesStore.setState((prev) => reduceSetMessagePinned(prev, channelId, messageId, pinned));
 }
 
 /**
@@ -372,47 +333,6 @@ export function applyServerMessage(response: MessageResponse): void {
 }
 
 /**
- * Apply a single reaction count/me delta to a channel's message list, or null
- * when the message is not loaded (nothing to update). Shared by the
- * server-echo path, the optimistic apply, and its rollback (which applies the
- * inverse action) so the three can never disagree about the arithmetic.
- */
-function applyReactionDelta(
-  prev: MessagesState,
-  { channelId, messageId, emoji, action }: PendingReaction,
-  isMe: boolean,
-): ReadonlyMap<number, readonly Message[]> | null {
-  const channelMessages = prev.messagesByChannel.get(channelId);
-  if (!channelMessages) return null;
-
-  const updatedList = channelMessages.map((msg) => {
-    if (msg.id !== messageId) return msg;
-
-    const existing = msg.reactions;
-    if (action === "add") {
-      const found = existing.find((r) => r.emoji === emoji);
-      if (found !== undefined) {
-        const updatedReactions = existing.map((r) =>
-          r.emoji === emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
-        );
-        return { ...msg, reactions: updatedReactions };
-      }
-      return { ...msg, reactions: [...existing, { emoji, count: 1, me: isMe }] };
-    }
-
-    // action === "remove"
-    const updatedReactions = existing
-      .map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r))
-      .filter((r) => r.count > 0);
-    return { ...msg, reactions: updatedReactions };
-  });
-
-  const updatedMessages = new Map(prev.messagesByChannel);
-  updatedMessages.set(channelId, updatedList);
-  return updatedMessages;
-}
-
-/**
  * Apply the user's own reaction toggle locally before the server confirms it —
  * the pill reacts to the click, not to the round-trip (ux/messaging §5) — and
  * register it under the send's correlation id. updateReaction consumes the
@@ -420,13 +340,7 @@ function applyReactionDelta(
  * reverts the toggle when the send errors.
  */
 export function addOptimisticReaction(correlationId: string, toggle: PendingReaction): void {
-  messagesStore.setState((prev) => {
-    const updatedMessages = applyReactionDelta(prev, toggle, true);
-    if (updatedMessages === null) return prev;
-    const updatedPending = new Map(prev.pendingReactions ?? []);
-    updatedPending.set(correlationId, toggle);
-    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
-  });
+  messagesStore.setState((prev) => reduceAddOptimisticReaction(prev, correlationId, toggle));
 }
 
 /**
@@ -438,60 +352,16 @@ export function addOptimisticReaction(correlationId: string, toggle: PendingReac
 export function rollbackReaction(correlationId: string): boolean {
   let found = false;
   messagesStore.setState((prev) => {
-    const toggle = prev.pendingReactions?.get(correlationId);
-    if (toggle === undefined) return prev;
-    found = true;
-    const updatedPending = new Map(prev.pendingReactions);
-    updatedPending.delete(correlationId);
-    const inverse: PendingReaction = {
-      ...toggle,
-      action: toggle.action === "add" ? "remove" : "add",
-    };
-    const updatedMessages = applyReactionDelta(prev, inverse, true);
-    if (updatedMessages === null) {
-      return { ...prev, pendingReactions: updatedPending };
-    }
-    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
+    const result = reduceRollbackReaction(prev, correlationId);
+    found = result.found;
+    return result.next;
   });
   return found;
 }
 
 /** Update reactions on a message from a reaction_update WS event. */
 export function updateReaction(payload: ReactionUpdatePayload, currentUserId: number): void {
-  messagesStore.setState((prev) => {
-    const isMe = payload.user_id === currentUserId;
-
-    // The echo of an optimistic toggle: consume it instead of re-applying —
-    // the delta arithmetic above would double-count otherwise. Matched by
-    // content, not envelope id (broadcasts carry no request correlation).
-    if (isMe) {
-      for (const [cid, t] of prev.pendingReactions ?? []) {
-        if (
-          t.channelId === payload.channel_id &&
-          t.messageId === payload.message_id &&
-          t.emoji === payload.emoji &&
-          t.action === payload.action
-        ) {
-          const updatedPending = new Map(prev.pendingReactions);
-          updatedPending.delete(cid);
-          return { ...prev, pendingReactions: updatedPending };
-        }
-      }
-    }
-
-    const updatedMessages = applyReactionDelta(
-      prev,
-      {
-        channelId: payload.channel_id,
-        messageId: payload.message_id,
-        emoji: payload.emoji,
-        action: payload.action,
-      },
-      isMe,
-    );
-    if (updatedMessages === null) return prev;
-    return { ...prev, messagesByChannel: updatedMessages };
-  });
+  messagesStore.setState((prev) => reduceUpdateReaction(prev, payload, currentUserId));
 }
 
 /** Reset the entire store to its initial (empty) state — e.g. on logout. */

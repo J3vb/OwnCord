@@ -113,6 +113,8 @@ export const shards = {
     "src/features/messaging/echoReconcile.ts",
     "src/features/messaging/liveMessages.ts",
     "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/messageEdits.ts",
+    "src/features/messaging/reactionState.ts",
   ], // 1918 mutants
 };
 
