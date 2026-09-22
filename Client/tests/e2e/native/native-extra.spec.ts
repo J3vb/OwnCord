@@ -31,7 +31,6 @@ const exec = promisify(execFile);
 const VK = {
   SHIFT: 0x10,
   CONTROL: 0x11,
-  ALT: 0x12,
   I: 0x49,
   Q: 0x51,
   R: 0x52,
@@ -39,6 +38,7 @@ const VK = {
   F12: 0x7b,
   // A key nothing else on the runner presses, and one PTT capture allows.
   F16: 0x7f,
+  F24: 0x87,
 } as const;
 
 /** pwsh first: a cold powershell.exe start took up to 30s on loaded runners
@@ -84,12 +84,14 @@ async function sendKeys(steps: readonly KeyStep[]): Promise<void> {
 
 /** Make the app the foreground window, so injected keys reach its webview.
  *  Windows only lets the process that produced the last input event move the
- *  foreground, so tap Alt from this process first. */
+ *  foreground, so tap a key first. Not the usual Alt: a bare Alt tap that
+ *  lands on the app window enters its system-menu loop and freezes WebView2;
+ *  nothing in the app or the webview handles F24. */
 async function bringToForeground(app: NativeApp, page: Page): Promise<void> {
   await powershell(`${USER32}
 $h = (Get-Process -Id ${app.process.pid}).MainWindowHandle
 if ($h -eq [System.IntPtr]::Zero) { throw 'OwnCord has no main window' }
-${keyEvents(chords([VK.ALT]))}
+${keyEvents(chords([VK.F24]))}
 if (-not [OwnCordE2E.User32]::SetForegroundWindow($h)) { throw 'SetForegroundWindow refused' }`);
   await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
 }
