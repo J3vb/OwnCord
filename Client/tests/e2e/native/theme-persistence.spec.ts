@@ -68,24 +68,37 @@ test.describe("Theme Persistence (Native)", () => {
   });
 
   test("accent color picker applies CSS variable", async ({ nativePage }) => {
-    // Look for accent color input
-    const colorInput = nativePage.locator(
-      "input[type='color'], .accent-color-input, .accent-picker",
-    );
+    // AppearanceTab builds the picker from .accent-swatch rows plus a hex
+    // input — there is no `input[type='color']`. Asserting the swatches exist
+    // (rather than guarding on a selector that never matches) is what makes
+    // this fail when the picker regresses.
+    const swatches = nativePage.locator(".accent-swatch");
+    await expect(swatches.first()).toBeVisible();
+    expect(await swatches.count()).toBeGreaterThanOrEqual(2);
 
-    if (await colorInput.isVisible().catch(() => false)) {
-      await colorInput.fill("#ff0066");
+    // Pick a swatch that is not already active so applying it is observable.
+    // Capture it by title, not by the `:not(.active)` locator: that locator
+    // re-resolves after the click (the swatch just became active), so asserting
+    // on it would target a *different* swatch.
+    const inactive = nativePage.locator(".accent-swatch:not(.active)").first();
+    const color = await inactive.getAttribute("title");
+    expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    const target = nativePage.locator(`.accent-swatch[title='${color}']`);
 
-      // Verify a CSS variable is set on body
-      await expect(async () => {
-        const accentValue = await nativePage.evaluate(() => {
-          const accent = document.body.style.getPropertyValue("--accent").trim();
-          const primary = document.body.style.getPropertyValue("--accent-primary").trim();
-          return accent || primary;
-        });
-        expect(accentValue.length).toBeGreaterThan(0);
-      }).toPass({ timeout: 3_000 });
-    }
+    await target.click();
+
+    // applyAccent sets the inline --accent on body (the value the theme class
+    // would otherwise win against), and the picker marks the chosen swatch
+    // active. Assert both: the rendered variable equals the swatch we picked —
+    // not merely that some accent variable is non-empty — and the picker
+    // reflects the selection.
+    await expect
+      .poll(() =>
+        nativePage.evaluate(() => document.body.style.getPropertyValue("--accent").trim()),
+      )
+      .toBe(color!);
+    await expect(target).toHaveClass(/active/);
+    await expect(target).toHaveAttribute("aria-checked", "true");
   });
 
   test("theme persists after navigating away and back", async ({ nativePage }) => {
@@ -127,7 +140,7 @@ test.describe("Theme Persistence (Native)", () => {
     await expect(toggle).toBeVisible();
 
     const wasCompact = await nativePage.evaluate(() =>
-      document.body.classList.contains("compact-mode"),
+      document.documentElement.classList.contains("compact-mode"),
     );
 
     await toggle.click();
@@ -135,7 +148,7 @@ test.describe("Theme Persistence (Native)", () => {
     // Wait for class to flip
     await expect(async () => {
       const isCompactNow = await nativePage.evaluate(() =>
-        document.body.classList.contains("compact-mode"),
+        document.documentElement.classList.contains("compact-mode"),
       );
       expect(isCompactNow).not.toBe(wasCompact);
     }).toPass({ timeout: 3_000 });
@@ -145,7 +158,7 @@ test.describe("Theme Persistence (Native)", () => {
 
     await expect(async () => {
       const restored = await nativePage.evaluate(() =>
-        document.body.classList.contains("compact-mode"),
+        document.documentElement.classList.contains("compact-mode"),
       );
       expect(restored).toBe(wasCompact);
     }).toPass({ timeout: 3_000 });

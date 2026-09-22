@@ -1357,7 +1357,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
     defaults:
       run:
         working-directory: Client/
@@ -1392,15 +1392,37 @@ jobs:
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
         run: npx playwright test --config playwright.config.native.ts --project native-core
-      - name: Preserve native core diagnostics before building installers
+      # The exploratory suites were defined in the config but never selected, so
+      # nine spec files were dead coverage. They reuse the binary built above
+      # (native-no-auth drives the real connect page and auth flows;
+      # native-authenticated logs in once and exercises layout, channel nav,
+      # chat, DMs, settings, appearance and overlays). The persistent fixture
+      # needs the LiveKit binary the same way native-core does.
+      # Own output paths: Playwright clears its output directory and the
+      # reporters overwrite theirs when a run starts, so sharing native-core's
+      # would erase the core diagnostics before they are uploaded.
+      - name: Test native auth, layout and overlay suites
+        timeout-minutes: 25
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/native-suites
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/native-suites.xml
+        run: >-
+          npx playwright test --config playwright.config.native.ts
+          --project native-no-auth --project native-authenticated
+          --output test-results/native-suites
+      - name: Preserve native core and suite diagnostics before building installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: native-core-e2e-report
           path: |
             Client/playwright-report/native/
+            Client/playwright-report/native-suites/
             Client/test-results/native/
+            Client/test-results/native-suites/
             Client/test-results/native-junit.xml
+            Client/test-results/native-suites.xml
           retention-days: 7
       # Collect installer evidence even if a core test fails; the job still fails.
       - name: Build two signed NSIS test packages
