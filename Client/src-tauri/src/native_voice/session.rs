@@ -278,6 +278,16 @@ fn devices_of(audio: &PlatformAudio) -> Devices {
     }
 }
 
+/// The id to switch to: `requested` when `listed` has it, otherwise the
+/// module's default (the first listed), flagged as a fallback unless the
+/// default was what was asked for (an empty id). `None` when nothing is listed.
+fn resolve_device<'a>(requested: &str, listed: &'a [String]) -> (Option<&'a str>, bool) {
+    match listed.iter().find(|id| *id == requested) {
+        Some(id) => (Some(id.as_str()), false),
+        None => (listed.first().map(String::as_str), !requested.is_empty()),
+    }
+}
+
 /// Enumerate with a device module that lives only for the call (no session).
 pub fn list_devices_transient() -> Result<Devices, String> {
     let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
@@ -481,34 +491,31 @@ impl NativeSession {
             .audio
             .as_ref()
             .ok_or("no audio device module — platform audio unavailable")?;
-        match kind {
+        // The switch stops the running stream first and never restarts it on
+        // an unknown id, so only ever hand it an id the module listed.
+        let listed = devices_of(audio);
+        let (ids, what) = match kind {
+            DeviceKind::Input => (listed.inputs, "capture"),
+            DeviceKind::Output => (listed.outputs, "playout"),
+        };
+        let ids: Vec<String> = ids.into_iter().map(|d| d.id).collect();
+        let (target, fell_back) = resolve_device(device_id, &ids);
+        let target = target.ok_or(format!("no {what} device"))?;
+        let switched = match kind {
             DeviceKind::Input => {
-                let id = if device_id.is_empty() {
-                    audio
-                        .recording_devices()
-                        .next()
-                        .ok_or("no capture device")?
-                        .id
-                } else {
-                    RecordingDeviceId::from_unchecked_guid(device_id)
-                };
-                audio
-                    .switch_recording_device(&id)
-                    .map_err(|e| e.to_string())
+                audio.switch_recording_device(&RecordingDeviceId::from_unchecked_guid(target))
             }
             DeviceKind::Output => {
-                let id = if device_id.is_empty() {
-                    audio
-                        .playout_devices()
-                        .next()
-                        .ok_or("no playout device")?
-                        .id
-                } else {
-                    PlayoutDeviceId::from_unchecked_guid(device_id)
-                };
-                audio.switch_playout_device(&id).map_err(|e| e.to_string())
+                audio.switch_playout_device(&PlayoutDeviceId::from_unchecked_guid(target))
             }
+        };
+        switched.map_err(|e| e.to_string())?;
+        if fell_back {
+            return Err(format!(
+                "{what} device {device_id} not found; switched to the default"
+            ));
         }
+        Ok(())
     }
 
     pub fn resources(&self) -> Resources {
@@ -612,6 +619,22 @@ mod tests {
             json,
             r#"{"inputs":[{"id":"guid-1","name":"Mic"}],"outputs":[]}"#
         );
+    }
+
+    #[test]
+    fn unknown_device_ids_fall_back_to_the_default() {
+        let listed = vec!["usb-mic".to_string(), "built-in".to_string()];
+        assert_eq!(
+            resolve_device("built-in", &listed),
+            (Some("built-in"), false)
+        );
+        assert_eq!(resolve_device("", &listed), (Some("usb-mic"), false));
+        assert_eq!(
+            resolve_device("unplugged", &listed),
+            (Some("usb-mic"), true)
+        );
+        assert_eq!(resolve_device("unplugged", &[]), (None, true));
+        assert_eq!(resolve_device("", &[]), (None, false));
     }
 
     #[test]

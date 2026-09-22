@@ -10,35 +10,34 @@ const WEBVIEW2 =
 const ANDROID =
   "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0";
 
-const g = globalThis as unknown as { RTCPeerConnection?: unknown };
-const originalPc = g.RTCPeerConnection;
 function FakePeerConnection(): void {}
 
-function withEnvironment(userAgent: string, webrtc: boolean): boolean {
+function withEnvironment(userAgent: string, tauri: boolean, webrtc: boolean): boolean {
   vi.stubGlobal("navigator", { userAgent });
-  if (webrtc) g.RTCPeerConnection = FakePeerConnection;
-  else delete g.RTCPeerConnection;
+  if (tauri) vi.stubGlobal("__TAURI_INTERNALS__", {});
+  vi.stubGlobal("RTCPeerConnection", webrtc ? FakePeerConnection : undefined);
   return isLinuxDesktop();
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  if (originalPc === undefined) delete g.RTCPeerConnection;
-  else g.RTCPeerConnection = originalPc;
 });
 
 describe("isLinuxDesktop", () => {
-  it("is true only for a Linux webview with no WebRTC (the Tauri app on WebKitGTK)", () => {
-    expect(withEnvironment(WEBKITGTK, false)).toBe(true);
+  it("is true in the Tauri app on Linux (WebKitGTK)", () => {
+    expect(withEnvironment(WEBKITGTK, true, false)).toBe(true);
   });
-  it("keeps a Linux Chromium (the browser suites) on the web path", () => {
-    expect(withEnvironment(CHROMIUM_LINUX, true)).toBe(false);
+  it("is true in the Tauri app on Linux even when the webview has WebRTC", () => {
+    expect(withEnvironment(WEBKITGTK, true, true)).toBe(true);
   });
-  it("is false on Windows, with or without WebRTC", () => {
-    expect(withEnvironment(WEBVIEW2, true)).toBe(false);
-    expect(withEnvironment(WEBVIEW2, false)).toBe(false);
+  it("keeps a Linux Chromium without a Tauri host on the web path", () => {
+    expect(withEnvironment(CHROMIUM_LINUX, false, true)).toBe(false);
+    expect(withEnvironment(CHROMIUM_LINUX, false, false)).toBe(false);
+  });
+  it("is false on Windows", () => {
+    expect(withEnvironment(WEBVIEW2, true, true)).toBe(false);
   });
   it("is false on Android", () => {
-    expect(withEnvironment(ANDROID, false)).toBe(false);
+    expect(withEnvironment(ANDROID, true, true)).toBe(false);
   });
 });

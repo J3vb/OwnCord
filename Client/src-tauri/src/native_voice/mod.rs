@@ -47,6 +47,17 @@ impl Inner {
             _ => Err(format!("native voice session {id} is not current")),
         }
     }
+    /// After an unlocked connect of session `id` with `connected_key`: the
+    /// key it must switch to (`Some` when a rotation landed meanwhile), or
+    /// an error when a newer connect or a leave (cleared key) superseded it.
+    fn key_after_connect(&self, id: u64, connected_key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        match &self.key {
+            Some(k) if self.next_id == id => Ok((k.as_slice() != connected_key).then(|| k.clone())),
+            _ => Err(format!(
+                "native voice session {id} superseded during connect"
+            )),
+        }
+    }
     fn resources(&self) -> Resources {
         match &self.session {
             Some((_, s)) => s.resources(),
@@ -155,6 +166,7 @@ pub async fn native_voice_connect<R: Runtime>(
             log::warn!("[native_voice] event emit failed: {e}");
         }
     });
+    let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
     // Playout needs the ADM even for a listen-only join. A headless box has
     // no sound server: log and carry on, the mic publish reports it again.
@@ -163,12 +175,16 @@ pub async fn native_voice_connect<R: Runtime>(
     }
     let identity = session.local_identity();
     let mut inner = state.inner.lock().await;
-    if inner.next_id != id {
-        log::info!("[native_voice] session {id} superseded during connect");
-        session.close().await;
-        return Err(format!(
-            "native voice session {id} superseded during connect"
-        ));
+    let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
+    wipe(&mut connected_key);
+    match rotated {
+        Err(e) => {
+            log::info!("[native_voice] {e}");
+            session.close().await;
+            return Err(e);
+        }
+        Ok(Some(k)) => session.set_key(k),
+        Ok(None) => {}
     }
     if let Some((old, s)) = inner.session.take() {
         // Only possible if a newer connect already stored — excluded above —
@@ -290,6 +306,21 @@ mod tests {
         let mut key = Some(vec![7u8; 4]);
         wipe(&mut key);
         assert!(key.is_none());
+    }
+
+    #[test]
+    fn key_after_connect_applies_a_rotation_and_rejects_supersession() {
+        let mut inner = Inner {
+            key: Some(vec![1]),
+            session: None,
+            next_id: 3,
+        };
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
+        inner.key = Some(vec![2]);
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(Some(vec![2])));
+        assert!(inner.key_after_connect(2, &[1]).is_err());
+        inner.key = None;
+        assert!(inner.key_after_connect(3, &[1]).is_err());
     }
 
     #[test]

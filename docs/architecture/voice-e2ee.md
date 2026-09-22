@@ -188,11 +188,12 @@ RMS 0 and counts decryption errors, and the native side hears silence.
 
 ### Phase 1b: devices, detection, and what stays out
 
-**Platform detection is by capability.** `isLinuxDesktop()` is true only for a
-Linux user agent whose webview has no `RTCPeerConnection` — the defect the
-backend exists for. A Linux Chromium (the browser e2e suites, or any browser
-build) keeps the web path by capability, so no test config needs to spoof a
-user agent.
+**Platform detection is by host.** `isLinuxDesktop()` is true only inside the
+Tauri app (`__TAURI_INTERNALS__` present) on a Linux, non-Android user agent,
+whether or not that WebKitGTK exposes `RTCPeerConnection` — a build with
+WebRTC still cannot do LiveKit E2EE. A Linux browser has no Tauri host and
+keeps the web path; the browser e2e suites still pin a desktop Chrome user
+agent.
 
 **Device selection.** `native_voice_list_devices` enumerates the device
 module's capture and playout devices (through the live session's module, or a

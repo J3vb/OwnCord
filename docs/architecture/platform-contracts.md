@@ -78,8 +78,9 @@ counts: of the 45 attributed functions, 43 appear in `generate_handler!`
 `#[cfg(feature = "devtools")]` and the ten `native_voice_*` commands behind
 `#[cfg(target_os = "linux")]`, so a default build registers 42 on Linux and 32
 elsewhere. The one environment-detection helper is
-`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a user-agent check
-that selects the native voice backend; it is not a desktop/browser seam.
+`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
+Linux user-agent check that selects the native voice backend; it is not a
+desktop/browser seam.
 
 Reproduce:
 
