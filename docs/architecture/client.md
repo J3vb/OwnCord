@@ -123,9 +123,9 @@ and `client-e2e` runs a 92-test smoke set against the Vite dev server, widening
 to the full suite when the specs or fixtures themselves change — plus a native
 Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`,
 a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
-runs the `native-core` Playwright project, then the `native-no-auth` and
-`native-authenticated` projects, then the signed-NSIS install/relaunch
-script), Stryker mutation testing
+runs the `native-core` Playwright project, then the auth, UI and
+native-extra projects listed in `docs/testing-behavior.md`, then the
+signed-NSIS install/relaunch script), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
 strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.
