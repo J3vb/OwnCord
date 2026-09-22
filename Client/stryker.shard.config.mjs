@@ -110,6 +110,12 @@ export const shards = {
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",
     "src/stores/voice.store.ts",
+    "src/features/messaging/messageModel.ts",
+    "src/features/messaging/echoReconcile.ts",
+    "src/features/messaging/liveMessages.ts",
+    "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/messageEdits.ts",
+    "src/features/messaging/reactionState.ts",
   ], // 1918 mutants
 };
 

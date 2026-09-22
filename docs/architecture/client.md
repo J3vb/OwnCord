@@ -46,7 +46,7 @@ flowchart TB
     subgraph state ["Stores (9 singletons)"]
         AUTH2["auth"]
         CHAN["channels<br/>(incl. roles)"]
-        MSG["messages"]
+        MSG["messages<br/>(reducers in features/messaging/)"]
         MEM["members"]
         VOICE["voice"]
         DM["dm"]
@@ -130,5 +130,5 @@ strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
-`src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts`,
+`src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),
 `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`.
