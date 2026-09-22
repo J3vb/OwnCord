@@ -258,7 +258,7 @@ pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
-    mic: Option<TrackSid>,
+    mic: Option<LocalTrackPublication>,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -334,12 +334,14 @@ impl NativeSession {
         Ok(())
     }
 
-    /// Publish (or unpublish) the microphone. Mute unpublishes and stops the
-    /// OS capture, so the system's in-use indicator goes out — the same
+    /// Enable or disable the microphone. The first enable publishes; after
+    /// that the publication stays and is muted in place (no renegotiation, no
+    /// new frame cryptor — rust-sdks #1408), and the OS capture is stopped
+    /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
-        if enabled {
-            if self.mic.is_some() {
+        let Some(publication) = &self.mic else {
+            if !enabled {
                 return Ok(());
             }
             let source = self
@@ -347,23 +349,22 @@ impl NativeSession {
                 .as_ref()
                 .ok_or("no audio device module — platform audio unavailable")?
                 .rtc_source();
-            self.publish_audio(source).await
+            return self.publish_audio(source).await;
+        };
+        if enabled {
+            if let Some(audio) = &self.audio {
+                audio.start_recording().map_err(|e| e.to_string())?;
+            }
+            publication.unmute();
         } else {
-            let Some(sid) = self.mic.take() else {
-                return Ok(());
-            };
-            self.room
-                .local_participant()
-                .unpublish_track(&sid)
-                .await
-                .map_err(|e| e.to_string())?;
+            publication.mute();
             if let Some(audio) = &self.audio {
                 if let Err(e) = audio.stop_recording() {
                     log::warn!("[native_voice] stop_recording failed: {e}");
                 }
             }
-            Ok(())
         }
+        Ok(())
     }
 
     /// Publish any audio source as the microphone track. The app passes the
@@ -382,7 +383,7 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
-        self.mic = Some(publication.sid());
+        self.mic = Some(publication);
         Ok(())
     }
 
@@ -418,8 +419,12 @@ impl NativeSession {
     /// Leave the room and release every native handle. Dropping the last
     /// `PlatformAudio` disables the ADM.
     pub async fn close(mut self) {
-        if let Some(sid) = self.mic.take() {
-            let _ = self.room.local_participant().unpublish_track(&sid).await;
+        if let Some(publication) = self.mic.take() {
+            let _ = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.sid())
+                .await;
         }
         if let Err(e) = self.room.close().await {
             log::warn!("[native_voice] room close: {e}");

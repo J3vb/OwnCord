@@ -1007,6 +1007,7 @@ export class E2EEManager {
     this._announceChain = Promise.resolve();
     this._ecdhKeyPair = null;
     this._roomKey = null;
+    this._worker.clearRoomKey();
     this._peerPublicKeys.clear();
     this._peerGenerations.clear();
     this._retiredPeerKeys.clear();

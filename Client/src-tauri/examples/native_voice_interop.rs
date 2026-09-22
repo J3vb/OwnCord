@@ -10,11 +10,14 @@
 //! with the right key and stay silent with a wrong one.
 //!
 //!   native_voice_interop --url ws://127.0.0.1:7880 --token <jwt> \
-//!       --key <base64 text> --secs 20 [--cycles N]
+//!       --key <base64 text> --secs 20 [--cycles N] [--mute-cycles N]
 //!
 //! `--cycles N` first connects and closes N throwaway sessions, printing the
 //! process thread count before and after, which is the measurement for
 //! rust-sdks #1408 (a leaked FrameCryptor thread per cryptor).
+//! `--mute-cycles N` mutes and unmutes the published microphone N times the
+//! way the app does, printing the thread count before and after: an in-place
+//! mute creates no new cryptor, so the count must stay flat.
 #[cfg(target_os = "linux")]
 mod linux {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -119,6 +122,11 @@ mod linux {
             .unwrap_or("0")
             .parse()
             .map_err(|_| "--cycles")?;
+        let mute_cycles: u32 = arg("--mute-cycles")
+            .as_deref()
+            .unwrap_or("0")
+            .parse()
+            .map_err(|_| "--mute-cycles")?;
 
         if cycles > 0 {
             emit(
@@ -153,6 +161,22 @@ mod linux {
             .publish_audio(RtcAudioSource::Native(source.clone()))
             .await?;
         let sine = tokio::spawn(play_sine(source));
+
+        if mute_cycles > 0 {
+            emit(
+                serde_json::json!({ "event": { "type": "threads", "phase": "mute-before", "count": process_threads() } }),
+            );
+            for _ in 0..mute_cycles {
+                session.set_microphone(false).await?;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                session.set_microphone(true).await?;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            emit(
+                serde_json::json!({ "event": { "type": "threads", "phase": "mute-after", "cycles": mute_cycles, "count": process_threads() } }),
+            );
+        }
 
         let mut meters = Vec::new();
         let deadline = tokio::time::sleep(Duration::from_secs(secs));

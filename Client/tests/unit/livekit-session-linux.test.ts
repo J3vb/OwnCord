@@ -133,7 +133,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
       },
-      debugInfo: vi.fn(),
+      debugInfo: () => {
+        host.commands.push(["debugInfo", []]);
+        return Promise.resolve({ rooms: 1, localTracks: 1, admRefs: 1, threads: 41 });
+      },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
         return () => host.handlers.delete(handler);
@@ -225,7 +228,12 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(setListenOnly).toHaveBeenCalledWith(false);
     expect(session.getSessionDebugInfo()).toMatchObject({
       hasRoom: true,
-      native: { openRooms: 1, listeners: 1 },
+      native: { openRooms: 1, listeners: 1, rust: null },
+    });
+    // The read requested a live snapshot from the backend; the next read has it.
+    await flush();
+    expect(session.getSessionDebugInfo()).toMatchObject({
+      native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
   });
 
@@ -270,6 +278,26 @@ describe("LiveKitSession on the Linux native backend", () => {
       ["setSubscribed", [1, "user-2", "TR_a", false]],
       ["setMicrophone", [1, false]],
     ]);
+  });
+
+  it("a voice track published after deafen stays unsubscribed", async () => {
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    mockVoiceState.localMuted = true;
+    mockVoiceState.localDeafened = true;
+    session.setDeafened(true);
+    await flush();
+    host.commands.length = 0;
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    emit({
+      session: 1,
+      event: {
+        type: "trackPublished",
+        identity: "user-3",
+        track: { sid: "TR_b", kind: "audio", source: "microphone", muted: false },
+      },
+    });
+    await flush();
+    expect(host.commands).toEqual([["setSubscribed", [1, "user-3", "TR_b", false]]]);
   });
 
   it("leaveVoice closes the native session and forgets the native key", async () => {

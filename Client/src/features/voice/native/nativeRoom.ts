@@ -17,6 +17,7 @@
 // down only its own room.
 import { DisconnectReason, RoomEvent } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
+import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
 import type {
   NativeVoiceAudioOptions,
@@ -98,6 +99,8 @@ export class NativeRoom {
   };
 
   private sessionId: number | null = null;
+  /** Whether this room is counted in `nativeCounters.openRooms`. */
+  private counted = false;
   private micPublished = false;
   private readonly listeners = new Map<string, Set<Listener>>();
   /** Releases this connect attempt's event subscription; null when none. */
@@ -166,6 +169,7 @@ export class NativeRoom {
     }
     this.state = "connected";
     nativeCounters.openRooms++;
+    this.counted = true;
     const queued = this.pending;
     this.pending = null;
     for (const envelope of queued ?? []) this.onEnvelope(envelope);
@@ -178,7 +182,8 @@ export class NativeRoom {
     if (id === null) return;
     this.sessionId = null;
     this.micPublished = false;
-    if (this.state !== "disconnected") nativeCounters.openRooms--;
+    if (this.counted) nativeCounters.openRooms--;
+    this.counted = false;
     this.state = "disconnected";
     // Scoped to this room's own session: the backend ignores a stale id.
     nativeCounters.rust = await desktop.nativeVoice.disconnect(id);
@@ -221,14 +226,30 @@ export class NativeRoom {
     return p;
   }
 
+  /** The backend auto-subscribes every track, so a voice track that appears
+   *  while deafened is unsubscribed here — the native counterpart of
+   *  AudioElements.handleTrackSubscribedAudio's guard, which never runs on
+   *  Linux because no TrackSubscribed is raised. Stream audio is exempt. */
+  private addPublication(identity: string, track: NativeVoiceTrack): void {
+    const p = this.participant(identity);
+    if (p.trackPublications.has(track.sid)) return;
+    const pub = new NativeRemotePublication(this, identity, track);
+    p.trackPublications.set(track.sid, pub);
+    if (
+      pub.kind === "audio" &&
+      pub.source !== "screen_share_audio" &&
+      voiceStore.getState().localDeafened
+    )
+      pub.setSubscribed(false);
+  }
+
   private apply(event: NativeVoiceEvent): void {
     switch (event.type) {
       case "connected":
         this.remoteParticipants.clear();
         for (const info of event.participants) {
-          const p = this.participant(info.identity);
-          for (const t of info.tracks)
-            p.trackPublications.set(t.sid, new NativeRemotePublication(this, info.identity, t));
+          this.participant(info.identity);
+          for (const t of info.tracks) this.addPublication(info.identity, t);
         }
         this.emit(RoomEvent.Connected);
         break;
@@ -242,15 +263,9 @@ export class NativeRoom {
         break;
       }
       case "trackPublished":
-      case "trackSubscribed": {
-        const p = this.participant(event.identity);
-        if (!p.trackPublications.has(event.track.sid))
-          p.trackPublications.set(
-            event.track.sid,
-            new NativeRemotePublication(this, event.identity, event.track),
-          );
+      case "trackSubscribed":
+        this.addPublication(event.identity, event.track);
         break;
-      }
       case "trackUnpublished":
         this.remoteParticipants.get(event.identity)?.trackPublications.delete(event.sid);
         break;

@@ -56,6 +56,7 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
+import { setLocalDeafened } from "../../../stores/voice.store";
 
 const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const emit = (envelope: NativeVoiceEnvelope) => {
@@ -70,6 +71,7 @@ beforeEach(() => {
   nativeCounters.openRooms = 0;
   nativeCounters.listeners = 0;
   nativeCounters.rust = null;
+  setLocalDeafened(false);
 });
 
 describe("NativeRoom connect/disconnect", () => {
@@ -128,6 +130,18 @@ describe("NativeRoom connect/disconnect", () => {
     expect(host.calls.filter(([n]) => n === "disconnect")).toHaveLength(1);
   });
 
+  it("uncounts a room the server dropped once it is disconnected", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    expect(nativeCounters.openRooms).toBe(1);
+    emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
+    expect(room.state).toBe("disconnected");
+    await room.disconnect();
+    expect(nativeCounters.openRooms).toBe(0);
+    await room.disconnect();
+    expect(nativeCounters.openRooms).toBe(0);
+  });
+
   it("releases the subscription and rethrows when connect fails", async () => {
     const room = createNativeRoom(audio);
     host.connectResult = Promise.reject(new Error("no key"));
@@ -171,6 +185,41 @@ describe("NativeRoom room surface", () => {
       ["setSubscribed", [1, "user-2", "TR_a", false]],
     ]);
     expect(pub.isSubscribed).toBe(false);
+  });
+
+  it("keeps voice tracks that appear while deafened unsubscribed, but not stream audio", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    setLocalDeafened(true);
+    const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
+      sid,
+      kind: "audio" as const,
+      source,
+      muted: false,
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-3", track: track("TR_mic", "microphone") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-3", track: track("TR_mic", "microphone") },
+    });
+    emit({
+      session: 1,
+      event: {
+        type: "trackSubscribed",
+        identity: "user-3",
+        track: track("TR_stream", "screen_share_audio"),
+      },
+    });
+    expect(host.calls.filter(([n]) => n === "setSubscribed")).toEqual([
+      ["setSubscribed", [1, "user-3", "TR_mic", false]],
+    ]);
+    const pubs = room.remoteParticipants.get("user-3")!.audioTrackPublications;
+    expect(pubs.get("TR_mic")!.isSubscribed).toBe(false);
+    expect(pubs.get("TR_stream")!.isSubscribed).toBe(true);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {

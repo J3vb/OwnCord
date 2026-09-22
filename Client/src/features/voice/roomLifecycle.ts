@@ -30,7 +30,6 @@ import {
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
 import type { SessionState } from "./sessionState";
-import { desktop } from "../../platform/desktop";
 import { isLinuxDesktop } from "./native/platform";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
@@ -310,11 +309,6 @@ export class RoomLifecycle {
     this._e2ee.clearState();
     this._e2eeWorker?.terminate();
     this._e2eeWorker = null;
-    // Linux: the key lives in the Rust backend's provider; forget it in the
-    // same teardown (the closed room above held the last copy).
-    if (isLinuxDesktop()) {
-      desktop.nativeVoice.clearRoomKey().catch((err) => log.warn("native key clear failed", err));
-    }
     // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
     // pendingJoin, and the joinGeneration (idle has none). Any in-flight
     // connectAndSetup() will detect the state type change at its next checkpoint.

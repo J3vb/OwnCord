@@ -39,6 +39,7 @@ import { MediaControl } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
+import { desktop } from "../platform/desktop";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -815,8 +816,16 @@ export class LiveKitSession {
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });
-    // B7-11 rule 3: native resources are countable through the facade.
-    return isLinuxDesktop() ? { ...info, native: { ...nativeCounters } } : info;
+    if (!isLinuxDesktop()) return info;
+    // B7-11 rule 3: native resources are countable through the facade. Each
+    // read asks the backend for a fresh snapshot, which the next read reports.
+    desktop.nativeVoice.debugInfo().then(
+      (resources) => {
+        nativeCounters.rust = resources;
+      },
+      (err) => log.warn("native debug info failed", err),
+    );
+    return { ...info, native: { ...nativeCounters } };
   }
 }
 

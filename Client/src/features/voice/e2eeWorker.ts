@@ -6,8 +6,11 @@
 // E2EEWorkerHost.
 import { ExternalE2EEKeyProvider } from "livekit-client";
 import { roomKeyToBase64 } from "../../lib/e2eeCrypto";
+import { createLogger } from "../../lib/logger";
 import { desktop } from "../../platform/desktop";
 import { isLinuxDesktop } from "./native/platform";
+
+const log = createLogger("e2eeWorker");
 
 /** What the key provider's write queue needs from E2EEManager. */
 export interface E2EEWorkerHost {
@@ -62,6 +65,17 @@ export class E2EEWorker {
       return;
     }
     await this.keyProvider.setKey(keyBase64);
+  }
+
+  /** Linux: forget the backend's room key when the session ends. Queued on
+   *  the same write queue as installs, so it lands after any write already in
+   *  flight and before the next session's key — a quick rejoin's key is never
+   *  wiped by the previous session's clear. */
+  clearRoomKey(): void {
+    if (!isLinuxDesktop()) return;
+    this._keyApplyChain = this._keyApplyChain.then(() =>
+      desktop.nativeVoice.clearRoomKey().catch((err) => log.warn("native key clear failed", err)),
+    );
   }
 
   /** Setup/reconnect must await the current key even if a rotation or offer

@@ -172,8 +172,6 @@ describe("RoomLifecycle on the Linux native backend", () => {
     };
     const createNativeRoom = vi.fn(() => nativeRoom);
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
-    const clearRoomKey = vi.fn(async () => undefined);
-    vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { clearRoomKey } } }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
     const { attachDiagnosticListeners: attach } = await import("../../lib/livekitDiagnostics");
     const { Room: WebRoom } = await import("livekit-client");
@@ -193,11 +191,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     // here, so count the registrations rather than name them).
     expect(nativeRoom.on).toHaveBeenCalledTimes(8);
     expect(attach).toHaveBeenCalledWith(nativeRoom);
-    // Leaving forgets the key in the native provider in the same teardown.
-    lifecycle.leaveVoice(false);
-    expect(clearRoomKey).toHaveBeenCalledTimes(1);
     vi.doUnmock("./native/platform");
     vi.doUnmock("./native/nativeRoom");
-    vi.doUnmock("../../platform/desktop");
   });
 });

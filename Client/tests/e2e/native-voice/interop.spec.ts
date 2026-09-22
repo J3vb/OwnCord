@@ -10,7 +10,8 @@
 //   2. the negative control: a native peer holding a different key produces
 //      silence and decryption errors in the browser, and hears silence —
 //      the media really is encrypted, not passed through;
-//   3. repeated native joins do not leak threads (rust-sdks #1408 measure).
+//   3. repeated native joins do not leak threads (rust-sdks #1408 measure);
+//   4. repeated mute/unmute keeps the publication, so it adds no threads.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
 import { test, expect } from "@playwright/test";
 import { createHmac, randomBytes } from "node:crypto";
@@ -218,7 +219,20 @@ test("native and browser peers decode each other's audio with the same key", asy
   const encryption: Array<{ identity: string; encrypted: boolean }> = [];
   const threads: Array<{ phase: string; count: number }> = [];
   const peer = runNativePeer(
-    ["--url", url, "--token", joinToken("user-2"), "--key", key, "--secs", "15", "--cycles", "5"],
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "15",
+      "--cycles",
+      "5",
+      "--mute-cycles",
+      "10",
+    ],
     ({ event }) => {
       if (event.type === "audio")
         nativeAudio.push(event as unknown as { identity: string; rms: number; frames: number });
@@ -264,6 +278,13 @@ test("native and browser peers decode each other's audio with the same key", asy
   const after = threads.find((t) => t.phase === "after")!.count;
   console.log(`native peer threads: before=${before} after 5 cycles=${after}`);
   expect(after - before).toBeLessThanOrEqual(2 * 5 + 2);
+  // 5. Mute is in place (no republish, no new FrameCryptor): ten mute/unmute
+  //    cycles leave the thread count flat, where a republish per unmute would
+  //    leak at least one thread each. The slack covers runtime pool jitter.
+  const muteBefore = threads.find((t) => t.phase === "mute-before")!.count;
+  const muteAfter = threads.find((t) => t.phase === "mute-after")!.count;
+  console.log(`native peer threads: before=${muteBefore} after 10 mute cycles=${muteAfter}`);
+  expect(muteAfter - muteBefore).toBeLessThanOrEqual(2);
 });
 
 test("a native peer with the wrong key hears silence and is heard as silence", async ({ page }) => {

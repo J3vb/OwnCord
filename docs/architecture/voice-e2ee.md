@@ -153,9 +153,14 @@ logged; the backend zeroes its copy on clear.
 **Lifecycle (B7-11).** Sessions are numbered so a superseded attempt's
 `disconnect()` closes only its own room; the Tauri subscription is registered
 per connect and released in `disconnect()` with the late-resolve guard; the key
-is forgotten in the same `leaveVoice` teardown. `getSessionDebugInfo().native`
-reports open native rooms, registered listeners and the backend's last resource
-snapshot (rooms, local tracks, ADM refs, process threads).
+is forgotten when the E2EE state is cleared on leave, queued on the
+`E2EEWorker` key write queue so it can never land after the next join's key.
+Mute keeps the microphone publication and mutes it in place (stopping ADM
+capture), so a mute toggle costs no renegotiation and no new frame cryptor.
+`getSessionDebugInfo().native` reports open native rooms, registered listeners
+and the backend's resource snapshot (rooms, local tracks, ADM refs, process
+threads); each read requests a fresh `native_voice_debug_info` snapshot, which
+the next read reports.
 
 **Interop test (CI).** `Client/tests/e2e/native-voice/interop.spec.ts`, run by
 ci.yml's `rust-tests` job: `examples/native_voice_interop.rs` drives the app's
@@ -173,6 +178,8 @@ RMS 0 and counts decryption errors, and the native side hears silence.
   one remote participant grew the process from 17 to 27 threads — **+2 per
   cycle**, idle. The interop test pins that rate as the ceiling. Long sessions
   with many joins accumulate them; a patch or an SDK fix is the follow-up.
+  Mute/unmute creates no cryptor: the interop test's ten mute cycles must
+  leave the thread count flat.
 - #1187 (bundled BoringSSL vs a dynamic OpenSSL): `cargo tree -i openssl-sys`
   and `-i native-tls` match nothing — the client is rustls-only.
 - Not exercised: real ADM capture and playout. Every box this was built on has
