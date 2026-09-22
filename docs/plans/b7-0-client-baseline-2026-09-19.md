@@ -501,11 +501,11 @@ failure comes from the bars, and nothing was tuned.
 Both failures came from the soak's interaction and console steps, not from the
 leak bars.
 
-**Stabilised soak, two consecutive clean runs** (`cbccfb8e` plus the working-tree
-change that retries the DM step as one unit and accepts close code 1000; bars
-and ceilings unchanged). The DM step now closes any popup, clicks Bob's row,
-waits for the popup's `.open` card and clicks its Message button, retrying the
-whole sequence until the DM header shows. No step uses a fixed sleep. The LiveKit
+**Stabilised soak, two consecutive clean runs** (`e02ef7ec`, which retries the
+DM step as one unit and accepts close code 1000; bars and ceilings unchanged).
+The DM step closes any popup, clicks Bob's row, waits for the popup's `.open`
+card and clicks its Message button, retrying the whole sequence until the DM
+header shows. No step uses a fixed sleep. The LiveKit
 expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
 
 | Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
@@ -515,6 +515,14 @@ expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
 
 `documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
 tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
+
+**Idempotent DM retry** (`e02ef7ec` plus the working-tree change). The retried
+unit now returns at once when the DM header is already visible. So a retry
+after Message has switched the sidebar to DMs no longer waits for Bob's member
+row, which that switch removes. The DM view then gets the config's default 15 s
+to appear, outside the retry. One clean 20-cycle run passed with the same bars:
+nodes 3489 → 3453 (−3.6), listeners 192 → 193 (0.1), AbortControllers 20, heap
+slope 11 350.
 
 **Owner decision: the five-run at-head calibration moves to B7-11c.** The
 intent asks for the 20-cycle soak to be run at least five times locally to show

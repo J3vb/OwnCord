@@ -237,14 +237,16 @@ async function runCycle(
   await expect(page.locator("[data-testid='channel-context-menu']")).not.toBeVisible();
 
   // 4. Open the DM with Bob, send one message, close it.
+  const dmHeader = page.locator("[data-testid='dm-back-header']");
   await expect(async () => {
+    if (await dmHeader.isVisible()) return;
     await page.keyboard.press("Escape");
     await page.locator(".member-item", { hasText: "bob" }).first().click({ timeout: 5_000 });
     const popup = page.locator("[data-testid='user-profile-popup'].open");
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await popup.locator("[data-testid='upp-message-btn']").click({ timeout: 5_000 });
-    await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 60_000 });
+  await expect(dmHeader).toBeVisible();
   const dmText = `soak-dm-${cycle}-${crypto.randomUUID()}`;
   await page.locator("[data-testid='message-input'] textarea").fill(dmText);
   await page.locator("[data-testid='message-input'] textarea").press("Enter");
