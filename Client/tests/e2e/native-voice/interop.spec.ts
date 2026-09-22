@@ -293,12 +293,12 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   const url = `ws://127.0.0.1:${livekitPort}`;
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
-  const nativeAudio: Array<{ identity: string; rms: number; frames: number }> = [];
+  const nativeAudio: Array<{ identity: string; rms: number; at: number }> = [];
   const peer = runNativePeer(
     ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "12"],
     ({ event }) => {
       if (event.type === "audio")
-        nativeAudio.push(event as unknown as { identity: string; rms: number; frames: number });
+        nativeAudio.push({ ...(event as unknown as { identity: string; rms: number }), at: Date.now() });
     },
   );
   await expect
@@ -306,6 +306,7 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
     .toContain("user-2");
   await page.waitForTimeout(3_000);
   await resetBrowserMeters(page);
+  const settledAt = Date.now();
   await page.waitForTimeout(5_000);
   const browser = await readBrowserPeer(page, "user-2");
   await peer.done;
@@ -313,7 +314,11 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   expect(browser.samples).toBeGreaterThan(0);
   expect(browser.rms).toBeLessThan(0.005);
   expect(browser.encErrors).toBeGreaterThan(0);
-  const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1");
-  // Either nothing decodes at all, or what does is silence.
-  expect(Math.max(0, ...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
+  // Same settled window as the browser meter: livekit 0.9.1 attaches the
+  // receiver FrameCryptor on TrackSubscribed, so the first frames can reach
+  // the decoder still encrypted and decode as a burst of noise.
+  const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1" && a.at >= settledAt);
+  // The native side still plays the browser track out, and it is silence.
+  expect(fromBrowser.length).toBeGreaterThan(0);
+  expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
 });
