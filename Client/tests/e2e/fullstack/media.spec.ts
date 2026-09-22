@@ -149,16 +149,23 @@ for (const fault of ["missing", "wrong"] as const) {
     await switchSettingsTab(bob, "Logs");
     await bob.getByRole("button", { name: "Start connection test", exact: true }).click();
     await expect(bob.getByTestId("diagnostics-status")).toContainText("Test complete");
-    await expect(bob.getByTestId("diagnostic-media")).toHaveAttribute(
-      "data-status",
-      /^(failed|not-tested)$/,
-    );
+    // The fault is real: the diagnostic must have run and found no decodable
+    // media — "not-tested" with the observed-nothing detail. The old
+    // /^(failed|not-tested)$/ regex also accepted "not-tested" but as a loose
+    // OR; pin the exact status so "the diagnostic never ran" cannot pass.
+    await expect(bob.getByTestId("diagnostic-media")).toHaveAttribute("data-status", "not-tested");
+    await expect(bob.getByTestId("diagnostic-media")).toContainText("No advancing decoded media");
     await bob.locator(".settings-close-btn").click();
     await bob.evaluate(() => window.__ocMedia.restoreKeys());
-    // The production fail-closed path may disconnect on EncryptionError.
-    // Rejoin with valid keys and require real decoded media again.
-    const disconnect = bob.locator(".voice-widget.visible button[aria-label='Disconnect']");
-    if (await disconnect.isVisible()) await disconnect.click();
+    // The production fail-closed path may disconnect on EncryptionError. Make
+    // the state determinate in both directions: if still connected, disconnect
+    // and require the widget to actually hide; otherwise it is already out.
+    // Either way the rejoin below is a fresh join, not a toggle-off.
+    const bobWidget = bob.locator(".voice-widget");
+    if (await bobWidget.evaluate((el) => el.classList.contains("visible"))) {
+      await bob.locator(".voice-widget.visible button[aria-label='Disconnect']").click();
+      await expect(bobWidget).not.toHaveClass(/visible/);
+    }
     await joinVoice(bob);
     await expectDecodedMedia(bob, true);
   });

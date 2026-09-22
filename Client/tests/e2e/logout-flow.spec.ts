@@ -68,6 +68,15 @@ test.describe("Logout Flow — auto-connect profile", () => {
   });
 
   test("logging out does not immediately auto-login back in", async ({ page }) => {
+    const connects = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.filter(
+            (e) => e.cmd === "ws_connect",
+          ).length,
+      );
+    const connectsBefore = await connects();
+
     const settingsBtn = page.locator("button[aria-label='Settings']");
     await settingsBtn.click();
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
@@ -75,9 +84,34 @@ test.describe("Logout Flow — auto-connect profile", () => {
     await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
 
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });
-    // Give the auto-login path (and its connecting overlay) time to fire.
-    await page.waitForTimeout(1500);
-    await expect(page.locator("[data-testid='app-layout']")).not.toBeVisible();
+
+    // Positive signal: logout clears the host's stored credential (the mock
+    // records every delete_credential, dispatched synchronously before the
+    // connect page mounts). A "no auto-login" test that never proves the
+    // credential path ran could pass on an app that simply never attempts
+    // auto-login at all.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __mockDeletedCredentials: string[] }).__mockDeletedCredentials,
+        ),
+      )
+      .toContain("localhost:8443");
+
+    // This is a negative property (auto-login must NOT fire), so it needs a
+    // bounded observation window: a single sample right after the form appears
+    // can beat the connect-page mount IIFE through its loadCredential →
+    // wirePostAuth → ws_connect roundtrips, and pass while auto-login is
+    // actually broken. Keep asserting for the whole window instead.
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      expect(await connects()).toBe(connectsBefore);
+      await expect(page.locator("[data-testid='app-layout']")).not.toBeVisible();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // And the outcome still holds: the connect form remains the visible page.
     await expect(page.locator(".connect-form, .login-form")).toBeVisible();
   });
 });

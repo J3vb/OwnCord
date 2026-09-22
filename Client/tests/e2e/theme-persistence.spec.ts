@@ -34,30 +34,28 @@ test.describe("Theme Persistence", () => {
     );
     expect(initialClasses.length).toBeGreaterThanOrEqual(1);
 
-    // Click a different theme option
-    const themeOptions = page.locator(".theme-opt");
-    const count = await themeOptions.count();
-    expect(count).toBeGreaterThanOrEqual(2);
-
-    // Find a theme option that is NOT currently active
-    let targetIndex = -1;
-    for (let i = 0; i < count; i++) {
-      const isActive = await themeOptions.nth(i).evaluate((el) => el.classList.contains("active"));
-      if (!isActive) {
-        targetIndex = i;
-        break;
+    // Must be a different theme available to switch to — not an optional
+    // discovery that silently skips the assertion when none is found.
+    const inactiveOption = page.locator(".theme-opt:not(.active)");
+    await expect(inactiveOption.first()).toBeVisible();
+    const themeName = await inactiveOption.first().evaluate((el) => {
+      const classes = el.classList;
+      for (const name of ["dark", "neon-glow", "midnight", "light"]) {
+        if (classes.contains(name)) return name;
       }
-    }
+      return "";
+    });
+    expect(themeName).not.toBe("");
 
-    if (targetIndex >= 0) {
-      await themeOptions.nth(targetIndex).click();
+    await inactiveOption.first().click();
 
-      // Body class should have changed
-      const newClasses = await page.evaluate(() =>
-        [...document.body.classList].filter((c) => c.startsWith("theme-")),
-      );
-      expect(newClasses).not.toEqual(initialClasses);
-    }
+    // Body class should now carry the selected theme, and it should differ
+    // from what we started with.
+    const newClasses = await page.evaluate(() =>
+      [...document.body.classList].filter((c) => c.startsWith("theme-")),
+    );
+    expect(newClasses).toContain(`theme-${themeName}`);
+    expect(newClasses).not.toEqual(initialClasses);
   });
 
   test("theme persists in localStorage", async ({ page }) => {
@@ -80,17 +78,17 @@ test.describe("Theme Persistence", () => {
     const themeOptions = page.locator(".theme-opt");
     await themeOptions.first().click();
 
-    // Read what was stored
+    // Read what was stored — must be a real value, not null (the old guard
+    // passed vacuously when nothing was stored).
     const storedTheme = await page.evaluate(() => localStorage.getItem("owncord:theme:active"));
+    expect(storedTheme).not.toBeNull();
 
     // Verify the body has the corresponding class
-    if (storedTheme !== null) {
-      const hasClass = await page.evaluate((themeName) => {
-        // Built-in themes use `theme-<name>` class
-        return document.body.classList.contains(`theme-${themeName}`);
-      }, storedTheme);
-      expect(hasClass).toBe(true);
-    }
+    const hasClass = await page.evaluate((themeName) => {
+      // Built-in themes use `theme-<name>` class
+      return document.body.classList.contains(`theme-${themeName}`);
+    }, storedTheme!);
+    expect(hasClass).toBe(true);
   });
 });
 
@@ -108,53 +106,46 @@ test.describe("Accent Color Override", () => {
   });
 
   test("accent color picker applies --accent CSS variable", async ({ page }) => {
-    // Look for the accent color input (color picker or text input)
-    const colorInput = page.locator("input[type='color'], .accent-color-input, .accent-picker");
+    // The hex field is the accent picker. Fail if it is missing — the old
+    // `if (isVisible)` guard made this test pass with zero assertions when
+    // the picker was absent.
+    const hexInput = page.locator(".accent-hex-row input.form-input");
+    await expect(hexInput).toBeVisible();
 
-    if (await colorInput.isVisible().catch(() => false)) {
-      // Set a custom accent color
-      await colorInput.fill("#ff5500");
+    await hexInput.fill("ff5500");
 
-      // Verify the --accent CSS variable is set on body
-      const accentValue = await page.evaluate(() =>
-        document.body.style.getPropertyValue("--accent").trim(),
-      );
-      // The accent may be set as --accent or --accent-primary
-      const accentPrimary = await page.evaluate(() =>
-        document.body.style.getPropertyValue("--accent-primary").trim(),
-      );
-
-      const hasAccent = accentValue.length > 0 || accentPrimary.length > 0;
-      expect(hasAccent).toBe(true);
-    }
+    // The rendered CSS variable on <body> must equal the value that was set,
+    // not merely be non-empty.
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.body.style.getPropertyValue("--accent").trim().toLowerCase()),
+      )
+      .toBe("#ff5500");
   });
 
   test("accent color persists across settings tab navigation", async ({ page }) => {
-    const colorInput = page.locator("input[type='color'], .accent-color-input, .accent-picker");
+    const hexInput = page.locator(".accent-hex-row input.form-input");
+    await expect(hexInput).toBeVisible();
 
-    if (await colorInput.isVisible().catch(() => false)) {
-      // Set accent color
-      await colorInput.fill("#ff5500");
+    await hexInput.fill("ff5500");
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.body.style.getPropertyValue("--accent").trim().toLowerCase()),
+      )
+      .toBe("#ff5500");
 
-      // Wait for the value to be stored
-      await expect(async () => {
-        const val = await page.evaluate(() => localStorage.getItem("owncord:pref:accentColor"));
-        expect(val).not.toBeNull();
-      }).toPass({ timeout: 3_000 });
+    const stored = await page.evaluate(() => localStorage.getItem("owncord:settings:accentColor"));
+    expect(stored).toContain("ff5500");
 
-      // Read the stored value
-      const stored = await page.evaluate(() => localStorage.getItem("owncord:pref:accentColor"));
+    // Navigate away from Appearance and back; the rendered accent must survive.
+    await switchSettingsTab(page, "Account");
+    await switchSettingsTab(page, "Appearance");
 
-      // Navigate away from Appearance tab and back
-      await switchSettingsTab(page, "Account");
-      await switchSettingsTab(page, "Appearance");
-
-      // Verify the accent is still applied
-      const storedAfter = await page.evaluate(() =>
-        localStorage.getItem("owncord:pref:accentColor"),
-      );
-      expect(storedAfter).toBe(stored);
-    }
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.body.style.getPropertyValue("--accent").trim().toLowerCase()),
+      )
+      .toBe("#ff5500");
   });
 });
 

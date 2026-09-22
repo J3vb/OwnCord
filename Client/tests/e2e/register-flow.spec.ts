@@ -178,7 +178,36 @@ test.describe("Register Flow — Submission", () => {
   });
 
   test("register shows loading state during submission", async ({ page }) => {
+    // Hold the register HTTP response open so the in-flight loading state is
+    // observable, not a race against the mock's fast reply. The wrapper
+    // delays only the register fetch; every other IPC call passes straight
+    // through the base mock.
     await mockRegisterSuccess(page);
+    await page.addInitScript(() => {
+      const t = (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+        }
+      ).__TAURI_INTERNALS__;
+      const orig = t.invoke.bind(t);
+      const urls = new Map<number, string>();
+      t.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "plugin:http|fetch") {
+          const a = args as { rid?: number; clientConfig?: { url?: string } };
+          const rid = (await orig(cmd, args)) as number;
+          urls.set(rid, a.clientConfig?.url ?? "");
+          return rid;
+        }
+        if (cmd === "plugin:http|fetch_send") {
+          const rid = (args as { rid?: number }).rid ?? -1;
+          if (urls.get(rid)?.includes("/api/v1/auth/register")) {
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        }
+        return orig(cmd, args);
+      };
+    });
+
     await page.goto("/");
     await switchToRegisterMode(page);
 
@@ -187,11 +216,17 @@ test.describe("Register Flow — Submission", () => {
     await page.locator("#password").fill("password123");
     await page.locator("#invite").fill("invite-abc");
 
-    // Submit and verify the form completes successfully
-    await page.locator(".btn-primary[type='submit']").click();
+    const submitBtn = page.locator(".btn-primary[type='submit']");
+    await submitBtn.click();
 
-    // The form should eventually complete and show the connected overlay
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5000 });
+    // The form enters its real loading state while the request is in flight:
+    // the control disables, flags itself loading, and relabels itself.
+    await expect(submitBtn).toBeDisabled({ timeout: 3_000 });
+    await expect(submitBtn).toHaveClass(/loading/);
+    await expect(submitBtn.locator(".btn-text")).toHaveText("Registering…");
+
+    // And it completes into the connected overlay.
+    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5_000 });
   });
 
   test("register error shows error banner", async ({ page }) => {
