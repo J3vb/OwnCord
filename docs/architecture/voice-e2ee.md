@@ -285,10 +285,12 @@ framerate and simulcast options. The backend publishes a `NativeVideoSource`
 the camera route. It drops rather than queues: one copy in flight, nothing
 sent while the socket has unsent bytes, and no faster than the max
 framerate. `native_voice_publish_camera` returns the publication's sid, and
-camera off unpublishes that sid (`native_voice_unpublish_camera`), as the
-web path unpublishes its own track, so remote tiles close the same way; a
-late unpublish of a camera a newer publish already replaced is a no-op. Screen share still refuses
-on Linux (phase 3).
+camera off names that sid (`native_voice_unpublish_camera`), as the web path
+unpublishes its own track, so remote tiles close the same way; a late
+unpublish of a camera a newer publish already replaced is a no-op. The
+backend unpublishes the camera's live publication, which follows the SDK's
+republish (a new sid) after a full reconnect. Screen share still refuses on
+Linux (phase 3).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
 room, whose single key provider and `KEY_INDEX` 0 already cover every sender
