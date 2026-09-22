@@ -298,7 +298,10 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
     ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "12"],
     ({ event }) => {
       if (event.type === "audio")
-        nativeAudio.push({ ...(event as unknown as { identity: string; rms: number }), at: Date.now() });
+        nativeAudio.push({
+          ...(event as unknown as { identity: string; rms: number }),
+          at: Date.now(),
+        });
     },
   );
   await expect

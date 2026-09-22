@@ -62,6 +62,12 @@ const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl:
 const emit = (envelope: NativeVoiceEnvelope) => {
   for (const h of host.handlers) h(envelope);
 };
+const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
+  sid,
+  kind: "audio" as const,
+  source,
+  muted: false,
+});
 
 beforeEach(() => {
   host.calls.length = 0;
@@ -190,12 +196,6 @@ describe("NativeRoom room surface", () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     setLocalDeafened(true);
-    const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
-      sid,
-      kind: "audio" as const,
-      source,
-      muted: false,
-    });
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     emit({
       session: 1,
