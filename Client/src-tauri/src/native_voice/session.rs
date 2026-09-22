@@ -358,9 +358,10 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
-    /// The selected capture device's name (empty: the default). The device
-    /// module keeps an index, which a hot-plug can shift under it.
+    /// The selected capture and playout devices' names (empty: the default).
+    /// The device module keeps indexes, which a hot-plug can shift.
     input_name: String,
+    output_name: String,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -396,6 +397,7 @@ impl NativeSession {
             audio: None,
             mic: None,
             input_name: String::new(),
+            output_name: String::new(),
             forwarder,
         })
     }
@@ -444,7 +446,7 @@ impl NativeSession {
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
         if enabled {
-            self.reselect_input();
+            self.reselect(DeviceKind::Input);
         }
         let Some(publication) = &self.mic else {
             if !enabled {
@@ -473,26 +475,41 @@ impl NativeSession {
         Ok(())
     }
 
-    /// Point a stopped capture stream at the selected device's current index
-    /// before it starts again.
-    fn reselect_input(&self) {
+    /// Point a stopped capture or playout stream at the selected device's
+    /// current index before it starts again.
+    fn reselect(&self, kind: DeviceKind) {
         let Some(audio) = &self.audio else { return };
         let runtime = LkRuntime::instance();
         let f = runtime.pc_factory();
-        if f.recording_is_initialized() {
+        let listed = devices_of(audio);
+        let (running, name, devices, what) = match kind {
+            DeviceKind::Input => (
+                f.recording_is_initialized(),
+                &self.input_name,
+                listed.inputs,
+                "capture",
+            ),
+            DeviceKind::Output => (
+                f.playout_is_initialized(),
+                &self.output_name,
+                listed.outputs,
+                "playout",
+            ),
+        };
+        if running {
             return;
         }
-        let (index, fell_back) = resolve_device(&self.input_name, &devices_of(audio).inputs);
+        let (index, fell_back) = resolve_device(name, &devices);
         if fell_back {
-            log::warn!(
-                "[native_voice] capture device {} not found; using the default",
-                self.input_name
-            );
+            log::warn!("[native_voice] {what} device {name} not found; using the default");
         }
-        if let Some(index) = index {
-            if !f.set_recording_device(index) {
-                log::warn!("[native_voice] selecting capture device {index} failed");
-            }
+        let Some(index) = index else { return };
+        let selected = match kind {
+            DeviceKind::Input => f.set_recording_device(index),
+            DeviceKind::Output => f.set_playout_device(index),
+        };
+        if !selected {
+            log::warn!("[native_voice] selecting {what} device {index} failed");
         }
     }
 
@@ -532,6 +549,9 @@ impl NativeSession {
         let publication = participant
             .get_track_publication(&track_sid)
             .ok_or_else(|| format!("unknown track {sid}"))?;
+        if subscribed {
+            self.reselect(DeviceKind::Output);
+        }
         publication.set_subscribed(subscribed);
         Ok(())
     }
@@ -580,13 +600,15 @@ impl NativeSession {
             ),
         };
         switched?;
-        if kind == DeviceKind::Input {
-            self.input_name = if fell_back {
-                String::new()
-            } else {
-                device_id.to_string()
-            };
-        }
+        let name = match kind {
+            DeviceKind::Input => &mut self.input_name,
+            DeviceKind::Output => &mut self.output_name,
+        };
+        *name = if fell_back {
+            String::new()
+        } else {
+            device_id.to_string()
+        };
         if fell_back {
             return Err(format!(
                 "{what} device {device_id} not found; switched to the default"
@@ -714,6 +736,8 @@ mod tests {
         assert_eq!(resolve_device("Built-in", &listed), (Some(1), false));
         assert_eq!(resolve_device("", &listed), (Some(0), false));
         assert_eq!(resolve_device("unplugged", &listed), (Some(0), true));
+        let shifted = vec![device("USB Mic", 0), device("Built-in", 3)];
+        assert_eq!(resolve_device("Built-in", &shifted), (Some(3), false));
         assert_eq!(resolve_device("unplugged", &[]), (None, true));
         assert_eq!(resolve_device("", &[]), (None, false));
     }
