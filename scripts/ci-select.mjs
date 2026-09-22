@@ -44,6 +44,11 @@
 //     Server/admin/static/index.html           tests/contract/server-admin-static-*.test.ts
 //     protocol/schema.json                     src/lib/protocolTypes.ts is generated from it
 //
+//   Rust reads outside Client/src-tauri/:
+//     Server/safefetch/testdata/classify_vectors.json  external_content.rs's tests
+//     Client/scripts/linux-webrtc-toolchain.sh         rust-tests / tauri-build run it
+//     Client/scripts/check-glibc-floor.sh              rust-tests runs its --selftest
+//
 // The two architecture docs are the trap this table exists for: they are
 // Markdown, so a docs-only rule would skip them, and the Go tests that read
 // them run with -count=1 precisely because Go's test cache cannot see an input
@@ -95,13 +100,21 @@ const CLIENT_READS_OUTSIDE = new Set([
   "Server/admin/static/index.html",
 ]);
 
-/** Paths outside Client/src-tauri/ that a Rust test reads. */
+/** Paths outside Client/src-tauri/ that a Rust test reads or runs. */
 const RUST_READS_OUTSIDE = new Set([
   // The C-09 classifier corpus: Server/safefetch's Go tests and the desktop
   // broker's Rust tests (external_content.rs) both read it at run time. A
   // vector added in a server-only PR must still run the Rust suite, or the
   // corpus looks like a shared gate and only one side is ever checked.
   "Server/safefetch/testdata/classify_vectors.json",
+  // The Linux native-voice build scripts. `Client/` selects client/browser/
+  // integration/native, but NOT rust — so editing the toolchain installer, whose
+  // only consumer is the rust-tests job (`bash ../scripts/linux-webrtc-toolchain.sh`)
+  // and the tauri-build Linux legs, could merge with the Rust suite never
+  // running against it. Same class as the corpus above: a shared input that
+  // only one component actually exercises.
+  "Client/scripts/linux-webrtc-toolchain.sh",
+  "Client/scripts/check-glibc-floor.sh",
 ]);
 
 /**
