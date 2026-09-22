@@ -91,7 +91,6 @@ export class NativeRoom {
     setMicrophoneEnabled: async (enabled: boolean): Promise<void> => {
       if (this.sessionId === null) throw new Error("native room is not connected");
       await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
-      this.micPublished = enabled;
     },
     setCameraEnabled: (): Promise<void> => Promise.reject(unsupported("camera")),
     publishTrack: (): Promise<void> => Promise.reject(unsupported("video publish")),
@@ -101,7 +100,6 @@ export class NativeRoom {
   private sessionId: number | null = null;
   /** Whether this room is counted in `nativeCounters.openRooms`. */
   private counted = false;
-  private micPublished = false;
   private readonly listeners = new Map<string, Set<Listener>>();
   /** Releases this connect attempt's event subscription; null when none. */
   private unsubscribe: (() => void) | null = null;
@@ -181,7 +179,6 @@ export class NativeRoom {
     this.pending = null;
     if (id === null) return;
     this.sessionId = null;
-    this.micPublished = false;
     if (this.counted) nativeCounters.openRooms--;
     this.counted = false;
     this.state = "disconnected";
@@ -195,11 +192,6 @@ export class NativeRoom {
     desktop.nativeVoice
       .setSubscribed(this.sessionId, identity, sid, subscribed)
       .catch((err) => log.warn("native setSubscribed failed", { identity, sid, subscribed, err }));
-  }
-
-  /** For the facade's debug surface. */
-  get isMicrophonePublished(): boolean {
-    return this.micPublished;
   }
 
   private releaseSubscription(): void {

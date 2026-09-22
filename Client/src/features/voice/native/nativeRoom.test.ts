@@ -162,9 +162,8 @@ describe("NativeRoom room surface", () => {
     await room.connect("u", "t");
     await room.localParticipant.setMicrophoneEnabled(true);
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true]]);
-    expect(room.isMicrophonePublished).toBe(true);
     await room.localParticipant.setMicrophoneEnabled(false);
-    expect(room.isMicrophonePublished).toBe(false);
+    expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, false]]);
   });
 
   it("deafen unsubscribes remote audio publications through the session", async () => {
