@@ -521,8 +521,7 @@ tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
 version waited for the DM view outside the retry, so a Message click that
 silently did nothing was not retried.
 
-**DM open fully inside the retry** (`0c343204` plus the change committed on top
-of it by this review round). Each attempt returns at once if the DM header is
+**DM open fully inside the retry** (`c9a2204f`). Each attempt returns at once if the DM header is
 already visible. So a retry after Message has switched the sidebar to DMs no
 longer waits for Bob's member row, which that switch removes. Otherwise the
 attempt opens the popup, clicks Message and waits up to the config's default
