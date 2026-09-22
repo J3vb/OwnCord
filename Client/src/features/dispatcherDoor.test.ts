@@ -72,8 +72,10 @@ describe("the dispatcher door", () => {
       (await eslint.calculateConfigForFile(file))?.rules?.["local/no-store-write-in-ws-on"];
 
     expect(await severity(path.join(srcDir, "lib/dispatcher.ts"))).toBeUndefined();
-    for (const file of sourceFiles.filter((f) => !f.endsWith(`lib${path.sep}dispatcher.ts`))) {
-      expect(await severity(file), path.relative(srcDir, file)).toEqual([2]);
-    }
+    const others = sourceFiles.filter((f) => !f.endsWith(`lib${path.sep}dispatcher.ts`));
+    const severities = await Promise.all(others.map(severity));
+    others.forEach((file, i) => {
+      expect(severities[i], path.relative(srcDir, file)).toEqual([2]);
+    });
   });
 });
