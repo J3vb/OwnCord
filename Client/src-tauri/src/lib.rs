@@ -169,6 +169,10 @@ pub fn run() {
             native_voice::native_voice_set_subscribed,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_list_devices,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_device,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

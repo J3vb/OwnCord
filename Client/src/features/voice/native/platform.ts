@@ -3,12 +3,15 @@
 // (`src-tauri/src/native_voice/`) behind this one check. A leaf module: it is
 // imported statically from the voice chunk, so it must stay dependency-free.
 
-/** True on a Linux desktop — the only place the native LiveKit backend
- *  exists. The client is the Tauri app on every platform today, so the OS
- *  is the whole test; Android also reports "Linux" but has no desktop
+/** True on a Linux desktop whose webview has no WebRTC — the defect the
+ *  native LiveKit backend exists for. The capability test is what keeps a
+ *  Linux Chromium (the browser e2e suites, or any future browser build) on
+ *  the web path; the OS check keeps a broken webview elsewhere from being
+ *  mistaken for Linux. Android also reports "Linux" but has no desktop
  *  webview, hence the exclusion. */
 export function isLinuxDesktop(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
-  return /\bLinux\b/.test(ua) && !/Android/.test(ua);
+  if (!/\bLinux\b/.test(ua) || /Android/.test(ua)) return false;
+  return typeof RTCPeerConnection === "undefined";
 }

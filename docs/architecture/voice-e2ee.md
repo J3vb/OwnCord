@@ -186,10 +186,42 @@ RMS 0 and counts decryption errors, and the native side hears silence.
   no sound server; `PlatformAudio::new()` failing is handled (listen-only, the
   existing toast) but the happy path on PulseAudio/PipeWire is untested here.
 
-**Not in phase 1** (tracked as 1b and later): input/output device selection
-(`switchActiveDevice` is a no-op on the native room), input volume and the
-VAD gate, per-user volume (the ADM mixes with no per-track gain), camera and
-screen share (`setCameraEnabled`/`publishTrack` reject on Linux).
+### Phase 1b: devices, detection, and what stays out
+
+**Platform detection is by capability.** `isLinuxDesktop()` is true only for a
+Linux user agent whose webview has no `RTCPeerConnection` — the defect the
+backend exists for. A Linux Chromium (the browser e2e suites, or any browser
+build) keeps the web path by capability, so no test config needs to spoof a
+user agent.
+
+**Device selection.** `native_voice_list_devices` enumerates the device
+module's capture and playout devices (through the live session's module, or a
+transient one outside a call) and `native_voice_set_device(session, kind, id)`
+switches in place; an empty id is the module's default (its first device).
+`NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
+saved-device switches at join and the settings tab's selectors work unchanged;
+`features/voice/native/devices.ts` gives the settings tab and the device
+manager the native list on Linux (the ids are the module's GUIDs, not the
+webview's) and is null everywhere else, leaving the web enumeration untouched.
+Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
+re-list through the native backend.
+
+**Connect no longer holds the backend lock**: a leave, a key rotation or a
+device switch during a slow join proceeds, and a connect that a newer one
+superseded closes its own room and reports it.
+
+**Still out.** Input volume and the sensitivity (VAD) gate: the device-module
+track is a plain libwebrtc `LocalAudioSource`, which never hands capture frames
+to a sink, so neither a gain stage nor a level gate can be applied on the
+native capture path without either the app's own capture pipeline (capture →
+gain/VAD → APM with a reverse stream → `NativeAudioSource`, the report's 1b
+sketch) or a patched `webrtc-sys`. Per-user volume (no per-track gain in the
+module), camera and screen share also remain later phases. rust-sdks #1408
+stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
+(PR livekit/rust-sdks#1408, open, CLA unsigned) that detaches the frame
+transformer in `FrameCryptor`'s destructor; carrying it means a vendored
+`webrtc-sys` under `[patch.crates-io]`, which is the follow-up if the soak
+needs it before upstream lands.
 
 **Phase 0 verification.** The Linux client was built on GitHub-hosted
 `ubuntu-22.04` and `ubuntu-22.04-arm` runners, before (`dev` at `dba68fe8`)

@@ -9,6 +9,7 @@ import { voiceStore } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
+import { nativeAudioDevices } from "../features/voice/native/devices";
 
 const log = createLogger("deviceManager");
 
@@ -126,7 +127,8 @@ export class DeviceManager {
     log.info("Device change detected");
 
     try {
-      const devices = await Room.getLocalDevices("audioinput");
+      const devices =
+        (await nativeAudioDevices("audioinput")) ?? (await Room.getLocalDevices("audioinput"));
       if (this.room !== room) return;
       const savedInput = loadPref<string>("audioInputDevice", "");
 
@@ -154,7 +156,8 @@ export class DeviceManager {
       }
 
       // Check output device
-      const outputDevices = await Room.getLocalDevices("audiooutput");
+      const outputDevices =
+        (await nativeAudioDevices("audiooutput")) ?? (await Room.getLocalDevices("audiooutput"));
       if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {

@@ -149,6 +149,13 @@ mod linux {
             );
         }
 
+        // Device enumeration must be callable on a headless box: an error
+        // (no sound server) is reported, never a crash.
+        let devices = owncord_client_lib::native_voice::session::list_devices_transient();
+        emit(
+            serde_json::json!({ "event": { "type": "devices", "ok": devices.is_ok(), "detail": match &devices { Ok(d) => format!("{} in / {} out", d.inputs.len(), d.outputs.len()), Err(e) => e.clone() } } }),
+        );
+
         let mut session =
             NativeSession::connect(&url, &token, shared_key_material(&key), sink()).await?;
         let mut room_events = session.subscribe_room_events();

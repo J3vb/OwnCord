@@ -384,10 +384,13 @@ describeNativeVoiceSuite(async () => {
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
     debugInfo: async () => undefined,
+    listDevices: async () => undefined,
+    setDevice: async () => undefined,
     onEvent: () => () => undefined,
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
     connectsAs: () => undefined,
+    hasDevices: () => undefined,
     commands: () => [],
     emits: async () => undefined,
   };

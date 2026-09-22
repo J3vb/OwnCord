@@ -43,6 +43,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setDevice: (...args: unknown[]) => {
+        host.calls.push(["setDevice", args]);
+        return Promise.resolve();
+      },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
         return () => {
@@ -161,6 +165,20 @@ describe("NativeRoom connect/disconnect", () => {
   });
 });
 
+describe("NativeRoom device switching", () => {
+  it("forwards audio device switches to the native session, mapping default to empty", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await expect(room.switchActiveDevice("audioinput", "guid-mic")).resolves.toBe(true);
+    await expect(room.switchActiveDevice("audiooutput", "default")).resolves.toBe(true);
+    await expect(room.switchActiveDevice("videoinput", "cam")).resolves.toBe(false);
+    expect(host.calls.filter(([n]) => n === "setDevice")).toEqual([
+      ["setDevice", [1, "audioinput", "guid-mic"]],
+      ["setDevice", [1, "audiooutput", ""]],
+    ]);
+  });
+});
+
 describe("NativeRoom room surface", () => {
   it("routes the microphone toggle to the native session", async () => {
     const room = createNativeRoom(audio);
@@ -254,7 +272,7 @@ describe("NativeRoom room surface", () => {
     const room = createNativeRoom(audio);
     await expect(room.setE2EEEnabled(true)).resolves.toBeUndefined();
     await expect(room.startAudio()).resolves.toBeUndefined();
-    await expect(room.switchActiveDevice("audioinput", "x")).resolves.toBe(true);
+    await expect(room.switchActiveDevice("audioinput", "x")).rejects.toThrow(/not connected/);
     expect(room.canPlaybackAudio).toBe(true);
     expect(room.engine.pcManager).toBeUndefined();
     expect(room.localParticipant.getTrackPublication()).toBeUndefined();

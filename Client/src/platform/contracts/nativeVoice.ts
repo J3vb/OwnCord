@@ -57,6 +57,19 @@ export interface NativeVoiceEnvelope {
   event: NativeVoiceEvent;
 }
 
+export interface NativeVoiceDevice {
+  /** The host device module's stable identifier (a GUID on desktop). */
+  id: string;
+  name: string;
+}
+
+/** Capture and playout devices in the host's order; the first entry of each
+ *  list is what the host uses by default. */
+export interface NativeVoiceDevices {
+  inputs: NativeVoiceDevice[];
+  outputs: NativeVoiceDevice[];
+}
+
 export interface NativeVoiceConnected {
   session: number;
   /** Our LiveKit identity in the room (`user-<id>…`). */
@@ -78,6 +91,11 @@ export interface NativeVoice {
   setMicrophone(session: number, enabled: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   debugInfo(): Promise<NativeVoiceResources>;
+  /** Enumerate audio devices, in or out of a call. */
+  listDevices(): Promise<NativeVoiceDevices>;
+  /** Switch the session's capture (`audioinput`) or playout (`audiooutput`)
+   *  device to a `listDevices` id; an empty id selects the host default. */
+  setDevice(session: number, kind: "audioinput" | "audiooutput", deviceId: string): Promise<void>;
   /** Room events for every session. Returns a synchronous unsubscribe that
    *  is safe to call before the host subscription has finished registering. */
   onEvent(handler: (envelope: NativeVoiceEnvelope) => void): () => void;

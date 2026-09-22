@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   outputDir: "test-results/fullstack",
@@ -18,10 +18,6 @@ export default defineConfig({
   ],
   use: {
     baseURL: "http://localhost:4173",
-    // This suite drives the browser LiveKit path (Windows' WebView2). Chromium
-    // on a Linux runner would otherwise report Linux and take the native
-    // backend (isLinuxDesktop), which only exists in the Tauri app.
-    userAgent: devices["Desktop Chrome"].userAgent,
     permissions: ["microphone", "camera"],
     launchOptions: {
       args: [

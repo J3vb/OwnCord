@@ -3,11 +3,17 @@
 // backend's command surface and its one event subscription. There is no
 // legacy binding — the capability is new with the Linux voice work.
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { NativeVoice, NativeVoiceEnvelope } from "../../../src/platform/contracts/nativeVoice";
+import type {
+  NativeVoice,
+  NativeVoiceDevices,
+  NativeVoiceEnvelope,
+} from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
   /** The host answers the next connect with this session and identity. */
   connectsAs(session: number, identity: string): void;
+  /** The host reports these devices on the next enumeration. */
+  hasDevices(devices: NativeVoiceDevices): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
@@ -63,6 +69,22 @@ export function describeNativeVoiceSuite(
         ],
         ["native_voice_disconnect", { session: 7 }],
         ["native_voice_clear_key", undefined],
+      ]);
+    });
+
+    check("lists the host's devices and switches by their ids", async () => {
+      const devices = {
+        inputs: [{ id: "guid-mic", name: "USB Mic" }],
+        outputs: [{ id: "guid-spk", name: "Speakers" }],
+      };
+      ctx.native.hasDevices(devices);
+      await expect(ctx.subject.listDevices()).resolves.toEqual(devices);
+      await ctx.subject.setDevice(7, "audioinput", "guid-mic");
+      await ctx.subject.setDevice(7, "audiooutput", "");
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_list_devices", undefined],
+        ["native_voice_set_device", { session: 7, kind: "audioinput", deviceId: "guid-mic" }],
+        ["native_voice_set_device", { session: 7, kind: "audiooutput", deviceId: "" }],
       ]);
     });
 

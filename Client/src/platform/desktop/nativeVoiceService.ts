@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   NativeVoice,
   NativeVoiceConnected,
+  NativeVoiceDevices,
   NativeVoiceEnvelope,
   NativeVoiceResources,
 } from "../contracts/nativeVoice";
@@ -24,6 +25,9 @@ export const nativeVoice: NativeVoice = {
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
+  listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
+  setDevice: (session, kind, deviceId) =>
+    invoke<void>("native_voice_set_device", { session, kind, deviceId }),
   onEvent(handler) {
     // Same late-resolve shape as trayStatus.ts: the host resolves the
     // unlisten asynchronously, and an unsubscribe that lands first must

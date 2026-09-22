@@ -243,6 +243,64 @@ pub struct Resources {
     pub threads: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// The platform's capture and playout devices, in the device module's order
+/// (the first entry is what it uses by default).
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Devices {
+    pub inputs: Vec<DeviceInfo>,
+    pub outputs: Vec<DeviceInfo>,
+}
+
+fn devices_of(audio: &PlatformAudio) -> Devices {
+    Devices {
+        inputs: audio
+            .recording_devices()
+            .map(|d| DeviceInfo {
+                id: d.id.as_str().to_string(),
+                name: d.name,
+            })
+            .collect(),
+        outputs: audio
+            .playout_devices()
+            .map(|d| DeviceInfo {
+                id: d.id.as_str().to_string(),
+                name: d.name,
+            })
+            .collect(),
+    }
+}
+
+/// Enumerate with a device module that lives only for the call (no session).
+pub fn list_devices_transient() -> Result<Devices, String> {
+    let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
+    Ok(devices_of(&audio))
+}
+
+/// The device kinds the web path's `switchActiveDevice` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Input,
+    Output,
+}
+
+impl DeviceKind {
+    pub fn parse(kind: &str) -> Result<Self, String> {
+        match kind {
+            "audioinput" => Ok(Self::Input),
+            "audiooutput" => Ok(Self::Output),
+            other => Err(format!("unsupported device kind {other}")),
+        }
+    }
+}
+
 pub fn process_threads() -> usize {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -407,6 +465,52 @@ impl NativeSession {
         Ok(())
     }
 
+    pub fn devices(&self) -> Result<Devices, String> {
+        self.audio
+            .as_ref()
+            .map(devices_of)
+            .ok_or_else(|| "no audio device module — platform audio unavailable".to_string())
+    }
+
+    /// Switch the capture or playout device in place (the module restarts
+    /// the stream if it is running). An empty id selects the module's
+    /// default, its first enumerated device.
+    pub fn set_device(&self, kind: &str, device_id: &str) -> Result<(), String> {
+        let kind = DeviceKind::parse(kind)?;
+        let audio = self
+            .audio
+            .as_ref()
+            .ok_or("no audio device module — platform audio unavailable")?;
+        match kind {
+            DeviceKind::Input => {
+                let id = if device_id.is_empty() {
+                    audio
+                        .recording_devices()
+                        .next()
+                        .ok_or("no capture device")?
+                        .id
+                } else {
+                    RecordingDeviceId::from_unchecked_guid(device_id)
+                };
+                audio
+                    .switch_recording_device(&id)
+                    .map_err(|e| e.to_string())
+            }
+            DeviceKind::Output => {
+                let id = if device_id.is_empty() {
+                    audio
+                        .playout_devices()
+                        .next()
+                        .ok_or("no playout device")?
+                        .id
+                } else {
+                    PlayoutDeviceId::from_unchecked_guid(device_id)
+                };
+                audio.switch_playout_device(&id).map_err(|e| e.to_string())
+            }
+        }
+    }
+
     pub fn resources(&self) -> Resources {
         Resources {
             rooms: 1,
@@ -485,6 +589,29 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+    }
+
+    #[test]
+    fn device_kinds_are_the_web_names() {
+        assert_eq!(DeviceKind::parse("audioinput"), Ok(DeviceKind::Input));
+        assert_eq!(DeviceKind::parse("audiooutput"), Ok(DeviceKind::Output));
+        assert!(DeviceKind::parse("videoinput").is_err());
+    }
+
+    #[test]
+    fn devices_serialize_camel_case() {
+        let json = serde_json::to_string(&Devices {
+            inputs: vec![DeviceInfo {
+                id: "guid-1".into(),
+                name: "Mic".into(),
+            }],
+            outputs: vec![],
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"inputs":[{"id":"guid-1","name":"Mic"}],"outputs":[]}"#
+        );
     }
 
     #[test]

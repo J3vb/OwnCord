@@ -16,6 +16,9 @@ export const nativeVoice: NativeVoice = {
   setSubscribed: async (session, identity, sid, subscribed) =>
     (await service()).setSubscribed(session, identity, sid, subscribed),
   debugInfo: async () => (await service()).debugInfo(),
+  listDevices: async () => (await service()).listDevices(),
+  setDevice: async (session, kind, deviceId) =>
+    (await service()).setDevice(session, kind, deviceId),
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.

@@ -139,11 +139,18 @@ export class NativeRoom {
   startAudio(): Promise<void> {
     return Promise.resolve();
   }
-  // ponytail: device selection is phase 1b — saved-device switches at join
-  // resolve as no-ops so the join proceeds on the system default.
-  switchActiveDevice(kind: string, deviceId: string): Promise<boolean> {
-    log.debug("switchActiveDevice ignored on the native backend (phase 1b)", { kind, deviceId });
-    return Promise.resolve(true);
+  /** Same contract as livekit-client's: `deviceId` is one of the ids the
+   *  device list reported (`listAudioDevices`), "" or "default" is the host
+   *  default. Camera switching has no native counterpart yet. */
+  async switchActiveDevice(kind: string, deviceId: string): Promise<boolean> {
+    if (kind !== "audioinput" && kind !== "audiooutput") return false;
+    if (this.sessionId === null) throw new Error("native room is not connected");
+    await desktop.nativeVoice.setDevice(
+      this.sessionId,
+      kind,
+      deviceId === "default" ? "" : deviceId,
+    );
+    return true;
   }
 
   async connect(url: string, token: string): Promise<void> {

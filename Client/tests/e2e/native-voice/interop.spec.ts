@@ -218,6 +218,7 @@ test("native and browser peers decode each other's audio with the same key", asy
   const nativeAudio: Array<{ identity: string; rms: number; frames: number }> = [];
   const encryption: Array<{ identity: string; encrypted: boolean }> = [];
   const threads: Array<{ phase: string; count: number }> = [];
+  const devices: Array<{ ok: boolean; detail: string }> = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -240,6 +241,8 @@ test("native and browser peers decode each other's audio with the same key", asy
         encryption.push(event as unknown as { identity: string; encrypted: boolean });
       if (event.type === "threads")
         threads.push(event as unknown as { phase: string; count: number });
+      if (event.type === "devices")
+        devices.push(event as unknown as { ok: boolean; detail: string });
     },
   );
 
@@ -268,6 +271,10 @@ test("native and browser peers decode each other's audio with the same key", asy
     identity: "user-1",
     encrypted: true,
   });
+  // Device enumeration ran without crashing; a headless runner has no sound
+  //    server, so either outcome is recorded rather than asserted.
+  expect(devices).toHaveLength(1);
+  console.log(`native device enumeration: ok=${devices[0]!.ok} ${devices[0]!.detail}`);
   // 4. rust-sdks #1408: five join/leave cycles before the real join. Measured
   //    2026-09-22 with livekit 0.9.1: +2 threads per cycle with one remote
   //    participant (one leaked FrameCryptor thread per cryptor: ours and the

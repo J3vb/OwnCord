@@ -13,6 +13,7 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
 } from "@lib/livekitSession";
+import { nativeAudioDevices } from "../../features/voice/native/devices";
 
 const log = createLogger("VoiceAudioTab");
 
@@ -364,7 +365,17 @@ function buildVoiceAudioTabInner(
       [videoSelect, "videoinput", "videoInputDevice", "Camera"],
     ];
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
+      // On Linux the audio lists come from the native backend (the ids the
+      // session can actually select); cameras are the webview's everywhere.
+      const [nativeInputs, nativeOutputs, all] = await Promise.all([
+        nativeAudioDevices("audioinput"),
+        nativeAudioDevices("audiooutput"),
+        navigator.mediaDevices.enumerateDevices(),
+      ]);
+      const devices =
+        nativeInputs === null || nativeOutputs === null
+          ? all
+          : [...nativeInputs, ...nativeOutputs, ...all.filter((d) => d.kind === "videoinput")];
       if (signal.aborted) return;
 
       for (const [select, kind, prefKey, label] of selects) {
