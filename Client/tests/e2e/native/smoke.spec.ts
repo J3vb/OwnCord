@@ -11,6 +11,7 @@
  */
 
 import { test, expect } from "../native-fixture";
+import { SERVER_URL } from "./helpers";
 
 test.describe("Native App Smoke Tests", () => {
   test("app window loads with correct title", async ({ nativePage }) => {
@@ -78,14 +79,19 @@ test.describe("Native App Smoke Tests", () => {
   });
 
   test("window dimensions match tauri.conf.json defaults", async ({ nativePage }) => {
-    // tauri.conf.json specifies 1280x720 default window size
-    const viewport = nativePage.viewportSize();
-    // WebView2 viewport may not be exactly 1280x720 due to window chrome,
-    // but it should be close. Check it's reasonable.
-    if (viewport) {
-      expect(viewport.width).toBeGreaterThan(800);
-      expect(viewport.height).toBeGreaterThan(400);
-    }
+    // tauri.conf.json pins a 1280x720 inner (client-area) size. The webview's
+    // innerWidth/innerHeight is exactly that client area in CSS pixels, so this
+    // compares the rendered app to its configured size instead of a ">800x400"
+    // floor any window would pass. A 5% band tolerates Windows DPI rounding
+    // while still failing on a window configured to some other size.
+    const configured = { width: 1280, height: 720 };
+    const inner = await nativePage.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+
+    expect(Math.abs(inner.width - configured.width) / configured.width).toBeLessThan(0.05);
+    expect(Math.abs(inner.height - configured.height) / configured.height).toBeLessThan(0.05);
   });
 });
 
@@ -99,64 +105,48 @@ test.describe("Native App Server Connection", () => {
     const hostInput = nativePage.locator("#host");
     await expect(hostInput).toBeVisible({ timeout: 15_000 });
 
-    // The connect page auto-pings saved servers on load.
-    // If a saved server profile exists (e.g. "localhost:8443"), the sidebar
-    // shows a .server-item with a .srv-latency badge showing the ping time.
-    // This proves the real Tauri HTTP plugin made a network request.
-    const serverItem = nativePage.locator(".server-item").first();
-    const hasServer = await serverItem.isVisible().catch(() => false);
+    // The connect page health-checks its saved profiles through the real Rust
+    // HTTP proxy. Reach that path deterministically: add the running server as
+    // a profile via the real modal, then assert the row's health dot leaves
+    // "unknown" and its latency badge shows a measured round-trip. That proves
+    // the real Tauri HTTP plugin made a request — filling the host input and
+    // re-reading it (the old assertion) proved only that the DOM kept a value.
+    const host = SERVER_URL;
+    await nativePage.locator(".btn-add-server").click();
+    const modal = nativePage.locator(".modal-overlay.visible .modal");
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await modal.locator(".modal-body .form-input").nth(0).fill("Health Check");
+    await modal.locator(".modal-body .form-input").nth(1).fill(host);
+    await modal.locator(".modal-footer .btn-primary").click();
 
-    if (hasServer) {
-      // A saved server exists — wait for latency to populate (proves real HTTP)
-      const latencyBadge = serverItem.locator(".srv-latency");
-      await expect(latencyBadge).toHaveText(/\d+ms/, { timeout: 10_000 });
-    } else {
-      // No saved server — fill in host and verify server-side response.
-      // Wait for host input to be editable before filling
-      await expect(hostInput).toBeEditable({ timeout: 5_000 });
-      await hostInput.fill("localhost:8443");
-      await hostInput.press("Tab");
+    const row = nativePage.locator(`.server-item[data-host='${host}']`);
+    await expect(row).toBeVisible({ timeout: 5_000 });
 
-      // Verify the form accepted the value (no crash = real HTTP plugin loaded)
-      await expect(hostInput).toHaveValue("localhost:8443", { timeout: 5_000 });
-    }
-  });
+    // The health probe is the first TLS contact, so the Rust proxy refuses it
+    // until the self-signed certificate is explicitly trusted (the real user
+    // ceremony). Trusting re-runs the health check.
+    const dialog = nativePage.getByRole("dialog", { name: "New Server Certificate" });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await dialog.getByRole("button", { name: "Trust This Certificate", exact: true }).click();
+    await expect(dialog).toBeHidden();
 
-  test("login attempt reaches real server", async ({ nativePage }) => {
-    // This test verifies the real Tauri HTTP plugin makes actual API calls.
-    // It does NOT require valid credentials — an "invalid credentials" error
-    // from the server proves the round-trip works.
-    // Skip if OWNCORD_SKIP_SERVER_TESTS is set.
-    test.skip(!!process.env.OWNCORD_SKIP_SERVER_TESTS, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
+    // The pin lands asynchronously in Rust; confirm it before asserting on a
+    // probe that would otherwise still be refused.
+    await expect
+      .poll(() =>
+        nativePage.evaluate(
+          (h) => (window as any).__TAURI_INTERNALS__.invoke("get_cert_fingerprint", { host: h }),
+          host,
+        ),
+      )
+      .toMatch(/^[0-9A-Fa-f:]+$/);
 
-    // Wait for the connect form to be ready
-    await expect(nativePage.locator("#host")).toBeVisible({ timeout: 15_000 });
-
-    // Fill login form — use env vars for real creds, or dummy creds to prove API round-trip
-    const serverUrl = process.env.OWNCORD_SERVER_URL ?? "localhost:8443";
-    const username = process.env.OWNCORD_TEST_USER ?? "e2e-native-test";
-    const password = process.env.OWNCORD_TEST_PASS ?? "e2e-native-test";
-
-    await nativePage.locator("#host").fill(serverUrl);
-    await nativePage.locator("#username").fill(username);
-    await nativePage.locator("#password").fill(password);
-    await nativePage.locator("button.btn-primary[type='submit']").click();
-
-    // Wait for either: successful login OR server error response.
-    // Both prove the real HTTP plugin made a round-trip to the server.
-    const appLayout = nativePage.locator("[data-testid='app-layout']");
-    const errorBanner = nativePage.locator(
-      ".error-banner, .error-message, .toast-error, [role='alert']",
-    );
-
-    // Use Promise.race — whichever appears first
-    const result = await Promise.race([
-      appLayout.waitFor({ state: "visible", timeout: 20_000 }).then(() => "login-success" as const),
-      errorBanner.waitFor({ state: "visible", timeout: 20_000 }).then(() => "login-error" as const),
-    ]).catch(() => "timeout" as const);
-
-    // Either outcome proves the real Tauri HTTP plugin works
-    expect(["login-success", "login-error"]).toContain(result);
+    // A real round trip: the dot must become online/slow (not `unknown`), and
+    // the latency badge must show a measurement.
+    await expect(row.locator(".srv-status-dot.online, .srv-status-dot.slow")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(row.locator(".srv-latency")).toHaveText(/\d+ms/, { timeout: 15_000 });
   });
 });
 

@@ -68,24 +68,30 @@ test.describe("Theme Persistence (Native)", () => {
   });
 
   test("accent color picker applies CSS variable", async ({ nativePage }) => {
-    // Look for accent color input
-    const colorInput = nativePage.locator(
-      "input[type='color'], .accent-color-input, .accent-picker",
-    );
+    // AppearanceTab builds the picker from .accent-swatch rows plus a hex
+    // input — there is no `input[type='color']`. Asserting the swatches exist
+    // (rather than guarding on a selector that never matches) is what makes
+    // this fail when the picker regresses.
+    const swatches = nativePage.locator(".accent-swatch");
+    await expect(swatches.first()).toBeVisible();
+    expect(await swatches.count()).toBeGreaterThanOrEqual(2);
 
-    if (await colorInput.isVisible().catch(() => false)) {
-      await colorInput.fill("#ff0066");
+    // Pick a swatch that is not already active so applying it is observable.
+    const target = nativePage.locator(".accent-swatch:not(.active)").first();
+    const color = await target.getAttribute("title");
+    expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
 
-      // Verify a CSS variable is set on body
-      await expect(async () => {
-        const accentValue = await nativePage.evaluate(() => {
-          const accent = document.body.style.getPropertyValue("--accent").trim();
-          const primary = document.body.style.getPropertyValue("--accent-primary").trim();
-          return accent || primary;
-        });
-        expect(accentValue.length).toBeGreaterThan(0);
-      }).toPass({ timeout: 3_000 });
-    }
+    await target.click();
+
+    // applyAccent sets the inline --accent on body (the value the theme class
+    // would otherwise win against). Assert the rendered variable equals the
+    // swatch we picked — not merely that some accent variable is non-empty.
+    await expect
+      .poll(() =>
+        nativePage.evaluate(() => document.body.style.getPropertyValue("--accent").trim()),
+      )
+      .toBe(color!);
+    await expect(target).toHaveClass(/active/);
   });
 
   test("theme persists after navigating away and back", async ({ nativePage }) => {

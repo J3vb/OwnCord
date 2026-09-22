@@ -1,8 +1,11 @@
 import { defineConfig } from "@playwright/test";
 
 /** Built Windows WebView2 app, isolated credentials/profile and local Go server.
- * `native-core` is the required CI journey. Legacy exploratory suites remain
- * available through the other projects. Binaries are built in CI only.
+ * Four projects share one built binary: `native-core` is the required CI
+ * journey and `native-updater` the installer journey, while `native-no-auth`
+ * (connect page, auth) and `native-authenticated` (layout, channel nav, chat,
+ * DMs, settings, appearance, overlays) run in the same CI job. Binaries are
+ * built in CI only.
  */
 export default defineConfig({
   outputDir: "test-results/native",
@@ -16,7 +19,10 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: !!process.env.CI,
-  globalTimeout: 25 * 60 * 1000,
+  // Applies per invocation. native-core/updater are small; the combined
+  // native-no-auth + native-authenticated run is the large one, so this is
+  // sized for that and the CI step carries the outer backstop.
+  globalTimeout: 35 * 60 * 1000,
   reporter: process.env.CI
     ? [
         ["list"],

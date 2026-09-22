@@ -1357,7 +1357,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
     defaults:
       run:
         working-directory: Client/
@@ -1392,6 +1392,19 @@ jobs:
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
         run: npx playwright test --config playwright.config.native.ts --project native-core
+      # The exploratory suites were defined in the config but never selected, so
+      # nine spec files were dead coverage. They reuse the binary built above
+      # (native-no-auth drives the real connect page and auth flows;
+      # native-authenticated logs in once and exercises layout, channel nav,
+      # chat, DMs, settings, appearance and overlays). The persistent fixture
+      # needs the LiveKit binary the same way native-core does.
+      - name: Test native auth, layout and overlay suites
+        timeout-minutes: 25
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
+        run: >-
+          npx playwright test --config playwright.config.native.ts
+          --project native-no-auth --project native-authenticated
       - name: Preserve native core diagnostics before building installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
