@@ -67,7 +67,7 @@ export class NativeRemoteParticipant {
     for (const [sid, pub] of this.trackPublications) if (pub.kind === "audio") audio.set(sid, pub);
     return audio;
   }
-  // ponytail: per-user volume is phase 1b (the ADM mixes all remote tracks
+  // ponytail: per-user volume is a later phase (the ADM mixes all remote tracks
   // with no per-track gain in the SDK); the store keeps the preference.
   getVolume(): number {
     return 1;

@@ -189,6 +189,7 @@ export class DeviceManager {
         const deviceId = loadPref<string>(key, "");
         if (deviceId === "" || !listed.some((d) => d.deviceId === deviceId)) continue;
         try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
           await room.switchActiveDevice(kind, deviceId);
         } catch (err) {
           log.warn("Failed to re-apply saved device after change", { kind, err });
