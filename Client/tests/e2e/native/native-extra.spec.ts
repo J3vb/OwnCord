@@ -343,9 +343,8 @@ test("a message link opens in the system browser, not the webview", async ({
         timeout: 30_000,
       })
       .not.toHaveLength(0);
-    // Unhandled, WebView2 loads a target=_blank link in its own popup, which
-    // fetches the page too. Only the shell hand-off starts a separate browser
-    // with the URL as its argument.
+    // The fetch alone does not say which browser made it; the shell hand-off
+    // starts a separate browser process with the URL as its argument.
     const browsers = (await launched("$_.Name")).split(/\s+/).filter(Boolean);
     expect(browsers.filter((name) => name.toLowerCase() !== "msedgewebview2.exe")).not.toEqual([]);
     expect(page.url()).toBe(before);
