@@ -154,15 +154,19 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     await progress("disconnecting successor CDP");
     await replacement?.close();
     // The installer owns the replacement process. Select ONLY the executable
-    // in this test's unique installation directory, then terminate its tree.
+    // in this test's unique installation directory, then terminate its tree
+    // and wait for it to exit. pwsh, not Windows PowerShell: every Actions
+    // step already runs pwsh, while this job's only powershell.exe start is
+    // cold and took up to 30s on loaded runners. Get-Process filters by name
+    // before reading paths; a Win32_Process scan reads every process's path.
     await progress("terminating installed successor");
     await exec(
-      "powershell",
+      "pwsh",
       [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $path } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
+        "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process -Name owncord-client -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $path } | ForEach-Object { try { $_.Kill($true) } catch [InvalidOperationException] {}; $_.WaitForExit() }",
       ],
       { env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe }, timeout: 30_000 },
     );
