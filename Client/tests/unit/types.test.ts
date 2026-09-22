@@ -9,7 +9,7 @@ import type {
   Permission,
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
-import { parseRegistrationMode } from "../../src/lib/types";
+import { parseRegistrationMode, retentionNotice } from "../../src/lib/types";
 
 // Sample docs/protocol.md JSON payloads for parsing validation
 const sampleAuthOk = {
@@ -275,5 +275,34 @@ describe("parseRegistrationMode", () => {
     ["a non-string", 1],
   ])("treats %s as unavailable (null), never as open", (_label, value) => {
     expect(parseRegistrationMode(value)).toBeNull();
+  });
+});
+
+describe("retentionNotice (B7-15c)", () => {
+  const info = (retention: unknown) =>
+    ({ name: "s", protocol_epoch: 1, browser_client_enabled: false, retention }) as never;
+
+  it("states a day window and that attachments go with their messages", () => {
+    expect(retentionNotice(info({ messages_days: 30 }))).toBe(
+      "By default this server deletes messages after 30 days; attachments are removed with their messages.",
+    );
+    expect(retentionNotice(info({ messages_days: 1 }))).toContain("after 1 day;");
+  });
+
+  it("states that 0 keeps messages until they are deleted", () => {
+    expect(retentionNotice(info({ messages_days: 0 }))).toContain(
+      "keeps messages until they are deleted",
+    );
+  });
+
+  it.each([
+    ["no snapshot", undefined],
+    ["no retention field", info(undefined)],
+    ["a negative window", info({ messages_days: -1 })],
+    ["a fractional window", info({ messages_days: 1.5 })],
+    ["a string window", info({ messages_days: "30" })],
+    ["a non-object retention", info(30)],
+  ])("says nothing for %s rather than guessing", (_label, value) => {
+    expect(retentionNotice(value)).toBeNull();
   });
 });

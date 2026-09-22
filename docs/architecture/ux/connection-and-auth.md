@@ -164,6 +164,10 @@ per-host `server-info` snapshot the 15 s preflight keeps (`serverInfoByHost` in
 | `closed`                 | Notice states registration is closed; submit disabled                     |
 | unknown (no/failed read) | Treated as `invite` — registration is never widened on an unreadable mode |
 
+Unless the mode is `closed`, the register notice also carries the server's
+default message-retention window from the same snapshot (`retentionNotice()`
+in `lib/types.ts`); nothing is shown when the server does not report one.
+
 The client mode is advisory; the server enforces its own. `POST /auth/register`
 returns a token directly → straight to WS connect (no separate login
 round-trip); an `approval` server's `pending_approval` response remains the
