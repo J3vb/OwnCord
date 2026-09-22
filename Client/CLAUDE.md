@@ -104,12 +104,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   from the syntax tree and fails on an unowned one that is not on an exact,
   shrink-only allowlist (R1 long-lived-target listeners need `signal`/`once`;
   R2 intervals keep their handle and clear it in-file; R3 `setTimeout` keeps
-  its handle; R4 `new AbortController` is only for the primitives and named
-  cancellation tokens). A stale entry also fails, so the lists only shrink.
+  its handle, or a signal owns it through `setOwnedTimeout` (`src/lib/dom.ts`);
+  R4 `new AbortController` is only for the primitives and named cancellation
+  tokens). A stale entry also fails, so the lists only shrink.
   `tests/helpers/lifecycle.ts` installs a guard from `tests/setup.ts` that
   fails a unit test leaving a bare `window`/`document` listener or a real
   interval alive, unless its file is on the shrink-only
-  `tests/lifecycle-guard-baseline.json`. The list is empty only after 11c; do
+  `tests/lifecycle-guard-baseline.json`, whose `reasons` justify each entry; do
   not add an entry without a reason. The runtime proof is the CDP soak
   (`tests/e2e/support/lifecycle-probe.ts`,
   `tests/e2e/fullstack/long-session.spec.ts`), which needs
