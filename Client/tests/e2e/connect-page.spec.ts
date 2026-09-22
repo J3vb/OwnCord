@@ -178,7 +178,7 @@ test.describe("Connect Page — TOTP", () => {
       timeout: 10_000,
     });
 
-    const totpInput = totpOverlay.locator("input[inputmode='numeric']");
+    const totpInput = totpOverlay.locator("input[autocomplete='one-time-code']");
     await expect(totpInput).toBeVisible();
 
     const verifyBtn = totpOverlay.locator("button.btn-primary");

@@ -71,6 +71,9 @@ function makeOptions(overrides: Partial<SettingsOverlayOptions> = {}): SettingsO
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
     onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
     onListSessions: vi.fn().mockResolvedValue([]),
     onRevokeSession: vi.fn().mockResolvedValue(undefined),
     onRevokeAllSessions: vi
@@ -846,5 +849,191 @@ describe("TOTP Settings", () => {
 
       overlay.destroy?.();
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // B7-15b: emergency code regeneration and the recovery kit
+  // -------------------------------------------------------------------------
+
+  const q = <T extends Element>(sel: string): T | null => container.querySelector<T>(sel);
+  const byTestId = <T extends Element>(id: string): T => q<T>(`[data-testid='${id}']`)!;
+
+  async function confirmWithPassword(prefix: string, password: string): Promise<void> {
+    byTestId<HTMLButtonElement>(`${prefix}-btn`).click();
+    byTestId<HTMLInputElement>(`${prefix}-password`).value = password;
+    byTestId<HTMLButtonElement>(`${prefix}-submit`).click();
+  }
+
+  describe("Regenerate emergency recovery codes (B7-15b)", () => {
+    const CODES = ["AAAAA-BBBBB", "CCCCC-DDDDD"];
+
+    it("is offered only when 2FA is enabled", () => {
+      mockTotpEnabled = false;
+      const overlay = createSettingsOverlay(makeOptions());
+      overlay.mount(container);
+      expect(q("[data-testid='totp-regenerate-btn']")).toBeNull();
+      overlay.destroy?.();
+    });
+
+    it("requires the password, then shows the new set once and clears the password", async () => {
+      mockTotpEnabled = true;
+      const options = makeOptions({ onRegenerateRecoveryCodes: vi.fn().mockResolvedValue(CODES) });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      await confirmWithPassword("totp-regenerate", "");
+      expect(byTestId("totp-regenerate-error").textContent).toBe("Password is required.");
+      expect(options.onRegenerateRecoveryCodes).not.toHaveBeenCalled();
+
+      byTestId<HTMLInputElement>("totp-regenerate-password").value = "mypassword123";
+      byTestId<HTMLButtonElement>("totp-regenerate-submit").click();
+      await vi.waitFor(() =>
+        expect(q("[data-testid='totp-regenerated-codes']")?.textContent).toBe(CODES.join("\n")),
+      );
+      expect(options.onRegenerateRecoveryCodes).toHaveBeenCalledWith("mypassword123");
+      expect(byTestId<HTMLInputElement>("totp-regenerate-password").value).toBe("");
+      overlay.destroy?.();
+    });
+
+    it("replaces the previous set rather than keeping it, and Done wipes it", async () => {
+      mockTotpEnabled = true;
+      const onRegenerateRecoveryCodes = vi
+        .fn()
+        .mockResolvedValueOnce(["OLDOL-DOLDO"])
+        .mockResolvedValueOnce(["NEWNE-WNEWN"]);
+      const overlay = createSettingsOverlay(makeOptions({ onRegenerateRecoveryCodes }));
+      overlay.mount(container);
+
+      await confirmWithPassword("totp-regenerate", "pw");
+      await vi.waitFor(() => expect(container.textContent).toContain("OLDOL-DOLDO"));
+      await vi.waitFor(() =>
+        expect(byTestId<HTMLButtonElement>("totp-regenerate-submit").disabled).toBe(false),
+      );
+      await confirmWithPassword("totp-regenerate", "pw");
+      await vi.waitFor(() => expect(container.textContent).toContain("NEWNE-WNEWN"));
+      expect(container.textContent).not.toContain("OLDOL-DOLDO");
+
+      byTestId<HTMLButtonElement>("shown-once-done").click();
+      expect(container.textContent).not.toContain("NEWNE-WNEWN");
+      expect(q("[data-testid='totp-regenerated-codes']")).toBeNull();
+      overlay.destroy?.();
+    });
+
+    it("shows the server's refusal and no codes", async () => {
+      mockTotpEnabled = true;
+      const overlay = createSettingsOverlay(
+        makeOptions({
+          onRegenerateRecoveryCodes: vi.fn().mockRejectedValue(new Error("invalid password")),
+        }),
+      );
+      overlay.mount(container);
+      await confirmWithPassword("totp-regenerate", "wrong");
+      await vi.waitFor(() =>
+        expect(byTestId("totp-regenerate-error").textContent).toBe("invalid password"),
+      );
+      expect(q("[data-testid='totp-regenerated-codes']")).toBeNull();
+      overlay.destroy?.();
+    });
+  });
+
+  describe("Recovery kit (B7-15b)", () => {
+    const SECRET = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
+
+    it.each([
+      [
+        { enrolled: true, created_at: "2026-09-21T00:00:00Z", used_at: null },
+        "Enrolled",
+        "Replace recovery kit",
+      ],
+      [{ enrolled: false, used_at: "2026-09-21T00:00:00Z" }, "Used", "Create recovery kit"],
+      [{ enrolled: false, used_at: null }, "Not set up", "Create recovery kit"],
+    ])("shows status %j as %s", async (status, badge, action) => {
+      const overlay = createSettingsOverlay(
+        makeOptions({ onGetRecoveryKitStatus: vi.fn().mockResolvedValue(status) }),
+      );
+      overlay.mount(container);
+      await vi.waitFor(() => expect(byTestId("recovery-kit-status").textContent).toBe(badge));
+      expect(byTestId("recovery-kit-btn").textContent).toBe(action);
+      overlay.destroy?.();
+    });
+
+    it("enrols with the password, shows the secret once and refreshes the status", async () => {
+      const onGetRecoveryKitStatus = vi
+        .fn()
+        .mockResolvedValueOnce({ enrolled: false, used_at: null })
+        .mockResolvedValueOnce({
+          enrolled: true,
+          created_at: "2026-09-21T00:00:00Z",
+          used_at: null,
+        });
+      const options = makeOptions({
+        onGetRecoveryKitStatus,
+        onEnrolRecoveryKit: vi
+          .fn()
+          .mockResolvedValue({ kit_secret: SECRET, created_at: "2026-09-21T00:00:00Z" }),
+      });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      await confirmWithPassword("recovery-kit", "mypassword123");
+      await vi.waitFor(() =>
+        expect(q("[data-testid='recovery-kit-secret']")?.textContent).toBe(SECRET),
+      );
+      expect(options.onEnrolRecoveryKit).toHaveBeenCalledWith("mypassword123");
+      await vi.waitFor(() => expect(byTestId("recovery-kit-status").textContent).toBe("Enrolled"));
+
+      byTestId<HTMLButtonElement>("shown-once-done").click();
+      expect(container.textContent).not.toContain(SECRET);
+      overlay.destroy?.();
+    });
+
+    it("says so when the server returns no secret", async () => {
+      const overlay = createSettingsOverlay(
+        makeOptions({ onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "x" }) }),
+      );
+      overlay.mount(container);
+      await confirmWithPassword("recovery-kit", "pw");
+      await vi.waitFor(() =>
+        expect(byTestId("recovery-kit-error").textContent).toMatch(/did not return/),
+      );
+      overlay.destroy?.();
+    });
+
+    it.each(["closing the overlay", "switching tab"])(
+      "wipes a shown secret and codes from the DOM on %s",
+      async (how) => {
+        mockTotpEnabled = true;
+        const overlay = createSettingsOverlay(
+          makeOptions({
+            onEnrolRecoveryKit: vi.fn().mockResolvedValue({ kit_secret: SECRET, created_at: "x" }),
+            onRegenerateRecoveryCodes: vi.fn().mockResolvedValue(["ZZZZZ-YYYYY"]),
+          }),
+        );
+        overlay.mount(container);
+        overlay.open();
+        await confirmWithPassword("recovery-kit", "pw");
+        await confirmWithPassword("totp-regenerate", "pw");
+        await vi.waitFor(() => {
+          expect(container.textContent).toContain(SECRET);
+          expect(container.textContent).toContain("ZZZZZ-YYYYY");
+        });
+        const secretNode = byTestId("recovery-kit-secret");
+
+        if (how === "closing the overlay") {
+          overlay.close();
+        } else {
+          (
+            Array.from(
+              container.querySelectorAll(".settings-sidebar > button.settings-nav-item"),
+            ).find((b) => b.textContent === "Appearance") as HTMLElement
+          ).click();
+        }
+        expect(container.innerHTML).not.toContain(SECRET);
+        expect(container.innerHTML).not.toContain("ZZZZZ-YYYYY");
+        // Even a detached reference holds nothing.
+        expect(secretNode.textContent).toBe("");
+        overlay.destroy?.();
+      },
+    );
   });
 });

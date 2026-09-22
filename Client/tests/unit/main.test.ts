@@ -89,6 +89,8 @@ vi.mock("@lib/profiles", async (importOriginal) => ({
 // `api.getConfig().host` read (main.ts:776) after a login sets it via
 // `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
+const mockRecoverAccount = vi.fn();
+const mockVerifyTotp = vi.fn();
 // UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
@@ -121,6 +123,8 @@ vi.mock("@lib/api", async (importOriginal) => {
           api.setConfig(cfg);
         }),
         login: (...args: unknown[]) => mockLogin(...args),
+        recoverAccount: (...args: unknown[]) => mockRecoverAccount(...args),
+        verifyTotp: (...args: unknown[]) => mockVerifyTotp(...args),
         getHealth: vi.fn(() =>
           mockHealthFails.value
             ? Promise.reject(new Error("offline"))
@@ -137,6 +141,13 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onRecover?: (
+    host: string,
+    username: string,
+    secret: string,
+    newPassword: string,
+  ) => Promise<void>;
+  onTotpSubmit?: (code: string) => Promise<void>;
   getRegistrationMode?: (host: string) => string | null;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
@@ -193,7 +204,7 @@ vi.mock("@lib/dispatcher", async () => {
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { expectConsole } from "../helpers/console";
-import { clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { deleteCredential, loadCredential } from "@lib/credentials";
@@ -663,6 +674,37 @@ describe("main.ts session ownership", () => {
     };
     await vi.advanceTimersByTimeAsync(15_000);
     expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+  });
+
+  it("signs a recovered session in exactly as a login does (B7-15b)", async () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const secret = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
+    mockRecoverAccount.mockResolvedValueOnce({ token: "recovered-token", requires_2fa: false });
+    await capturedConnectCallbacks.onRecover!("recover.example", "alice", secret, "N3w-Str0ng!");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(mockRecoverAccount).toHaveBeenCalledWith("alice", secret, "N3w-Str0ng!");
+    // The same wirePostAuth tail a login reaches: the session is live.
+    expect(api.getConfig().host).toBe("recover.example");
+    expect(authStore.getState().token).toBe("recovered-token");
+    clearAuth();
+  });
+
+  it("keeps the partial token across a wrong emergency recovery code (B7-15b)", async () => {
+    mockLogin.mockResolvedValueOnce({ partial_token: "partial-1", requires_2fa: true });
+    await capturedConnectCallbacks.onLogin!("totp.example", "alice", "hunter22");
+    mockVerifyTotp
+      .mockRejectedValueOnce(new Error("invalid two-factor code"))
+      .mockResolvedValueOnce({ token: "full-token", requires_2fa: false });
+    await expect(capturedConnectCallbacks.onTotpSubmit!("ABCDE-FGHJK")).rejects.toThrow(
+      "invalid two-factor code",
+    );
+    await capturedConnectCallbacks.onTotpSubmit!("abcde-fghjm");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(mockVerifyTotp).toHaveBeenNthCalledWith(1, "ABCDE-FGHJK", "partial-1");
+    expect(mockVerifyTotp).toHaveBeenNthCalledWith(2, "abcde-fghjm", "partial-1");
+    clearAuth();
   });
 
   it("does not let an older same-host login overwrite the newer attempt", async () => {

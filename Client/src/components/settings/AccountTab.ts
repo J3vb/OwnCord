@@ -21,6 +21,7 @@ import {
   resolveServerUrl,
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
 
 const log = createLogger("AccountTab");
 
@@ -570,54 +571,17 @@ function buildTotpConfirmArea(
   if (result.backup_codes.length > 0) {
     // These codes are shown exactly once — the confirm step replaces this view.
     // Say so, and give a one-click way to keep them.
-    const backupLabel = createElement(
-      "div",
+    const reveal = buildShownOnce(
       {
-        style: "color:var(--yellow, #faa61a);font-size:13px;margin-bottom:8px;font-weight:600",
+        warning: "Save these backup codes now — you won't see them again:",
+        text: result.backup_codes.join("\n"),
+        codeTestId: "totp-backup-codes",
+        copyTestId: "totp-copy-backup-codes",
+        copyLabel: "Copy Codes",
       },
-      "Save these backup codes now — you won't see them again:",
+      signal,
     );
-    const codesText = result.backup_codes.join("\n");
-    const backupList = createElement(
-      "code",
-      {
-        style:
-          "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
-          "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:8px;" +
-          "color:var(--text-primary);user-select:all",
-        "data-testid": "totp-backup-codes",
-      },
-      codesText,
-    );
-    const copyBtn = createElement(
-      "button",
-      {
-        class: "ac-btn",
-        style: "margin-bottom:12px",
-        "data-testid": "totp-copy-backup-codes",
-      },
-      "Copy Codes",
-    );
-    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-    copyBtn.addEventListener(
-      "click",
-      () => {
-        const restore = (label: string): void => {
-          setText(copyBtn, label);
-          if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-          copyResetTimer = setTimeout(() => {
-            setText(copyBtn, "Copy Codes");
-            copyResetTimer = null;
-          }, 1500);
-        };
-        void navigator.clipboard
-          .writeText(codesText)
-          .then(() => restore("Copied!"))
-          .catch(() => restore("Copy failed"));
-      },
-      { signal },
-    );
-    elements.push(backupLabel, backupList, copyBtn);
+    elements.push(reveal.element);
   }
 
   const codeInput = createElement("input", {
@@ -828,6 +792,7 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
     if (enabled) {
       contentArea.appendChild(buildTotpDisableView(options, signal, render));
+      contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
       contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
     }
@@ -1395,6 +1360,9 @@ export function buildAccountTab(
 
   // Two-factor authentication section
   section.appendChild(buildTotpSection(options, signal));
+
+  // Recovery kit
+  section.appendChild(buildRecoveryKitSection(options, signal));
 
   // Signed-in devices
   section.appendChild(buildSessionsSection(options, signal));

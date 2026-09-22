@@ -30,6 +30,8 @@ export interface ConnectPageCallbacks {
   onLoginWithSavedPassword(host: string, username: string): Promise<void>;
   onRegister(host: string, username: string, password: string, inviteCode: string): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
+  /** Recover with a recovery kit secret or an owner-issued credential. */
+  onRecover?(host: string, username: string, secret: string, newPassword: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
   onDeleteProfile?(profileId: string): void;
   onToggleAutoLogin?(profileId: string, enabled: boolean): void;
@@ -43,6 +45,9 @@ export interface ConnectPageCallbacks {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+/** Account actions offered by the settings overlay before sign-in. */
+const notAuthenticated = (): Promise<never> => Promise.reject(new Error("Not authenticated"));
 
 const DEFAULT_PROFILES: readonly SimpleProfile[] = [
   { name: "Local Server", host: "localhost:8443" },
@@ -94,6 +99,7 @@ export function createConnectPage(
     onLoginWithSavedPassword: callbacks.onLoginWithSavedPassword,
     onRegister: callbacks.onRegister,
     onTotpSubmit: callbacks.onTotpSubmit,
+    onRecover: callbacks.onRecover,
     onSettingsOpen: () => openSettings(),
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
     getRegistrationMode: callbacks.getRegistrationMode,
@@ -286,17 +292,20 @@ export function createConnectPage(
         onClose: () => closeSettings(),
         onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
-        onUploadAvatar: () => Promise.reject(new Error("Not authenticated")),
+        onUploadAvatar: notAuthenticated,
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},
-        onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
-        onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
-        onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
+        onEnableTotp: notAuthenticated,
+        onConfirmTotp: notAuthenticated,
+        onDisableTotp: notAuthenticated,
         onRefreshTotpStatus: () => Promise.resolve(),
+        onRegenerateRecoveryCodes: notAuthenticated,
+        onEnrolRecoveryKit: notAuthenticated,
+        onGetRecoveryKitStatus: notAuthenticated,
         onListSessions: () => Promise.resolve([]),
-        onRevokeSession: () => Promise.reject(new Error("Not authenticated")),
-        onRevokeAllSessions: () => Promise.reject(new Error("Not authenticated")),
+        onRevokeSession: notAuthenticated,
+        onRevokeAllSessions: notAuthenticated,
       });
       settingsOverlay.mount(root);
     });

@@ -10,7 +10,12 @@ import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
-import type { RevokeAllSessionsResponse, SessionInfo } from "@lib/api";
+import type {
+  RecoveryKitIssue,
+  RecoveryKitStatus,
+  RevokeAllSessionsResponse,
+  SessionInfo,
+} from "@lib/api";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { buildAccountTab } from "./settings/AccountTab";
@@ -60,6 +65,13 @@ export interface SettingsOverlayOptions {
   /** Re-read the 2FA state from GET /users/me, the only response that
    *  carries it, and put it in the auth store (OC-0354). */
   onRefreshTotpStatus(): Promise<void>;
+  /** Replace the emergency recovery codes (password-confirmed); resolves with
+   *  the new set, which the tab shows once and never keeps. */
+  onRegenerateRecoveryCodes(password: string): Promise<string[]>;
+  /** Issue or replace the recovery kit (password-confirmed). The secret in
+   *  the result is shown once and never kept. */
+  onEnrolRecoveryKit(password: string): Promise<RecoveryKitIssue>;
+  onGetRecoveryKitStatus(): Promise<RecoveryKitStatus>;
   /** List the account's signed-in devices (GET /users/me/sessions). */
   onListSessions(): Promise<readonly SessionInfo[]>;
   /** Sign one device out; it can no longer connect. */
@@ -205,6 +217,10 @@ export function createSettingsOverlay(
 
   function hide(): void {
     root?.classList.remove("open");
+    // The hidden pane is rebuilt on reopen (contentLive), so drop its build
+    // now: anything shown once (recovery codes, a recovery kit secret) is
+    // wiped from the DOM on abort rather than lingering while closed.
+    renderAC?.abort();
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;

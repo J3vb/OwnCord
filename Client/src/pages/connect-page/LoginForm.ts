@@ -4,6 +4,7 @@
 import { createElement, setText, appendChildren, qs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
+import type { RecoverContext } from "./RecoverOverlay";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,6 +26,13 @@ const MIN_PASSWORD_LENGTH = 8;
 // anywhere: submission branches on `usingSavedPassword`, never on the field's
 // text, so this string can never be mistaken for a real password.
 const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+
+/**
+ * What the 2FA box accepts: a six-digit authenticator code, or an emergency
+ * recovery code (`XXXXX-XXXXX`, case-insensitive, separator optional). The
+ * server routes the one `code` field by this same shape.
+ */
+const TOTP_OR_RECOVERY_CODE = /^(?:\d{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5})$/;
 
 /**
  * Copy shown in the register notice for a mode, or null when no notice
@@ -59,6 +67,18 @@ export interface LoginFormOptions {
     inviteCode: string,
   ) => Promise<void>;
   readonly onTotpSubmit: (code: string) => Promise<void>;
+  /**
+   * Recover an account with a recovery kit secret or an owner-issued
+   * recovery credential, setting a new password. On success the caller signs
+   * the returned session in exactly as a login does. Without it, the form
+   * offers no recovery entry.
+   */
+  readonly onRecover?: (
+    host: string,
+    username: string,
+    secret: string,
+    newPassword: string,
+  ) => Promise<void>;
   readonly onSettingsOpen: () => void;
   readonly onAutoLoginCancel?: () => void;
   /**
@@ -121,6 +141,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onLoginWithSavedPassword,
     onRegister,
     onTotpSubmit,
+    onRecover,
     onSettingsOpen,
     onAutoLoginCancel,
     getRegistrationMode,
@@ -366,6 +387,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const formSwitch = createElement("div", { class: "form-switch" });
     toggleModeBtn = createElement("a", {}, "Need an account? Register");
     formSwitch.appendChild(toggleModeBtn);
+    // Outside .form-switch: that link is the login/register toggle.
+    let recoverLink: HTMLAnchorElement | null = null;
+    if (onRecover !== undefined) {
+      recoverLink = createElement(
+        "a",
+        { class: "totp-backup-link", "data-testid": "recover-account-link" },
+        "Lost your password or 2FA device? Recover your account",
+      );
+      recoverLink.addEventListener("click", openRecover, { signal });
+    }
 
     appendChildren(
       form,
@@ -378,6 +409,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       inviteGroup,
       submitBtn,
       formSwitch,
+      ...(recoverLink ? [recoverLink] : []),
     );
 
     // Wire form events
@@ -448,17 +480,20 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       {
         class: "totp-subtitle",
       },
-      "Enter the 6-digit code from your authenticator app.",
+      "Enter the 6-digit code from your authenticator app, or an emergency recovery code.",
     );
 
+    // Not numeric-only: an emergency recovery code is letters and digits,
+    // 11 characters with its separator, and goes in this same box.
     totpInput = createElement("input", {
       class: "form-input",
       type: "text",
-      maxlength: "6",
-      placeholder: "000000",
-      inputmode: "numeric",
-      pattern: "[0-9]{6}",
+      maxlength: "11",
+      placeholder: "000000 or XXXXX-XXXXX",
+      inputmode: "text",
+      pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
       autocomplete: "one-time-code",
+      "aria-label": "Authentication or recovery code",
     });
 
     totpSubmitBtn = createElement(
@@ -837,7 +872,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (totpSubmitBtn.disabled) return;
 
     const code = totpInput.value.trim();
-    if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+    if (!TOTP_OR_RECOVERY_CODE.test(code)) {
       // Simple inline feedback — add error class to the input
       totpInput.classList.add("error");
       setTimeout(() => totpInput.classList.remove("error"), 500);
@@ -867,6 +902,31 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function handleTotpCancel(): void {
     totpPending = false;
     transitionTo("idle");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Account recovery (lazy: the overlay module loads on first use)
+  // ---------------------------------------------------------------------------
+
+  // One context per form: it is the overlay module's cache key.
+  let recoverCtx: RecoverContext | undefined;
+
+  function openRecover(): void {
+    if (onRecover === undefined) return;
+    if (formState === "loading" || formState === "connecting") return;
+    recoverCtx ??= {
+      signal,
+      anchor: totpOverlay,
+      hostInput,
+      usernameInput,
+      placeholder: SAVED_PASSWORD_PLACEHOLDER,
+      onRecover,
+      onRecovered: () => transitionTo("connecting"),
+    };
+    const ctx = recoverCtx;
+    void import("./RecoverOverlay")
+      .then((m) => m.openRecoverOverlay(ctx))
+      .catch(() => transitionTo("error", "Account recovery is unavailable."));
   }
 
   // ---------------------------------------------------------------------------

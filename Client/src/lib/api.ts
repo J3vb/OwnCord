@@ -84,6 +84,20 @@ export interface RevokeAllSessionsResponse {
   readonly current_session_revoked: boolean;
 }
 
+/** POST /users/me/recovery-kit: `kit_secret` is present only when the server
+ *  generated it, and it is shown exactly once. */
+export interface RecoveryKitIssue {
+  readonly kit_secret?: string;
+  readonly created_at: string;
+}
+
+/** GET /users/me/recovery-kit: whether the account holds an unspent kit. */
+export interface RecoveryKitStatus {
+  readonly enrolled: boolean;
+  readonly created_at?: string;
+  readonly used_at: string | null;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -282,6 +296,23 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       });
     },
 
+    /** POST /auth/recover. `secret` is a recovery kit secret or an
+     *  owner-issued recovery credential; the server tells them apart by
+     *  shape, so both travel in `kit_secret`. Answers the login shape. */
+    recoverAccount(
+      username: string,
+      secret: string,
+      newPassword: string,
+      signal?: AbortSignal,
+    ): Promise<AuthResponse> {
+      return request<AuthResponse>(
+        "POST",
+        "/auth/recover",
+        { username, kit_secret: secret, new_password: newPassword },
+        signal,
+      );
+    },
+
     deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", "/auth/account", { password }, signal);
     },
@@ -378,6 +409,23 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         { password },
         signal,
       );
+    },
+
+    /** Replace the emergency recovery codes; the new set is returned once. */
+    regenerateRecoveryCodes(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<{ backup_codes: string[] }> {
+      return request("POST", "/users/me/totp/recovery-codes", { password }, signal);
+    },
+
+    /** Issue (or replace) the recovery kit; the server generates the secret. */
+    enrolRecoveryKit(password: string, signal?: AbortSignal): Promise<RecoveryKitIssue> {
+      return request<RecoveryKitIssue>("POST", "/users/me/recovery-kit", { password }, signal);
+    },
+
+    getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
+      return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {

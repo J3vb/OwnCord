@@ -403,6 +403,10 @@ git grep -n "server-info" Client/src                        # the one new caller
 - **B7-12's epoch/update-notice work, B7-14's session UI, B7-13's profile
   isolation** — named only as file collisions.
 
+## Evidence
+
+B7-15b's evidence is in `docs/plans/beta-requirements-traceability-2026-08-23.md`, rows BPR-044 and BPR-046 (each milestone writes its own row, per the B7 plan review).
+
 ## Open questions for the owner
 
 - [ ] **Q1 — the `retention` summary shape.** Decision 3 says "server-default

@@ -736,6 +736,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
           wirePostAuth(host, result.token, username, savedPassword, remember, true);
         },
+        async onRecover(host, username, secret, newPassword) {
+          api.endSession();
+          api.setConfig({ host });
+          const attempt = api.getSession();
+          const result = await api.recoverAccount(username, secret, newPassword);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          // The login shape: sign the session in exactly as a login does.
+          completeLogin(host, username, result, newPassword);
+        },
         async onTotpSubmit(code) {
           if (!pendingTotpPartialToken) {
             log.error("TOTP submit without pending partial token");
