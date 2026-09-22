@@ -34,33 +34,43 @@ test.describe("Typing Indicator — WebSocket", () => {
   });
 
   test("typing indicator does not show for current user", async ({ page }) => {
-    // Emit typing event from the current user (id: 1)
+    // Positive control first: another user's typing DOES render, so the
+    // negative assertion below proves the self-filter, not an indicator that
+    // never renders at all.
+    const typingBar = page.locator(".typing-bar");
     await emitWsMessage(page, {
       type: "typing",
-      payload: {
-        channel_id: 1,
-        user_id: 1,
-        username: "testuser",
-      },
+      payload: { channel_id: 1, user_id: 2, username: "otheruser" },
     });
+    await expect(typingBar).toContainText("otheruser", { timeout: 5_000 });
 
-    // Should NOT show "testuser is typing"
-    const typingText = page.locator(".typing-bar", { hasText: "testuser" });
-    await expect(typingText).not.toBeVisible({ timeout: 1000 });
+    // Now the current user (id: 1) types — the indicator must not name them,
+    // and must not replace the other user's entry.
+    await emitWsMessage(page, {
+      type: "typing",
+      payload: { channel_id: 1, user_id: 1, username: "testuser" },
+    });
+    await expect(typingBar).not.toContainText("testuser", { timeout: 1_000 });
+    await expect(typingBar).toContainText("otheruser");
   });
 
   test("typing indicator ignores events from other channels", async ({ page }) => {
-    // We're viewing channel 1, emit typing on channel 2
+    // Positive control: a typing event on channel 1 (the viewed channel)
+    // renders.
+    const typingBar = page.locator(".typing-bar");
     await emitWsMessage(page, {
       type: "typing",
-      payload: {
-        channel_id: 2,
-        user_id: 2,
-        username: "otheruser",
-      },
+      payload: { channel_id: 1, user_id: 2, username: "otheruser" },
     });
+    await expect(typingBar).toContainText("otheruser", { timeout: 5_000 });
 
-    const typingText = page.locator(".typing-bar", { hasText: "otheruser" });
-    await expect(typingText).not.toBeVisible({ timeout: 1000 });
+    // A typing event on channel 2 must be ignored — neither replacing the
+    // channel-1 entry nor adding the channel-2 user.
+    await emitWsMessage(page, {
+      type: "typing",
+      payload: { channel_id: 2, user_id: 3, username: "elsewhere" },
+    });
+    await expect(typingBar).not.toContainText("elsewhere", { timeout: 1_000 });
+    await expect(typingBar).toContainText("otheruser");
   });
 });

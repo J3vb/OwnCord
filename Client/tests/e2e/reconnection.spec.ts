@@ -75,10 +75,11 @@ test.describe("Reconnection — Banner Visibility", () => {
 
   test("reconnecting banner is hidden when connected", async ({ page }) => {
     const banner = page.locator(".reconnecting-banner");
-    // The banner element exists but should NOT have the "visible" class
-    if ((await banner.count()) > 0) {
-      await expect(banner).not.toHaveClass(/visible/);
-    }
+    // The banner element exists and is genuinely hidden — not a `.count() > 0`
+    // guard that passes when the component is missing entirely.
+    await expect(banner).toBeAttached();
+    await expect(banner).not.toHaveClass(/visible/);
+    await expect(banner).not.toBeVisible();
   });
 
   test("disconnect shows reconnecting banner", async ({ page }) => {
@@ -94,10 +95,9 @@ test.describe("Reconnection — Banner Visibility", () => {
     await simulateReconnect(page);
 
     const banner = page.locator(".reconnecting-banner");
-    if ((await banner.count()) > 0) {
-      // After successful reconnect, banner should be hidden
-      await expect(banner).not.toHaveClass(/visible/);
-    }
+    // Assert the banner itself is hidden after reconnect, unconditionally.
+    await expect(banner).not.toHaveClass(/visible/);
+    await expect(banner).not.toBeVisible();
   });
 });
 
@@ -128,14 +128,19 @@ test.describe("Reconnection — State Recovery", () => {
   });
 
   test("messages container is visible after reconnect", async ({ page }) => {
-    // Verify messages container exists
+    // Verify the loaded message is rendered before disconnect, so "survives
+    // reconnect" is a real claim rather than an always-visible container.
     const messagesContainer = page.locator(".messages-container");
     await expect(messagesContainer).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".msg-text", { hasText: "Hello world!" })).toBeVisible();
 
     await simulateReconnect(page);
 
-    // Messages container should still be visible
+    // The container AND its loaded message survive the reconnect.
     await expect(messagesContainer).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".msg-text", { hasText: "Hello world!" })).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("new messages arrive after reconnect", async ({ page }) => {
