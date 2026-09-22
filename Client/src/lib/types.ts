@@ -902,6 +902,22 @@ export function parseRegistrationMode(value: unknown): RegistrationMode | null {
 }
 
 /**
+ * The server-default retention sentence from a `server-info` snapshot, or null
+ * when the server did not report a usable window (older server, failed read,
+ * malformed value) — callers then say nothing rather than guess. Attachments
+ * have no window of their own: they are deleted with their messages.
+ */
+export function retentionNotice(info: ServerInfoResponse | undefined): string | null {
+  const days: unknown = info?.retention?.messages_days;
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 0) return null;
+  const window =
+    days === 0
+      ? "keeps messages until they are deleted"
+      : `deletes messages after ${days} day${days === 1 ? "" : "s"}`;
+  return `By default this server ${window}; attachments are removed with their messages.`;
+}
+
+/**
  * GET /api/v1/server-info response (B6-7).
  *
  * `protocol_epoch` is the wire epoch this server speaks; the client compares it
