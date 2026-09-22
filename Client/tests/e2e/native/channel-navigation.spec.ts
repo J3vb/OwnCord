@@ -87,16 +87,21 @@ test.describe("Channel Switching", () => {
     const textChannels = nativePage.locator(".channel-item").filter({
       has: nativePage.locator(".ch-icon", { hasText: "#" }),
     });
-    const firstChannel = textChannels.first();
-    const firstName = await firstChannel.locator(".ch-name").textContent();
     const header = nativePage.locator("[data-testid='chat-header-name']");
-    const headerText = await header.textContent();
-    expect(headerText?.trim()).toBe(firstName?.trim());
+
+    // A prior serial test left some channel active; explicitly select the
+    // first, then assert the header follows the click rather than assuming the
+    // first channel was already active.
+    const firstChannel = textChannels.first();
+    const firstName = (await firstChannel.locator(".ch-name").textContent())?.trim() ?? "";
+    await firstChannel.click();
+    await expect(header).toHaveText(firstName, { timeout: 5_000 });
 
     const secondChannel = textChannels.nth(1);
-    const secondName = await secondChannel.locator(".ch-name").textContent();
+    const secondName = (await secondChannel.locator(".ch-name").textContent())?.trim() ?? "";
+    expect(secondName).not.toBe(firstName);
     await secondChannel.click();
-    await expect(header).toHaveText(secondName?.trim() ?? "", { timeout: 5_000 });
+    await expect(header).toHaveText(secondName, { timeout: 5_000 });
   });
 
   test("switching text channels loads new messages", async ({ nativePage }) => {

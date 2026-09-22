@@ -183,6 +183,15 @@ test.describe("Pinned Messages", () => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await ensureLoggedIn(nativePage);
+
+    // The panel is app state shared across this project's serial specs: a prior
+    // test may have left it open, and its close button would then intercept the
+    // pin-btn click below. Start from a known-closed panel.
+    const openPanel = nativePage.locator(".pinned-panel");
+    if (await openPanel.isVisible().catch(() => false)) {
+      await openPanel.locator(".pinned-panel__close").click();
+      await expect(openPanel).not.toBeVisible({ timeout: 3_000 });
+    }
   });
 
   test("pin button opens the pinned messages panel", async ({ nativePage }) => {

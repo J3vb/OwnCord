@@ -77,21 +77,28 @@ test.describe("Theme Persistence (Native)", () => {
     expect(await swatches.count()).toBeGreaterThanOrEqual(2);
 
     // Pick a swatch that is not already active so applying it is observable.
-    const target = nativePage.locator(".accent-swatch:not(.active)").first();
-    const color = await target.getAttribute("title");
+    // Capture it by title, not by the `:not(.active)` locator: that locator
+    // re-resolves after the click (the swatch just became active), so asserting
+    // on it would target a *different* swatch.
+    const inactive = nativePage.locator(".accent-swatch:not(.active)").first();
+    const color = await inactive.getAttribute("title");
     expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    const target = nativePage.locator(`.accent-swatch[title='${color}']`);
 
     await target.click();
 
     // applyAccent sets the inline --accent on body (the value the theme class
-    // would otherwise win against). Assert the rendered variable equals the
-    // swatch we picked — not merely that some accent variable is non-empty.
+    // would otherwise win against), and the picker marks the chosen swatch
+    // active. Assert both: the rendered variable equals the swatch we picked —
+    // not merely that some accent variable is non-empty — and the picker
+    // reflects the selection.
     await expect
       .poll(() =>
         nativePage.evaluate(() => document.body.style.getPropertyValue("--accent").trim()),
       )
       .toBe(color!);
     await expect(target).toHaveClass(/active/);
+    await expect(target).toHaveAttribute("aria-checked", "true");
   });
 
   test("theme persists after navigating away and back", async ({ nativePage }) => {

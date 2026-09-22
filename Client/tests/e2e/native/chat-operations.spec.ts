@@ -10,6 +10,20 @@ import { SKIP_SERVER, hasCredentials, ensureLoggedIn, waitForMessages } from "./
 
 test.describe.configure({ mode: "serial" });
 
+// MessageInput debounces sends by 200ms to collapse a double-click into one
+// message (SEND_DEBOUNCE_MS). The persistent fixture shares one app process
+// across this project's serial specs, so adjacent tests can press Enter within
+// that window and have the second send silently dropped. Pace each send past
+// the debounce — this is deliberate input pacing, not a readiness wait.
+const SEND_DEBOUNCE_MS = 200;
+
+async function typeAndSend(page: import("@playwright/test").Page, text: string): Promise<void> {
+  const textarea = page.locator("[data-testid='msg-textarea']");
+  await textarea.fill(text);
+  await page.waitForTimeout(SEND_DEBOUNCE_MS + 50);
+  await textarea.press("Enter");
+}
+
 test.describe("Chat Operations", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
@@ -38,22 +52,17 @@ test.describe("Chat Operations", () => {
   });
 
   test("sending a message clears the textarea", async ({ nativePage }) => {
-    const textarea = nativePage.locator("[data-testid='msg-textarea']");
-    const uniqueMsg = `native-e2e-${Date.now()}`;
-
-    await textarea.fill(uniqueMsg);
-    await textarea.press("Enter");
+    await typeAndSend(nativePage, `native-e2e-${Date.now()}`);
 
     // Textarea should clear after send
-    await expect(textarea).toHaveValue("", { timeout: 5_000 });
+    await expect(nativePage.locator("[data-testid='msg-textarea']")).toHaveValue("", {
+      timeout: 5_000,
+    });
   });
 
   test("sent message appears in message list", async ({ nativePage }) => {
-    const textarea = nativePage.locator("[data-testid='msg-textarea']");
     const uniqueMsg = `native-e2e-${Date.now()}`;
-
-    await textarea.fill(uniqueMsg);
-    await textarea.press("Enter");
+    await typeAndSend(nativePage, uniqueMsg);
 
     // Message should appear in the list (server echoes it back via WS)
     const sentMessage = nativePage.locator(".message .msg-text", { hasText: uniqueMsg });
