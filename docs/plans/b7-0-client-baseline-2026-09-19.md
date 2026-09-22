@@ -562,3 +562,83 @@ it is not flaky. The five recorded calibration runs are pre-rebase and predate
 the DM-step and console-pattern changes. For 11a the at-head evidence is the two
 consecutive passing runs at the rebased head, and 11c re-runs the five at its
 head.
+
+## B7-11b ownership move (Tasks 5–11, 2026-09-22)
+
+PR 11b's evidence append: a behaviour-preserving move of the ad-hoc owners onto
+`Disposable` (and, where a signal already owns the work, `setOwnedTimeout` in
+`lib/dom.ts`). Base is `dev` `e73b9223` (11a merged). It is an evidence append,
+not a status row.
+
+### Allowlists and counts, base → 11b head
+
+| Measure                                         | Base | 11b | Floor reached                                                                                                                                   |
+| ----------------------------------------------- | ---: | --: | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 long-lived-target listeners allowlisted      |   22 |  17 | 16 app-lifetime + 1 per-mount (`deviceManager`, see below)                                                                                      |
+| R3 discarded `setTimeout` handles allowlisted   |   17 |   3 | self-bounded only: `Toast` fallback removal, `content-parser` ×2                                                                                |
+| R4 `new AbortController` outside the primitives |   53 |   8 | the 8 named cancellation tokens                                                                                                                 |
+| Files constructing their own `AbortController`  |   45 |   8 | the 2 primitives + `api.ts`, `profiles.ts`, `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`, `ChannelController.ts` |
+| Files importing `Disposable`                    |    3 |  42 |                                                                                                                                                 |
+| `tests/lifecycle-guard-baseline.json` files     |   16 |   1 | `media-visibility.test.ts` (singleton under test, no release)                                                                                   |
+
+Inventory script (the plan's appendix) at base →
+`{ add: 409, signal: 288, once: 28, bare: 93, remove: 29, setTimeout: 69, discarded: 17, setInterval: 7, ac: 55, acFiles: 45, bareFiles: 31 }`;
+at the 11b head →
+`{ add: 410, signal: 293, once: 29, bare: 88, remove: 23, setTimeout: 56, discarded: 3, setInterval: 7, ac: 10, acFiles: 8, bareFiles: 28 }`.
+`setTimeout` falls by 13 because 14 discarded sites now go through
+`setOwnedTimeout`, which holds the one kept `setTimeout`.
+
+### Sites that stay, and why
+
+- **`deviceManager.ts` devicechange (R1, per-mount).** It keeps its hand-paired
+  start/stop. `device-manager.test.ts` pins the bare
+  `addEventListener("devicechange", fn)` call shape and the explicit
+  `removeEventListener` in three assertions. A signal-owned listener would need
+  those assertions edited, and 11b edits no assertion.
+- **`ChannelController.ts` `channelAbort` (R4, token).** It is not forked from the
+  `SessionScope`. A fork would also cancel in-flight channel loads at logout,
+  where today they run to a guarded no-op. That is behaviour, so it stays a token
+  owned by the next channel switch. **Task 12 candidate.**
+- **`content-parser.ts` copy-button resets (R3).** `renderMessageContent` takes no
+  owner, so nothing can clear them. They only relabel a button the code block
+  owns.
+- **`media-visibility.test.ts` (guard baseline).** `ensureVisibilityListener` is a
+  once-guarded app-lifetime singleton and the unit under test. It has no release.
+
+### Guard baseline teardown
+
+Every other listed file now releases what it opened (a `destroy()`, a dismissal,
+or the page signal's abort). Six files (`e2eeWorker`, `voice-audio-tab`, which
+are the two Linux voice 1b leaks, `updater`, `voice.store`, `channel-mutes` and
+`settings-overlay`'s re-import test) leaked because `vi.resetModules()`
+re-evaluated the modules that install an app-lifetime window listener at load
+(`logger`, `channel-mutes`, the message-list renderers). They now re-import
+against the already-loaded instances of those modules. No assertion changed. The
+one removed `expect` line in `tests/**` is the inventory's per-mount count,
+tightened from 6 to 1.
+
+### Gates
+
+- Unit suite: 282 files, 6 195 passed + 147 expected fail (base 6 191 + 147; the
+  4 new cases are `setOwnedTimeout`'s). `typecheck`, `typecheck:build`,
+  `typecheck:e2e`, `lint` and `knip` are clean. The mutation shard union is exact
+  (104 files; no new `src/` file).
+- Bundle: startup closure 85 654 → 85 918 B (budget 91 000); `MainPage`
+  57 289 → 57 164 B (budget 60 000).
+- **PR soak, 20 cycles**, Linux Chromium, one run each at base `e73b9223` and at
+  the 11b head:
+
+| Metric (warm → final, slope) | Base               | 11b head           |
+| ---------------------------- | ------------------ | ------------------ |
+| nodes                        | 3490 → 3454 (−3.6) | 3490 → 3454 (−3.6) |
+| listeners                    | 192 → 193 (0.1)    | 192 → 193 (0.1)    |
+| abortControllers             | 20 → 20 (0)        | 22 → 22 (0)        |
+| heap slope (B/cycle)         | 10 320             | 10 840             |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets, peerConnections,
+tracks and audioContexts 0 in both runs, all flat. Nothing grows faster. The
+one level change is live `AbortController`s, +2 and flat. `GlobalKeybinds` and
+`OverlayManagers` each own their `document` keydown listener through a
+page-lifetime `Disposable` now, where before they hand-paired a
+`removeEventListener`. The heap slope is inside 11a's recorded run-to-run range
+(9 250–12 431).
