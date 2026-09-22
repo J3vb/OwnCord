@@ -590,11 +590,14 @@ at the 11b head →
 
 ### Sites that stay, and why
 
-- **`deviceManager.ts` devicechange (R1, per-mount).** It keeps its hand-paired
-  start/stop. `device-manager.test.ts` pins the bare
+- **`deviceManager.ts:102` devicechange (R1, per-mount).** It keeps its
+  hand-paired start/stop. `device-manager.test.ts:136-156` pins the bare
   `addEventListener("devicechange", fn)` call shape and the explicit
   `removeEventListener` in three assertions. A signal-owned listener would need
-  those assertions edited, and 11b edits no assertion.
+  those assertions edited, and 11b edits no assertion. By owner decision the
+  plan's never-edit-an-assertion rule outranks this one move, so Task 5's "R1's
+  allowlist is down to 16" is met at 17, and 17 is the 11b floor. **Task 12
+  (11c) candidate.**
 - **`ChannelController.ts` `channelAbort` (R4, token).** It is not forked from the
   `SessionScope`. A fork would also cancel in-flight channel loads at logout,
   where today they run to a guarded no-op. That is behaviour, so it stays a token
