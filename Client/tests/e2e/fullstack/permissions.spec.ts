@@ -122,6 +122,7 @@ test.describe("Moderation rank enforcement (real server)", () => {
     bob,
     server,
   }) => {
+    void alice;
     const owner = server.owner!.token;
     const users = await listUsers(server, owner);
     const bobUser = users.find((u) => u.username === "bob")!;
@@ -145,7 +146,9 @@ test.describe("Moderation rank enforcement (real server)", () => {
       bob.locator("[data-testid='toast']", { hasText: "equal or higher rank" }),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Alice's session still works: the force-logout never landed.
-    await expect(alice.locator("[data-testid='app-layout']")).toBeVisible();
+    // The owner token is one of alice's sessions; a landed force-logout would
+    // have revoked it, so an authenticated call proves it never did.
+    const afterRefusal = await listUsers(server, owner);
+    expect(afterRefusal.find((u) => u.id === aliceUser.id)).toBeDefined();
   });
 });
