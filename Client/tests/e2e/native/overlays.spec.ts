@@ -93,9 +93,9 @@ test.describe("Quick Switcher", () => {
   });
 
   test("selecting a result switches channel", async ({ nativePage, nativeServer }) => {
-    // The seeded server has a single text channel, so create a second one
-    // through the real admin route; the WS channel_create fan-out adds it to
-    // the open app's sidebar.
+    // Create a fresh target channel through the real admin route so the
+    // switcher has a known non-active channel to pick; the WS channel_create
+    // fan-out adds it to the open app's sidebar.
     const targetName = `switcher-${Date.now()}`;
     await nativeServer.api(
       "/admin/api/channels",

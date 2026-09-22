@@ -19,10 +19,10 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: !!process.env.CI,
-  // Applies per invocation. native-core/updater are small; the combined
-  // native-no-auth + native-authenticated run is the large one, so this is
-  // sized for that and the CI step carries the outer backstop.
-  globalTimeout: 35 * 60 * 1000,
+  // Applies per invocation. The combined native-no-auth + native-authenticated
+  // run is the large one (about 2 minutes on CI); this stays below the CI
+  // step's 25-minute timeout so the reporters finish writing on a hung run.
+  globalTimeout: 20 * 60 * 1000,
   reporter: process.env.CI
     ? [
         ["list"],

@@ -35,8 +35,7 @@ async function startDmWithOtherMember(page: Page): Promise<string> {
   await ensureChannelMode(page);
 
   const memberItems = page.locator(".member-item");
-  const memberCount = await memberItems.count();
-  test.skip(memberCount < 2, "Need at least 2 members visible to test DMs");
+  await expect.poll(() => memberItems.count()).toBeGreaterThanOrEqual(2);
 
   // Pick a roster row that is not the signed-in user (alice, the fixture).
   const otherMember = memberItems.filter({ hasNotText: /alice/i }).first();
@@ -74,7 +73,7 @@ test.describe("DM System (Native)", () => {
     await ensureChannelMode(nativePage);
 
     const memberItems = nativePage.locator(".member-item");
-    test.skip((await memberItems.count()) < 2, "Need at least 2 members to test DMs");
+    await expect.poll(() => memberItems.count()).toBeGreaterThanOrEqual(2);
 
     await memberItems.filter({ hasNotText: /alice/i }).first().click();
 

@@ -6,11 +6,10 @@
  *
  * The fixture server uses a self-signed certificate. The Rust proxy refuses
  * the first TLS contact until the fingerprint is trusted — the real first-use
- * ceremony. The connect page's mount-time health probe is usually the first
- * contact (so the modal is up before any click), but a submit can also be the
- * trigger, so `submitLogin` trusts if prompted on either side of the click.
- * Without this the submit never reaches the server, or the modal intercepts
- * the click outright.
+ * ceremony. The connect page's mount-time health probe only touches the
+ * default localhost profile, so the submit is the first contact with the
+ * fixture host and `submitLogin` trusts the prompt that follows it. Without
+ * this the submit never reaches the server.
  */
 
 import { test, expect } from "../native-fixture";
@@ -125,14 +124,7 @@ test.describe("Authentication Flow", () => {
     await submit.click();
 
     // First TLS contact: trust the certificate, then resubmit for real.
-    const dialog = nativePage.getByRole("dialog", { name: "New Server Certificate" });
-    const prompted = await dialog
-      .waitFor({ state: "visible", timeout: 15_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (prompted) {
-      await dialog.getByRole("button", { name: "Trust This Certificate", exact: true }).click();
-      await expect(dialog).toBeHidden();
+    if (await trustCertIfPrompted(nativePage, 15_000)) {
       await expect(submit).toBeEnabled({ timeout: 10_000 });
     }
 
