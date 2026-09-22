@@ -3,6 +3,7 @@
  * Step 5.42 of the Tauri v2 migration.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -906,13 +907,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Picker state (declared together so both toggle functions can cross-close)
     let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
     let gifPicker: { element: HTMLDivElement; destroy(): void } | null = null;
+    // One outside-click owner per open picker, destroyed when that picker closes.
+    let emojiDismiss: Disposable | null = null;
+    let gifDismiss: Disposable | null = null;
 
     function closeEmojiPicker(): void {
       if (emojiPicker !== null) {
         emojiPicker.element.remove();
         emojiPicker.destroy();
         emojiPicker = null;
-        document.removeEventListener("mousedown", handleClickOutside);
+        emojiDismiss?.destroy();
+        emojiDismiss = null;
       }
     }
 
@@ -959,11 +964,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         },
       });
       root?.appendChild(emojiPicker.element);
+      const dismiss = new Disposable();
+      emojiDismiss = dismiss;
       // Defer so this click doesn't immediately close it
       const t1 = setTimeout(() => {
         activeTimers.delete(t1);
         if (!signal.aborted) {
-          document.addEventListener("mousedown", handleClickOutside);
+          document.addEventListener("mousedown", handleClickOutside, { signal: dismiss.signal });
         }
       }, 0);
       activeTimers.add(t1);
@@ -977,7 +984,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         gifPicker.element.remove();
         gifPicker.destroy();
         gifPicker = null;
-        document.removeEventListener("mousedown", handleGifClickOutside);
+        gifDismiss?.destroy();
+        gifDismiss = null;
       }
     }
 
@@ -1029,10 +1037,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         },
       });
       root?.appendChild(gifPicker.element);
+      const dismiss = new Disposable();
+      gifDismiss = dismiss;
       const t2 = setTimeout(() => {
         activeTimers.delete(t2);
         if (!signal.aborted) {
-          document.addEventListener("mousedown", handleGifClickOutside);
+          document.addEventListener("mousedown", handleGifClickOutside, { signal: dismiss.signal });
         }
       }, 0);
       activeTimers.add(t2);

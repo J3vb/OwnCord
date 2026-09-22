@@ -180,10 +180,19 @@ function closeActivePopup(): void {
   }
 }
 
+// One outside-click owner per open menu: destroyed when the menu closes and
+// when the list is torn down.
+let menuDismiss: Disposable | null = null;
+
+function releaseMenuDismiss(): void {
+  menuDismiss?.destroy();
+  menuDismiss = null;
+}
+
 function handleOutsideClick(e: MouseEvent): void {
   if (activeMenu !== null && !activeMenu.element.contains(e.target as Node)) {
     closeActiveMenu();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
   }
 }
 
@@ -285,7 +294,7 @@ function createMemberItem(
       const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
       closeActiveMenu();
-      document.removeEventListener("mousedown", handleOutsideClick);
+      releaseMenuDismiss();
 
       // Roles come from the server's `ready` payload — a hardcoded list made
       // custom roles unreachable and, worse, unresolvable to a role id, so
@@ -318,8 +327,10 @@ function createMemberItem(
       document.body.appendChild(activeMenu.element);
 
       // Close on outside click (deferred so this click doesn't close it)
+      const dismiss = new Disposable();
+      menuDismiss = dismiss;
       setTimeout(() => {
-        document.addEventListener("mousedown", handleOutsideClick);
+        document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
       }, 0);
     },
     { signal },
@@ -520,7 +531,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   function destroy(): void {
     closeActiveMenu();
     closeActivePopup();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
     disposable.destroy();
     renderAc?.abort();
     renderAc = null;

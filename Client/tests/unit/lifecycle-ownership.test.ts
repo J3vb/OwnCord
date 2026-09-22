@@ -60,29 +60,6 @@ interface R4Entry {
 // R1: long-lived-target listeners without `signal`/`once: true`.
 const R1_ALLOWLIST: readonly R1Entry[] = [
   {
-    file: "components/MemberList.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason: "per-menu outside-click listener; hand-paired removeEventListener in createMemberItem",
-  },
-  {
-    file: "components/MessageInput.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason:
-      "per-picker outside-click listener; hand-paired removeEventListener in toggleEmojiPicker/toggleGifPicker",
-  },
-  {
-    file: "components/MessageInput.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason:
-      "per-picker outside-click listener; hand-paired removeEventListener in toggleEmojiPicker/toggleGifPicker",
-  },
-  {
     file: "components/message-list/attachments.ts",
     receiver: "window",
     event: "owncord:pref-change",
@@ -129,7 +106,8 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     receiver: "navigator.mediaDevices",
     event: "devicechange",
     category: "per-mount",
-    reason: "device-change listener with a start/stop pair (startDeviceChangeListener)",
+    reason:
+      "device-change listener with a start/stop pair (startDeviceChangeListener); stays hand-paired because device-manager.test.ts pins the bare add/remove call shape, and 11b edits no assertion",
   },
   {
     file: "lib/logger.ts",
@@ -200,20 +178,6 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     event: "beforeunload",
     category: "app-lifetime",
     reason: "app-bootstrap best-effort voice_leave at module load",
-  },
-  {
-    file: "pages/main-page/GlobalKeybinds.ts",
-    receiver: "document",
-    event: "keydown",
-    category: "per-mount",
-    reason: "attachGlobalKeybinds returns its own removeEventListener disposer",
-  },
-  {
-    file: "pages/main-page/OverlayManagers.ts",
-    receiver: "document",
-    event: "keydown",
-    category: "per-mount",
-    reason: "attach returns its own removeEventListener disposer and closes the overlay",
   },
 ];
 // R3: discarded `setTimeout` handles (expression statement or `void`).
@@ -801,9 +765,9 @@ describe("lifecycle ownership inventory (R1-R4)", () => {
     compare("R4", r4Found, keys(R4_ALLOWLIST));
   });
 
-  it("the allowlist categories are exactly the plan's (16 app-lifetime, 6 per-mount)", () => {
+  it("the allowlist categories are at their 11b floors (16 app-lifetime, 1 per-mount)", () => {
     expect(R1_ALLOWLIST.filter((e) => e.category === "app-lifetime")).toHaveLength(16);
-    expect(R1_ALLOWLIST.filter((e) => e.category === "per-mount")).toHaveLength(6);
+    expect(R1_ALLOWLIST.filter((e) => e.category === "per-mount")).toHaveLength(1);
     expect(R4_ALLOWLIST.filter((e) => e.category === "cancellation-token")).toHaveLength(8);
   });
 
