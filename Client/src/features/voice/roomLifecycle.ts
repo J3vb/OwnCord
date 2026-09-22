@@ -30,6 +30,7 @@ import {
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
 import type { SessionState } from "./sessionState";
+import { isLinuxDesktop } from "./native/platform";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -136,6 +137,7 @@ export class RoomLifecycle {
   private _e2eeWorker: Worker | null = null;
 
   async createRoom(channelId?: number): Promise<Room> {
+    if (isLinuxDesktop()) return this.createNativeRoom();
     // livekit's per-room E2EEManager registers a SetKey listener on the
     // shared key provider and never removes it; only those managers
     // subscribe, so clear them all before the new Room re-registers.
@@ -195,6 +197,31 @@ export class RoomLifecycle {
     // flag and it's a no-op today for the "" pre-connect identity, then wires
     // up for real once the SignalConnected handler has the real identity.
     await newRoom.setE2EEEnabled(true);
+    this.wireRoomEvents(newRoom);
+    return newRoom;
+  }
+
+  /** Linux: the Room is the Rust backend's (`src-tauri/src/native_voice/`),
+   *  driven through the NativeRoom adapter, which implements the slice of
+   *  `Room` the voice modules use. Loaded on demand so the native backend
+   *  never lands in the voice chunk on other platforms. The room key was
+   *  installed by the E2EE worker before this room connects, and the same
+   *  event wiring applies. */
+  private async createNativeRoom(): Promise<Room> {
+    const { createNativeRoom } = await import("./native/nativeRoom");
+    const nativeRoom = createNativeRoom({
+      echoCancellation: loadPref("echoCancellation", true),
+      noiseSuppression: loadPref("noiseSuppression", true),
+      autoGainControl: loadPref("autoGainControl", true),
+    });
+    // The adapter is structurally the subset of Room the modules call; the
+    // cast is the one seam where the two backends meet.
+    const newRoom = nativeRoom as unknown as Room;
+    this.wireRoomEvents(newRoom);
+    return newRoom;
+  }
+
+  private wireRoomEvents(newRoom: Room): void {
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     newRoom.on(RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
     newRoom.on(RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
@@ -220,8 +247,6 @@ export class RoomLifecycle {
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
     newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
-
-    return newRoom;
   }
 
   // --- Module wiring helper ---

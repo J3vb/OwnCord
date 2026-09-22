@@ -25,6 +25,9 @@ export const shards = {
     "src/features/voice/e2eePeerState.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/e2eeOffer.ts",
+    "src/features/voice/native/platform.ts",
+    "src/features/voice/native/counters.ts",
+    "src/features/voice/native/nativeRoom.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",

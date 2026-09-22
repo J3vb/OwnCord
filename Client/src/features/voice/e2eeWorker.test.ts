@@ -113,3 +113,51 @@ describe("E2EEWorker.applyCurrentRoomKey", () => {
     expect(setKey.mock.calls.map((c) => c[0])).toEqual(["b64:1", "b64:2"]);
   });
 });
+
+describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
+  it("sends the same base64 text to the native key provider, not the web one", async () => {
+    vi.resetModules();
+    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    const setRoomKey = vi.fn(async () => undefined);
+    vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { setRoomKey } } }));
+    const { E2EEWorker: LinuxWorker } = await import("./e2eeWorker");
+    const roomKey = new Uint8Array([9]);
+    const worker = new LinuxWorker({ getSessionGeneration: () => 0, getRoomKey: () => roomKey });
+    await expect(worker.applyRoomKey(roomKey)).resolves.toBe(true);
+    expect(setRoomKey).toHaveBeenCalledWith("b64:9");
+    expect(setKey).not.toHaveBeenCalled();
+    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../platform/desktop");
+  });
+});
+
+describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
+  it("lands before the next session's key, even when the clear is slow", async () => {
+    vi.resetModules();
+    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    const order: string[] = [];
+    const clearing = deferred();
+    const clearRoomKey = vi.fn(async () => {
+      await clearing.promise;
+      order.push("clear");
+    });
+    const setRoomKey = vi.fn(async (key: string) => {
+      order.push(`set ${key}`);
+    });
+    vi.doMock("../../platform/desktop", () => ({
+      desktop: { nativeVoice: { setRoomKey, clearRoomKey } },
+    }));
+    const { E2EEWorker: LinuxWorker } = await import("./e2eeWorker");
+    const nextKey = new Uint8Array([7]);
+    const worker = new LinuxWorker({ getSessionGeneration: () => 1, getRoomKey: () => nextKey });
+    worker.clearRoomKey();
+    const applied = worker.applyRoomKey(nextKey);
+    await Promise.resolve();
+    expect(setRoomKey).not.toHaveBeenCalled();
+    clearing.resolve();
+    await expect(applied).resolves.toBe(true);
+    expect(order).toEqual(["clear", "set b64:7"]);
+    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../platform/desktop");
+  });
+});
