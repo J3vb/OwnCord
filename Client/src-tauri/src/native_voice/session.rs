@@ -1,20 +1,25 @@
 //! One native LiveKit room: connect over the loopback proxy URL, E2EE with the
 //! room key the TypeScript key exchange hands over, microphone publish and
-//! remote playout through libwebrtc's audio device module (ADM), and a stream
-//! of room events for the webview. No Tauri types here so the interop example
+//! remote playout through libwebrtc's audio device module (ADM), camera
+//! publish and remote video through the session's frame socket
+//! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
 use std::sync::Arc;
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::TrackPublishOptions;
+use livekit::options::{TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
 use livekit::rtc_engine::lk_runtime::LkRuntime;
 use livekit::webrtc::audio_source::RtcAudioSource;
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
 use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+use livekit::webrtc::video_source::native::NativeVideoSource;
+use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
+
+use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
 /// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and rust-sdks #1280
@@ -240,6 +245,8 @@ pub struct Resources {
     pub rooms: usize,
     pub local_tracks: usize,
     pub adm_refs: usize,
+    /// Open frame-socket connections (remote renderers plus camera upload).
+    pub video_sockets: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
@@ -357,6 +364,18 @@ impl DeviceKind {
     }
 }
 
+/// How the camera is published, from the same presets the web path hands
+/// `publishTrack` (`CAMERA_PRESETS`, `CAMERA_PUBLISH_BITRATES`).
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraOptions {
+    pub width: u32,
+    pub height: u32,
+    pub max_bitrate: u64,
+    pub max_framerate: f64,
+    pub simulcast: bool,
+}
+
 pub fn process_threads() -> usize {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -373,6 +392,8 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
+    camera: Option<LocalTrackPublication>,
+    frames: FrameServer,
     input: Selection,
     output: Selection,
     forwarder: tokio::task::JoinHandle<()>,
@@ -399,16 +420,19 @@ impl NativeSession {
                 key_provider: key_provider.clone(),
             });
         }
+        let frames = FrameServer::bind().await?;
         let (room, events) = Room::connect(url, token, options)
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        let forwarder = tokio::spawn(forward_events(events, on_event));
+        let forwarder = tokio::spawn(forward_events(events, on_event, frames.observer()));
         Ok(Self {
             room,
             key_provider,
             audio: None,
             mic: None,
+            camera: None,
+            frames,
             input: Selection::default(),
             output: Selection::default(),
             forwarder,
@@ -426,6 +450,12 @@ impl NativeSession {
     /// webview-facing `Event`s deliberately leave out).
     pub fn subscribe_room_events(&self) -> UnboundedReceiver<RoomEvent> {
         self.room.subscribe()
+    }
+
+    /// The frame socket's base URL, token included: only the webview (via
+    /// the connect result) and the interop example may see it.
+    pub fn frames_url(&self) -> &str {
+        self.frames.url()
     }
 
     pub fn local_identity(&self) -> String {
@@ -550,6 +580,60 @@ impl NativeSession {
         Ok(())
     }
 
+    /// Publish the camera. Its frames arrive on the frame socket's `camera`
+    /// route (the webview's `getUserMedia` track, uploaded by
+    /// `cameraUplink.ts`); E2EE covers the track exactly as it covers the
+    /// microphone, through the room's one key provider. A camera already
+    /// published is replaced.
+    pub async fn publish_camera(&mut self, opts: CameraOptions) -> Result<(), String> {
+        self.unpublish_camera().await;
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: opts.width,
+                height: opts.height,
+            },
+            false,
+        );
+        let track =
+            LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(
+                LocalTrack::Video(track),
+                TrackPublishOptions {
+                    source: TrackSource::Camera,
+                    simulcast: opts.simulcast,
+                    video_encoding: Some(VideoEncoding {
+                        max_bitrate: opts.max_bitrate,
+                        max_framerate: opts.max_framerate,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        self.frames.set_camera(Some(source));
+        self.camera = Some(publication);
+        Ok(())
+    }
+
+    /// Unpublish the camera (the web path unpublishes rather than mutes, so
+    /// remote tiles close the same way). The upload socket ends with it.
+    pub async fn unpublish_camera(&mut self) {
+        self.frames.set_camera(None);
+        if let Some(publication) = self.camera.take() {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.sid())
+                .await
+            {
+                log::warn!("[native_voice] camera unpublish: {e}");
+            }
+        }
+    }
+
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
         &mut self,
@@ -639,15 +723,18 @@ impl NativeSession {
     pub fn resources(&self) -> Resources {
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some()),
+            local_tracks: usize::from(self.mic.is_some()) + usize::from(self.camera.is_some()),
             adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
+            video_sockets: self.frames.sockets(),
             threads: process_threads(),
         }
     }
 
     /// Leave the room and release every native handle. Dropping the last
-    /// `PlatformAudio` disables the ADM.
+    /// `PlatformAudio` disables the ADM; dropping the frame server closes
+    /// its listener and every frame socket.
     pub async fn close(mut self) {
+        self.unpublish_camera().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
                 .room
@@ -663,8 +750,15 @@ impl NativeSession {
     }
 }
 
-async fn forward_events(mut events: UnboundedReceiver<RoomEvent>, on_event: EventSink) {
+async fn forward_events(
+    mut events: UnboundedReceiver<RoomEvent>,
+    on_event: EventSink,
+    frames: Observer,
+) {
     while let Some(ev) = events.recv().await {
+        // Before the webview hears of a video track, so its frame socket
+        // finds it.
+        frames.observe(&ev);
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }

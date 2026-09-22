@@ -17,7 +17,7 @@ export default defineConfig({
   reporter: [["list"], ["junit", { outputFile: "test-results/native-voice.xml" }]],
   use: {
     ...devices["Desktop Chrome"],
-    permissions: ["microphone"],
+    permissions: ["microphone", "camera"],
     launchOptions: {
       args: [
         "--use-fake-device-for-media-stream",
