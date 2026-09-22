@@ -4,7 +4,7 @@
 //! publish and remote video through the session's frame socket
 //! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
@@ -387,12 +387,37 @@ pub fn process_threads() -> usize {
         .unwrap_or(0)
 }
 
+/// The published camera. `issued` is the sid the webview was handed and must
+/// name to unpublish; `live` follows the SDK's republish after a full
+/// reconnect, which re-issues the sid of the same track.
+struct CameraPublication {
+    issued: String,
+    live: TrackSid,
+}
+
+impl CameraPublication {
+    fn new(sid: TrackSid) -> Self {
+        Self {
+            issued: sid.to_string(),
+            live: sid,
+        }
+    }
+
+    fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
+        if self.live == *previous {
+            self.live = sid;
+        }
+    }
+}
+
+type CameraSlot = Arc<Mutex<Option<CameraPublication>>>;
+
 pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
-    camera: Option<LocalTrackPublication>,
+    camera: CameraSlot,
     frames: FrameServer,
     input: Selection,
     output: Selection,
@@ -425,13 +450,19 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        let forwarder = tokio::spawn(forward_events(events, on_event, frames.observer()));
+        let camera = CameraSlot::default();
+        let forwarder = tokio::spawn(forward_events(
+            events,
+            on_event,
+            frames.observer(),
+            camera.clone(),
+        ));
         Ok(Self {
             room,
             key_provider,
             audio: None,
             mic: None,
-            camera: None,
+            camera,
             frames,
             input: Selection::default(),
             output: Selection::default(),
@@ -614,21 +645,23 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
-        let sid = publication.sid().to_string();
+        let sid = publication.sid();
         self.frames.set_camera(Some(source));
-        self.camera = Some(publication);
-        Ok(sid)
+        *self.camera.lock().unwrap() = Some(CameraPublication::new(sid.clone()));
+        Ok(sid.to_string())
     }
 
     /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
     /// remote tiles close the same way). A stale sid, one a later publish
     /// already replaced, is a no-op: it must not remove the newer camera.
     pub async fn unpublish_camera(&mut self, sid: &str) {
-        if self
+        let issued = self
             .camera
+            .lock()
+            .unwrap()
             .as_ref()
-            .is_some_and(|p| p.sid().to_string() == sid)
-        {
+            .is_some_and(|c| c.issued == sid);
+        if issued {
             self.release_camera().await;
         }
     }
@@ -636,11 +669,12 @@ impl NativeSession {
     /// Unpublish whatever camera is published. The upload socket ends with it.
     async fn release_camera(&mut self) {
         self.frames.set_camera(None);
-        if let Some(publication) = self.camera.take() {
+        let camera = self.camera.lock().unwrap().take();
+        if let Some(camera) = camera {
             if let Err(e) = self
                 .room
                 .local_participant()
-                .unpublish_track(&publication.sid())
+                .unpublish_track(&camera.live)
                 .await
             {
                 log::warn!("[native_voice] camera unpublish: {e}");
@@ -737,7 +771,8 @@ impl NativeSession {
     pub fn resources(&self) -> Resources {
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some()) + usize::from(self.camera.is_some()),
+            local_tracks: usize::from(self.mic.is_some())
+                + usize::from(self.camera.lock().unwrap().is_some()),
             adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
             video_sockets: self.frames.sockets(),
             threads: process_threads(),
@@ -768,8 +803,19 @@ async fn forward_events(
     mut events: UnboundedReceiver<RoomEvent>,
     on_event: EventSink,
     frames: Observer,
+    camera: CameraSlot,
 ) {
     while let Some(ev) = events.recv().await {
+        if let RoomEvent::LocalTrackRepublished {
+            previous_sid,
+            publication,
+            ..
+        } = &ev
+        {
+            if let Some(c) = camera.lock().unwrap().as_mut() {
+                c.republished(previous_sid, publication.sid());
+            }
+        }
         // Before the webview hears of a video track, so its frame socket
         // finds it.
         frames.observe(&ev);
@@ -940,6 +986,18 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
+    }
+
+    #[test]
+    fn camera_unpublish_follows_its_republished_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut camera = CameraPublication::new(sid("TR_a"));
+        camera.republished(&sid("TR_mic"), sid("TR_mic2"));
+        assert_eq!(camera.live, sid("TR_a"), "another track's republish");
+        camera.republished(&sid("TR_a"), sid("TR_b"));
+        camera.republished(&sid("TR_b"), sid("TR_c"));
+        assert_eq!(camera.live, sid("TR_c"));
+        assert_eq!(camera.issued, "TR_a", "the webview still names TR_a");
     }
 
     #[test]
