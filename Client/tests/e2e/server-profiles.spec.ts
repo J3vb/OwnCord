@@ -146,6 +146,16 @@ test.describe("Server profiles — Add Server modal", () => {
     await expect(page.locator(".server-item[data-host='2001:db8::1']")).toBeVisible();
   });
 
+  test("accepts a bracketed IPv6 host with a port", async ({ page }) => {
+    await openModal(page);
+    await nameInput(page).fill("V6 Bracketed");
+    await hostInput(page).fill("[::1]:8443");
+    await saveButton(page).click();
+
+    await expect(page.locator("#add-server-title")).toBeHidden();
+    await expect(page.locator(".server-item[data-host='[::1]:8443']")).toBeVisible();
+  });
+
   test("cancel closes without adding a profile", async ({ page }) => {
     await openModal(page);
     await nameInput(page).fill("Discarded");
