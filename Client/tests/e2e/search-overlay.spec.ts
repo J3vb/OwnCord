@@ -95,8 +95,8 @@ async function mockSessionWithSearch(page: Page, searchResults: unknown): Promis
   );
 }
 
-/** Query strings of every `/search` request the client has issued, in order. */
-async function searchQueries(page: Page): Promise<string[]> {
+/** Params of every `/search` request the client has issued, in order. */
+async function searchRequests(page: Page): Promise<Array<{ q: string; channelId: string }>> {
   return page.evaluate(() =>
     (
       window as unknown as {
@@ -106,22 +106,15 @@ async function searchQueries(page: Page): Promise<string[]> {
       .filter((e) => e.cmd === "plugin:http|fetch")
       .map((e) => e.args?.clientConfig?.url ?? "")
       .filter((url) => url.includes("/search"))
-      .map((url) => new URL(url).searchParams.get("q") ?? ""),
+      .map((url) => {
+        const params = new URL(url).searchParams;
+        return { q: params.get("q") ?? "", channelId: params.get("channel_id") ?? "" };
+      }),
   );
 }
 
-async function searchChannelIds(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    (
-      window as unknown as {
-        __invokeLog: Array<{ cmd: string; args?: { clientConfig?: { url?: string } } }>;
-      }
-    ).__invokeLog
-      .filter((e) => e.cmd === "plugin:http|fetch")
-      .map((e) => e.args?.clientConfig?.url ?? "")
-      .filter((url) => url.includes("/search"))
-      .map((url) => new URL(url).searchParams.get("channel_id") ?? ""),
-  );
+async function searchQueries(page: Page): Promise<string[]> {
+  return (await searchRequests(page)).map((r) => r.q);
 }
 
 const OVERLAY = "[data-testid='search-overlay']";
@@ -165,16 +158,23 @@ test.describe("Search overlay", () => {
   test("input is debounced, then sends the final query once, scoped to the channel", async ({
     page,
   }) => {
+    // Freeze time so the burst below lands inside one debounce window no
+    // matter how slowly the runner delivers the keystrokes. The clock runs
+    // until the overlay is open: its input is focused in a rAF callback.
+    await page.clock.install();
     await openOverlay(page);
+    await page.clock.pauseAt(Date.now() + 1_000);
 
-    // A burst faster than the 300ms debounce window. Debounce and the 500ms
-    // rate limiter each collapse it; drop both and this fires per keystroke
-    // past the 2-char minimum ("he", "hel", "hell", "hello"), failing the poll.
-    await page.locator(INPUT).pressSequentially("hello", { delay: 20 });
+    await page.locator(INPUT).pressSequentially("hello");
 
-    await expect.poll(() => searchQueries(page)).toEqual(["hello"]);
-    // Scoped to the active channel (#general = 1), not a global search.
-    expect(await searchChannelIds(page)).toEqual(["1"]);
+    // Nothing is sent until the 300ms window has elapsed since the last key.
+    await page.clock.runFor(299);
+    expect(await searchRequests(page)).toEqual([]);
+
+    // Then exactly one request, carrying the final query, scoped to the active
+    // channel (#general = 1) rather than a global search.
+    await page.clock.runFor(1);
+    await expect.poll(() => searchRequests(page)).toEqual([{ q: "hello", channelId: "1" }]);
   });
 
   test("a below-minimum query shows the hint and clears prior results", async ({ page }) => {
