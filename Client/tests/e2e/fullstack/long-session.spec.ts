@@ -39,22 +39,17 @@ const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
 /**
  * The per-cycle slope ceiling for a metric with a known base leak.
  *
- * The plan's cycle logs out and back in every 10 cycles. With the sample taken
- * after the reset (as the plan's schedule implies), the raw series alternated
- * between the mid-session and post-logout states, so `nodes` and `listeners`
- * breached the pooled slope bar. The reviewer's fix for that blind spot was to
- * take the sample *before* the reset steps, making every sample the same settled
- * mid-session state; the clean run is then flat (listeners slope 0, nodes slope
- * −3.6 to −6.3 per cycle over five calibration runs).
- *
- * The two metrics are still ratcheted rather than left at the plan's 0.05: the
- * ratchet is a small margin above that measured slope, so any growth past it
- * fails the PR soak. The planted-listener control (a settings-tab mount adding
- * an unowned `window` listener every cycle) drives the nodes slope to ~25/cycle
- * and fails. 11c's Task 12 fixes the underlying leak and removes these entries,
- * returning both to the plan bar.
+ * `evaluateBars` groups samples by their phase in the 10-cycle login generation,
+ * so the post-logout series (cycles 10/20) carries the known logout-path leak:
+ * about one listener and 1.6 nodes per logout/login. Rather than leaving the two
+ * metrics at the plan's 0.05, each is ratcheted a small margin above that
+ * measured per-cycle slope, so any further growth fails the PR soak. The
+ * calibration runs, the planted-listener control and the at-head runs are in
+ * docs/plans/b7-0-client-baseline-2026-09-19.md ("Soak calibration"). 11c's
+ * Task 12 fixes the leak and removes these entries, returning both to the plan
+ * bar.
  */
-const PENDING_METRICS: SlopeCeilings = { listeners: 0.5, nodes: 8 };
+const PENDING_METRICS: SlopeCeilings = { listeners: 0.15, nodes: 2 };
 
 // The reconnect and logout steps deliberately drop the socket, so the client
 // logs its own transport failure while it is offline. Only the exact messages

@@ -366,15 +366,17 @@ slope. Slopes are regressed on the cycle number, so the "per cycle" label is
 literal (review finding `slope-units`).
 
 **Ceilings.** `nodes` and `listeners` carry the known logout-path leak (below),
-so rather than leaving them at the plan's 0.05 they are ratcheted at the
-decision's example ceilings — listeners 0.5/cycle and nodes 8/cycle, about 5× the
-measured 0.1 and 1.6. Any growth past that fails the PR soak; 11c's Task 12
-fixes the leak and removes the ceilings, returning both to 0.05.
+so rather than leaving them at the plan's 0.05 they are ratcheted a small margin
+above their measured per-cycle slopes: listeners 0.15/cycle and nodes 2/cycle
+(measured 0.1 and 1.6, run-to-run spread 0). Any growth past that fails the PR
+soak; 11c's Task 12 fixes the leak and removes the ceilings, returning both to
+0.05.
 
-**Five 20-cycle runs at the final head** (`03570460`; run after the fix commit
-was authored, before it was committed — the code under test is the branch's
-final state). All five passed; every count metric was identical across them
-(run-to-run spread 0 on all counts):
+**Five 20-cycle calibration runs** on the uncommitted working tree that became
+`7eaa1570` (on top of `03570460`), under the earlier 0.5/8 ceilings. Their
+numbers are the committed phase-grouped evaluation's output (the ceilings do not
+change what is measured). All five passed; every count metric was identical
+across them (run-to-run spread 0 on all counts):
 
 | Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
 | --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
@@ -412,8 +414,25 @@ are counted by `!signal.aborted` rather than reachability (the media probe keeps
 every peer, track and socket it sees, so "reachable" never falls — the plan's
 own trap).
 
-**Proved able to fail.** A throwaway `window.addEventListener("resize", …)` in
-the Account tab's mount (added on every settings visit, so every cycle) drove the
-mid-session nodes slope to 12/cycle, past the 8/cycle ceiling, and the soak
-reported the nodes bar red (`phase 5: 6087→6207`). The plant was then removed; no
-production file is changed in 11a.
+**Runs at the 0.15/2 ceilings** (`7eaa1570` plus the working-tree change that
+sets these ceilings; nothing else differs):
+
+- **Planted control, failed as intended, but on nodes only.** A throwaway
+  `window.addEventListener("resize", () => void section)` in the Account tab's
+  mount (added on every settings visit, so every cycle) failed the soak on the
+  nodes bar (`phase 5: 6087→6207`, 12/cycle against the 2/cycle ceiling). The
+  **listeners bar stayed green** (phase 5 `217→217`, worst slope 0.1): the samples
+  were c0 191, c5 217, c10 193, c15 217, c20 194. The plant grows listeners
+  within a login generation (c5 is +6 over the clean 211), but the soak's
+  re-login goes through `login()` in `tests/e2e/fullstack/fixtures.ts`, which
+  calls `page.goto("/")`. That is a full navigation, so every 10-cycle generation
+  starts on a fresh page and the plant's listeners are dropped. The phase-grouped
+  bars compare c5 against c15, both 5 cycles into a fresh page, so a leak that
+  only lives within one page cannot move them. Only growth that outlives the
+  navigation is visible. This is unresolved in 11a and left to the owner. The
+  likely fix is an in-app re-login with no navigation, which needs a fresh
+  calibration. The plant was then removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, passed.** nodes 3489 → 3453 (−3.6), listeners 192 → 193
+  (0.1), AbortControllers 20, heap slope 11 762; documents, intervals and timeouts
+  1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
+  the five calibration runs.
