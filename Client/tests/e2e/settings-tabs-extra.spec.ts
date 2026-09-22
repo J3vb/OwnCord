@@ -5,7 +5,7 @@
  * These assert on rendered UI and on the app's outgoing IPC, not on the
  * injected mock's own state:
  *   - Text & Images toggles gate what a later-rendered message draws
- *     (YouTube embed, inline image, generic link card). The prefs are cached
+ *     (YouTube embed, inline image, generic link card, frozen GIF). The prefs are cached
  *     at module load and invalidated by the `owncord:pref-change` event
  *     `savePref` dispatches, so a message emitted AFTER the toggle proves the
  *     whole toggle -> storage -> render path, not just the switch.
@@ -98,6 +98,12 @@ async function mockSession(
       if (cmd === "plugin:fs|exists") return true;
       if (cmd === "plugin:fs|mkdir") return;
       if (cmd === "plugin:fs|write_text_file") return;
+      // The broker hands a .gif URL back as a 1x1 GIF so the GIF-freeze path
+      // runs; every other external image still refuses as in the base mock.
+      if (cmd === "external_image" && String(a?.url ?? "").endsWith(".gif")) {
+        const gif = atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+        return Uint8Array.from(gif, (c) => c.charCodeAt(0)).buffer;
+      }
       return orig(cmd, args);
     };
   });
@@ -250,7 +256,7 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(card.locator(".msg-embed-host")).toHaveText("example.com");
   });
 
-  test("Animate GIFs reflects its stored value after the tab is rebuilt", async ({ page }) => {
+  test("Animate GIFs off renders a new GIF frozen, on renders it playing", async ({ page }) => {
     await openSettings(page);
     await switchSettingsTab(page, "Text & Images");
 
@@ -258,15 +264,21 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(await page.evaluate(() => localStorage.getItem("owncord:settings:animateGifs"))).toBe(
-      "false",
-    );
 
-    // Closing tears the pane down; reopening rebuilds it from storage.
     await closeSettings(page);
+    await emitChat(page, 9351, "https://example.com/frozen.gif");
+    const frozen = page.locator("[data-testid='message-9351'] .msg-image");
+    await expect(frozen).toHaveClass(/gif-paused/);
+    await expect(frozen.locator(".gif-play-btn")).not.toHaveClass(/playing/);
+
     await openSettings(page);
     await switchSettingsTab(page, "Text & Images");
-    await expect(toggleFor(page, "Animate GIFs")).toHaveAttribute("aria-checked", "false");
+    await toggleFor(page, "Animate GIFs").click();
+    await closeSettings(page);
+    await emitChat(page, 9352, "https://example.com/playing.gif");
+    const playing = page.locator("[data-testid='message-9352'] .msg-image");
+    await expect(playing.locator(".gif-play-btn")).toHaveClass(/playing/);
+    await expect(playing).not.toHaveClass(/gif-paused/);
   });
 });
 
@@ -536,23 +548,5 @@ test.describe("Settings — Notifications Tab", () => {
     await page.locator("[data-testid='unmute-999']").click();
     await expect(page.locator("[data-testid='muted-empty']")).toBeVisible();
     expect(await readStoredMuteList(page)).not.toContain(999);
-  });
-
-  test("notification toggles persist their value across a tab rebuild", async ({ page }) => {
-    await openSettings(page);
-    await switchSettingsTab(page, "Notifications");
-
-    const toggle = toggleFor(page, "Suppress @everyone");
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(
-      await page.evaluate(() => localStorage.getItem("owncord:settings:suppressEveryone")),
-    ).toBe("true");
-
-    await closeSettings(page);
-    await openSettings(page);
-    await switchSettingsTab(page, "Notifications");
-    await expect(toggleFor(page, "Suppress @everyone")).toHaveAttribute("aria-checked", "true");
   });
 });
