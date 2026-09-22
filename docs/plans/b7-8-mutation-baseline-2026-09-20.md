@@ -447,3 +447,120 @@ range each moved block came from:
 `transport-auth` shard list, and `check-mutation-shards.mjs` reports the union
 exact (93 files). Client suite: 257 files / 5 911 passed + 140 expected fail
 at `be7a0594`; 264 / 5 955 + 140 after.
+
+## B7-10b post-split measurement (evidence append, 2026-09-22)
+
+B7-10b (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+Tasks 9–14) moved `src/stores/messages.store.ts`'s reducer bodies into pure
+`(prev, …) => next` functions under `src/features/messaging/`:
+`messageModel.ts` (types, converters, cap, initial state), `echoReconcile.ts`,
+`liveMessages.ts`, `historyWindows.ts`, `messageEdits.ts` and
+`reactionState.ts`. The store keeps the instance, every mutator name and
+signature (each now `messagesStore.setState((prev) => reduceX(prev, …))`, still
+22 sites), the selectors and the re-exported types. Same machine, Node 26.9.0
+and Stryker 10.0.0 as B7-10a, from `Client/`:
+
+```bash
+# before: dev at b6a5360f (B7-10a merged; messages.store.ts unchanged since 92242f4a) (20 m 25 s)
+npx stryker run --mutate "src/stores/messages.store.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+# after: fm/b7-10b-impl after Task 13 (11 m 17 s)
+npx stryker run --mutate "src/stores/messages.store.ts,src/features/messaging/*.ts,!src/features/messaging/wsHandlers.ts,!src/**/*.test.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+| Scope                                       | Before: mutants / errors / score | After: mutants / errors / score |
+| ------------------------------------------- | -------------------------------: | ------------------------------: |
+| `messages.store` (facade + extracted files) |              788 / 244 / 83.64 % |             811 / 269 / 91.88 % |
+
+The before-number reproduces the plan's re-measured 83.64 % exactly (451
+killed, 4 timeout, 89 survived). **The pass rule holds:** 91.88 % is 8.24
+points above it, and the mutant total rose 2.9 %, inside the plan's 3 % band.
+The 23 extra mutants are not rewritten code. Each mutator is now an arrow
+that passes its arguments to a reducer, and each reducer has its own function
+block, so the wrappers add `CompileError`s (an emptied argument list or a
+removed call is ill-typed): errors rose 244 → 269, while valid mutants went
+544 → 542 (killed 451 → 494, survived 89 → 44).
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file (the before run's mutants bucketed by the original line range
+each moved block came from; a mutator's own signature block, the
+`bulkDeleteMessages` empty-ids guard and `rollbackReaction`'s `found` flag
+stayed in the facade and are bucketed there):
+
+| Module (after)                      | Before, same code |    After |     Δ |
+| ----------------------------------- | ----------------: | -------: | ----: |
+| `features/messaging/messageModel`   |          100.00 % | 100.00 % |     0 |
+| `features/messaging/echoReconcile`  |           68.12 % |  89.86 % | +21.7 |
+| `features/messaging/liveMessages`   |           81.09 % |  88.83 % |  +7.7 |
+| `features/messaging/historyWindows` |           88.16 % |  91.22 % |  +3.1 |
+| `features/messaging/messageEdits`   |          100.00 % | 100.00 % |     0 |
+| `features/messaging/reactionState`  |           85.29 % | 100.00 % | +14.7 |
+| `stores/messages.store` (facade)    |           96.55 % |  94.12 % |  −2.4 |
+
+- **The rises are the colocated `src/features/messaging/*.test.ts` suites**
+  (six files, 101 cases), which drive each reducer directly — for example the
+  `echoNormalize` entity/tag table, `prev`-identity returns on every no-op
+  path, and the reaction rollback's inverse delta. The oracle suites are
+  unedited: `tests/unit/messages.store.test.ts` (131 cases),
+  `messages-store-detached.test.ts` (21) and `dispatcher.test.ts` (188).
+- **The facade's drop is two surviving mutants, neither new behaviour left
+  untested.** `if (payload.ids.length === 0) return;` → `false` in
+  `bulkDeleteMessages` survived before the split as well: without the guard the
+  reducer still returns `prev`, so it is equivalent. `let found = false` → `true`
+  in `rollbackReaction` was killed before and survives now, because the reducer
+  returns `{ next, found }` and the wrapper always overwrites the initial value
+  inside the updater. It is dead unless `setState` defers the updater
+  (a re-entrant call from a subscriber), which the store has never had a test
+  for. The remaining new facade mutants are wiring, all killed or
+  `CompileError`.
+- **Errors stay excluded from the denominator**, the same `CompileError` class
+  as caveat 2 above.
+
+Jev triage of the after report (typesafe.ai `jev-latest`, used as a sorting
+aid and not as a gate; 313 requests, 0 errors, 272 556 input tokens, 26 s):
+
+| Status       | Jev category   | conf ≥ 0.8 | conf < 0.8 |
+| ------------ | -------------- | ---------: | ---------: |
+| CompileError | `type-invalid` |        269 |          0 |
+| Survived     | `test-gap`     |         38 |          3 |
+| Survived     | `equivalent`   |          0 |          3 |
+
+All 269 `CompileError`s and the 38 high-confidence `test-gap`s are
+auto-accepted; 6 survivors are left for review. The high-confidence `test-gap`
+list, by module:
+
+- `echoReconcile.ts`: the `&#39;` replacement string (`:13`), the `"<"`
+  probe in `stripTags` (`:24`), the fixpoint loop's `i++` (`:55`) and its
+  `next === cur` exit (`:57`), the `failed`+`OFFLINE` clause (`:94`) and the
+  exact-content short-circuit (`:97`).
+- `historyWindows.ts`: the cap comparisons in `reduceSetMessages` (`:40`),
+  `reduceSetAroundMessages` (`:123`) and `reducePrependMessages` (`:225`);
+  `snapshotIds.has` (`:62`); the `carried.length > 0` ternaries (`:69`,
+  `:137`, `:229`); `m.id > maxWindowId` (`:135`); `if (wasTrimmed)` (`:226`).
+- `liveMessages.ts`: the client-id twin guard in `reduceAddMessage` (`:26`, ×2);
+  `reduceMarkSendFailed`'s fallback scan (`:116`, `:118`);
+  `reduceRemoveOptimistic`'s registered branch (`:148`); `reduceConfirmSend`'s
+  fallback lookup and match predicates (`:181`, `:186`–`:188`, `:205`,
+  `:209`–`:211`, 15 mutants); `findSendChannel`'s `rows.some` (`:253`).
+- `messages.store.ts`: the empty-ids guard (`:276`), which is equivalent (see
+  above) — a Jev false positive.
+
+For review: `echoReconcile.ts:55` `i <= 20` (test-gap 0.67),
+`historyWindows.ts:123` `>=` (test-gap 0.78), the three `carried.length >= 0`
+mutants at `historyWindows.ts:69,137,229` (equivalent 0.60 / 0.29 / 0.70) and
+`messages.store.ts:353` `found = true` (test-gap 0.45). Most of the
+`carried.length > 0 ? … : trimmed` and `m.status !== "sent"` mutants Jev calls
+`test-gap` produce an equal array or match only rows that cannot occur, so
+several are likely equivalent; they are recorded here, not fixed, since B7-10b
+moves code and adds no behaviour.
+
+The `stores` shard after the split, `STRYKER_SHARD=stores npx stryker run
+stryker.shard.config.mjs --reporters clear-text,json,progress --ignorePatterns src-tauri`
+(23 m 13 s): 15 files, 1 950 mutants, 1 091 killed, 4 timeout, 114 survived,
+4 no coverage, 737 errors — **90.27 %**, against 86.60 % over 9 files and
+1 918 mutants in the B7-8 table above.
+
+`stryker.ci.config.mjs` is unchanged. The six new modules are in the `stores`
+shard list, and `check-mutation-shards.mjs` reports the union exact (99 files).
+The startup closure is 90 428 B at `b6a5360f` and 90 565 B after (+137 B,
+budget 91 000 B). Client suite after: 272 files / 6 090 passed + 140 expected fail — the six new
+colocated files (101 cases) on top of `b6a5360f`.
