@@ -366,10 +366,21 @@ test.describe("Link preview", () => {
     // No stub for LINK_URL: the broker refuses it as "unavailable".
     await bootMedia(page, {});
 
+    await expect
+      .poll(async () =>
+        (await brokerCalls(page)).some(
+          (c) => c.cmd === "external_preview" && c.args.url === LINK_URL,
+        ),
+      )
+      .toBe(true);
+
     const card = page.locator("[data-testid='message-203'] .msg-embed-link");
     await expect(card).toBeVisible();
+    await expect(card.locator(".msg-embed-link-desc")).toHaveCSS("display", "none");
     await expect(card.locator(".msg-embed-link-title")).toHaveText("example.com");
+    await expect(card.locator(".msg-embed-host")).toHaveText("example.com");
     await expect(card.locator(".msg-embed-link-image")).toBeHidden();
+    await expect(card.locator(".msg-embed-link-img")).toHaveCount(0);
   });
 });
 
