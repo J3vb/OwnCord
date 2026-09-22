@@ -210,12 +210,16 @@ re-list through the native backend.
 device switch during a slow join proceeds, and a connect that a newer one
 superseded closes its own room and reports it.
 
-**Still out.** Input volume and the sensitivity (VAD) gate: the device-module
-track is a plain libwebrtc `LocalAudioSource`, which never hands capture frames
-to a sink, so neither a gain stage nor a level gate can be applied on the
-native capture path without either the app's own capture pipeline (capture →
-gain/VAD → APM with a reverse stream → `NativeAudioSource`, the report's 1b
-sketch) or a patched `webrtc-sys`. Per-user volume (no per-track gain in the
+**Still out, by owner decision (2026-09-22).** Input volume and the
+sensitivity (VAD) gate: the device-module track is a plain libwebrtc
+`LocalAudioSource`, which never hands capture frames to a sink, so neither a
+gain stage nor a level gate can be applied on the native capture path without
+either the app's own capture pipeline (capture → gain/VAD → APM with a reverse
+stream → `NativeAudioSource`, the report's 1b sketch) or a patched
+`webrtc-sys`. Linux relies on the engine's automatic gain control and Opus DTX
+instead, and the settings tab hides the Input Volume, Input Sensitivity, Output
+Volume and Enhanced Noise Suppression controls there with a note pointing at
+the system mixer; the three APM toggles stay and apply at the next join. Per-user volume (no per-track gain in the
 module), camera and screen share also remain later phases. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
 (PR livekit/rust-sdks#1408, open, CLA unsigned) that detaches the frame
