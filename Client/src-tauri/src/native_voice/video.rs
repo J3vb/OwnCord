@@ -12,9 +12,12 @@
 //!
 //! Routes, each one WebSocket:
 //! - `/<token>/remote/<track sid>`: decoded frames of one subscribed remote
-//!   video track, server to webview, as [`pack_i420`] messages. Only the
-//!   latest frame is kept, so a slow renderer drops frames instead of
-//!   queueing them.
+//!   video track, server to webview, as [`pack_i420`] messages. The webview
+//!   acknowledges each frame it has drawn with any data message, and the
+//!   next frame is sent only after that ack; meanwhile only the latest
+//!   decoded frame is kept, so a slow renderer drops frames instead of
+//!   queueing them anywhere (the webview's socket reads eagerly, so TCP
+//!   backpressure alone would not).
 //! - `/<token>/camera`: the local camera, webview to server, as
 //!   [`parse_upload`] messages fed to the published camera source.
 use std::collections::HashMap;
@@ -238,25 +241,42 @@ async fn serve(stream: tokio::net::TcpStream, token: String, shared: Arc<Shared>
 type Ws = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
 async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
-    let (mut tx, mut rx) = ws.split();
-    // The default queue is one frame: the latest replaces an unsent one.
     let mut frames = NativeVideoStream::new(track.rtc_track());
+    send_acked(ws, &mut frames, |frame| pack_i420(&frame.buffer.to_i420())).await;
+    frames.close();
+}
+
+/// Send `frames` one at a time, each only after the previous one was
+/// acknowledged, keeping just the latest while waiting.
+async fn send_acked<S: futures_util::Stream + Unpin>(
+    ws: Ws,
+    frames: &mut S,
+    pack: impl Fn(S::Item) -> Vec<u8>,
+) {
+    let (mut tx, mut rx) = ws.split();
+    let mut acked = true;
+    let mut latest = None;
     loop {
         tokio::select! {
             frame = frames.next() => {
                 let Some(frame) = frame else { break };
-                let packed = pack_i420(&frame.buffer.to_i420());
-                if tx.send(Message::Binary(packed.into())).await.is_err() {
-                    break;
-                }
+                latest = Some(frame);
             }
             msg = rx.next() => match msg {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(Message::Binary(_) | Message::Text(_))) => acked = true,
                 Some(Ok(_)) => {}
             },
         }
+        if acked {
+            if let Some(frame) = latest.take() {
+                acked = false;
+                if tx.send(Message::Binary(pack(frame).into())).await.is_err() {
+                    break;
+                }
+            }
+        }
     }
-    frames.close();
 }
 
 async fn receive_camera(ws: Ws, shared: &Shared) {
@@ -416,6 +436,47 @@ mod tests {
         assert_eq!(route(&format!("/{token}/remote/"), &token), None);
         assert_eq!(route(&format!("/{token}/camera/extra"), &token), None);
         assert_eq!(route(&format!("/{token}"), &token), None);
+    }
+
+    /// The next binary message, or `None` if none arrives within 200 ms.
+    async fn recv<S, E>(ws: &mut S) -> Option<Vec<u8>>
+    where
+        S: futures_util::Stream<Item = Result<Message, E>> + Unpin,
+    {
+        match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
+            Ok(Some(Ok(Message::Binary(data)))) => Some(data.to_vec()),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_frames_wait_for_an_ack_and_skip_to_the_latest() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (push, mut queue) = tokio::sync::mpsc::unbounded_channel::<u8>();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut frames = futures_util::stream::poll_fn(move |cx| queue.poll_recv(cx));
+            send_acked(ws, &mut frames, |n| vec![n]).await;
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+
+        push.send(1).unwrap();
+        assert_eq!(recv(&mut client).await, Some(vec![1]));
+        push.send(2).unwrap();
+        push.send(3).unwrap();
+        assert_eq!(
+            recv(&mut client).await,
+            None,
+            "sent before the renderer acked"
+        );
+        client
+            .send(Message::Binary(Vec::new().into()))
+            .await
+            .unwrap();
+        assert_eq!(recv(&mut client).await, Some(vec![3]));
+        server.abort();
     }
 
     #[test]

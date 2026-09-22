@@ -584,9 +584,10 @@ impl NativeSession {
     /// route (the webview's `getUserMedia` track, uploaded by
     /// `cameraUplink.ts`); E2EE covers the track exactly as it covers the
     /// microphone, through the room's one key provider. A camera already
-    /// published is replaced.
-    pub async fn publish_camera(&mut self, opts: CameraOptions) -> Result<(), String> {
-        self.unpublish_camera().await;
+    /// published is replaced. Returns the publication's sid, which
+    /// [`Self::unpublish_camera`] takes.
+    pub async fn publish_camera(&mut self, opts: CameraOptions) -> Result<String, String> {
+        self.release_camera().await;
         let source = NativeVideoSource::new(
             VideoResolution {
                 width: opts.width,
@@ -613,14 +614,27 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
+        let sid = publication.sid().to_string();
         self.frames.set_camera(Some(source));
         self.camera = Some(publication);
-        Ok(())
+        Ok(sid)
     }
 
-    /// Unpublish the camera (the web path unpublishes rather than mutes, so
-    /// remote tiles close the same way). The upload socket ends with it.
-    pub async fn unpublish_camera(&mut self) {
+    /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
+    /// remote tiles close the same way). A stale sid, one a later publish
+    /// already replaced, is a no-op: it must not remove the newer camera.
+    pub async fn unpublish_camera(&mut self, sid: &str) {
+        if self
+            .camera
+            .as_ref()
+            .is_some_and(|p| p.sid().to_string() == sid)
+        {
+            self.release_camera().await;
+        }
+    }
+
+    /// Unpublish whatever camera is published. The upload socket ends with it.
+    async fn release_camera(&mut self) {
         self.frames.set_camera(None);
         if let Some(publication) = self.camera.take() {
             if let Err(e) = self
@@ -734,7 +748,7 @@ impl NativeSession {
     /// `PlatformAudio` disables the ADM; dropping the frame server closes
     /// its listener and every frame socket.
     pub async fn close(mut self) {
-        self.unpublish_camera().await;
+        self.release_camera().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
                 .room

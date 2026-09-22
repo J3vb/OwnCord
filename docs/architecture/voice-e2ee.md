@@ -250,8 +250,11 @@ routes:
 
 - `/<token>/remote/<track sid>`: one subscribed remote video track's decoded
   frames, native to webview, as width, height and the three I420 planes
-  packed tightly. The backend keeps only the latest frame, so a slow renderer
-  drops frames instead of queueing them. The remote track table is updated
+  packed tightly. The renderer acknowledges each frame (an empty message)
+  once drawn, and the backend sends the next only after that ack, keeping
+  just the latest decoded frame meanwhile, so a slow renderer drops frames
+  instead of queueing them (the webview's socket reads eagerly, so TCP
+  backpressure alone would not hold them back). The remote track table is updated
   from the room's events before they are forwarded, so the webview never asks
   for a track the socket does not know.
 - `/<token>/camera`: the local camera, webview to native: a header (format,
@@ -281,8 +284,10 @@ framerate and simulcast options. The backend publishes a `NativeVideoSource`
 (`features/voice/native/cameraUplink.ts`) pumps the webview track's frames up
 the camera route. It drops rather than queues: one copy in flight, nothing
 sent while the socket has unsent bytes, and no faster than the max
-framerate. Camera off unpublishes (`native_voice_unpublish_camera`), as the
-web path does, so remote tiles close the same way. Screen share still refuses
+framerate. `native_voice_publish_camera` returns the publication's sid, and
+camera off unpublishes that sid (`native_voice_unpublish_camera`), as the
+web path unpublishes its own track, so remote tiles close the same way; a
+late unpublish of a camera a newer publish already replaced is a no-op. Screen share still refuses
 on Linux (phase 3).
 
 **E2EE covers video exactly as audio.** The camera is published into the same

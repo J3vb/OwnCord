@@ -109,9 +109,12 @@ export interface NativeVoice {
   setMicrophone(session: number, enabled: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Publish (or replace) the camera; its frames then go up the session's
-   *  frame socket. E2EE covers it with the room key, as for the microphone. */
-  publishCamera(session: number, options: NativeVoiceCameraOptions): Promise<void>;
-  unpublishCamera(session: number): Promise<void>;
+   *  frame socket. E2EE covers it with the room key, as for the microphone.
+   *  Resolves with the publication's sid. */
+  publishCamera(session: number, options: NativeVoiceCameraOptions): Promise<string>;
+  /** Unpublish camera `sid` if it is still the published one; a sid a later
+   *  publish replaced is a no-op. */
+  unpublishCamera(session: number, sid: string): Promise<void>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;

@@ -172,6 +172,13 @@ mod linux {
         let mut last = tokio::time::Instant::now();
         while let Some(Ok(msg)) = ws.next().await {
             let Message::Binary(data) = msg else { continue };
+            // Ack each frame as the renderer does, or no next frame is sent.
+            if futures_util::SinkExt::send(&mut ws, Message::Binary(Vec::new().into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
             if data.len() >= 8 {
                 let at =
                     |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
@@ -267,7 +274,7 @@ mod linux {
         let frames_url = session.frames_url().to_string();
         let mut bars = None;
         if let Some((width, height)) = video {
-            session
+            let mut camera_sid = session
                 .publish_camera(CameraOptions {
                     width,
                     height,
@@ -293,9 +300,13 @@ mod linux {
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
                 );
                 for _ in 0..camera_cycles {
-                    session.unpublish_camera().await;
+                    session.unpublish_camera(&camera_sid).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    session.publish_camera(options).await?;
+                    let stale =
+                        std::mem::replace(&mut camera_sid, session.publish_camera(options).await?);
+                    // A late unpublish of the replaced camera must leave
+                    // the new one published (the spec's `localTracks`).
+                    session.unpublish_camera(&stale).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;

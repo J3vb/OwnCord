@@ -266,13 +266,14 @@ pub async fn native_voice_set_microphone(
 }
 
 /// Publish (or replace) the camera; its frames then arrive on the session's
-/// frame socket.
+/// frame socket. Returns the publication sid `native_voice_unpublish_camera`
+/// takes.
 #[tauri::command]
 pub async fn native_voice_publish_camera(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
     options: CameraOptions,
-) -> Result<(), String> {
+) -> Result<String, String> {
     state
         .inner
         .lock()
@@ -282,17 +283,20 @@ pub async fn native_voice_publish_camera(
         .await
 }
 
+/// Unpublish camera `sid` if it is still the published one; a stale sid is a
+/// no-op.
 #[tauri::command]
 pub async fn native_voice_unpublish_camera(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
+    sid: String,
 ) -> Result<(), String> {
     state
         .inner
         .lock()
         .await
         .current(session)?
-        .unpublish_camera()
+        .unpublish_camera(&sid)
         .await;
     Ok(())
 }

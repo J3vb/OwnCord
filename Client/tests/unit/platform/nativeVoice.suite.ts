@@ -13,6 +13,8 @@ export interface NativeControl {
   /** The host answers the next connect with this session, identity and
    *  frame-socket URL. */
   connectsAs(session: number, identity: string, frames: string): void;
+  /** The host answers the next camera publish with this publication sid. */
+  publishesCameraAs(sid: string): void;
   /** The host reports these devices on the next enumeration. */
   hasDevices(devices: NativeVoiceDevices): void;
   /** Every host command issued so far, as `[name, payload]`. */
@@ -74,7 +76,7 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
-    check("publishes and unpublishes the camera per session", async () => {
+    check("publishes the camera per session and unpublishes it by its sid", async () => {
       const camera = {
         width: 1280,
         height: 720,
@@ -82,11 +84,12 @@ export function describeNativeVoiceSuite(
         maxFramerate: 30,
         simulcast: true,
       };
-      await ctx.subject.publishCamera(7, camera);
-      await ctx.subject.unpublishCamera(7);
+      ctx.native.publishesCameraAs("TR_cam");
+      await expect(ctx.subject.publishCamera(7, camera)).resolves.toBe("TR_cam");
+      await ctx.subject.unpublishCamera(7, "TR_cam");
       expect(ctx.native.commands()).toEqual([
         ["native_voice_publish_camera", { session: 7, options: camera }],
-        ["native_voice_unpublish_camera", { session: 7 }],
+        ["native_voice_unpublish_camera", { session: 7, sid: "TR_cam" }],
       ]);
     });
 

@@ -45,6 +45,10 @@ class FakeSocket {
     this.deliver = handler;
   }
   closed = false;
+  sent: ArrayBuffer[] = [];
+  send(data: ArrayBuffer) {
+    this.sent.push(data);
+  }
   constructor(readonly url: string) {
     FakeSocket.last = this;
   }
@@ -116,6 +120,21 @@ describe("NativeVideoRenderer", () => {
     ]);
     expect(gl.draws).toBe(1);
     renderer.dispose();
+  });
+
+  it("acknowledges each message once handled so the socket sends the next frame", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    const socket = FakeSocket.last;
+    expect(socket.sent).toHaveLength(0);
+    socket.deliver!({ data: message(4, 2) });
+    expect(gl.draws).toBe(1);
+    expect(socket.sent.map((d) => d.byteLength)).toEqual([0]);
+    // A malformed frame is skipped but still acknowledged, or video stalls.
+    socket.deliver!({ data: new ArrayBuffer(3) });
+    expect(socket.sent).toHaveLength(2);
+    renderer.dispose();
+    socket.deliver!({ data: message(4, 2) });
+    expect(socket.sent).toHaveLength(2);
   });
 
   it("dispose closes the socket, stops the track and releases the context once", () => {

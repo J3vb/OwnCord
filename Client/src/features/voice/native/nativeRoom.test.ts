@@ -36,7 +36,7 @@ const host = vi.hoisted(() => ({
     identity: "user-1",
     frames: "ws://127.0.0.1:9/tok",
   }),
-  publishCamera: (): Promise<void> => Promise.resolve(),
+  publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
   uplinks: [] as FakeMedia[],
@@ -134,7 +134,7 @@ beforeEach(() => {
     identity: "user-1",
     frames: "ws://127.0.0.1:9/tok",
   });
-  host.publishCamera = () => Promise.resolve();
+  host.publishCamera = () => Promise.resolve("TR_cam");
   host.renderers.length = 0;
   host.uplinks.length = 0;
   nativeCounters.openRooms = 0;
@@ -486,7 +486,7 @@ describe("NativeRoom camera", () => {
     expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
   });
 
-  it("unpublishes by track or by its mediaStreamTrack, and ignores other tracks", async () => {
+  it("unpublishes by its mediaStreamTrack and ignores other tracks", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     const cam = cameraTrack();
@@ -495,7 +495,7 @@ describe("NativeRoom camera", () => {
     expect(host.uplinks[0]!.disposed).toBe(false);
     await room.localParticipant.unpublishTrack(cam.mediaStreamTrack);
     expect(host.uplinks[0]!.disposed).toBe(true);
-    expect(host.calls.at(-1)).toEqual(["unpublishCamera", [1]]);
+    expect(host.calls.at(-1)).toEqual(["unpublishCamera", [1, "TR_cam"]]);
     expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
     await room.localParticipant.publishTrack(cam, cameraOptions);
     await room.localParticipant.setCameraEnabled(false);
@@ -522,13 +522,78 @@ describe("NativeRoom camera", () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     let finish!: () => void;
-    host.publishCamera = () => new Promise<void>((r) => (finish = r));
+    host.publishCamera = () => new Promise<string>((r) => (finish = () => r("TR_cam")));
     const publishing = room.localParticipant.publishTrack(cameraTrack(), cameraOptions);
     await Promise.resolve();
     await room.disconnect();
     finish();
     await expect(publishing).rejects.toThrow(/disconnected/);
     expect(host.uplinks).toHaveLength(0);
+  });
+
+  it("refuses a publish that names no encoding rather than inventing one", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await expect(
+      room.localParticipant.publishTrack(cameraTrack(), { source: "camera" }),
+    ).rejects.toThrow(/videoEncoding/);
+    await expect(
+      room.localParticipant.publishTrack(cameraTrack(), {
+        source: "camera",
+        videoEncoding: { maxBitrate: 1_700_000 },
+      }),
+    ).rejects.toThrow(/maxFramerate/);
+    expect(host.calls.filter(([n]) => n === "publishCamera")).toHaveLength(0);
+  });
+
+  it("scopes a stale unpublish to its own publication, not the camera replacing it", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const finish: Array<() => void> = [];
+    let next = 0;
+    host.publishCamera = () => {
+      const sid = `TR_cam${++next}`;
+      return new Promise<string>((r) => finish.push(() => r(sid)));
+    };
+    const [first, second] = [cameraTrack(), cameraTrack()];
+    const publishingFirst = room.localParticipant.publishTrack(first, cameraOptions);
+    const publishingSecond = room.localParticipant.publishTrack(second, cameraOptions);
+    await vi.waitFor(() => expect(finish).toHaveLength(2));
+    finish[0]!();
+    await publishingFirst;
+    // The superseded enable tears down its own track after the backend has
+    // already started (and will finish) the replacing publish.
+    await room.localParticipant.unpublishTrack(first.mediaStreamTrack);
+    finish[1]!();
+    await publishingSecond;
+    expect(host.calls.filter(([n]) => n === "unpublishCamera")).toEqual([
+      ["unpublishCamera", [1, "TR_cam1"]],
+    ]);
+    expect(room.localParticipant.getTrackPublication("camera")).toMatchObject({
+      trackSid: "TR_cam2",
+      track: second,
+    });
+    expect(host.uplinks.map((u) => u.disposed)).toEqual([true, false]);
+  });
+
+  it("disposes the pump of a publish the backend already replaced", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const finish: Array<() => void> = [];
+    let next = 0;
+    host.publishCamera = () => {
+      const sid = `TR_cam${++next}`;
+      return new Promise<string>((r) => finish.push(() => r(sid)));
+    };
+    const publishingFirst = room.localParticipant.publishTrack(cameraTrack(), cameraOptions);
+    const publishingSecond = room.localParticipant.publishTrack(cameraTrack(), cameraOptions);
+    await vi.waitFor(() => expect(finish).toHaveLength(2));
+    finish[0]!();
+    await publishingFirst;
+    finish[1]!();
+    await publishingSecond;
+    expect(host.uplinks.map((u) => u.disposed)).toEqual([true, false]);
+    expect(room.localParticipant.getTrackPublication("camera")!.trackSid).toBe("TR_cam2");
   });
 
   it("disposes the camera pump on disconnect", async () => {

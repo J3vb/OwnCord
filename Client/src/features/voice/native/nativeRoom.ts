@@ -134,10 +134,6 @@ interface NativeLocalPublication {
   readonly uplink: CameraUplink;
 }
 
-/** Fallbacks when a publish names no encoding (the web path always does). */
-const DEFAULT_CAMERA_BITRATE = 1_700_000;
-const DEFAULT_CAMERA_FRAMERATE = 30;
-
 export class NativeRoom {
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   readonly name = "";
@@ -162,13 +158,11 @@ export class NativeRoom {
       if (enabled) throw unsupported("setCameraEnabled(true)");
       await this.unpublishCamera();
     },
-    publishTrack: (track: PublishableTrack, options?: PublishOptions) =>
+    publishTrack: (track: PublishableTrack, options: PublishOptions) =>
       this.publishCamera(track, options),
-    /** Takes the track or its `mediaStreamTrack`, like livekit-client. */
-    unpublishTrack: async (track: PublishableTrack | MediaStreamTrack): Promise<void> => {
-      const camera = this.localParticipant.trackPublications.get("camera");
-      if (camera === undefined) return;
-      if (track === camera.track || track === camera.track.mediaStreamTrack)
+    /** Takes the `mediaStreamTrack`, as the shared camera path passes it. */
+    unpublishTrack: async (track: MediaStreamTrack): Promise<void> => {
+      if (this.localParticipant.trackPublications.get("camera")?.track.mediaStreamTrack === track)
         await this.unpublishCamera();
     },
   };
@@ -277,28 +271,32 @@ export class NativeRoom {
    *  source (E2EE like the microphone) that this pump feeds. */
   private async publishCamera(
     track: PublishableTrack,
-    options: PublishOptions = {},
+    options: PublishOptions,
   ): Promise<NativeLocalPublication> {
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (track.kind !== "video" || (options.source ?? track.source) !== "camera")
       throw unsupported(`publishing ${options.source ?? track.source}`);
+    const encoding = options.videoEncoding;
+    if (encoding?.maxFramerate === undefined)
+      throw new Error("native camera publish needs videoEncoding.maxBitrate and maxFramerate");
     const session = this.sessionId;
     const settings = track.mediaStreamTrack.getSettings();
     const camera: NativeVoiceCameraOptions = {
       width: settings.width ?? 1280,
       height: settings.height ?? 720,
-      maxBitrate: options.videoEncoding?.maxBitrate ?? DEFAULT_CAMERA_BITRATE,
-      maxFramerate: options.videoEncoding?.maxFramerate ?? DEFAULT_CAMERA_FRAMERATE,
+      maxBitrate: encoding.maxBitrate,
+      maxFramerate: encoding.maxFramerate,
       simulcast: options.simulcast ?? false,
     };
     await this.unpublishCamera();
-    await desktop.nativeVoice.publishCamera(session, camera);
+    const sid = await desktop.nativeVoice.publishCamera(session, camera);
     if (this.sessionId !== session) {
       // Disconnected meanwhile: the session (and its publish) is gone.
       throw new Error("native room disconnected during camera publish");
     }
+    this.localParticipant.trackPublications.get("camera")?.uplink.dispose();
     const publication: NativeLocalPublication = {
-      trackSid: "camera",
+      trackSid: sid,
       source: "camera",
       kind: "video",
       isMuted: false,
@@ -318,7 +316,8 @@ export class NativeRoom {
     if (camera === undefined) return;
     this.localParticipant.trackPublications.delete("camera");
     camera.uplink.dispose();
-    if (this.sessionId !== null) await desktop.nativeVoice.unpublishCamera(this.sessionId);
+    if (this.sessionId !== null)
+      await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
   }
 
   /** Dispose every renderer and the camera pump without raising events: the

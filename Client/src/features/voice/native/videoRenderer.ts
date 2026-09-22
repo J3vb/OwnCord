@@ -3,6 +3,10 @@
 // and drawn with a WebGL2 I420->RGB shader. Frames never cross Tauri IPC,
 // whose JSON path cannot carry 720p at a usable rate on WebKitGTK.
 //
+// Each message is acknowledged (an empty message) once drawn, and the socket
+// sends the next frame only after that ack, so a slow renderer skips to the
+// latest frame instead of queueing them.
+//
 // The canvas is exposed as a `MediaStreamTrack` (`canvas.captureStream()`),
 // so the video grid, stream previews and track lifecycle keep consuming
 // MediaStreams exactly as they do for browser LiveKit tracks.
@@ -118,14 +122,18 @@ export class NativeVideoRenderer {
     this.mediaStreamTrack = this.canvas.captureStream().getVideoTracks()[0]!;
     this.socket = new WebSocket(url);
     this.socket.binaryType = "arraybuffer";
-    this.socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => this.draw(e.data));
+    this.socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => {
+      if (this.disposed) return;
+      this.draw(e.data);
+      this.socket.send(new ArrayBuffer(0));
+    });
     nativeCounters.videoRenderers++;
   }
 
   private draw(data: ArrayBuffer): void {
     const frame = parseI420(data);
     const gl = this.gl;
-    if (frame === null || gl === null || this.disposed) return;
+    if (frame === null || gl === null) return;
     if (this.canvas.width !== frame.width || this.canvas.height !== frame.height) {
       this.canvas.width = frame.width;
       this.canvas.height = frame.height;

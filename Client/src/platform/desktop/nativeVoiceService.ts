@@ -25,8 +25,9 @@ export const nativeVoice: NativeVoice = {
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
   publishCamera: (session, options) =>
-    invoke<void>("native_voice_publish_camera", { session, options }),
-  unpublishCamera: (session) => invoke<void>("native_voice_unpublish_camera", { session }),
+    invoke<string>("native_voice_publish_camera", { session, options }),
+  unpublishCamera: (session, sid) =>
+    invoke<void>("native_voice_unpublish_camera", { session, sid }),
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
   listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>
