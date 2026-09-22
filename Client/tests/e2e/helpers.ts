@@ -474,6 +474,17 @@ export function buildTauriMockScript(opts: {
    *  call is recorded on `window.__mockSavedPasswordLogins` so a test can
    *  assert the saved-password path ran instead of a typed-password login. */
   savedPasswordLogin?: { status: number; body: unknown };
+  /** Stub the external-content broker (B7-16) so link previews, oEmbed titles
+   *  and external images can be exercised. Without it every broker call is
+   *  refused as "unavailable" (the mocked suite has no external network).
+   *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
+   *  `handle:<handle>`. A preview value that is a bare failure-class string
+   *  refuses just that request; a request with no entry keeps the refusing
+   *  default. */
+  externalContent?: {
+    preview?: Record<string, Record<string, unknown> | string>;
+    image?: Record<string, number[] | string>;
+  };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
   // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
@@ -792,7 +803,24 @@ export function buildTauriMockScript(opts: {
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh
         // partition with an empty-URL preview, which the broker refuses.
-        if (cmd === "external_preview" || cmd === "external_image") throw "unavailable";
+        // A test can opt in to a canned answer per URL/handle via the
+        // externalContent option; anything unmatched stays refused.
+        window.__mockExternalPreview ??= ${JSON.stringify(opts.externalContent?.preview ?? {})};
+        window.__mockExternalImage ??= ${JSON.stringify(opts.externalContent?.image ?? {})};
+        if (cmd === "external_preview") {
+          var preview = window.__mockExternalPreview[args?.url];
+          if (preview !== undefined) {
+            if (typeof preview === "string") throw preview;
+            return preview;
+          }
+          throw "unavailable";
+        }
+        if (cmd === "external_image") {
+          var source = args?.handle !== undefined ? "handle:" + args.handle : "url:" + args.url;
+          var bytes = window.__mockExternalImage[source];
+          if (bytes !== undefined) return new Uint8Array(bytes).buffer;
+          throw "unavailable";
+        }
         const error = new Error("Unexpected IPC command: " + cmd);
         console.error("[tauri-mock]", error.message);
         throw error;
