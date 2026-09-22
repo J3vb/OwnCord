@@ -1088,8 +1088,30 @@ function buildSessionsSection(
 }
 
 // ---------------------------------------------------------------------------
+// Message retention (B7-15c)
+// ---------------------------------------------------------------------------
+
+/** The server-default retention window, when the server reported one. */
+function buildRetentionSection(notice: string): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "account-retention" });
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "settings-separator" }),
+    createElement("div", { class: "settings-section-title" }, "Message Retention"),
+    createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
+  );
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Delete account (danger zone) builder
 // ---------------------------------------------------------------------------
+
+/** What deletion does and does not reach (Server/service/erasure.go). */
+const DELETE_ACCOUNT_WARNING =
+  "Deletion is immediate and permanent: your account, messages and attachments are erased now and cannot be recovered. " +
+  "Server backups made before you delete keep a copy until they rotate out; if one is restored, your deletion is applied again. " +
+  "Images you shared may stay cached on other people's devices. Enter your password to confirm.";
 
 function buildDeleteAccountSection(
   options: SettingsOverlayOptions,
@@ -1136,7 +1158,10 @@ function buildDeleteAccountSection(
     {
       style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4",
     },
-    "This action is permanent and cannot be undone. All your data will be deleted. Enter your password to confirm.",
+    // B7-15c owner decision: no retention window here. Erasure hard-deletes
+    // the account's messages and attachments at once (Server/db/erasure.go),
+    // so a "kept N days" line would imply a grace period that does not exist.
+    DELETE_ACCOUNT_WARNING,
   );
 
   const passwordInput = createElement("input", {
@@ -1366,6 +1391,9 @@ export function buildAccountTab(
 
   // Signed-in devices
   section.appendChild(buildSessionsSection(options, signal));
+
+  const retention = options.getRetentionNotice?.() ?? null;
+  if (retention !== null) section.appendChild(buildRetentionSection(retention));
 
   // Delete account (danger zone)
   section.appendChild(buildDeleteAccountSection(options, signal));

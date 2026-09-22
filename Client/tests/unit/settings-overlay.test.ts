@@ -663,6 +663,50 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  // B7-15c owner decision: the dialog states immediacy, backups and cached
+  // images, and never a retention window — erasure hard-deletes at once.
+  it("delete warning discloses immediacy, backups and cached images, and no retention window", () => {
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      getRetentionNotice: () => "By default this server deletes messages after 30 days.",
+    });
+    overlay.mount(container);
+    (container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+
+    const warning = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    )!.textContent!;
+    expect(warning).toContain("immediate and permanent");
+    expect(warning).toContain("backups made before you delete keep a copy until they rotate out");
+    expect(warning).toContain("your deletion is applied again");
+    expect(warning).toContain("cached on other people's devices");
+    expect(warning).not.toMatch(/\bdays?\b/);
+    expect(warning).not.toContain("By default this server");
+
+    overlay.destroy?.();
+  });
+
+  it("shows the retention window in its own Account section when the server reported one", () => {
+    const notice = "By default this server deletes messages after 30 days.";
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => notice });
+    overlay.mount(container);
+
+    const section = container.querySelector("[data-testid='account-retention']")!;
+    expect(section.textContent).toContain(notice);
+    expect(
+      section.contains(container.querySelector("[data-testid='delete-account-confirm-area']")),
+    ).toBe(false);
+
+    overlay.destroy?.();
+  });
+
+  it("omits the retention section when the server did not report one", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => null });
+    overlay.mount(container);
+    expect(container.querySelector("[data-testid='account-retention']")).toBeNull();
+    overlay.destroy?.();
+  });
+
   it("shows error when confirming delete without password", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);

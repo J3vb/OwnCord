@@ -40,6 +40,8 @@ export interface ConnectPageCallbacks {
   onUpdateClient?(host: string): void;
   /** The registration mode `server-info` reported for a host, if known. */
   getRegistrationMode?(host: string): RegistrationMode | null;
+  /** The retention sentence `server-info` reported for a host, if known. */
+  getRetentionNotice?(host: string): string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,7 @@ export function createConnectPage(
     onSettingsOpen: () => openSettings(),
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
     getRegistrationMode: callbacks.getRegistrationMode,
+    getRetentionNotice: callbacks.getRetentionNotice,
   });
 
   // Per-host compatibility from the advisory preflight. The notice reads it

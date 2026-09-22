@@ -149,6 +149,7 @@ const capturedConnectCallbacks: {
   ) => Promise<void>;
   onTotpSubmit?: (code: string) => Promise<void>;
   getRegistrationMode?: (host: string) => string | null;
+  getRetentionNotice?: (host: string) => string | null;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -632,6 +633,7 @@ describe("main.ts session ownership", () => {
       protocol_epoch: 1,
       browser_client_enabled: false,
       registration_mode: "approval",
+      retention: { messages_days: 30 },
     };
     await loginAndReachAuthOk("snapshot.example:8443", "alex", {
       user: { id: 1, username: "alex", avatar: null, role: "member" },
@@ -649,6 +651,14 @@ describe("main.ts session ownership", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBe("approval");
+    // B7-15c: the same snapshot feeds the retention sentence at sign-up, and
+    // the main page reads it for the signed-in host — null when unprobed.
+    expect(capturedConnectCallbacks.getRetentionNotice!("localhost:8443")).toContain(
+      "deletes messages after 30 days",
+    );
+    expect(capturedConnectCallbacks.getRetentionNotice!("never-probed.example")).toBeNull();
+    const mainPageOptions = vi.mocked(createMainPage).mock.calls.at(-1)![0];
+    expect(mainPageOptions.getRetentionNotice!()).toBeNull();
 
     // A failed health probe drops the snapshot and refreshes the form through
     // updateCompatibility, so the stale "approval" form cannot outlive it.

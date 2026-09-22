@@ -42,6 +42,7 @@ import { setServerHost } from "@components/message-list/renderers";
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
+  pruneAttachmentCacheScope,
   setAttachmentCacheScope,
 } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
@@ -89,6 +90,8 @@ const SESSION_NOTICE_TOAST_MS = 12_000;
 export interface MainPageOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
+  /** The connected server's retention sentence, or null when unknown. */
+  readonly getRetentionNotice?: () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +177,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a
   // profile switch isolates the cache even before this page is destroyed.
-  setAttachmentCacheScope(apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null);
+  const cacheScope = apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null;
+  setAttachmentCacheScope(cacheScope);
   const unsubCacheScope = onAuthCleared(() => setAttachmentCacheScope(null));
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
@@ -581,9 +585,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onLogout: () => logout(api),
+      getRetentionNotice: options.getRetentionNotice,
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
+        // The account is gone, so its cached server images go too (B7-15c).
+        // clearAuth has already disarmed the scope, so no late write follows.
+        if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
         showToast("Account deleted successfully", "success");
       },
       onEnableTotp: async (password) => {

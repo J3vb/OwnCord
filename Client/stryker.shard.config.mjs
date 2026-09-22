@@ -93,6 +93,7 @@ export const shards = {
     "src/lib/read-state.ts",
     "src/lib/safe-render.ts",
     "src/lib/store.ts",
+    "src/lib/supportBundle.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",
     "src/lib/updater.ts",
