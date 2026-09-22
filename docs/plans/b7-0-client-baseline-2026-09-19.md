@@ -352,6 +352,16 @@ Linux x86_64 Chromium, ~2.3 minutes for the 20-cycle test (the whole
 `client-fullstack` suite is 6.0 minutes, inside the config's 20-minute
 `globalTimeout`, so no `playwright.config.fullstack.ts` change was needed).
 
+**Pre-rebase history.** Every run below up to "At the rebased head" was made
+before the branch was rebased from base `9f2d92eb` onto `b252d0ea`. The commits
+those runs cite (`03570460`, `7eaa1570`, `fa8c72a3`, `80f1dcbb`, `e02ef7ec`,
+`0c343204`, `c9a2204f`) are pre-rebase SHAs that the branch history no longer
+contains. They are kept as history. The rebase brought in production changes on
+the soak's per-cycle path (`VoiceAudioTab.ts`, `roomLifecycle.ts`,
+`livekitSession.ts`, `deviceManager.ts`) and a `userAgent` override in
+`playwright.config.fullstack.ts`. The at-head evidence is the "At the rebased
+head" runs.
+
 **Bars and why they are phase-grouped.** The plan's cycle logs out and back in
 every 10 cycles and samples every 5, so the raw sample series alternates between
 the settled mid-session state and the torn-down post-logout state. A single
@@ -373,7 +383,7 @@ soak; 11c's Task 12 fixes the leak and removes the ceilings, returning both to
 0.05.
 
 **Five 20-cycle calibration runs** on the uncommitted working tree that became
-`7eaa1570` (on top of `03570460`), under the earlier 0.5/8 ceilings. Their
+pre-rebase `7eaa1570` (on top of `03570460`), under the earlier 0.5/8 ceilings. Their
 numbers are the committed phase-grouped evaluation's output (the ceilings do not
 change what is measured). All five passed; every count metric was identical
 across them (run-to-run spread 0 on all counts):
@@ -416,7 +426,7 @@ are counted by `!signal.aborted` rather than reachability (the media probe keeps
 every peer, track and socket it sees, so "reachable" never falls — the plan's
 own trap).
 
-**Runs at the 0.15/2 ceilings** (`7eaa1570` plus the working-tree change that
+**Runs at the 0.15/2 ceilings** (pre-rebase `7eaa1570` plus the working-tree change that
 sets these ceilings; nothing else differs):
 
 - **Planted control, failed as intended, but on nodes only.** A throwaway
@@ -438,7 +448,7 @@ sets these ceilings; nothing else differs):
   1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
   the five calibration runs.
 
-**Trial: a within-page series** (`fa8c72a3` plus a working-tree change, later
+**Trial: a within-page series** (pre-rebase `fa8c72a3` plus a working-tree change, later
 committed as `80f1dcbb`, that added a cycle-9 sample and regressed each page's
 cycle-5/9 pair for nodes and listeners; ceilings still 0.15/2). The clean run
 failed, so the trial was reverted (below).
@@ -483,7 +493,7 @@ like-for-like (c5 follows a reconnect, c9 does not), so whether this is a leak
 or state the reconnect resets is unanswered. 11c answers it before it adds
 within-page coverage.
 
-**At-head clean runs after the revert** (`80f1dcbb` plus the working-tree change
+**Clean runs after the revert** (pre-rebase `80f1dcbb` plus the working-tree change
 that reverts its spec and probe to the phase-only evaluation, with only comments
 differing from `fa8c72a3`). **Needs a decision: neither run passed.** Neither
 failure comes from the bars, and nothing was tuned.
@@ -501,7 +511,7 @@ failure comes from the bars, and nothing was tuned.
 Both failures came from the soak's interaction and console steps, not from the
 leak bars.
 
-**Stabilised soak, two consecutive clean runs** (`e02ef7ec`, which retries the
+**Stabilised soak, two consecutive clean runs** (pre-rebase `e02ef7ec`, which retries the
 DM step as one unit and accepts close code 1000; bars and ceilings unchanged).
 The DM step closes any popup, clicks Bob's row, waits for the popup's `.open`
 card and clicks its Message button, retrying the whole sequence until the DM
@@ -516,12 +526,12 @@ expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
 `documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
 tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
 
-**Idempotent DM retry**, run once on `0c343204` and passed with the same bars
+**Idempotent DM retry**, run once on pre-rebase `0c343204` and passed with the same bars
 (nodes −3.6, listeners 0.1, AbortControllers 20, heap slope 11 350). That
 version waited for the DM view outside the retry, so a Message click that
 silently did nothing was not retried.
 
-**DM open fully inside the retry** (`c9a2204f`). Each attempt returns at once if the DM header is
+**DM open fully inside the retry** (pre-rebase `c9a2204f`). Each attempt returns at once if the DM header is
 already visible. So a retry after Message has switched the sidebar to DMs no
 longer waits for Bob's member row, which that switch removes. Otherwise the
 attempt opens the popup, clicks Message and waits up to the config's default
@@ -533,8 +543,22 @@ step uses a fixed sleep. Two consecutive clean 20-cycle runs both passed:
 | 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 11 735     |
 | 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 962     |
 
+**At the rebased head** (`0823d20f`, on base `b252d0ea`; spec and ceilings
+unchanged). The server and client were rebuilt at this commit. Two consecutive
+clean 20-cycle runs both passed, with every count bar as before and the nodes
+count one node higher at both ends:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 250      |
+| 2   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 984      |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat.
+
 **Owner decision: the five-run at-head calibration moves to B7-11c.** The
 intent asks for the 20-cycle soak to be run at least five times locally to show
-it is not flaky. The five recorded calibration runs predate the DM-step and
-console-pattern changes. For 11a the at-head evidence is these two consecutive
-passing runs, and 11c re-runs the five at its head.
+it is not flaky. The five recorded calibration runs are pre-rebase and predate
+the DM-step and console-pattern changes. For 11a the at-head evidence is the two
+consecutive passing runs at the rebased head, and 11c re-runs the five at its
+head.
