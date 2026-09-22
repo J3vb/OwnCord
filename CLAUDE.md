@@ -65,10 +65,10 @@ steps (and the versions) are in `.github/workflows/ci.yml`.
   the default build proves nothing about the tagged ones.
 - **The client unit suite is green and must stay green.** Never make a failing
   test pass by weakening its assertions.
-- **A Linux Rust build of the client needs a one-time prerequisite**: `livekit`
+- **A Linux Rust build of the client needs a prerequisite**: `livekit`
   (Linux-only) pulls `webrtc-sys`, which needs clang >= 21 and a prebuilt
-  libwebrtc. Run `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` once per
-  clone before `cargo test`/`clippy`/`tauri build`. Windows and server-only
+  libwebrtc. Run `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` in each
+  shell you build from, before `cargo test`/`clippy`/`tauri build`. Windows and server-only
   work need nothing. Details: [Client/CLAUDE.md](Client/CLAUDE.md),
   [docs/contributing.md](docs/contributing.md#client-tauri-v2).
 - Security issues go through GitHub Security Advisories, never public issues

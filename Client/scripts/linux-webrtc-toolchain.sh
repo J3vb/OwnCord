@@ -21,37 +21,36 @@
 #
 # Security posture, matching the download-and-verify convention the release
 # workflow already uses (see the actionlint/osv-scanner/zizmor installs):
-#   - every download is pinned by version AND sha256, checked before use;
-#   - nothing is fetched from a moving ref.
+#   - the libwebrtc archive is pinned by version AND sha256, checked before use;
+#   - clang-21 comes from apt.llvm.org's llvm-toolchain-<codename>-21 channel on
+#     both architectures. That channel is a moving ref (whatever 21.x point
+#     release it currently publishes), trusted through the repository's GPG
+#     signature: its signing key is pinned by full fingerprint and the script
+#     fails if the downloaded key differs. The exact installed version is
+#     printed so every build log records which compiler produced it.
 #
 # Tag-triggered release jobs restore NO actions/cache entry (cache poisoning,
 # zizmor's finding in #1656): release.yml declares no actions/cache step, so
 # this script starts from nothing and downloads+verifies. ci.yml does cache the
 # libwebrtc archive directory, but it is keyed per-arch and written only by
 # ordinary branch/PR runs. The same script runs on both paths, so the verify
-# logic cannot drift between them.
+# logic cannot drift between them. clang is an apt package outside that
+# directory, so it is never cached: it is installed fresh on every runner.
 #
-# Toolchain choice differs by architecture, deliberately:
-#   - x64 prefers the exact Chromium clang (llvmorg-23) libwebrtc was built
-#     with. It ships as a relocatable tarball, so it is cached and re-used.
-#   - arm64 has no Chromium host tarball for this revision, so it installs
-#     apt.llvm.org's clang-21 (the archive's declared floor). That is a normal
-#     apt package with no relocatable prefix, so it is installed fresh rather
-#     than cached: ~1 minute, and it keeps the release path download-and-verify.
-#
-# The download URLs and digests are the ones the scout verified against the
+# The libwebrtc URLs and digests are the ones the scout verified against the
 # real OwnCord binary on Ubuntu (report §3).
 set -euo pipefail
+
+# Everything below writes to stderr; only emit_env writes to the original
+# stdout (fd 3), so tool chatter can never corrupt the eval'd exports.
+exec 3>&1 1>&2
 
 # libwebrtc tag: must match webrtc-sys-build's WEBRTC_TAG for the webrtc-sys
 # version livekit 0.9.1 resolves to (0.3.45 -> webrtc-89d790b). A crate bump
 # moves this and the digests below together.
 WEBRTC_TAG="webrtc-89d790b"
-CHROMIUM_CLANG_REV="llvmorg-23-init-10931-g20b6ec66-11"
-CHROMIUM_CLANG_SHA256="de584381536aa5ba2403033c4f8b70f3c39c2e5d7fa87c953b7fd8bfbba0ee2a"
-# apt.llvm.org's signing key, pinned by content digest (fingerprint
-# 6084 F3CF 814B 57C1 CF12 EFD5 15CF 4D18 AF4F 7421).
-LLVM_KEY_SHA256="8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d"
+# apt.llvm.org's repository signing key, pinned by full fingerprint.
+LLVM_KEY_FPR="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
 
 case "$(uname -m)" in
   x86_64)
@@ -81,48 +80,40 @@ emit_env() {
       echo "LK_CUSTOM_WEBRTC=$WEBRTC_DIR"
     } >> "$GITHUB_ENV"
   else
-    echo "export CC=$CLANG_CC"
-    echo "export CXX=$CLANG_CXX"
-    echo "export LK_CUSTOM_WEBRTC=$WEBRTC_DIR"
+    {
+      echo "export CC=$CLANG_CC"
+      echo "export CXX=$CLANG_CXX"
+      echo "export LK_CUSTOM_WEBRTC=$WEBRTC_DIR"
+    } >&3
   fi
 }
 
 # ---------------------------------------------------------------------------
 # 1. clang
 # ---------------------------------------------------------------------------
-if [ "$(uname -m)" = "x86_64" ]; then
-  CLANG_DIR="$CACHE/clang-$CHROMIUM_CLANG_REV"
-  if [ ! -x "$CLANG_DIR/bin/clang++" ]; then
-    url="https://commondatastorage.googleapis.com/chromium-browser-clang/Linux_x64/clang-${CHROMIUM_CLANG_REV}.tar.xz"
-    tmp="$CACHE/chromium-clang.tar.xz"
-    curl -sSfL --retry 3 -o "$tmp" "$url"
-    echo "$CHROMIUM_CLANG_SHA256  $tmp" | sha256sum -c -
-    rm -rf "$CLANG_DIR"
-    mkdir -p "$CLANG_DIR"
-    # The archive has bin/ at its root, so extract straight into the prefix.
-    tar xf "$tmp" -C "$CLANG_DIR"
-    rm -f "$tmp"
+CLANG_CC=/usr/bin/clang-21
+CLANG_CXX=/usr/bin/clang++-21
+if [ ! -x "$CLANG_CXX" ]; then
+  key="$CACHE/llvm-snapshot.gpg.key"
+  curl -sSfL --retry 3 -o "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+  gnupghome="$(mktemp -d)"
+  fpr="$(GNUPGHOME="$gnupghome" gpg --batch --show-keys --with-colons "$key" \
+    | awk -F: '$1 == "pub" { p = 1; next } $1 == "fpr" && p { print $10; p = 0 }')"
+  rm -rf "$gnupghome"
+  if [ "$fpr" != "$LLVM_KEY_FPR" ]; then
+    echo "apt.llvm.org key fingerprint mismatch: got '${fpr}', want $LLVM_KEY_FPR" >&2
+    exit 1
   fi
-  CLANG_CC="$CLANG_DIR/bin/clang"
-  CLANG_CXX="$CLANG_DIR/bin/clang++"
-else
-  CLANG_CC=/usr/bin/clang-21
-  CLANG_CXX=/usr/bin/clang++-21
-  if [ ! -x "$CLANG_CXX" ]; then
-    key="$CACHE/llvm-snapshot.gpg.key"
-    curl -sSfL --retry 3 -o "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
-    echo "$LLVM_KEY_SHA256  $key" | sha256sum -c -
-    # shellcheck source=/dev/null
-    codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
-    # The key goes under /etc/apt/keyrings, not $HOME: apt drops to the _apt
-    # user to fetch indexes and would fail to read a keyring behind a home
-    # directory's permissions.
-    sudo install -m 0644 -D "$key" /etc/apt/keyrings/llvm-snapshot.asc
-    echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/$codename/ llvm-toolchain-$codename-21 main" \
-      | sudo tee /etc/apt/sources.list.d/llvm-21.list >/dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq clang-21
-  fi
+  # shellcheck source=/dev/null
+  codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+  # The key goes under /etc/apt/keyrings, not $HOME: apt drops to the _apt
+  # user to fetch indexes and would fail to read a keyring behind a home
+  # directory's permissions.
+  sudo install -m 0644 -D "$key" /etc/apt/keyrings/llvm-snapshot.asc
+  echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/$codename/ llvm-toolchain-$codename-21 main" \
+    | sudo tee /etc/apt/sources.list.d/llvm-21.list >/dev/null
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq clang-21
 fi
 
 # ---------------------------------------------------------------------------
@@ -142,15 +133,7 @@ if [ ! -f "$WEBRTC_DIR/lib/libwebrtc.a" ]; then
   rm -f "$zip"
 fi
 
-# Put the toolchain on PATH for CI steps that call cargo without our env (the
-# GITHUB_ENV exports already cover CC/CXX, but rustc's own linker lookup and
-# any direct clang invocation want this too).
-if [ -n "${GITHUB_PATH:-}" ]; then
-  dirname "$CLANG_CC" >> "$GITHUB_PATH"
-fi
-
-# Exports to stdout (local `eval` use) or $GITHUB_ENV (CI); diagnostics to
-# stderr so they never corrupt the eval'd output.
+# Exports to stdout (local `eval` use) or $GITHUB_ENV (CI).
 emit_env
-echo "clang: $("$CLANG_CXX" --version | head -1)" >&2
-echo "libwebrtc: $WEBRTC_DIR ($(du -sh "$WEBRTC_DIR" | cut -f1))" >&2
+echo "clang: $("$CLANG_CXX" --version | head -1) (package clang-21 $(dpkg-query -W -f='${Version}' clang-21))"
+echo "libwebrtc: $WEBRTC_DIR ($(du -sh "$WEBRTC_DIR" | cut -f1))"

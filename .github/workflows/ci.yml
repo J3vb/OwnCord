@@ -914,20 +914,21 @@ jobs:
             librsvg2-dev
 
       # The Linux client links livekit, whose webrtc-sys crate needs clang >= 21
-      # and the prebuilt libwebrtc (~148 MB download, ~800 MB extracted). Cached
-      # here — an ordinary PR/branch cache — because this job runs on every
-      # client change, and a cold download is the slow part.
+      # and the prebuilt libwebrtc (~148 MB download, ~800 MB extracted). The
+      # libwebrtc archive is cached here — an ordinary PR/branch cache — because
+      # this job runs on every client change, and a cold download is the slow
+      # part. clang-21 is an apt package and is installed fresh every run.
       #
       # The trust boundary is deliberate: this cache is populated by the same
       # kind of branch/PR runs that consume it, and this workflow neither is
       # tag-triggered nor publishes a runtime artifact. release.yml, which does
       # publish, restores NO cache (zizmor cache-poisoning, #1656) — it always
       # downloads and verifies the pinned sha256.
-      - name: Cache libwebrtc and clang
+      - name: Cache libwebrtc
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v1
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
 
       - name: Install native-voice build prerequisites
         run: bash ../scripts/linux-webrtc-toolchain.sh
@@ -1215,13 +1216,13 @@ jobs:
             librsvg2-dev \
             xdg-utils
 
-      # Same clang + libwebrtc prerequisite as rust-tests, cached per arch.
-      - name: Cache libwebrtc and clang
+      # Same clang + libwebrtc prerequisite as rust-tests, libwebrtc cached per arch.
+      - name: Cache libwebrtc
         if: startsWith(matrix.os, 'ubuntu')
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v1
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
 
       - name: Install native-voice build prerequisites
         if: startsWith(matrix.os, 'ubuntu')

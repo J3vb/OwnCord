@@ -95,16 +95,18 @@ next section, and using them directly is equally correct.
 Rust SDK (`livekit`), whose `webrtc-sys` crate compiles C++ against Chromium's
 hermetic libc++ and therefore needs **clang >= 21** plus a prebuilt
 **libwebrtc** (~148 MB download, ~800 MB extracted). GCC is refused. Run the
-installer once per clone before any Linux Rust build (`cargo test`, `cargo
-clippy`, `tauri build`):
+installer in each shell you build from, before any Linux Rust build (`cargo
+test`, `cargo clippy`, `tauri build`):
 
 ```bash
 eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
 ```
 
-It writes the paths into the environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`), so
-`eval` in the shell you build from. In CI it writes them to `$GITHUB_ENV` and
-caches both under `~/.cache/owncord-linux-webrtc`. Windows client builds and
+It installs clang-21 from apt.llvm.org (once, system-wide), downloads
+libwebrtc once into `~/.cache/owncord-linux-webrtc`, and prints the
+environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a
+new terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`;
+ci.yml caches the libwebrtc directory, and clang is installed fresh each run. Windows client builds and
 server-only work need none of this. Design and rationale:
 [docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md); the phase that
 ships the user-visible voice path is a separate change.

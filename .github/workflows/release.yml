@@ -192,8 +192,11 @@ jobs:
       # (livekit -> webrtc-sys). Deliberately NO actions/cache restore here:
       # this workflow publishes runtime artifacts and is tag-triggered, so a
       # poisoned cache is exactly the risk zizmor's cache-poisoning audit names
-      # (#1656). The installer downloads and verifies a pinned sha256 instead,
-      # so a clean runner pays the ~148 MB and nothing can seed it.
+      # (#1656). The installer downloads libwebrtc and verifies its pinned
+      # sha256 instead, so a clean runner pays the ~148 MB and nothing can seed
+      # it. clang-21 comes from apt.llvm.org's GPG-signed llvm-toolchain channel
+      # (signing key pinned by fingerprint, not a pinned compiler build); the
+      # exact version installed is printed in the log.
       - name: Install native-voice build prerequisites
         run: bash Client/scripts/linux-webrtc-toolchain.sh
 
@@ -432,9 +435,8 @@ jobs:
             xdg-utils
 
       # Same prerequisite and same no-cache rule as the x86_64 job — see the
-      # comment there. On arm64 the installer takes apt.llvm.org's clang-21
-      # (the archive's declared floor; there is no Chromium arm64-host tarball)
-      # and the arm64 libwebrtc zip, both verified by pinned sha256.
+      # comment there: clang-21 from the same GPG-signed apt.llvm.org channel,
+      # and the arm64 libwebrtc zip verified by its pinned sha256.
       - name: Install native-voice build prerequisites
         run: bash Client/scripts/linux-webrtc-toolchain.sh
 
