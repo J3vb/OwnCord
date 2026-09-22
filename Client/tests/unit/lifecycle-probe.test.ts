@@ -5,11 +5,7 @@
 // lifecycle-probe.ts imports only types from @playwright/test, so it loads
 // under jsdom.
 import { describe, expect, it } from "vitest";
-import {
-  evaluateBars,
-  formatBars,
-  type LifecycleSample,
-} from "../e2e/support/lifecycle-probe";
+import { evaluateBars, formatBars, type LifecycleSample } from "../e2e/support/lifecycle-probe";
 
 function sample(cycle: number, overrides: Partial<LifecycleSample> = {}): LifecycleSample {
   return {
