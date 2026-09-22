@@ -182,7 +182,14 @@ test.describe("Settings — Notifications Tab", () => {
 
     await toggle.click();
 
-    await expect(toggle).toHaveClass(initialOn ? /(?!on)/ : /on/);
+    // `/(?!on)/` would match any string (an empty match always satisfies the
+    // lookahead), so the rendered state was never actually checked. Assert the
+    // class the toggle must hold after the click.
+    if (initialOn) {
+      await expect(toggle).not.toHaveClass(/\bon\b/);
+    } else {
+      await expect(toggle).toHaveClass(/\bon\b/);
+    }
     // A toggle that does not persist is not a settings control.
     await expect
       .poll(() =>

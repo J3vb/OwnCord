@@ -86,9 +86,10 @@ test.describe("Logout Flow — auto-connect profile", () => {
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });
 
     // Positive signal: logout clears the host's stored credential (the mock
-    // records every delete_credential). A "no auto-login" test that never
-    // proves the credential path ran could pass on an app that simply never
-    // attempts auto-login at all.
+    // records every delete_credential, dispatched synchronously before the
+    // connect page mounts). A "no auto-login" test that never proves the
+    // credential path ran could pass on an app that simply never attempts
+    // auto-login at all.
     await expect
       .poll(() =>
         page.evaluate(
@@ -98,11 +99,19 @@ test.describe("Logout Flow — auto-connect profile", () => {
       )
       .toContain("localhost:8443");
 
-    // The auto-login path would have opened a fresh WS connection; it must not.
-    expect(await connects()).toBe(connectsBefore);
+    // This is a negative property (auto-login must NOT fire), so it needs a
+    // bounded observation window: a single sample right after the form appears
+    // can beat the connect-page mount IIFE through its loadCredential →
+    // wirePostAuth → ws_connect roundtrips, and pass while auto-login is
+    // actually broken. Keep asserting for the whole window instead.
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      expect(await connects()).toBe(connectsBefore);
+      await expect(page.locator("[data-testid='app-layout']")).not.toBeVisible();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
 
-    // And the outcome still holds: the app layout never reappears.
-    await expect(page.locator("[data-testid='app-layout']")).not.toBeVisible();
+    // And the outcome still holds: the connect form remains the visible page.
     await expect(page.locator(".connect-form, .login-form")).toBeVisible();
   });
 });
