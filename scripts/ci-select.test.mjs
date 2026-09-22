@@ -167,6 +167,21 @@ test("the shared classifier corpus runs the Rust suite as well as the server", (
   assert.equal(sel.rust, true, "external_content.rs's tests read it");
 });
 
+test("the Linux native-voice build scripts run the Rust suite", () => {
+  // rust-tests runs `bash ../scripts/linux-webrtc-toolchain.sh` and the
+  // glibc-floor selftest. Client/ alone selects client/browser/integration/
+  // native but NOT rust, so editing the installer without this entry would let
+  // the one job that exercises it skip — while tauri-build, which also runs it,
+  // only fires on PRs to main.
+  for (const p of [
+    "Client/scripts/linux-webrtc-toolchain.sh",
+    "Client/scripts/check-glibc-floor.sh",
+  ]) {
+    const sel = picked(`M\t${p}`);
+    assert.equal(sel.rust, true, `${p} must run rust-tests, which executes it`);
+  }
+});
+
 test("the platform-contracts document runs the client unit suite", () => {
   // Client/tests/unit/platform-contracts-counts.test.ts reads it and asserts
   // its counts against the source tree.

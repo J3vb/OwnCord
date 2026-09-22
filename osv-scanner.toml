@@ -89,3 +89,11 @@ reason = "rust-unic unmaintained, reached only via urlpattern -> tauri-utils (se
 [[IgnoredVulns]]
 id = "RUSTSEC-2025-0100"
 reason = "rust-unic unmaintained, reached only via urlpattern -> tauri-utils (see deny.toml)"
+
+# --- Rust: Linux native voice (livekit), phase-0 build plumbing ---
+#
+# No entry: the Linux-only tree added for livekit 0.9.1 (livekit-*, webrtc-sys,
+# libwebrtc) scans clean at the pinned versions, so an ignore here would be an
+# unused entry. The C/C++ libraries bundled inside the prebuilt libwebrtc.a
+# (BoringSSL, ffmpeg, openh264, ...) are not crates and are outside osv-scanner's
+# graph; deny.toml carries the note on their licensing.

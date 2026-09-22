@@ -7,7 +7,9 @@ wrote the contracts and B7-4/B7-5 moved every native call behind
 the last native importers behind the seam, and B7-16 (branch `fm/b7-16-impl`,
 2026-09-21), which added the external-content broker contract, its two native
 commands and a twenty-first importer, so all twenty-one live under
-`platform/desktop/`; the
+`platform/desktop/`, and the Linux native-voice phase 0 (branch
+`fm/linux-voice-p0`, 2026-09-22), which added the Linux-only
+`native_voice_build_info` command; the
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -58,18 +60,20 @@ Measured with `git grep`, not estimated:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 21    |
 | Distinct `invoke` command names called from `Client/src/`  | 30    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 35    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 36    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | none  |
 | Files under `Client/src/platform/`                         | 44    |
 
-The handler count covers both attribute spellings — 23 `#[tauri::command]` plus
+The handler count covers both attribute spellings — 24 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
-brackets undercounts to 23. Attributes and registrations are two different
-counts: of the 35 attributed functions, 33 appear in `generate_handler!`
-(`Client/src-tauri/src/lib.rs`), and one of those, `open_devtools`, sits behind
-`#[cfg(feature = "devtools")]`, so a default build registers 32.
+brackets undercounts to 24. Attributes and registrations are two different
+counts: of the 36 attributed functions, 34 appear in `generate_handler!`
+(`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
+`#[cfg(feature = "devtools")]` and `native_voice_build_info` behind
+`#[cfg(target_os = "linux")]`, so a default build registers 33 on Linux and 32
+elsewhere.
 
 Reproduce:
 
