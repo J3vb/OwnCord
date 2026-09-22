@@ -102,7 +102,10 @@ test`, `cargo clippy`, `tauri build`):
 eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
 ```
 
-It installs clang-21 from apt.llvm.org (once, system-wide), downloads
+It uses `CC`/`CXX` if both are already set, else an installed `clang++-21` or
+`clang++` reporting version 21 or newer; only if neither exists does it install
+clang-21 from apt.llvm.org (once, system-wide, on the Debian/Ubuntu releases
+apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads
 libwebrtc once into `~/.cache/owncord-linux-webrtc`, and prints the
 environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a
 new terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`;

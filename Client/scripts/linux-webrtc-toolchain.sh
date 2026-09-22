@@ -10,8 +10,8 @@
 # refused outright (it ignores the trivial_abi annotations the archive's
 # std::unique_ptr/shared_ptr calling convention depends on) and so is a clang
 # older than the floor the archive states in its own headers (clang 21 for
-# libwebrtc webrtc-89d790b). This script installs a suitable clang, fetches the
-# archive, and writes the environment the build needs: CC/CXX and
+# libwebrtc webrtc-89d790b). This script finds or installs a suitable clang,
+# fetches the archive, and writes the environment the build needs: CC/CXX and
 # LK_CUSTOM_WEBRTC (so webrtc-sys uses our verified copy instead of
 # downloading its own).
 #
@@ -22,8 +22,11 @@
 # Security posture, matching the download-and-verify convention the release
 # workflow already uses (see the actionlint/osv-scanner/zizmor installs):
 #   - the libwebrtc archive is pinned by version AND sha256, checked before use;
-#   - clang-21 comes from apt.llvm.org's llvm-toolchain-<codename>-21 channel on
-#     both architectures. That channel is a moving ref (whatever 21.x point
+#   - clang: CC/CXX from the environment if both are set; otherwise an
+#     installed clang++-21 or clang++ (in that order) reporting major >= 21;
+#     otherwise, on a Debian/Ubuntu release apt.llvm.org publishes, clang-21
+#     from its llvm-toolchain-<codename>-21 channel (what CI and release jobs
+#     get on both architectures: their runners have no clang >= 21). That channel is a moving ref (whatever 21.x point
 #     release it currently publishes), trusted through the repository's GPG
 #     signature: its signing key is pinned by full fingerprint and the script
 #     fails if the downloaded key differs. The exact installed version is
@@ -91,9 +94,39 @@ emit_env() {
 # ---------------------------------------------------------------------------
 # 1. clang
 # ---------------------------------------------------------------------------
-CLANG_CC=/usr/bin/clang-21
-CLANG_CXX=/usr/bin/clang++-21
-if [ ! -x "$CLANG_CXX" ]; then
+clang_major() {
+  local v
+  v="$("$1" -dumpversion 2>/dev/null)" || return 0
+  echo "${v%%.*}"
+}
+
+CLANG_CC=""
+CLANG_CXX=""
+if [ -n "${CC:-}" ] && [ -n "${CXX:-}" ]; then
+  CLANG_CC="$CC"
+  CLANG_CXX="$CXX"
+else
+  for suffix in -21 ""; do
+    cc="$(command -v "clang$suffix" || true)"
+    cxx="$(command -v "clang++$suffix" || true)"
+    if [ -n "$cc" ] && [ -n "$cxx" ] && [ "$(clang_major "$cxx")" -ge 21 ] 2>/dev/null; then
+      CLANG_CC="$cc"
+      CLANG_CXX="$cxx"
+      break
+    fi
+  done
+fi
+
+if [ -z "$CLANG_CXX" ]; then
+  # shellcheck source=/dev/null
+  codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")" || codename=""
+  case "$codename" in
+    focal | jammy | noble | bullseye | bookworm | trixie) ;;
+    *)
+      echo "clang >= 21 is required: install it and put it on PATH (as clang-21/clang++-21 or clang/clang++), or set CC and CXX to it. Automatic install from apt.llvm.org is only done on Debian/Ubuntu releases it publishes (focal, jammy, noble, bullseye, bookworm, trixie); this host is '${codename:-unknown}'." >&2
+      exit 1
+      ;;
+  esac
   key="$CACHE/llvm-snapshot.gpg.key"
   curl -sSfL --retry 3 -o "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
   gnupghome="$(mktemp -d)"
@@ -104,8 +137,6 @@ if [ ! -x "$CLANG_CXX" ]; then
     echo "apt.llvm.org key fingerprint mismatch: got '${fpr}', want $LLVM_KEY_FPR" >&2
     exit 1
   fi
-  # shellcheck source=/dev/null
-  codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
   # The key goes under /etc/apt/keyrings, not $HOME: apt drops to the _apt
   # user to fetch indexes and would fail to read a keyring behind a home
   # directory's permissions.
@@ -114,6 +145,8 @@ if [ ! -x "$CLANG_CXX" ]; then
     | sudo tee /etc/apt/sources.list.d/llvm-21.list >/dev/null
   sudo apt-get update -qq
   sudo apt-get install -y -qq clang-21
+  CLANG_CC=/usr/bin/clang-21
+  CLANG_CXX=/usr/bin/clang++-21
 fi
 
 # ---------------------------------------------------------------------------
@@ -135,5 +168,8 @@ fi
 
 # Exports to stdout (local `eval` use) or $GITHUB_ENV (CI).
 emit_env
-echo "clang: $("$CLANG_CXX" --version | head -1) (package clang-21 $(dpkg-query -W -f='${Version}' clang-21))"
+echo "clang: $CLANG_CXX: $("$CLANG_CXX" --version | head -1)"
+if [ "$CLANG_CXX" = /usr/bin/clang++-21 ]; then
+  echo "clang package: clang-21 $(dpkg-query -W -f='${Version}' clang-21 2>/dev/null || echo unknown)"
+fi
 echo "libwebrtc: $WEBRTC_DIR ($(du -sh "$WEBRTC_DIR" | cut -f1))"
