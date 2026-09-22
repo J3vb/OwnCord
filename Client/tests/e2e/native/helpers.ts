@@ -137,14 +137,3 @@ export async function waitForMessages(page: Page): Promise<void> {
   const container = page.locator(".messages-container");
   await expect(container).toBeVisible({ timeout: 10_000 });
 }
-
-/**
- * Count text channels visible in the sidebar.
- * Useful for data-dependent test gating.
- */
-export async function countTextChannels(page: Page): Promise<number> {
-  return page
-    .locator(".channel-item")
-    .filter({ has: page.locator(".ch-icon", { hasText: "#" }) })
-    .count();
-}
