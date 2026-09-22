@@ -6,6 +6,8 @@
 // E2EEWorkerHost.
 import { ExternalE2EEKeyProvider } from "livekit-client";
 import { roomKeyToBase64 } from "../../lib/e2eeCrypto";
+import { desktop } from "../../platform/desktop";
+import { isLinuxDesktop } from "./native/platform";
 
 /** What the key provider's write queue needs from E2EEManager. */
 export interface E2EEWorkerHost {
@@ -40,7 +42,7 @@ export class E2EEWorker {
       this._sessionGeneration === myGeneration && this._roomKey === roomKey && isCurrent();
     const run = this._keyApplyChain.then(async () => {
       if (!ownsKey()) return false;
-      await this.keyProvider.setKey(roomKeyToBase64(roomKey));
+      await this.installKey(roomKeyToBase64(roomKey));
       return ownsKey();
     });
     this._keyApplyChain = run.then(
@@ -48,6 +50,18 @@ export class E2EEWorker {
       () => undefined,
     );
     return run;
+  }
+
+  /** The one place the room key leaves the TS key exchange. On Linux the
+   *  Room lives in the Rust backend, so the same base64 text goes over IPC
+   *  to its key provider instead (byte-identical derivation, index 0); the
+   *  browser provider is never written there. Everywhere else: unchanged. */
+  private async installKey(keyBase64: string): Promise<void> {
+    if (isLinuxDesktop()) {
+      await desktop.nativeVoice.setRoomKey(keyBase64);
+      return;
+    }
+    await this.keyProvider.setKey(keyBase64);
   }
 
   /** Setup/reconnect must await the current key even if a rotation or offer

@@ -113,3 +113,20 @@ describe("E2EEWorker.applyCurrentRoomKey", () => {
     expect(setKey.mock.calls.map((c) => c[0])).toEqual(["b64:1", "b64:2"]);
   });
 });
+
+describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
+  it("sends the same base64 text to the native key provider, not the web one", async () => {
+    vi.resetModules();
+    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    const setRoomKey = vi.fn(async () => undefined);
+    vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { setRoomKey } } }));
+    const { E2EEWorker: LinuxWorker } = await import("./e2eeWorker");
+    const roomKey = new Uint8Array([9]);
+    const worker = new LinuxWorker({ getSessionGeneration: () => 0, getRoomKey: () => roomKey });
+    await expect(worker.applyRoomKey(roomKey)).resolves.toBe(true);
+    expect(setRoomKey).toHaveBeenCalledWith("b64:9");
+    expect(setKey).not.toHaveBeenCalled();
+    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../platform/desktop");
+  });
+});

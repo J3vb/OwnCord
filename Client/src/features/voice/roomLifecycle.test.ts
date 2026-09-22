@@ -160,3 +160,44 @@ describe("leaveVoice", () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 });
+
+describe("RoomLifecycle on the Linux native backend", () => {
+  it("builds a NativeRoom with the same event wiring and no E2EE web worker", async () => {
+    vi.resetModules();
+    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    const nativeRoom = {
+      on: vi.fn(),
+      disconnect: vi.fn(async () => {}),
+      removeAllListeners: vi.fn(),
+    };
+    const createNativeRoom = vi.fn(() => nativeRoom);
+    vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
+    const clearRoomKey = vi.fn(async () => undefined);
+    vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { clearRoomKey } } }));
+    const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
+    const { attachDiagnosticListeners: attach } = await import("../../lib/livekitDiagnostics");
+    const { Room: WebRoom } = await import("livekit-client");
+    const webRoomsBefore = vi.mocked(WebRoom).mock.calls.length;
+    const ctx = setup();
+    const lifecycle = new LinuxLifecycle(ctx.host as unknown as RoomLifecycleHost);
+    const room = await lifecycle.createRoom(1);
+    expect(room).toBe(nativeRoom);
+    expect(createNativeRoom).toHaveBeenCalledWith({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    });
+    expect(vi.mocked(WebRoom).mock.calls.length).toBe(webRoomsBefore);
+    expect(workers).toHaveLength(0);
+    // The same eight handlers the web room gets (RoomEvent is stubbed empty
+    // here, so count the registrations rather than name them).
+    expect(nativeRoom.on).toHaveBeenCalledTimes(8);
+    expect(attach).toHaveBeenCalledWith(nativeRoom);
+    // Leaving forgets the key in the native provider in the same teardown.
+    lifecycle.leaveVoice(false);
+    expect(clearRoomKey).toHaveBeenCalledTimes(1);
+    vi.doUnmock("./native/platform");
+    vi.doUnmock("./native/nativeRoom");
+    vi.doUnmock("../../platform/desktop");
+  });
+});

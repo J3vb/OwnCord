@@ -13,8 +13,9 @@ mod http_proxy;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+// Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]
-mod native_voice;
+pub mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
@@ -42,6 +43,15 @@ fn log_level_from_env() -> log::LevelFilter {
         _ => log::LevelFilter::Info,
     }
 }
+
+#[cfg(target_os = "linux")]
+fn native_voice_state() -> native_voice::NativeVoiceState {
+    native_voice::NativeVoiceState::new()
+}
+/// Off Linux the webview's own WebRTC handles voice; a unit placeholder keeps
+/// the builder chain identical on every platform.
+#[cfg(not(target_os = "linux"))]
+fn native_voice_state() -> () {}
 
 // Only used by the desktop-only single-instance closure below.
 #[cfg(desktop)]
@@ -109,6 +119,7 @@ pub fn run() {
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
         .manage(external_content::ExternalContentState::new())
+        .manage(native_voice_state())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
@@ -144,6 +155,20 @@ pub fn run() {
             external_content::external_image,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_key,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_clear_key,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_connect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_disconnect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_microphone,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_subscribed,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_debug_info,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

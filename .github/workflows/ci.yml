@@ -960,6 +960,51 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
+      # Native-voice E2EE interop (Linux): the crate's own NativeSession
+      # (examples/native_voice_interop.rs) against livekit-client in Chromium
+      # over a local livekit-server, with the room key handed to both the way
+      # the app does — proof that a Linux client decodes a Windows client and
+      # vice versa, plus the wrong-key negative control. Lives here rather
+      # than in a media job because the crate is already built in this cache;
+      # the example is a dev-profile build of the same objects.
+      - name: Build the native-voice interop peer
+        run: cargo build --example native_voice_interop
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: Client/
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: Client/
+        run: npx playwright install --with-deps chromium
+
+      - name: Install livekit-server
+        working-directory: Client/
+        run: node tests/e2e/scripts/install-livekit.mjs
+
+      - name: Native-voice E2EE interop test
+        working-directory: Client/
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
+          OWNCORD_NATIVE_VOICE_PEER: src-tauri/target/debug/examples/native_voice_interop
+        run: npm run test:e2e:native-voice
+
+      - name: Upload native-voice interop report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-voice-interop-report
+          path: |
+            Client/test-results/native-voice
+            Client/test-results/native-voice.xml
+          if-no-files-found: ignore
+
   # Mocked desktop boundary: unexpected IPC/page errors and flakes fail.
   client-e2e:
     name: Client E2E (Playwright)

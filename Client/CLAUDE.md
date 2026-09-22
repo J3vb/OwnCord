@@ -85,6 +85,16 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   unaffected: the dependency is behind
   `[target.'cfg(target_os = "linux")'.dependencies]`. Design:
   [docs/architecture/voice-e2ee.md](../docs/architecture/voice-e2ee.md).
+- Linux voice runs in that backend (`src-tauri/src/native_voice/`) behind the
+  `livekitSession` facade: `features/voice/native/platform.ts`'s
+  `isLinuxDesktop()` is the only switch, `RoomLifecycle.createRoom` builds a
+  `NativeRoom` adapter there and `E2EEWorker.applyRoomKey` sends the key over
+  the `NativeVoice` platform contract. Keep the state machine platform-blind:
+  a Linux-only behaviour belongs in the adapter or the Rust session, never as
+  a branch in `joinOrchestration`/`mediaControl`. The interop proof is
+  `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
+  `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
+  (built with `cargo build --example native_voice_interop`).
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.

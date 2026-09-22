@@ -37,6 +37,8 @@ import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
+import { isLinuxDesktop } from "../features/voice/native/platform";
+import { nativeCounters } from "../features/voice/native/counters";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -806,13 +808,15 @@ export class LiveKitSession {
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
-    return buildSessionDebugInfo({
+    const info = buildSessionDebugInfo({
       room: this._room,
       currentChannelId: this._currentChannelId,
       outputVolumeMultiplier: this._audioElements.getOutputVolumeMultiplier(),
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });
+    // B7-11 rule 3: native resources are countable through the facade.
+    return isLinuxDesktop() ? { ...info, native: { ...nativeCounters } } : info;
   }
 }
 
