@@ -32,13 +32,17 @@ async function mockUpdaterSession(
     const w = window as unknown as {
       __resolveInstall: (() => void) | null;
       __rejectInstall: ((e: Error) => void) | null;
+      __updateChecks: number;
     };
     w.__resolveInstall = null;
     w.__rejectInstall = null;
+    w.__updateChecks = 0;
     t.invoke = async (cmd: string, args?: unknown) => {
       if (cmd === "check_client_update") {
         // Short-circuits before the base mock, so this command never appears
-        // in __invokeLog — assertions below only rely on logged base commands.
+        // in __invokeLog. Record it here so a "no banner" test can prove the
+        // check actually ran instead of sleeping and hoping.
+        w.__updateChecks += 1;
         return cfg.available
           ? { available: true, version: cfg.version, body: "release notes" }
           : { available: false, version: null, body: null };
@@ -98,8 +102,19 @@ test.describe("Updater journey", () => {
     await page.goto("/");
     await navigateToMainPageReady(page);
 
-    // The check fires 3 s after mount; give it time to (not) show.
-    await page.waitForTimeout(4_000);
+    // The check fires 3 s after mount. Prove it actually ran (no
+    // waitForTimeout standing in for a condition): the updater's IPC read
+    // must have been invoked, and only then does the banner's absence mean
+    // "no update" rather than "the check never happened".
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () => (window as unknown as { __updateChecks: number }).__updateChecks ?? 0,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(0);
     await expect(banner(page)).toHaveCount(0);
   });
 
