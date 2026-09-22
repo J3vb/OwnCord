@@ -348,7 +348,7 @@ test.describe("Member list section", () => {
     const handle = page.locator(".sidebar-resize-handle");
     await handle.scrollIntoViewIfNeeded();
 
-    const startHeight = await section.evaluate((el) => el.offsetHeight);
+    const startHeight = await section.evaluate((el: HTMLElement) => el.offsetHeight);
     const box = await handle.boundingBox();
     if (box === null) throw new Error("resize handle has no box");
 
