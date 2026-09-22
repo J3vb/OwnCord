@@ -10,6 +10,20 @@ import {
   setChannelMutesHost,
 } from "@lib/channel-mutes";
 import { STORAGE_PREFIX } from "@lib/preferences";
+// The modules in the notifications graph that install an app-lifetime window
+// listener at load. loadNotifications() re-imports against these instances,
+// so its vi.resetModules() does not install a second copy of each listener.
+import * as attachments from "@components/message-list/attachments";
+import * as formatting from "@components/message-list/formatting";
+import * as channelMutes from "@lib/channel-mutes";
+import * as appLogger from "@lib/logger";
+
+const APP_LIFETIME_MODULES = [
+  ["@components/message-list/attachments", attachments],
+  ["@components/message-list/formatting", formatting],
+  ["@lib/channel-mutes", channelMutes],
+  ["@lib/logger", appLogger],
+] as const;
 
 const KEY = `${STORAGE_PREFIX}mutedChannels`;
 
@@ -189,7 +203,12 @@ describe("notifyIncomingMessage respects mutes", () => {
   // popup, the chime and the taskbar flash cannot each apply their own copy.
   async function loadNotifications() {
     vi.resetModules();
-    return import("@lib/notifications");
+    for (const [id, mod] of APP_LIFETIME_MODULES) vi.doMock(id, () => mod);
+    try {
+      return await import("@lib/notifications");
+    } finally {
+      for (const [id] of APP_LIFETIME_MODULES) vi.doUnmock(id);
+    }
   }
 
   beforeEach(() => {

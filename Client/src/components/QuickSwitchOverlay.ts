@@ -4,6 +4,7 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
@@ -30,7 +31,7 @@ export interface QuickSwitchOverlayOptions {
 // ---------------------------------------------------------------------------
 
 export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let restoreFocus: (() => void) | null = null;
 
@@ -46,12 +47,12 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
       (e) => {
         if (e.target === root) options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     const modal = createElement("div", { class: "quick-switch-modal" });
     applyDialogSemantics(modal, { label: "Switch server" });
-    trapFocus(modal, ac.signal);
+    trapFocus(modal, disposable.signal);
 
     // Header
     const header = createElement("div", { class: "quick-switch-header" });
@@ -103,7 +104,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
           () => {
             options.onSwitch(profile.host, profile.name);
           },
-          { signal: ac.signal },
+          { signal: disposable.signal },
         );
         // Divs get no native key activation; Enter/Space mirrors the click
         // so the row honors the button role it advertises.
@@ -115,7 +116,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
               options.onSwitch(profile.host, profile.name);
             }
           },
-          { signal: ac.signal },
+          { signal: disposable.signal },
         );
       }
 
@@ -139,7 +140,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     );
     appendChildren(addInfo, addName, addHost);
     appendChildren(addItem, addIcon, addInfo);
-    addItem.addEventListener("click", () => options.onAddServer(), { signal: ac.signal });
+    addItem.addEventListener("click", () => options.onAddServer(), { signal: disposable.signal });
     addItem.addEventListener(
       "keydown",
       (e) => {
@@ -148,7 +149,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
           options.onAddServer();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     list.appendChild(addItem);
 
@@ -169,12 +170,12 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
       (e) => {
         if (e.key === "Escape") options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

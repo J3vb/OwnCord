@@ -6,6 +6,7 @@
  * Uses the existing .modal-overlay / .cert-* CSS classes from login.css.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
@@ -23,7 +24,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
   const { host, storedFingerprint, newFingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
   let restoreFocus: (() => void) | null = null;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
@@ -32,7 +33,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
     // Ids are unique per factory, not per instance — these three trust prompts
     // never stack with each other in practice.
     applyDialogSemantics(modal, { labelledBy: "cert-mismatch-title" });
-    trapFocus(modal, ac.signal);
+    trapFocus(modal, disposable.signal);
 
     // Header
     const header = createElement("div", { class: "modal-header" });
@@ -45,7 +46,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onReject, { signal: ac.signal });
+    closeBtn.addEventListener("click", onReject, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -82,14 +83,14 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       type: "button",
     });
     setText(rejectBtn, "Disconnect");
-    rejectBtn.addEventListener("click", onReject, { signal: ac.signal });
+    rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", {
       class: "btn-danger",
       type: "button",
     });
     setText(acceptBtn, "Accept New Certificate");
-    acceptBtn.addEventListener("click", onAccept, { signal: ac.signal });
+    acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
 
@@ -102,7 +103,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       (e) => {
         if (e.target === overlay) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape maps to reject because that is the fail-closed safe default
@@ -112,7 +113,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && overlay?.isConnected === true) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     container.appendChild(overlay);
@@ -120,7 +121,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (overlay !== null) {
       overlay.remove();
       overlay = null;
@@ -149,7 +150,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
   const { host, fingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
   let restoreFocus: (() => void) | null = null;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
@@ -157,7 +158,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     // Unique per factory, not per instance — the three trust prompts never
     // stack with each other in practice.
     applyDialogSemantics(modal, { labelledBy: "cert-first-use-title" });
-    trapFocus(modal, ac.signal);
+    trapFocus(modal, disposable.signal);
 
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", { id: "cert-first-use-title" }, "New Server Certificate");
@@ -168,7 +169,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onReject, { signal: ac.signal });
+    closeBtn.addEventListener("click", onReject, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });
@@ -201,11 +202,11 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
 
     const rejectBtn = createElement("button", { class: "btn-ghost", type: "button" });
     setText(rejectBtn, "Cancel");
-    rejectBtn.addEventListener("click", onReject, { signal: ac.signal });
+    rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", { class: "btn-danger", type: "button" });
     setText(acceptBtn, "Trust This Certificate");
-    acceptBtn.addEventListener("click", onAccept, { signal: ac.signal });
+    acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
 
@@ -217,7 +218,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
       (e) => {
         if (e.target === overlay) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape rejects (Cancel) — the fail-closed default: never trust a
@@ -227,7 +228,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && overlay?.isConnected === true) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     container.appendChild(overlay);
@@ -235,7 +236,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (overlay !== null) {
       overlay.remove();
       overlay = null;
@@ -270,7 +271,7 @@ export function createIdentityMismatchModal(
   const { username, fingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
   let restoreFocus: (() => void) | null = null;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
@@ -278,7 +279,7 @@ export function createIdentityMismatchModal(
     // Unique per factory, not per instance — the three trust prompts never
     // stack with each other in practice.
     applyDialogSemantics(modal, { labelledBy: "identity-mismatch-title" });
-    trapFocus(modal, ac.signal);
+    trapFocus(modal, disposable.signal);
 
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", { id: "identity-mismatch-title" }, "Identity Warning");
@@ -289,7 +290,7 @@ export function createIdentityMismatchModal(
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onReject, { signal: ac.signal });
+    closeBtn.addEventListener("click", onReject, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });
@@ -323,11 +324,11 @@ export function createIdentityMismatchModal(
 
     const rejectBtn = createElement("button", { class: "btn-ghost", type: "button" });
     setText(rejectBtn, "Cancel");
-    rejectBtn.addEventListener("click", onReject, { signal: ac.signal });
+    rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", { class: "btn-danger", type: "button" });
     setText(acceptBtn, "Trust New Key");
-    acceptBtn.addEventListener("click", onAccept, { signal: ac.signal });
+    acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
 
@@ -339,7 +340,7 @@ export function createIdentityMismatchModal(
       (e) => {
         if (e.target === overlay) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape rejects (Cancel) — the fail-closed default: dismissing the
@@ -349,7 +350,7 @@ export function createIdentityMismatchModal(
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && overlay?.isConnected === true) onReject();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     container.appendChild(overlay);
@@ -357,7 +358,7 @@ export function createIdentityMismatchModal(
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (overlay !== null) {
       overlay.remove();
       overlay = null;

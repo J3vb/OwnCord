@@ -60,29 +60,6 @@ interface R4Entry {
 // R1: long-lived-target listeners without `signal`/`once: true`.
 const R1_ALLOWLIST: readonly R1Entry[] = [
   {
-    file: "components/MemberList.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason: "per-menu outside-click listener; hand-paired removeEventListener in createMemberItem",
-  },
-  {
-    file: "components/MessageInput.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason:
-      "per-picker outside-click listener; hand-paired removeEventListener in toggleEmojiPicker/toggleGifPicker",
-  },
-  {
-    file: "components/MessageInput.ts",
-    receiver: "document",
-    event: "mousedown",
-    category: "per-mount",
-    reason:
-      "per-picker outside-click listener; hand-paired removeEventListener in toggleEmojiPicker/toggleGifPicker",
-  },
-  {
     file: "components/message-list/attachments.ts",
     receiver: "window",
     event: "owncord:pref-change",
@@ -129,7 +106,8 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     receiver: "navigator.mediaDevices",
     event: "devicechange",
     category: "per-mount",
-    reason: "device-change listener with a start/stop pair (startDeviceChangeListener)",
+    reason:
+      "device-change listener with a start/stop pair (startDeviceChangeListener); stays hand-paired because device-manager.test.ts pins the bare add/remove call shape, and 11b edits no assertion",
   },
   {
     file: "lib/logger.ts",
@@ -201,337 +179,34 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     category: "app-lifetime",
     reason: "app-bootstrap best-effort voice_leave at module load",
   },
-  {
-    file: "pages/main-page/GlobalKeybinds.ts",
-    receiver: "document",
-    event: "keydown",
-    category: "per-mount",
-    reason: "attachGlobalKeybinds returns its own removeEventListener disposer",
-  },
-  {
-    file: "pages/main-page/OverlayManagers.ts",
-    receiver: "document",
-    event: "keydown",
-    category: "per-mount",
-    reason: "attach returns its own removeEventListener disposer and closes the overlay",
-  },
 ];
 // R3: discarded `setTimeout` handles (expression statement or `void`).
 const R3_ALLOWLIST: readonly R3Entry[] = [
   {
-    file: "components/MemberList.ts",
-    fn: "createMemberItem",
-    reason:
-      "deferred outside-click registration guarded by the signal; the node is owned by the menu",
-  },
-  {
     file: "components/Toast.ts",
     fn: "removeToast",
-    reason: "fallback removal after transitionend; touches only the node it removes",
-  },
-  {
-    file: "components/channel-sidebar/context-menu.ts",
-    fn: "attachChannelContextMenu",
-    reason: "deferred click registration guarded by menuAc; the menu owns its node",
-  },
-  {
-    file: "components/channel-sidebar/volume-menu.ts",
-    fn: "showUserVolumeMenu",
-    reason: "deferred mousedown registration guarded by dismissAc",
+    reason: "self-bounded: fallback removal after transitionend; touches only the node it removes",
   },
   {
     file: "components/message-list/content-parser.ts",
     fn: "renderCodeBlock",
-    reason: "copy-button label reset on a node the code block owns",
+    reason:
+      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
   {
     file: "components/message-list/content-parser.ts",
     fn: "renderCodeBlock",
-    reason: "copy-button label reset on a node the code block owns",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/AdvancedTab.ts",
-    fn: "buildAdvancedTab",
-    reason: "button label reset 2s after a completed action; node is owned by the row",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "components/settings/LogsTab.ts",
-    fn: "build",
-    reason: "copy-button label reset 1.5s after a completed copy",
-  },
-  {
-    file: "lib/context-menu.ts",
-    fn: "showContextMenu",
-    reason: "deferred mousedown registration guarded by dismissAc",
-  },
-  {
-    file: "pages/connect-page/LoginForm.ts",
-    fn: "handleTotpSubmit",
-    reason: "input error-class removal 500ms after an invalid code",
+    reason:
+      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
 ];
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
   {
-    file: "components/AdminActions.ts",
-    fn: "createMemberContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/AdminActions.ts",
-    fn: "createChannelContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createCertMismatchModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createCertFirstUseModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CertMismatchModal.ts",
-    fn: "createIdentityMismatchModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/ChannelSidebar.ts",
-    fn: "createChannelSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/ChannelSidebar.ts",
-    fn: "renderChannels",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/ConnectedOverlay.ts",
-    fn: "createConnectedOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/CreateChannelModal.ts",
-    fn: "createCreateChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/DeleteChannelModal.ts",
-    fn: "createDeleteChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/DmProfileSidebar.ts",
-    fn: "createDmProfileSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/DmSidebar.ts",
-    fn: "createDmSidebar",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/EditChannelModal.ts",
-    fn: "createEditChannelModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/EmojiPicker.ts",
-    fn: "createEmojiPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/GifPicker.ts",
-    fn: "createGifPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/IncomingCallBanner.ts",
-    fn: "createIncomingCallBanner",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/InviteManager.ts",
-    fn: "createInviteManager",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MemberList.ts",
-    fn: "render",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/MessageInput.ts",
-    fn: "createMessageInput",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MessageList.ts",
-    fn: "createMessageList",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/MessageList.ts",
-    fn: "beginRowRender",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/NsfwGate.ts",
-    fn: "createNsfwGate",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/PinnedMessages.ts",
-    fn: "createPinnedMessages",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/QuickSwitchOverlay.ts",
-    fn: "createQuickSwitchOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/QuickSwitcher.ts",
-    fn: "createQuickSwitcher",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/SearchOverlay.ts",
-    fn: "createSearchOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "components/SearchOverlay.ts",
     fn: "doSearch",
     category: "cancellation-token",
     reason: "owner: the next search, which aborts this one",
-  },
-  {
-    file: "components/SettingsOverlay.ts",
-    fn: "createSettingsOverlay",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/SettingsOverlay.ts",
-    fn: "renderActiveTab",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "components/StatusPicker.ts",
-    fn: "createStatusPicker",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/UserProfilePopup.ts",
-    fn: "createUserProfilePopup",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/VoiceWidget.ts",
-    fn: "createVoiceWidget",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/channel-sidebar/context-menu.ts",
-    fn: "attachChannelContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/channel-sidebar/drag-reorder.ts",
-    fn: "ensureGlobalDragListeners",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/channel-sidebar/volume-menu.ts",
-    fn: "showUserVolumeMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/inline-autocomplete.ts",
-    fn: "createInlineAutocomplete",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "components/message-list/attachments.ts",
-    fn: "openImageLightbox",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
   },
   {
     file: "components/settings/ConnectionDiagnosticsPanel.ts",
@@ -558,30 +233,6 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/autoIdle.ts",
-    fn: "startAutoIdle",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/context-menu.ts",
-    fn: "showContextMenu",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/modalFactory.ts",
-    fn: "createModal",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "lib/os-motion.ts",
-    fn: "syncOsMotionListener",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "lib/profiles.ts",
     fn: "pingHost",
     category: "cancellation-token",
@@ -594,41 +245,11 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the next attempt, which aborts this one",
   },
   {
-    file: "pages/ConnectPage.ts",
-    fn: "createConnectPage",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "pages/MainPage.ts",
-    fn: "mount",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
-    file: "pages/connect-page/ServerPanel.ts",
-    fn: "renderServerProfiles",
-    category: "per-render-child",
-    reason:
-      "per-render child signal, aborted and replaced on the next render; 11b moves it onto a child Disposable",
-  },
-  {
-    file: "pages/connect-page/ServerPanel.ts",
-    fn: "handleAddServer",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
-  },
-  {
     file: "pages/main-page/ChannelController.ts",
     fn: "mountChannel",
     category: "cancellation-token",
-    reason: "owner: the next channel switch, which aborts the previous channel's work",
-  },
-  {
-    file: "pages/main-page/SidebarMemberSection.ts",
-    fn: "createSidebarMemberSection",
-    category: "component-lifetime",
-    reason: "component/overlay factory lifetime; 11b moves it onto a Disposable",
+    reason:
+      "owner: the next channel switch (destroyChannel), which aborts the previous channel's work. Not forked from the SessionScope in 11b: a fork would also cancel in-flight channel loads at logout, where today they run to a guarded no-op (a Task 12 candidate)",
   },
 ];
 
@@ -801,9 +422,9 @@ describe("lifecycle ownership inventory (R1-R4)", () => {
     compare("R4", r4Found, keys(R4_ALLOWLIST));
   });
 
-  it("the allowlist categories are exactly the plan's (16 app-lifetime, 6 per-mount)", () => {
+  it("the allowlist categories are at their 11b floors (16 app-lifetime, 1 per-mount)", () => {
     expect(R1_ALLOWLIST.filter((e) => e.category === "app-lifetime")).toHaveLength(16);
-    expect(R1_ALLOWLIST.filter((e) => e.category === "per-mount")).toHaveLength(6);
+    expect(R1_ALLOWLIST.filter((e) => e.category === "per-mount")).toHaveLength(1);
     expect(R4_ALLOWLIST.filter((e) => e.category === "cancellation-token")).toHaveLength(8);
   });
 

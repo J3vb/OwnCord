@@ -2,6 +2,7 @@
 // Composes standalone components; never sets innerHTML with user content.
 // Delegates sidebar and chat-area DOM construction to sub-orchestrators.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -412,8 +413,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
 
     // A sign-in not yet reviewed: listed on connect and on window focus.
-    const sessionNotice = new AbortController();
-    unsubscribers.push(() => sessionNotice.abort());
+    const sessionNotice = new Disposable();
+    unsubscribers.push(() => sessionNotice.destroy());
     const pollSessions = startSessionNotice({
       fetchSessions: (signal) => api.getSessions(signal),
       notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),

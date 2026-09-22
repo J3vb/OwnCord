@@ -11,6 +11,7 @@
  * under every category — the server agrees (it validates the type alone).
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -43,7 +44,7 @@ export function defaultTypeForCategory(category: string): ChannelType {
 
 export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let instance: ModalInstance | null = null;
 
   function mount(container: Element): void {
@@ -58,7 +59,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onClose, { signal: ac.signal });
+    closeBtn.addEventListener("click", onClose, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -124,7 +125,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       { class: "btn-modal-cancel", type: "button" },
       "Cancel",
     );
-    cancelBtn.addEventListener("click", onClose, { signal: ac.signal });
+    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
     const createBtn = createElement(
       "button",
@@ -166,7 +167,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           setText(createBtn, "Create Channel");
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(footer, cancelBtn, createBtn);
@@ -195,7 +196,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape cancels — never creates. Document-level so it works wherever
@@ -208,7 +209,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Focus the name input
@@ -216,7 +217,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     instance?.destroy();
     instance = null;
   }

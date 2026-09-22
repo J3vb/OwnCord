@@ -3,6 +3,7 @@
  * with avatars, hover actions, and entry animation.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -97,7 +98,7 @@ function renderEmptyState(): HTMLDivElement {
 }
 
 export function createPinnedMessages(options: PinnedMessagesOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
 
   function mount(container: Element): void {
@@ -124,7 +125,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
       "aria-label": "Close pinned messages",
     });
     closeBtn.appendChild(createIcon("x", 16));
-    closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
+    closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });
 
     const titleGroup = createElement("div", {
       class: "pinned-panel__title-group",
@@ -139,7 +140,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     } else {
       const list = createElement("div", { class: "pinned-panel__list" });
       for (const msg of options.pinnedMessages) {
-        list.appendChild(renderPinnedItem(msg, options, ac.signal));
+        list.appendChild(renderPinnedItem(msg, options, disposable.signal));
       }
       appendChildren(root, header, list);
     }
@@ -148,7 +149,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

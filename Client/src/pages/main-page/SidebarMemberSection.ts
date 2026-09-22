@@ -4,6 +4,7 @@
  * collapsed state and height to localStorage.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
@@ -90,7 +91,7 @@ export function createSidebarMemberSection(
   }
 
   // --- Drag-to-resize logic ---
-  const resizeAbort = new AbortController();
+  const resizeOwner = new Disposable();
   let isDragging = false;
   let startY = 0;
   let startHeight = 0;
@@ -103,7 +104,7 @@ export function createSidebarMemberSection(
       startHeight = memberListContainer.offsetHeight;
       e.preventDefault();
     },
-    { signal: resizeAbort.signal },
+    { signal: resizeOwner.signal },
   );
 
   document.addEventListener(
@@ -115,7 +116,7 @@ export function createSidebarMemberSection(
       const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
       memberListContainer.style.height = `${newHeight}px`;
     },
-    { signal: resizeAbort.signal },
+    { signal: resizeOwner.signal },
   );
 
   document.addEventListener(
@@ -125,11 +126,11 @@ export function createSidebarMemberSection(
       isDragging = false;
       localStorage.setItem(LS_KEY_HEIGHT, String(memberListContainer.offsetHeight));
     },
-    { signal: resizeAbort.signal },
+    { signal: resizeOwner.signal },
   );
 
   unsubs.push(() => {
-    resizeAbort.abort();
+    resizeOwner.destroy();
   });
 
   // --- Collapse state ---

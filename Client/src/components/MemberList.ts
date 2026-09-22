@@ -4,7 +4,7 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setText, setOwnedTimeout } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import {
@@ -180,10 +180,19 @@ function closeActivePopup(): void {
   }
 }
 
+// One outside-click owner per open menu: destroyed when the menu closes and
+// when the list is torn down.
+let menuDismiss: Disposable | null = null;
+
+function releaseMenuDismiss(): void {
+  menuDismiss?.destroy();
+  menuDismiss = null;
+}
+
 function handleOutsideClick(e: MouseEvent): void {
   if (activeMenu !== null && !activeMenu.element.contains(e.target as Node)) {
     closeActiveMenu();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
   }
 }
 
@@ -285,7 +294,7 @@ function createMemberItem(
       const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
       closeActiveMenu();
-      document.removeEventListener("mousedown", handleOutsideClick);
+      releaseMenuDismiss();
 
       // Roles come from the server's `ready` payload — a hardcoded list made
       // custom roles unreachable and, worse, unresolvable to a role id, so
@@ -318,9 +327,15 @@ function createMemberItem(
       document.body.appendChild(activeMenu.element);
 
       // Close on outside click (deferred so this click doesn't close it)
-      setTimeout(() => {
-        document.addEventListener("mousedown", handleOutsideClick);
-      }, 0);
+      const dismiss = new Disposable();
+      menuDismiss = dismiss;
+      setOwnedTimeout(
+        dismiss.signal,
+        () => {
+          document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
+        },
+        0,
+      );
     },
     { signal },
   );
@@ -469,17 +484,17 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   // addEventListener({ signal }) keeps a detached row alive via that signal's
   // own retained "abort" listener list until it fires, so every rebuild would
   // otherwise leak one full set of detached rows (OC-0295), exactly the
-  // defect already fixed in ChannelSidebar (renderAc, OC-0229) and
-  // MessageList (OC-0286). renderAc is aborted and replaced at the top of
+  // defect already fixed in ChannelSidebar (renderOwner, OC-0229) and
+  // MessageList (OC-0286). renderOwner is aborted and replaced at the top of
   // every render, so only the CURRENT render's rows stay reachable.
-  let renderAc: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   function render(): void {
     if (root === null) return;
-    renderAc?.abort();
-    const currentRenderAc = new AbortController();
-    renderAc = currentRenderAc;
-    renderList(root, opts, currentRenderAc.signal, rowsByUserId);
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
+    renderList(root, opts, currentRender.signal, rowsByUserId);
   }
 
   function mount(container: Element): void {
@@ -520,10 +535,10 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   function destroy(): void {
     closeActiveMenu();
     closeActivePopup();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
     disposable.destroy();
-    renderAc?.abort();
-    renderAc = null;
+    renderOwner?.destroy();
+    renderOwner = null;
     rowsByUserId.clear();
     if (root !== null) {
       root.remove();

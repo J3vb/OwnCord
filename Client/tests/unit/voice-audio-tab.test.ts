@@ -17,6 +17,11 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+// vi.resetModules() below would hand the re-imported module a fresh logger,
+// which re-installs the logger's app-lifetime pref-change listener on every
+// reset. Those tests re-import against this already-loaded instance instead,
+// so the singleton stays one.
+import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
 
 describe("VoiceAudioTab camera preview", () => {
@@ -940,6 +945,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const getUserMedia = vi.fn();
   beforeEach(async () => {
     vi.resetModules();
+    vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
     vi.doMock("../../src/features/voice/native/devices", () => ({
       nativeAudioDevices: async (kind: string) =>
@@ -964,6 +970,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   afterEach(() => {
     vi.doUnmock("../../src/features/voice/native/platform");
     vi.doUnmock("../../src/features/voice/native/devices");
+    vi.doUnmock("@lib/logger");
     vi.unstubAllGlobals();
   });
 

@@ -81,12 +81,13 @@ describe("userStatus", () => {
 
   it("ignores unrelated preference changes", () => {
     const seen = vi.fn();
-    onUserStatusChange(seen, { signal: new AbortController().signal });
+    const unsub = onUserStatusChange(seen, { signal: new AbortController().signal });
 
     window.dispatchEvent(
       new CustomEvent("owncord:pref-change", { detail: { key: "compactMode" } }),
     );
 
     expect(seen).not.toHaveBeenCalled();
+    unsub();
   });
 });

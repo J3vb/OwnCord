@@ -5,6 +5,7 @@
  * Step 6.50
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
@@ -74,7 +75,7 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
 }
 
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let channelNameEl: HTMLSpanElement | null = null;
   let statusLabel: HTMLSpanElement | null = null;
@@ -319,7 +320,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "aria-label": label,
     });
     btn.appendChild(createIcon(icon, 18));
-    btn.addEventListener("click", handler, { signal: ac.signal });
+    btn.addEventListener("click", handler, { signal: disposable.signal });
     return btn;
   }
 
@@ -354,7 +355,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       () => {
         statsPane?.classList.toggle("visible");
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
@@ -466,7 +467,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           }
         });
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(root, header, statsPane, grantMicBtn, controls);
@@ -530,7 +531,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function destroy(): void {
     stopStatsPoller();
     stopElapsedTimer();
-    ac.abort();
+    disposable.destroy();
     for (const unsub of unsubs) {
       unsub();
     }

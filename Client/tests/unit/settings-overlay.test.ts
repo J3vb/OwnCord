@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+// The modules in SettingsOverlay's graph that install an app-lifetime window
+// listener at load. The re-import below reuses these instances, so the
+// vi.resetModules() does not install a second copy of each listener.
+import * as attachments from "@components/message-list/attachments";
+import * as formatting from "@components/message-list/formatting";
+import * as media from "@components/message-list/media";
+import * as channelMutes from "@lib/channel-mutes";
+
+const APP_LIFETIME_MODULES = [
+  ["@components/message-list/attachments", attachments],
+  ["@components/message-list/formatting", formatting],
+  ["@components/message-list/media", media],
+  ["@lib/channel-mutes", channelMutes],
+] as const;
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -1182,6 +1196,8 @@ describe("SettingsOverlay", () => {
     expect(secondPane).not.toBe(firstPane);
     // Exactly one pane — the old one was replaced, not appended to.
     expect(container.querySelectorAll(".settings-content .settings-pane").length).toBe(1);
+
+    overlay.destroy?.();
   });
 
   it("re-reads preferences when reopened", () => {
@@ -1203,6 +1219,8 @@ describe("SettingsOverlay", () => {
 
     slider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(slider.value).toBe("20");
+
+    overlay.destroy?.();
   });
 
   // --- Listener retention across tab switches (OC-0268) ---
@@ -1270,11 +1288,13 @@ describe("SettingsOverlay", () => {
 describe("SettingsOverlay - mount() with settingsOpen already true", () => {
   afterEach(() => {
     vi.doUnmock("@stores/ui.store");
+    for (const [id] of APP_LIFETIME_MODULES) vi.doUnmock(id);
     vi.resetModules();
   });
 
   it("moves focus into the dialog when the store is already open at mount time", async () => {
     vi.resetModules();
+    for (const [id, mod] of APP_LIFETIME_MODULES) vi.doMock(id, () => mod);
     vi.doMock("@stores/ui.store", () => ({
       uiStore: {
         getState: () => ({ settingsOpen: true }),

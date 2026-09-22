@@ -16,6 +16,7 @@
  * shown as its own option rather than being silently rounded to a neighbour.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -158,7 +159,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     onClose,
   } = options;
   const isVoice = channelType === "voice";
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let instance: ModalInstance | null = null;
 
   function mount(container: Element): void {
@@ -173,7 +174,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onClose, { signal: ac.signal });
+    closeBtn.addEventListener("click", onClose, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -322,7 +323,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       { class: "btn-modal-cancel", type: "button" },
       "Cancel",
     );
-    cancelBtn.addEventListener("click", onClose, { signal: ac.signal });
+    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
     const saveBtn = createElement(
       "button",
@@ -373,7 +374,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           setText(saveBtn, "Save Changes");
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(footer, cancelBtn, saveBtn);
@@ -402,7 +403,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape cancels — never saves. Document-level so it works wherever focus
@@ -415,7 +416,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     nameInput.focus();
@@ -423,7 +424,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     instance?.destroy();
     instance = null;
   }

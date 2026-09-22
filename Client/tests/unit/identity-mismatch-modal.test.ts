@@ -9,6 +9,9 @@ import { createIdentityMismatchModal } from "../../src/components/CertMismatchMo
 
 describe("IdentityMismatchModal", () => {
   let container: HTMLDivElement;
+  // Every modal a test mounts, destroyed in afterEach so its document keydown
+  // listener does not outlive the test.
+  const mounted: { destroy?(): void }[] = [];
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -16,6 +19,7 @@ describe("IdentityMismatchModal", () => {
   });
 
   afterEach(() => {
+    for (const modal of mounted.splice(0)) modal.destroy?.();
     container.remove();
   });
 
@@ -30,6 +34,7 @@ describe("IdentityMismatchModal", () => {
       ...overrides,
     });
     modal.mount(container);
+    mounted.push(modal);
     return { modal, onAccept, onReject };
   }
 
