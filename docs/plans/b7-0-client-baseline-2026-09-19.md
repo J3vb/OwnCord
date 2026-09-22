@@ -285,7 +285,7 @@ This section is B7-11's PR 11a (instruments, no production file changed) evidenc
 append: the recount at the 11a base, the ownership classification, the guard
 baseline, and the soak calibration. It is an evidence append, not a status row.
 
-### Task 0 recount at the 11a base (`27d3d47d`, from `dev` `e5eb4b19`)
+### Task 0 recount at the pre-rebase 11a base (`27d3d47d`, from `dev` `e5eb4b19`)
 
 The plan's Verify rows re-derive unchanged at the 11a base:
 
@@ -402,7 +402,7 @@ stream … WS closed unexpectedly`** console line did **not** appear in any of t
 five runs: it is intermittent, emitted when the every-5th-cycle application
 reconnect drops the socket LiveKit's signaling connection rides on, and it is
 expected because that step deliberately severs the transport. It has been seen
-with close code 1006 and, in a later at-head run, 1000; the pattern accepts
+with close code 1006 and, in a later run, 1000; the pattern accepts
 either code. It is on
 the named expected-line list (with `[ws] ws_send failed {error: WS is not open}`)
 so a run that does see it still passes, while any other `console.error` fails.
