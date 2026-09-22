@@ -278,3 +278,118 @@ marker assertion catches that regression exactly rather than by size.
 "Runtime" in the milestone name is bundle-size-only: startup time and memory
 have a defined method above and are measured on a real desktop; no
 runtime-timing gate is added in CI.
+
+## B7-11 long-session baseline (Task 0 and Task 3, 2026-09-22)
+
+This section is B7-11's PR 11a (instruments, no production file changed) evidence
+append: the recount at the 11a base, the ownership classification, the guard
+baseline, and the soak calibration. It is an evidence append, not a status row.
+
+### Task 0 recount at the 11a base (`27d3d47d`, from `dev` `e5eb4b19`)
+
+The plan's Verify rows re-derive unchanged at the 11a base:
+
+- `addEventListener(` 409 calls: 288 with `signal`, 28 `once: true`, 93 with
+  neither, in 31 files. `removeEventListener(` 29.
+- Timers: `setTimeout(` 69 (17 discarded handles), `setInterval(` 7 (all cleared
+  in their own file), `clearTimeout(` 68, `clearInterval(` 7.
+- `new AbortController` 55 constructions in 45 files. `AbortController` or
+  `AbortSignal` named in 71 files.
+- Lifecycle primitives: 2 (`lib/disposable.ts`, `lib/sessionScope.ts`).
+  `Disposable` is imported by 3 files, `SessionScope` by 2.
+- Suite: 274 files, 6 124 passed + 140 expected fail; statements coverage
+  94.33 % (16 937 / 17 955). Startup closure 85 678 / 91 000 B, `MainPage`
+  57 263 / 60 000 B. (Verify row 11's statement count is unchanged; the row's
+  row 6/7/8 numbers are the ones above.)
+
+### Ownership classification (the R1/R3/R4 allowlists)
+
+`tests/unit/lifecycle-ownership.test.ts` pins exact, shrink-only allowlists at
+the base:
+
+- **R1** (long-lived-target listeners without `signal`/`once`): 22 sites — 16
+  app-lifetime singletons (module-load preference/storage/visibility listeners,
+  the `main.ts` bootstrap singletons, `safe-render`'s global handlers) and 6
+  per-mount sites paired with a hand-written `removeEventListener`
+  (`MemberList`/`MessageInput` outside-click, `deviceManager` devicechange,
+  `GlobalKeybinds`, `OverlayManagers`).
+- **R3** (discarded `setTimeout` handles): 17 sites, all self-bounded (a
+  button-label or error-class reset on a node the caller owns: `AdvancedTab`
+  ×5, `LogsTab` ×4, `content-parser` ×2, and one each in `MemberList`, `Toast`,
+  `channel-sidebar/context-menu`, `volume-menu`, `lib/context-menu`,
+  `LoginForm`).
+- **R4** (`new AbortController` outside the two primitives): 53 sites — 8
+  cancellation tokens with a named owner (`api.ts` ×3, `profiles.ts`,
+  `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`,
+  `ChannelController.ts`), 5 per-render children, and 40 component/overlay
+  lifetimes. 11b moves the lifetimes and children onto `Disposable`, leaving
+  the 8 tokens.
+- **R2** (intervals): 0 sites fail — every `setInterval` keeps its handle and
+  clears it in its own file.
+
+Informational counts printed by the test: 93 bare listeners in 31 files,
+`requestAnimationFrame` 16 / `cancelAnimationFrame` 6, 3 observer files
+(`MessageList`, `VideoGrid`, `media-visibility`), and 3 native `listen(` sites
+under `src/platform/desktop/`.
+
+### Unit lifecycle guard baseline
+
+`tests/helpers/lifecycle.ts` records every non-`once` `window`/`document`
+registration and releases each when its signal aborts, so a component that was
+never destroyed stays red even though every listener it carries has a signal
+(the OC-0335 class). At the base, **14 files** leak and are listed in
+`tests/lifecycle-guard-baseline.json`; 11b adds each file's missing teardown and
+empties the list. The plan's row 10 counted 20 files with a throwaway probe that
+did not release signal-owned listeners, and it also counted jsdom's own
+`requestAnimationFrame` timer (jsdom implements rAF on an internal
+`setInterval`); the real guard excludes both. Full suite with the guard on: 276
+files, 6 139 passed + 140 expected fail.
+
+### Soak calibration
+
+Command: `cd Client && OWNCORD_SOAK_CYCLES=20 OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:fullstack -- long-session`,
+Linux x86_64 Chromium, ~2.3 minutes for the 20-cycle test (the whole
+`client-fullstack` suite is 6.0 minutes, inside the config's 20-minute
+`globalTimeout`, so no `playwright.config.fullstack.ts` change was needed).
+
+Bars: counts final ≤ warm and slope ≤ 0.05 per cycle; heap final ≤ warm × 1.10
+and slope ≤ 25 KB per cycle; `documents` and `intervals` exactly equal. Warm is
+the cycle-5 sample.
+
+Three 20-cycle runs were identical on every metric (run-to-run spread 0). At the
+base the asserted metrics all pass. Two are listed in `PENDING_METRICS` for
+11c's Task 12:
+
+| Metric                                             | Warm      | Final     | Slope   | Bar                                      |
+| -------------------------------------------------- | --------- | --------- | ------- | ---------------------------------------- |
+| documents                                          | 1         | 1         | 0.000   | exactly 1 (pass)                         |
+| nodes                                              | 3489      | 2118      | 8.000   | final ≤ warm, slope ≤ 0.05 — **pending** |
+| listeners                                          | 211       | 193       | 0.500   | final ≤ warm, slope ≤ 0.05 — **pending** |
+| AbortControllers                                   | 39        | 20        | 0.000   | pass                                     |
+| intervals                                          | 1         | 1         | 0.000   | exactly 1 (pass)                         |
+| timeouts                                           | 1         | 1         | 0.000   | pass                                     |
+| sockets / peerConnections / tracks / audioContexts | 0         | 0         | 0.000   | pass                                     |
+| heapUsed                                           | 8 090 252 | 4 543 780 | −43 802 | pass                                     |
+
+The two pending metrics fail because the logout/login path leaks, not from
+noise. Over 40 cycles the post-logout samples grow monotonically while the
+mid-session samples stay flat:
+
+| Cycle (phase)     | nodes                     | listeners             |
+| ----------------- | ------------------------- | --------------------- |
+| 5 / 15 / 25 / 35  | 3453                      | 211                   |
+| 10 / 20 / 30 / 40 | 2102 → 2118 → 2134 → 2150 | 192 → 193 → 194 → 195 |
+
+That is about one listener and 1.6 nodes per logout/login. The soak is the
+finding's evidence; 11c writes the regression test and fixes it.
+
+Two measurement fixes the calibration needed, both in the probe: quiesce drains
+one second before sampling (leaving a voice room and closing a socket finish on
+microtasks/timers after their synchronous call returns), and `AbortController`s
+are counted by `!signal.aborted` rather than reachability (the media probe keeps
+every peer, track and socket it sees, so "reachable" never falls — the plan's
+own trap).
+
+The soak was proved able to fail: a throwaway `window.addEventListener("resize",
+…)` in the Account tab raised listeners 211 → 217 and nodes 3489 → 6087 and the
+assertions reported the bars red, before the plant was removed.
