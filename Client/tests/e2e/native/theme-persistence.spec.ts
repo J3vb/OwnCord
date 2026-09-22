@@ -140,7 +140,7 @@ test.describe("Theme Persistence (Native)", () => {
     await expect(toggle).toBeVisible();
 
     const wasCompact = await nativePage.evaluate(() =>
-      document.body.classList.contains("compact-mode"),
+      document.documentElement.classList.contains("compact-mode"),
     );
 
     await toggle.click();
@@ -148,7 +148,7 @@ test.describe("Theme Persistence (Native)", () => {
     // Wait for class to flip
     await expect(async () => {
       const isCompactNow = await nativePage.evaluate(() =>
-        document.body.classList.contains("compact-mode"),
+        document.documentElement.classList.contains("compact-mode"),
       );
       expect(isCompactNow).not.toBe(wasCompact);
     }).toPass({ timeout: 3_000 });
@@ -158,7 +158,7 @@ test.describe("Theme Persistence (Native)", () => {
 
     await expect(async () => {
       const restored = await nativePage.evaluate(() =>
-        document.body.classList.contains("compact-mode"),
+        document.documentElement.classList.contains("compact-mode"),
       );
       expect(restored).toBe(wasCompact);
     }).toPass({ timeout: 3_000 });

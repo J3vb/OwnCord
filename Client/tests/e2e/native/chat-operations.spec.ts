@@ -110,11 +110,13 @@ test.describe("Chat Operations", () => {
     const textarea = nativePage.locator("[data-testid='msg-textarea']");
     const timestamp = Date.now();
 
-    // Send 3 messages, waiting for each to appear before sending the next
+    // Send 3 messages, waiting for each to appear before sending the next.
+    // The local server echoes a message back well inside SEND_DEBOUNCE_MS, so
+    // "appeared in the list" is not enough spacing: the next Enter would be
+    // dropped by the debounce and the textarea would keep its text.
     for (let i = 0; i < 3; i++) {
       const msg = `native-seq-${timestamp}-${i}`;
-      await textarea.fill(msg);
-      await textarea.press("Enter");
+      await typeAndSend(nativePage, msg);
       await expect(textarea).toHaveValue("", { timeout: 5_000 });
       // Wait for the sent message to appear in the list before sending the next
       if (i < 2) {
