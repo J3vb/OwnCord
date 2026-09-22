@@ -477,9 +477,10 @@ export function buildTauriMockScript(opts: {
   /** Stub the external-content broker (B7-16) so link previews, oEmbed titles
    *  and external images can be exercised. Without it every broker call is
    *  refused as "unavailable" (the mocked suite has no external network).
-   *  `preview` keys on the requested URL; `image` keys on a request's URL or
-   *  its opaque handle. A value that is a bare failure-class string refuses
-   *  just that request; an entry with no match keeps the refusing default. */
+   *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
+   *  `handle:<handle>`. A preview value that is a bare failure-class string
+   *  refuses just that request; a request with no entry keeps the refusing
+   *  default. */
   externalContent?: {
     preview?: Record<string, Record<string, unknown> | string>;
     image?: Record<string, number[] | string>;
