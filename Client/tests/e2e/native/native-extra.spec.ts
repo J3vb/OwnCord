@@ -321,6 +321,12 @@ test("a message link opens in the system browser, not the webview", async ({
   await once(target, "listening");
   const path = `/native-extra-${Date.now()}`;
   const url = `http://127.0.0.1:${(target.address() as AddressInfo).port}${path}`;
+  // Processes launched with this test's unique URL on their command line,
+  // other than this PowerShell itself.
+  const launched = (action: string) =>
+    powershell(
+      `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${path}*' } | ForEach-Object { ${action} }`,
+    );
   try {
     const textarea = page.getByTestId("msg-textarea");
     await textarea.fill(`external ${url}`);
@@ -330,12 +336,17 @@ test("a message link opens in the system browser, not the webview", async ({
     const before = page.url();
     await link.click();
     // Loopback is outside the link-preview fetcher's allowed ranges, so a
-    // browser user agent on this path can only be the opened browser.
+    // browser user agent on this path is a browser loading the link.
     await expect
       .poll(() => hits.filter((hit) => hit.startsWith(path) && hit.includes("Mozilla")), {
         timeout: 30_000,
       })
       .not.toHaveLength(0);
+    // Unhandled, WebView2 loads a target=_blank link in its own popup, which
+    // fetches the page too. Only the shell hand-off starts a separate browser
+    // with the URL as its argument.
+    const browsers = (await launched("$_.Name")).split(/\s+/).filter(Boolean);
+    expect(browsers.filter((name) => name.toLowerCase() !== "msedgewebview2.exe")).not.toEqual([]);
     expect(page.url()).toBe(before);
     expect(nativeContext.pages()).toHaveLength(1);
   } finally {
@@ -343,9 +354,7 @@ test("a message link opens in the system browser, not the webview", async ({
     target.close();
     // Close only the browser this test opened: the process whose command line
     // carries this test's unique URL. Best effort — it must not mask a failure.
-    await powershell(
-      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${path}*' } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }`,
-    ).catch(() => {});
+    await launched("taskkill /pid $_.ProcessId /t /f | Out-Null").catch(() => {});
   }
 });
 
