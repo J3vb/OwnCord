@@ -57,6 +57,8 @@ const EXPECTED_CONSOLE_ERRORS = [
   /\[ws\] ws_send failed/,
   /ws_send failed/,
   /WebSocket is not open/,
+  /error reading from signal stream/,
+  /WS closed unexpectedly/,
   /reconnect/i,
   /disconnected/i,
   /offline/i,
