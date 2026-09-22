@@ -29,6 +29,7 @@ import {
   evaluateBars,
   formatBars,
   describeLiveListeners,
+  type SlopeCeilings,
 } from "../support/lifecycle-probe";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -36,32 +37,36 @@ const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
 const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
 
 /**
- * Metrics that fail at the 11a base. Reported, not asserted; 11c empties this.
+ * The per-cycle slope ceiling for a metric with a known base leak.
  *
- * `nodes` and `listeners` fail the pooled slope bar because there is a real,
- * small leak in the logout/login path, not because the samples are noisy. Over
- * 40 cycles the post-logout samples grow monotonically: listeners 192 → 193 →
- * 194 → 195 (cycle 10/20/30/40) and nodes 2102 → 2118 → 2134 → 2150, while the
- * mid-session samples (cycle 5/15/25/35) stay flat at 211 listeners and 3453
- * nodes. So roughly one listener and ~1.6 nodes leak per logout/login. The
- * slopes are far below run-to-run spread on the other metrics (calibration was
- * identical across three 20-cycle runs); 11c's Task 12 writes the regression
- * test and fixes it, then empties this constant.
+ * The plan's cycle logs out and back in every 10 cycles. With the sample taken
+ * after the reset (as the plan's schedule implies), the raw series alternated
+ * between the mid-session and post-logout states, so `nodes` and `listeners`
+ * breached the pooled slope bar. The reviewer's fix for that blind spot was to
+ * take the sample *before* the reset steps, making every sample the same settled
+ * mid-session state; the clean run is then flat (listeners slope 0, nodes slope
+ * −3.6 to −6.3 per cycle over five calibration runs).
+ *
+ * The two metrics are still ratcheted rather than left at the plan's 0.05: the
+ * ratchet is a small margin above that measured slope, so any growth past it
+ * fails the PR soak. The planted-listener control (a settings-tab mount adding
+ * an unowned `window` listener every cycle) drives the nodes slope to ~25/cycle
+ * and fails. 11c's Task 12 fixes the underlying leak and removes these entries,
+ * returning both to the plan bar.
  */
-const PENDING_METRICS: readonly string[] = ["nodes", "listeners"];
+const PENDING_METRICS: SlopeCeilings = { listeners: 0.5, nodes: 8 };
 
 // The reconnect and logout steps deliberately drop the socket, so the client
-// logs its own transport failure while it is offline. Only those lines (and the
-// app's own "disconnected/reconnect" notices) are expected.
+// logs its own transport failure while it is offline. Only the exact messages
+// those steps emit are expected; a genuine error that merely mentions
+// "reconnect" must still fail the run. Both were observed in calibration runs
+// and are listed by their real text.
 const EXPECTED_CONSOLE_ERRORS = [
-  /\[ws\] ws_send failed/,
-  /ws_send failed/,
-  /WebSocket is not open/,
-  /error reading from signal stream/,
-  /WS closed unexpectedly/,
-  /reconnect/i,
-  /disconnected/i,
-  /offline/i,
+  // `ws_send` on a closed socket (lib/ws.ts:539).
+  /\[ws\] ws_send failed \{error: WS is not open/,
+  // LiveKit's signaling socket, dropped by the every-5th-cycle reconnect; the
+  // message's own text, not a bare "reconnect" substring.
+  /error reading from signal stream \{room: channel-\d+.*WS closed unexpectedly with code 1006/,
 ];
 
 const test = base.extend<{ alice: Page }>({
@@ -338,8 +343,11 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
       }
     }
 
-    // The idle-connected phase: every count metric must be exactly equal
-    // across the idle samples (the long run's Task 15 evidence).
+    // The idle-connected phase: with no user activity, every count metric must
+    // be exactly equal across the idle samples — a poller that allocates per
+    // tick (health, connection stats, presence, heartbeat) shows up here. The PR
+    // soak does not run it (OWNCORD_SOAK_IDLE_MIN defaults to 0); the long run
+    // does.
     if (IDLE_MIN > 0) {
       const end = Date.now() + IDLE_MIN * 60_000;
       while (Date.now() < end) {
@@ -357,7 +365,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     });
   }
 
-  const bars = evaluateBars(samples);
+  const bars = evaluateBars(samples, PENDING_METRICS);
   console.log(`lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
 
   expect(pageErrors, "no page errors across the run").toEqual([]);
@@ -366,15 +374,43 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     "no unexpected console.error lines",
   ).toEqual([]);
 
-  const asserted = bars.filter((bar) => !PENDING_METRICS.includes(bar.metric));
+  // Every metric is asserted. `PENDING_METRICS` no longer removes any from
+  // assertion; it raises the slope ceiling of the two metrics with a known,
+  // recorded base leak so the gate still fails on any further growth.
   expect(
-    asserted
+    bars
       .filter((bar) => !bar.pass)
       .map((bar) => `${bar.metric}: ${bar.final} vs warm ${bar.warm} (slope ${bar.slope})`),
-    `metric bars (pending: ${PENDING_METRICS.join(", ") || "none"})`,
+    `metric bars (raised ceilings: ${Object.keys(PENDING_METRICS).join(", ") || "none"})`,
   ).toEqual([]);
 
   // A short run (below the warm + 1 sample) has nothing to compare; a 20-cycle
   // PR soak always does, so this catches a harness that measured nothing.
-  if (CYCLES >= 10) expect(asserted.length, "at least one metric was asserted").toBeGreaterThan(0);
+  if (CYCLES >= 10) expect(bars.length, "at least one metric was asserted").toBeGreaterThan(0);
+
+  // The idle-connected phase (long run only): no count may move across the idle
+  // samples at all. `documents` and `intervals` are already checked exactly by
+  // `evaluateBars`; here every count metric is.
+  const idle = samples.filter((s) => s.cycle === -1);
+  if (idle.length > 1) {
+    const countMetrics = [
+      "documents",
+      "nodes",
+      "listeners",
+      "abortControllers",
+      "intervals",
+      "timeouts",
+      "sockets",
+      "peerConnections",
+      "tracks",
+      "audioContexts",
+    ] as const;
+    const drifted: string[] = [];
+    for (const metric of countMetrics) {
+      const first = idle[0]![metric];
+      if (!idle.every((s) => s[metric] === first))
+        drifted.push(`${metric}: ${idle.map((s) => s[metric]).join("→")}`);
+    }
+    expect(drifted, "idle-phase counts must be exactly equal").toEqual([]);
+  }
 });

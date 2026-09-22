@@ -38,6 +38,19 @@ const COUNT_BAR_SLOPE = 0.05;
 const HEAP_BAR_RATIO = 1.1;
 const HEAP_BAR_SLOPE = 25 * 1024;
 
+/** A count metric the soak asserts. */
+export type CountMetric =
+  | "documents"
+  | "nodes"
+  | "listeners"
+  | "abortControllers"
+  | "intervals"
+  | "timeouts"
+  | "sockets"
+  | "peerConnections"
+  | "tracks"
+  | "audioContexts";
+
 /**
  * The timer ledger: an init script that wraps `setTimeout`/`setInterval` (and
  * their `clear` counterparts) into id sets. It records ids only, so it adds no
@@ -178,22 +191,29 @@ export interface BarResult {
   pass: boolean;
 }
 
-/** Least-squares slope of y over the sample indices. */
-function slope(values: readonly number[]): number {
-  const n = values.length;
+/** Per-metric slope ceilings, in units per cycle; absent uses the plan's 0.05. */
+export type SlopeCeilings = Partial<Record<CountMetric, number>>;
+
+/**
+ * Least-squares slope of y per **cycle** (not per sample index). Samples are 5
+ * cycles apart, so regressing on the index would report a slope 5× the stated
+ * bar; regressing on the cycle number keeps the "per cycle" labels honest.
+ */
+function slope(points: readonly { x: number; y: number }[]): number {
+  const n = points.length;
   if (n < 2) return 0;
-  const meanX = (n - 1) / 2;
-  const meanY = values.reduce((a, b) => a + b, 0) / n;
+  const meanX = points.reduce((a, p) => a + p.x, 0) / n;
+  const meanY = points.reduce((a, p) => a + p.y, 0) / n;
   let num = 0;
   let den = 0;
-  for (let i = 0; i < n; i++) {
-    num += (i - meanX) * (values[i]! - meanY);
-    den += (i - meanX) ** 2;
+  for (const p of points) {
+    num += (p.x - meanX) * (p.y - meanY);
+    den += (p.x - meanX) ** 2;
   }
   return den === 0 ? 0 : num / den;
 }
 
-const COUNT_METRICS = [
+const COUNT_METRICS: readonly CountMetric[] = [
   "documents",
   "nodes",
   "listeners",
@@ -204,55 +224,102 @@ const COUNT_METRICS = [
   "peerConnections",
   "tracks",
   "audioContexts",
-] as const;
+];
 
 /**
- * Evaluate the pass bars over the post-warm samples. Warm is the sample at
- * cycle 5; every later sample is the evidence.
+ * Evaluate the pass bars.
  *
- * Count bar: the final sample is ≤ warm, and the least-squares slope over all
- * post-warm samples is ≤ 0.05 per cycle. Heap bar: final ≤ warm × 1.10 and
- * slope ≤ 25 KB per cycle. `documents` and `intervals` must be exactly equal to
- * warm at every sample.
+ * The plan's cycle logs out every 10 cycles and samples every 5, so the raw
+ * series alternates between two ages-since-login and a single least-squares
+ * slope would read the reset (and give the mid-session sample no weight), not
+ * the app. Samples are therefore grouped by their phase in the 10-cycle login
+ * generation (`cycle % 10`): cycles 5/15/25 are one like-for-like mid-session
+ * series, cycles 10/20 are the post-logout series. A metric passes only when
+ * *every* group's per-cycle slope is within its ceiling, so a leak that shows in
+ * either series fails the gate.
+ *
+ * `slopeCeilings` is the ratchet for a metric with a known, recorded base leak
+ * (the logout-path listeners/nodes leak): the gate still fails on any growth past
+ * the measured slope, and 11c lowers each ceiling to the plan's 0.05 once the
+ * leak is fixed. `documents` and `intervals` must be exactly flat in every group.
  */
-export function evaluateBars(samples: readonly LifecycleSample[]): BarResult[] {
-  const warmIndex = samples.findIndex((s) => s.cycle === 5);
-  const warm = warmIndex === -1 ? samples[0] : samples[warmIndex];
-  const post = samples.filter((s) => s.cycle > 5);
-  if (warm === undefined || post.length === 0) return [];
+export function evaluateBars(
+  samples: readonly LifecycleSample[],
+  slopeCeilings: SlopeCeilings = {},
+): BarResult[] {
+  const post = samples.filter((s) => s.cycle > 0);
+  if (post.length < 2) return [];
+
+  // Group by phase in the 10-cycle login generation; each group is a
+  // like-for-like series at the same age since the last login.
+  const groups = new Map<number, LifecycleSample[]>();
+  for (const sample of post) {
+    const phase = sample.cycle % 10;
+    groups.set(phase, [...(groups.get(phase) ?? []), sample]);
+  }
 
   const results: BarResult[] = [];
   for (const metric of COUNT_METRICS) {
-    const values = post.map((s) => s[metric]);
-    const final = values[values.length - 1]!;
-    const measuredSlope = slope(values);
+    const ceiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
     const exact = metric === "documents" || metric === "intervals";
-    const pass = exact
-      ? values.every((v) => v === warm[metric])
-      : final <= warm[metric] && measuredSlope <= COUNT_BAR_SLOPE;
-    results.push({
+    const failures: string[] = [];
+    let worstSlope = 0;
+    let lastWarm: number | null = null;
+    let lastFinal = 0;
+    for (const [phase, group] of groups) {
+      const values = group.map((s) => s[metric]);
+      const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
+      if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
+        worstSlope = measuredSlope;
+        lastWarm = values[0]!;
+        lastFinal = values[values.length - 1]!;
+      }
+      const flat = values.every((v) => v === values[0]);
+      const ok = exact ? flat : measuredSlope <= ceiling;
+      if (!ok) failures.push(`phase ${phase}: ${values.join("→")}`);
+    }
+    const result: BarResult = {
       metric,
-      warm: warm[metric],
-      final,
-      slope: measuredSlope,
+      warm: lastWarm,
+      final: lastFinal,
+      slope: worstSlope,
       bar: exact
-        ? `every sample exactly ${warm[metric]}`
-        : `final <= warm (${warm[metric]}) and slope <= ${COUNT_BAR_SLOPE}`,
-      pass,
-    });
+        ? "every generation series exactly flat"
+        : `every generation series slope <= ${ceiling}/cycle`,
+      pass: failures.length === 0,
+    };
+    if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
+    results.push(result);
   }
 
-  const heapValues = post.map((s) => s.heapUsed);
-  const heapFinal = heapValues[heapValues.length - 1]!;
-  const heapSlope = slope(heapValues);
+  // Heap gets the same like-for-like treatment as the counts: compare each
+  // generation series against itself, so the intended post-logout drop is not
+  // read as a breach and a real heap leak still shows.
+  const heapFailures: string[] = [];
+  let heapSlope = 0;
+  let heapFirst: number | null = null;
+  let heapLast = 0;
+  for (const [phase, group] of groups) {
+    const values = group.map((s) => s.heapUsed);
+    const measured = slope(group.map((s) => ({ x: s.cycle, y: s.heapUsed })));
+    if (Math.abs(measured) >= Math.abs(heapSlope)) {
+      heapSlope = measured;
+      heapFirst = values[0]!;
+      heapLast = values[values.length - 1]!;
+    }
+    if (values[values.length - 1]! > values[0]! * HEAP_BAR_RATIO || measured > HEAP_BAR_SLOPE)
+      heapFailures.push(`phase ${phase}: ${values.join("→")}`);
+  }
   results.push({
     metric: "heapUsed",
-    warm: warm.heapUsed,
-    final: heapFinal,
+    warm: heapFirst,
+    final: heapLast,
     slope: heapSlope,
-    bar: `final <= warm * ${HEAP_BAR_RATIO} (${Math.round(warm.heapUsed * HEAP_BAR_RATIO)}) and slope <= ${HEAP_BAR_SLOPE}`,
-    pass: heapFinal <= warm.heapUsed * HEAP_BAR_RATIO && heapSlope <= HEAP_BAR_SLOPE,
+    bar: `every generation series last <= first * ${HEAP_BAR_RATIO} and slope <= ${HEAP_BAR_SLOPE}/cycle`,
+    pass: heapFailures.length === 0,
   });
+  if (heapFailures.length > 0)
+    results[results.length - 1]!.bar += ` — FAIL ${heapFailures.join("; ")}`;
   return results;
 }
 
