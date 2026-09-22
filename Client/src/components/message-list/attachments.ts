@@ -157,7 +157,16 @@ export function setAttachmentCacheScope(scope: string | null): void {
   if (scope === cacheScope) return;
   cacheScope = scope;
   clearAttachmentCaches();
-  if (scope !== null) void idbPruneOutside(scope);
+  if (scope !== null) void idbPrune(scope, true);
+}
+
+/**
+ * Delete every durable entry of `scope` — a self-deleted account's images
+ * (B7-15c). Call it after auth has cleared, so the scope is no longer armed
+ * and no late write can land behind the prune.
+ */
+export function pruneAttachmentCacheScope(scope: string): Promise<void> {
+  return idbPrune(scope, false);
 }
 
 /** Durable-store key: the scope, then the URL. */
@@ -290,8 +299,9 @@ function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
   tx.onerror = close;
 }
 
-/** Delete every durable entry outside `scope`, including pre-B7-13 keys. */
-async function idbPruneOutside(scope: string): Promise<void> {
+/** Delete every durable entry outside `scope` (including pre-B7-13 keys) when
+ *  `keep` is true, or every entry inside it when false. */
+async function idbPrune(scope: string, keep: boolean): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
   try {
@@ -303,7 +313,8 @@ async function idbPruneOutside(scope: string): Promise<void> {
     // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
     req.onsuccess = () => {
       for (const key of req.result) {
-        if (typeof key !== "string" || !key.startsWith(prefix)) store.delete(key);
+        const inside = typeof key === "string" && key.startsWith(prefix);
+        if (inside !== keep) store.delete(key);
       }
     };
   } catch {

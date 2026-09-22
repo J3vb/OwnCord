@@ -5,7 +5,9 @@ an operator or a reviewer has about a self-hosted OwnCord server: **what can
 I look at when something is wrong**, **what does the server ever send off
 this machine**, and **what a support bundle contains**. The server-side support bundle is
 implemented in the admin panel; all three are checked by tests on every CI run.
-Desktop-local bundles and broader B6/B9 recovery qualification remain separate work.
+The desktop client's own local bundle (B7-15c) is described in
+[Desktop client support bundle](#desktop-client-support-bundle); broader B6/B9
+recovery qualification remains separate work.
 
 The short version: OwnCord sends no automatic product or usage telemetry.
 Every outbound network path in the server is one of three things — an
@@ -34,6 +36,33 @@ messaging, upload, idle and shutdown.
 Log content is governed by `logging.level`; usernames, ids and client
 addresses appear at `info` (data-lifecycle class 22), which is why the
 support-bundle contract below treats log excerpts as sensitive.
+
+## Desktop client support bundle
+
+B7-15c (PRD decision 7). **Settings > Logs > Export Support Bundle** writes a
+zip to a path the user picks in the OS save dialog. It is user-initiated, read
+and written on the user's machine, and makes no server call. The zip is
+store-only and written in TypeScript (`Client/src/lib/supportBundle.ts`,
+loaded lazily from the button); there is no Rust command behind it.
+
+| File                     | Contents                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `README.txt`             | what the bundle holds and the verbatim-logs warning below                                                                                                                                              |
+| `app.json`               | client version and export time                                                                                                                                                                         |
+| `settings.json`          | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection) |
+| `voice-diagnostics.json` | the voice session state the Logs tab shows                                                                                                                                                             |
+| `logs/*.jsonl`           | the rotated client log files (at most five days)                                                                                                                                                       |
+
+A settings key that is not on the allowlist never enters the bundle, whatever
+it holds; device ids and the custom status text are left out on purpose. The
+OS keychain, which holds saved passwords and session tokens, is never read.
+`Client/tests/unit/support-bundle.test.ts` plants a token, password, recovery
+kit secret, recovery code and TOTP secret in storage and in the profiles, and
+proves none reaches the zip.
+
+**Log lines are exported verbatim.** The client logger does not redact, so the
+bundle does not claim to: the Logs tab and `README.txt` both say the log files
+are unredacted and should be read before the bundle is shared.
 
 ## Egress inventory
 

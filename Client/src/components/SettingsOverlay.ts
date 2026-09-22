@@ -58,6 +58,9 @@ export interface SettingsOverlayOptions {
   onUploadAvatar(file: File): Promise<string>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
+  /** The server-default retention sentence for the Account tab, or null when
+   *  the server did not report one (B7-15c). */
+  getRetentionNotice?(): string | null;
   onStatusChange(status: UserStatus): void;
   onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
   onConfirmTotp(password: string, code: string): Promise<void>;
