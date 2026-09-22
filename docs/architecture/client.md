@@ -179,7 +179,12 @@ Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`
 a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
 runs the `native-core` Playwright project, then the auth, UI and
 native-extra projects listed in `docs/testing-behavior.md`, then the
-signed-NSIS install/relaunch script), Stryker mutation testing
+signed-NSIS install/relaunch script; and a four-target installed-artifact smoke,
+`client-artifact-smoke.yml`, which installs the Windows x64/ARM64 NSIS and
+Linux x64/ARM64 AppImage + deb bundles on their own architecture and drives
+install, boot, connect, media and recovery — nightly on unsigned builds, and in
+`release.yml` before `publish` on the signed bundles, where it also updates from
+the previous release and rolls back), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
 strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.

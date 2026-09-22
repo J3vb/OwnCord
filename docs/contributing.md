@@ -115,22 +115,23 @@ Windows client builds and server-only work need none of this. Design and rationa
 
 **Tests**
 
-| Command                    | Description                            |
-| -------------------------- | -------------------------------------- |
-| `npm test`                 | Run all tests (vitest)                 |
-| `npm run test:unit`        | Unit tests only                        |
-| `npm run test:integration` | Integration tests only                 |
-| `npm run test:contract`    | Cross-component contract tests only    |
-| `npm run test:e2e`         | Playwright E2E (mocked Tauri)          |
-| `npm run test:e2e:native`  | Playwright E2E (real Tauri exe + CDP)  |
-| `npm run test:e2e:admin`   | Playwright E2E (real Go server + SPA)  |
-| `npm run test:e2e:prod`    | Playwright E2E (prod build)            |
-| `npm run test:e2e:ui`      | Playwright UI mode                     |
-| `npm run test:watch`       | Vitest watch mode                      |
-| `npm run test:coverage`    | Coverage report                        |
-| `npm run test:mutate`      | Stryker mutation testing               |
-| `npm run test:mutate:dry`  | Stryker dry-run (no mutations applied) |
-| `npm run test:browser`     | Vitest browser-mode tests              |
+| Command                     | Description                                |
+| --------------------------- | ------------------------------------------ |
+| `npm test`                  | Run all tests (vitest)                     |
+| `npm run test:unit`         | Unit tests only                            |
+| `npm run test:integration`  | Integration tests only                     |
+| `npm run test:contract`     | Cross-component contract tests only        |
+| `npm run test:e2e`          | Playwright E2E (mocked Tauri)              |
+| `npm run test:e2e:native`   | Playwright E2E (real Tauri exe + CDP)      |
+| `npm run test:e2e:artifact` | Installed release artifact smoke (CI only) |
+| `npm run test:e2e:admin`    | Playwright E2E (real Go server + SPA)      |
+| `npm run test:e2e:prod`     | Playwright E2E (prod build)                |
+| `npm run test:e2e:ui`       | Playwright UI mode                         |
+| `npm run test:watch`        | Vitest watch mode                          |
+| `npm run test:coverage`     | Coverage report                            |
+| `npm run test:mutate`       | Stryker mutation testing                   |
+| `npm run test:mutate:dry`   | Stryker dry-run (no mutations applied)     |
+| `npm run test:browser`      | Vitest browser-mode tests                  |
 
 PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
 `src/lib/permissions.ts`). The full-client mutation baseline
@@ -335,19 +336,20 @@ test-driven workflow and never lower a threshold to make a change fit.
 
 ### Tiers
 
-| Tier                         | Command                      | CI job                               | Blocking |
-| ---------------------------- | ---------------------------- | ------------------------------------ | -------- |
-| `Client/tests/unit`          | `npm run test:unit`          | Client Unit Tests                    | yes      |
-| `Client/tests/integration`   | `npm run test:integration`   | Client Unit Tests                    | yes      |
-| `Client/tests/contract`      | `npm run test:contract`      | Client Unit Tests                    | yes      |
-| `Client/tests/browser`       | `npm run test:browser`       | Client E2E (Playwright)              | yes      |
-| `Client/tests/e2e`           | `npm run test:e2e`           | Client E2E (Playwright)              | yes      |
-| `Client/tests/e2e` @parity   | —                            | Client E2E (parity subset, blocking) | yes      |
-| `Client/tests/e2e/native`    | `npm run test:e2e:native`    | Client E2E (Windows native)          | yes      |
-| `Client/tests/e2e/admin`     | `npm run test:e2e:admin`     | Admin Panel E2E (real server)        | yes      |
-| `Client/tests/e2e/fullstack` | `npm run test:e2e:fullstack` | Client E2E (real server and media)   | yes      |
-| `Server/**/*_test.go`        | `make test`                  | Server Build & Test                  | yes      |
-| `Client/src-tauri`           | `cargo test --lib`           | Rust Unit Tests                      | yes      |
+| Tier                              | Command                      | CI job                                                                                               | Blocking               |
+| --------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------- |
+| `Client/tests/unit`               | `npm run test:unit`          | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/integration`        | `npm run test:integration`   | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/contract`           | `npm run test:contract`      | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/browser`            | `npm run test:browser`       | Client E2E (Playwright)                                                                              | yes                    |
+| `Client/tests/e2e`                | `npm run test:e2e`           | Client E2E (Playwright)                                                                              | yes                    |
+| `Client/tests/e2e` @parity        | —                            | Client E2E (parity subset, blocking)                                                                 | yes                    |
+| `Client/tests/e2e/native`         | `npm run test:e2e:native`    | Client E2E (Windows native)                                                                          | yes                    |
+| `Client/tests/e2e/artifact-smoke` | `npm run test:e2e:artifact`  | Desktop Artifact Smoke (`client-artifact-smoke.yml`: nightly, and before `publish` in `release.yml`) | no (gates the release) |
+| `Client/tests/e2e/admin`          | `npm run test:e2e:admin`     | Admin Panel E2E (real server)                                                                        | yes                    |
+| `Client/tests/e2e/fullstack`      | `npm run test:e2e:fullstack` | Client E2E (real server and media)                                                                   | yes                    |
+| `Server/**/*_test.go`             | `make test`                  | Server Build & Test                                                                                  | yes                    |
+| `Client/src-tauri`                | `cargo test --lib`           | Rust Unit Tests                                                                                      | yes                    |
 
 `npm test` — not `npm run test:unit` — is the suite that covers
 `tests/contract`. CI runs it as `vitest run --coverage`, and
