@@ -25,6 +25,7 @@
 // loudly instead of letting the suite go quietly vacuous again.
 import { setLogLevel } from "../src/lib/logger";
 import { installConsoleGuard } from "./helpers/console";
+import { installLifecycleGuard } from "./helpers/lifecycle";
 
 if (typeof globalThis.localStorage === "undefined") {
   throw new Error(
@@ -57,6 +58,20 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
 // debug/info log entry (buffer entry, listener call) raises the level back for
 // itself and restores "warn" afterwards.
 setLogLevel("warn");
+
+// ...and that a test does not leak a bare window/document listener or a real
+// interval: the guard fails the test that made it, unless its file is on the
+// shrink-only tests/lifecycle-guard-baseline.json (B7-11a).
+//
+// Installed BEFORE the console guard on purpose. vitest runs setup afterEach
+// hooks in reverse registration order, so whichever registers later runs
+// first. message-list-media-release.test.ts leaves a floating
+// fetchExternalImage promise whose refusal logs through the app logger; if
+// the console guard's afterEach runs after another setup afterEach, that
+// microtask checkpoint lets the log land inside the assertion window and
+// fails a test that is otherwise green. Registering this guard first keeps
+// the console guard's afterEach last, where the base suite already had it.
+installLifecycleGuard();
 
 // ...and that nothing else prints either: console.warn/console.error are
 // captured per test, and a test that provokes one must claim it with
