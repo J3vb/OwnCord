@@ -244,8 +244,9 @@ unlinking — is never pruned; only its content is bounded.
 ### Admin attention panel (`attention`)
 
 Warning floors for the Dashboard's attention panel (RI-07). The server samples
-each signal once a minute. The first measured level shows at once; after
-that a disk or rate level must hold for two samples to raise or clear, a
+each signal once a minute. The first disk level and a stopped dispatch loop
+show at once; any other disk or rate level must hold for two samples to raise
+or clear, a
 raised rate clears only below half its threshold, and a disk warning clears
 only 10% above its floor. Each rate learns a baseline over ten samples,
 skipping the first measured minute (the resume burst after a restart), and

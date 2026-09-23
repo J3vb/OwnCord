@@ -107,8 +107,13 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	// sample and raises nothing; any other signal learns only samples at or
 	// below its floor and raises at the floor, so pressure present at boot is
 	// raised rather than learned. After warm-up only healthy samples are
-	// learned, so sustained pressure never becomes the normal.
+	// learned, so sustained pressure never becomes the normal. Only a stopped
+	// dispatch loop commits on the first measured interval; any other rate
+	// level starts healthy and needs attentionSustain samples to raise.
 	first := st.level.status == ""
+	if first && !spec.dead {
+		st.level.status = AttentionStatusOK
+	}
 	warm := st.samples >= attentionBaselineWarmup
 	threshold := spec.floor
 	if warm {
