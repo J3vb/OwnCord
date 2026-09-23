@@ -7,7 +7,10 @@
 [public-beta roadmap](repo-health-roadmap-2026-08-23.md)  
 **Structural input:**
 [repository-layout audit](../audit-2026-08-23-repository-layout.md)  
-**Current status:** all 57 requirements are mapped; none is release-qualified
+**Current status:** all 57 requirements are mapped; none is release-qualified  
+_2026-09-23 (B9-0):_ the B9 entry baseline
+([b9-entry-baseline-2026-09-23.md](b9-entry-baseline-2026-09-23.md)) qualifies
+no row; BPR-060..064, BPR-070..073 and BPR-090..092 keep their status
 
 ## How to use this document
 

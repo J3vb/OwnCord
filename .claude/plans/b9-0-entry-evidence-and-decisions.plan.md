@@ -1,6 +1,6 @@
 # Plan: B9-0 — Verify entry evidence and settle the execution contract
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** COMPLETE — 2026-09-23 at `dev` `f32149c4`; evidence in `docs/plans/b9-entry-baseline-2026-09-23.md`.
 
 > **Milestone:** B9-0 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `docs/b9-0-entry-evidence-and-decisions`; branch from current `dev`, PR to `dev` only.
