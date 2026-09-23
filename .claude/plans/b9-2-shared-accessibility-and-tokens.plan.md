@@ -88,7 +88,7 @@ Add a small shared-controls fixture for normal, hover, focus, disabled, loading 
 
 ### Task 2: Change only shared primitives
 
-Apply the Q1/Q8-approved token adjustments, visible focus treatment, dialog focus restoration and common status/error semantics. Keep action-specific rules in their own milestone; do not restyle all feature screens here.
+Apply the Q1/Q8 token adjustments (Q8: derived `--on-accent`, `--accent-hover` and `--accent-active`; accent-as-text or focus below 3:1 falls back to the theme default accent), visible focus treatment, dialog focus restoration and common status/error semantics. Keep action-specific rules in their own milestone; do not restyle all feature screens here.
 
 ### Task 3: Make the checks reusable
 
@@ -130,17 +130,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -170,12 +171,16 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q1 — Accessibility acceptance contract
 
+**Decided 2026-09-23 by the owner:** adopt a WCAG 2.2 AA-oriented checklist as the B9 acceptance bar. Named assistive technologies: NVDA (current stable) on Windows 11 and Orca (current GNOME release) on Linux; one native recording per milestone journey on each. Thresholds: text contrast 4.5:1, large text / UI components / focus indicators 3:1 (WCAG 1.4.3, 1.4.11); visible, unobscured focus (2.4.7, 2.4.11); pointer targets at least 24×24 CSS px (2.5.8); text spacing (1.4.12); no content or function lost at the app text scale of 12–20 px with Large Font on, at OS zoom 200 %, and at the 940×500 minimum window (1.4.10 as applied to desktop); reduced motion honoured from both the OS setting and the in-app toggle. The repository owner is the named human reviewer; automated reports supplement, never replace, the manual checks. This is a bar for B9 acceptance, not a certification claim.
+
 **Options and consequences:** Adopt a documented WCAG 2.2 AA-oriented checklist with Windows NVDA and Linux Orca native checks, text scaling and desktop reflow; or specify an equivalent native-task checklist covering every roadmap property with explicit thresholds and AT coverage. The first provides familiar criteria; the second needs more owner review to establish equivalent coverage. Structural smoke alone is insufficient under either option.
 
-**Recommendation (not approved):** Adopt the broader checklist, name supported OS/AT versions and assign human reviewers before implementation. This is a proposed bar, not a claim of certification.
+**Drafting recommendation (historical):** Adopt the broader checklist, name supported OS/AT versions and assign human reviewers before implementation. This is a proposed bar, not a claim of certification.
 
 ### Q8 — Theme and custom-accent accessibility policy
 
+**Decided 2026-09-23 by the owner:** option (a), scoped. Qualify the four built-in themes (dark, neon-glow, midnight, light) and the High Contrast toggle at the Q1 thresholds, and the ten preset accent swatches with them. A custom accent is honoured for fills and decoration. Three tokens are derived from it at apply time: `--on-accent` (white or near-black by WCAG relative luminance, used for all text on accent surfaces), `--accent-hover` and `--accent-active`. Where the accent itself is the text or the focus indicator and its contrast against the theme background is below 3:1, those uses fall back to the theme's default accent; fills keep the user's colour. One line under the accent input discloses this: "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours."
+
 **Options and consequences:** Qualify every built-in theme and provide a contrast-safe fallback for arbitrary custom accents; or require/warn users to adjust custom themes themselves. Fallback preserves readable controls but can alter chosen colors; warnings preserve exact choices but cannot establish an all-settings contrast claim.
 
-**Recommendation (not approved):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.
+**Drafting recommendation (historical):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.

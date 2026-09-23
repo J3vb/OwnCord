@@ -130,17 +130,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -170,6 +171,8 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q3 — External-content consent scope and persistence
 
+**Decided 2026-09-23 by the owner:** one consent choice per server profile, persisted across restarts. The first time a message would load external content on a given server, nothing is fetched; a dialog states in one sentence that previews and images are fetched from the viewer's machine to hosts chosen by message authors, and offers "Load automatically on this server" or "Ask each time". "Ask each time" is per-item click-to-load. The grant is keyed by server profile (not global), stored with the other client preferences, and is revoked by turning off the existing Text & Images toggles or by a "Reset external content consent" action in that tab. Message Request previews and NSFW channels stay separately gated and never inherit this grant. YouTube playback remains a separate explicit click, as today.
+
 **Options and consequences:** Require per-item activation without persistence; remember consent for this server/account session; or persist provider/server permission across restarts. Per-item is clearest but repetitive, session memory reduces prompts, persistent grants need a discoverable revocation/reset model and stronger lifecycle evidence. All options keep zero fetch before the applicable acknowledgement; NSFW and request trust remain separate.
 
-**Recommendation (not approved):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.
+**Drafting recommendation (historical):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.

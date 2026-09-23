@@ -6,7 +6,7 @@
 > **Branch:** `feat/b9-14-removal-kick-ban-controls`; branch from current `dev`, PR to `dev` only.
 > **Drafted:** 2026-09-23. **Base commit:** `0beee8e4c50ca18823750e381d3a1d6e327029b8` (`dev`).
 > **Roadmap workstreams:** 4, 5, 8. **Requirements:** BPR-072, BPR-091.
-> **Dependencies:** B9-13. Q5-approved effective-capability prerequisite. All product work also requires the PRD entry gate.
+> **Dependencies:** B9-13. Q5 prerequisite: the separate server PR adding `can_moderate_voice` (decided 2026-09-23; not yet implemented). All product work also requires the PRD entry gate.
 > **Owner:** one assigned implementer for this PR; product decisions and HP signatures remain with the repository owner.
 > **Priority/impact:** beta-blocking acceptance for the named requirements; no date deadline.
 
@@ -84,7 +84,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Resolve the effective-capability handoff
 
-Q5 must name how this client obtains authoritative per-channel voice affordances. A narrowly reviewed server projection, if chosen, is a separate prerequisite PR and must be planned before this client milestone starts. Do not copy an incomplete override algorithm or request broader admin data.
+Per Q5 (decided 2026-09-23) this client obtains authoritative per-channel voice affordances from the server-computed `can_moderate_voice` channel boolean. That server projection is a separate prerequisite PR and must be planned before this client milestone starts. Do not copy an incomplete override algorithm or request broader admin data.
 
 ### Task 2: Wire removal, kick and ban
 
@@ -130,17 +130,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -159,7 +160,7 @@ All PRs retain exact-integration-SHA CI evidence before phase closure.
 
 ## Risks and rollback
 
-Permission presentation needs data the client can lawfully read. Until Q5 and its prerequisite are complete this milestone is blocked, not satisfied by server rejection alone.
+Permission presentation needs data the client can lawfully read. Until the Q5 `can_moderate_voice` prerequisite PR is accepted this milestone is blocked, not satisfied by server rejection alone.
 
 Rollback is a scoped revert of this PR plus dependent client changes where
 necessary; preserve server data and current authorization. No new durable data
@@ -170,6 +171,8 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q5 — Effective voice moderation affordance contract
 
+**Decided 2026-09-23 by the owner:** option (a). A separate small server PR (protocol-change skill) adds one boolean, `can_moderate_voice`, to each channel object in `ready` and in the per-user `channel_create` refresh, beside `can_send`. It is computed by the existing `permissions.CanModerateVoice` for the caller in that channel (effective READ | MUTE_MEMBERS after both override layers). It is refreshed on the same events that refresh `can_send` today, plus a per-user `channel_update` push when a role or user override on that channel changes. The client shows the four voice-moderation actions only when `can_moderate_voice` is true; target rank, timeouts and destination capacity remain server-side refusals and are surfaced as such. No override data is exposed to members; no server authorization is rewritten.
+
 **Options and consequences:** Provide a narrow server-computed capability projection for the caller in each channel; or expose sufficient authorized overrides for a complete client derivation. The first keeps policy canonical and payload small; the second duplicates more permission logic and data. Role-only controls with eventual server refusal do not close SEC-02's effective-permission UI requirement.
 
-**Recommendation (not approved):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
+**Drafting recommendation (historical):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.

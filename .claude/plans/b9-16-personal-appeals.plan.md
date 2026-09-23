@@ -6,7 +6,7 @@
 > **Branch:** `feat/b9-16-personal-appeals`; branch from current `dev`, PR to `dev` only.
 > **Drafted:** 2026-09-23. **Base commit:** `0beee8e4c50ca18823750e381d3a1d6e327029b8` (`dev`).
 > **Roadmap workstreams:** 5, 8. **Requirements:** BPR-073, BPR-091, BPR-092.
-> **Dependencies:** B9-15. Q6-approved recipient-discovery prerequisite. All product work also requires the PRD entry gate.
+> **Dependencies:** B9-15. Q6 prerequisite: the separate B5 contract-completion PR adding `GET /api/v1/users/me/moderation` (decided 2026-09-23; not yet implemented). All product work also requires the PRD entry gate.
 > **Owner:** one assigned implementer for this PR; product decisions and HP signatures remain with the repository owner.
 > **Priority/impact:** beta-blocking acceptance for the named requirements; no date deadline.
 
@@ -84,7 +84,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Require a real action source
 
-Q6 and any separately planned recipient-history prerequisite must provide restart-safe authorized action ids before full closure. Never ask a user to guess an integer or grant moderator read authority to populate the form.
+The Q6 `GET /api/v1/users/me/moderation` contract (a separate B5 contract-completion PR) must provide restart-safe authorized action ids before full closure. Never ask a user to guess an integer or grant moderator read authority to populate the form.
 
 ### Task 2: Build submission and withdrawal
 
@@ -130,17 +130,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -170,6 +171,8 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q6 — Restart-safe recipient sanctions and appeal eligibility
 
+**Decided 2026-09-23 by the owner:** option (a), as a separate B5 contract-completion PR. Add `GET /api/v1/users/me/moderation` (session auth) returning the caller's own ledger rows of kind warning, timeout, removal, and ban where the ban has lapsed or been reversed, newest first, bounded by the existing retention sweep. Each row: `id` (the ledger id appeals use), `kind`, `reason`, `created_at`, `expires_at`, `lifted_at`, `acknowledged_at`, `appealable` (computed by the same rules `Submit` applies: kind eligible, not already appealed), and `appeal` (`{id, state}` or null). Excluded by construction: actor, reporter, report link, evidence, internal notes. Keep `ready.notices` as the fast path for unacknowledged warnings. Currently banned users remain out of band under B5 policy. B9-15/16 stay blocked for complete closure until this contract is accepted.
+
 **Options and consequences:** Add a member-safe own-action/restriction read with ids, reasons, expiry and eligibility; or use only existing live frames and ready warnings. The read needs a narrowly scoped server contract PR; live-only UX cannot recover removal/timeout action ids and all eligible history after restart and leaves BPR-072/073 incomplete. Currently banned users remain out-of-band under the existing B5 policy in either case.
 
-**Recommendation (not approved):** Approve a separate B5 contract-completion PR for own-action/restriction discovery, with a DTO excluding reporter/evidence/internal notes. B9-15/16 remain blocked for complete closure until its exact contract is accepted.
+**Drafting recommendation (historical):** Approve a separate B5 contract-completion PR for own-action/restriction discovery, with a DTO excluding reporter/evidence/internal notes. B9-15/16 remain blocked for complete closure until its exact contract is accepted.
