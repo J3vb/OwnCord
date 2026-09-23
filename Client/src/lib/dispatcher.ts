@@ -12,6 +12,7 @@ import type { WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
+import { serverErrorText } from "./api";
 import type { ApiClient } from "./api";
 import { showToast } from "./toast";
 import { connectText } from "../i18n/connect";
@@ -312,7 +313,10 @@ export function wireDispatcher(
       // synchronously, independent of the video-rollback lookup below: both
       // paths react to this exact same message, so there is nothing left to
       // gate on that lookup resolving.
-      showToast(payload.message || connectText("error.serverFallback"), "error");
+      showToast(
+        serverErrorText(payload.code, payload.message, connectText("error.serverFallback")),
+        "error",
+      );
 
       rollbackVideoOnError(id);
     }),

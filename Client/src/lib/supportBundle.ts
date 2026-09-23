@@ -167,8 +167,6 @@ const PROFILE_FIELDS = [
   "lastConnected",
 ] as const;
 
-const README = settingsText("logs.bundleReadme");
-
 export interface SupportBundleSources {
   readonly appVersion: string;
   readonly logs: readonly { readonly name: string; readonly text: string }[];
@@ -216,7 +214,7 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
   const encoder = new TextEncoder();
   return zipStore(
     [
-      { name: "README.txt", data: encoder.encode(README) },
+      { name: "README.txt", data: encoder.encode(settingsText("logs.bundleReadme")) },
       {
         name: "app.json",
         data: json({ version: src.appVersion, exportedAt: src.now.toISOString() }),

@@ -92,6 +92,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     min: String(MIN_FONT_SIZE_PX),
     max: String(MAX_FONT_SIZE_PX),
     value: String(currentFontSize),
+    "aria-label": t("appearance.fontSize"),
   });
   // The EFFECTIVE size, not the raw slider position: Large Font can floor it
   // above where the slider sits, and a label that disagrees with the rendered

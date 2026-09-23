@@ -11,6 +11,7 @@ import {
   nsfwContentBlocked,
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
+import { connectText } from "../i18n/connect";
 import type {
   AuthResponse,
   AdminUser,
@@ -56,6 +57,29 @@ export class ApiClientError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * The text for a server error: catalog text when its code has a mapping, the
+ * server's message only when it has none, and `fallback` for an empty message.
+ * An internal failure maps to the caller's own `fallback`.
+ */
+export function serverErrorText(code: string, message: string, fallback: string): string {
+  switch (code) {
+    case "RATE_LIMITED":
+      return connectText("error.rateLimited");
+    case "INTERNAL":
+    case "INTERNAL_ERROR":
+      return fallback;
+    default:
+      return message || fallback;
+  }
+}
+
+/** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */
+export function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
+  return err instanceof Error ? err.message : fallback;
 }
 
 export type OnUnauthorized = () => void;

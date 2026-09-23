@@ -14,11 +14,6 @@
 import { createStore } from "@lib/store";
 import { connectText } from "../i18n/connect";
 
-/** Shown when the local user is the blocker. */
-export const BLOCKED_BY_ME_REASON = connectText("blocks.blockedByMe");
-/** Neutral reason for the blocking direction — never reveals the block explicitly. */
-export const BLOCKED_BY_THEM_REASON = connectText("blocks.blockedByThem");
-
 export interface BlocksState {
   readonly blockedByMe: ReadonlySet<number>;
   readonly blockedByThem: ReadonlySet<number>;
@@ -107,7 +102,8 @@ export function resetBlocksStore(): void {
  * blockedByMe takes precedence so the user always sees that they are the blocker.
  */
 export function dmComposerBlockReason(state: BlocksState, recipientId: number): string | null {
-  if (state.blockedByMe.has(recipientId)) return BLOCKED_BY_ME_REASON;
-  if (state.blockedByThem.has(recipientId)) return BLOCKED_BY_THEM_REASON;
+  if (state.blockedByMe.has(recipientId)) return connectText("blocks.blockedByMe");
+  // The neutral reason never reveals the block explicitly.
+  if (state.blockedByThem.has(recipientId)) return connectText("blocks.blockedByThem");
   return null;
 }

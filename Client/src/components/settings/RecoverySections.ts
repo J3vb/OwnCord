@@ -9,6 +9,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
@@ -170,7 +171,7 @@ function buildPasswordConfirm(
         .onSubmit(pw)
         .then(close)
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : t("recovery.requestFailed"));
+          setText(errorEl, errorText(err, t("recovery.requestFailed")));
         })
         .finally(() => {
           submitBtn.disabled = false;

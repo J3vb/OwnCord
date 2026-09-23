@@ -3454,17 +3454,8 @@ describe("WS Dispatcher", () => {
 
     expect(authStore.getState().isAuthenticated).toBe(false);
     const error = uiStore.getState().transientError;
-    expect(error).toBe(
-      `You have been banned from this server. ${safetyText("appeals.unavailable")}`,
-    );
+    expect(error).toBe(`You have been banned. ${safetyText("appeals.unavailable")}`);
     expect(error).toContain("contact the server's operator directly");
-  });
-
-  it("wires error BANNED to keep a server message that already ends a sentence", () => {
-    mock.dispatch("error", { code: "BANNED", message: "You are banned!" });
-    expectConsole("error", /\[dispatcher\] Server error/);
-    const error = uiStore.getState().transientError;
-    expect(error).toBe(`You are banned! ${safetyText("appeals.unavailable")}`);
   });
 
   it("wires error BANNED with empty message uses default", () => {
@@ -3503,15 +3494,15 @@ describe("WS Dispatcher", () => {
   // login screen, where it resurfaces stale and out of context. The
   // catch-all must use the same in-app toast the sibling CHANNEL_FULL /
   // VIDEO_LIMIT branches already use, and must leave transientError alone.
-  it("wires error RATE_LIMITED to an in-app toast (OC-0064)", () => {
+  it("wires error RATE_LIMITED to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "RATE_LIMITED",
-      message: "Too many requests",
+      message: "too many requests, please slow down",
     });
     expectConsole("error", /\[dispatcher\] Server error/);
 
-    expect(mockShowToast).toHaveBeenCalledWith("Too many requests", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
@@ -3527,12 +3518,26 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error RATE_LIMITED with empty message uses default (OC-0064)", () => {
+  it("wires error RATE_LIMITED with empty message to its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
     expectConsole("error", /\[dispatcher\] Server error/);
-    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
     expect(uiStore.getState().transientError).toBeNull();
+  });
+
+  it("wires an unmapped error with an empty message to the generic fallback toast", () => {
+    mockShowToast.mockClear();
+    mock.dispatch("error", { code: "FORBIDDEN", message: "" });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  it("wires error INTERNAL to the generic fallback toast, never the server's message", () => {
+    mockShowToast.mockClear();
+    mock.dispatch("error", { code: "INTERNAL", message: "db: sqlite busy" });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
   });
 
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
@@ -4824,14 +4829,8 @@ describe("WS Dispatcher", () => {
       mockShowToast.mockClear();
     });
 
-    it("surfaces CHANNEL_FULL as a toast", () => {
+    it("surfaces CHANNEL_FULL as a toast with its catalog text, not the server's message", () => {
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "voice channel is full" });
-      expectConsole("error", /\[dispatcher\] Server error/);
-      expect(mockShowToast).toHaveBeenCalledWith("voice channel is full", "error");
-    });
-
-    it("falls back to a readable message when the server sends none", () => {
-      mock.dispatch("error", { code: "CHANNEL_FULL", message: "" });
       expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith("That voice channel is full", "error");
     });
@@ -4996,7 +4995,7 @@ describe("WS Dispatcher", () => {
 
       expect(mockDisableScreenshare).toHaveBeenCalled();
       expect(mockDisableCamera).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 

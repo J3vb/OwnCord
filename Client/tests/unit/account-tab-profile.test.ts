@@ -62,7 +62,9 @@ describe("validateAvatarFile", () => {
   });
 
   it("rejects a file over 1 MB", () => {
-    expect(validateAvatarFile({ size: 1024 * 1024 + 1, type: "image/png" }, ok)).toMatch(/KB/);
+    expect(validateAvatarFile({ size: 1024 * 1024 + 1, type: "image/png" }, ok)).toBe(
+      "Avatar must be at most 1024 KB.",
+    );
     // Exactly at the cap is fine.
     expect(validateAvatarFile({ size: 1024 * 1024, type: "image/png" }, ok)).toBeNull();
   });
@@ -70,7 +72,7 @@ describe("validateAvatarFile", () => {
   it("rejects an image bigger than any surface renders", () => {
     expect(
       validateAvatarFile({ size: 1000, type: "image/png" }, { width: 2000, height: 100 }),
-    ).toMatch(/pixels/);
+    ).toBe("Avatar must be at most 1024x1024 pixels.");
     expect(
       validateAvatarFile({ size: 1000, type: "image/png" }, { width: 1024, height: 1024 }),
     ).toBeNull();

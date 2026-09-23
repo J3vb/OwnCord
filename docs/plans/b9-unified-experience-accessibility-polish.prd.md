@@ -33,7 +33,7 @@ the owner on 2026-09-23; the plan lists the affected keys.
 **B9-20 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-20-english-settings-and-native.plan.md#implementation-record-2026-09-23) records the
 account and voice catalogs, the 624-literal extraction (baseline lists no B9-20 file), the Rust `src-tauri/src/text.rs`
-extraction table with its test, and the Voice & Audio and Logs accessible-name fixes. The startup closure fell from
+extraction table with its tests, the server error-code mapping, and the Voice & Audio, Logs and Appearance accessible-name fixes. The startup closure fell from
 93,944 B to 90,889 B because the diagnostics engine moved behind a lazy import, so no budget change was needed.
 Budget note (2026-09-23, firstmate decision 010): B9 feature lanes share one budget, startup 93,000 B (was 91,000 B) and MainPage
 64,000 B (was 60,512 B), superseding the earlier MainPage 61,000 B decision; re-baseline at B9-26. B9-18's cost is catalog keys and

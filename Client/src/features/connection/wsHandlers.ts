@@ -100,9 +100,7 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     // token via scheduleReconnect() forever (OC-0107). Disconnect here
     // directly: it's idempotent with that subscriber's own
     // ws.disconnect() and covers every router state, not just "main".
-    setTransientError(
-      `${(payload.message || connectText("session.banned")).replace(/([^.!?])$/, "$1.")} ${safetyText("appeals.unavailable")}`,
-    );
+    setTransientError(`${connectText("session.banned")} ${safetyText("appeals.unavailable")}`);
     ws.disconnect();
     clearAuth();
     return true;

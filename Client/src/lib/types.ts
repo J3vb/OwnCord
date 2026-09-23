@@ -1008,7 +1008,9 @@ export function retentionNotice(info: ServerInfoResponse | undefined): string | 
   const days: unknown = info?.retention?.messages_days;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 0) return null;
   const window =
-    days === 0 ? connectText("retention.kept") : connectText("retention.deleted", { count: days });
+    days === 0
+      ? connectText("retention.kept")
+      : connectText("retention.deleted", { count: days, days: String(days) });
   return connectText("retention.notice", { window });
 }
 

@@ -13,46 +13,47 @@ const STATUS_DND_ID: &str = "status_dnd";
 const STATUS_OFFLINE_ID: &str = "status_offline";
 const QUIT_ID: &str = "quit";
 
+/// One menu item: its event id and its label from the text table.
+type Item = (&'static str, &'static str);
+
+/// The tray's menu, top to bottom, and its tooltip. `create_tray` builds
+/// exactly this, so every label it shows comes from `text.rs`.
+struct TrayMenu {
+    show_hide: Item,
+    status: &'static str,
+    statuses: [Item; 4],
+    quit: Item,
+    tooltip: &'static str,
+}
+
+fn tray_menu() -> TrayMenu {
+    TrayMenu {
+        show_hide: (SHOW_HIDE_ID, text::TRAY_SHOW_HIDE),
+        status: text::TRAY_STATUS,
+        statuses: [
+            (STATUS_ONLINE_ID, text::TRAY_STATUS_ONLINE),
+            (STATUS_IDLE_ID, text::TRAY_STATUS_IDLE),
+            (STATUS_DND_ID, text::TRAY_STATUS_DND),
+            (STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE),
+        ],
+        quit: (QUIT_ID, text::TRAY_QUIT),
+        tooltip: text::TRAY_TOOLTIP,
+    }
+}
+
 pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
-    let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, text::TRAY_SHOW_HIDE, true, None::<&str>)?;
+    let spec = tray_menu();
+    let item = |(id, label): Item| MenuItem::with_id(app, id, label, true, None::<&str>);
 
-    let status_online = MenuItem::with_id(
-        app,
-        STATUS_ONLINE_ID,
-        text::TRAY_STATUS_ONLINE,
-        true,
-        None::<&str>,
-    )?;
-    let status_idle = MenuItem::with_id(
-        app,
-        STATUS_IDLE_ID,
-        text::TRAY_STATUS_IDLE,
-        true,
-        None::<&str>,
-    )?;
-    let status_dnd = MenuItem::with_id(
-        app,
-        STATUS_DND_ID,
-        text::TRAY_STATUS_DND,
-        true,
-        None::<&str>,
-    )?;
-    let status_offline = MenuItem::with_id(
-        app,
-        STATUS_OFFLINE_ID,
-        text::TRAY_STATUS_OFFLINE,
-        true,
-        None::<&str>,
-    )?;
-
+    let show_hide = item(spec.show_hide)?;
+    let [online, idle, dnd, offline] = spec.statuses.map(item);
     let status_submenu = Submenu::with_items(
         app,
-        text::TRAY_STATUS,
+        spec.status,
         true,
-        &[&status_online, &status_idle, &status_dnd, &status_offline],
+        &[&online?, &idle?, &dnd?, &offline?],
     )?;
-
-    let quit = MenuItem::with_id(app, QUIT_ID, text::TRAY_QUIT, true, None::<&str>)?;
+    let quit = item(spec.quit)?;
 
     let menu = Menu::with_items(app, &[&show_hide, &status_submenu, &quit])?;
 
@@ -66,7 +67,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
                 .unwrap_or_else(|| tauri::image::Image::new(&[], 1, 1)),
         )
         .menu(&menu)
-        .tooltip(text::TRAY_TOOLTIP)
+        .tooltip(spec.tooltip)
         .on_tray_icon_event(move |_tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -114,4 +115,27 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
 
 fn emit_status_change<R: Runtime>(app: &tauri::AppHandle<R>, status: &str) {
     let _ = app.emit("status-change", status);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_and_tooltip_come_from_the_text_table() {
+        let menu = tray_menu();
+        assert_eq!(menu.show_hide, (SHOW_HIDE_ID, text::TRAY_SHOW_HIDE));
+        assert_eq!(menu.status, text::TRAY_STATUS);
+        assert_eq!(
+            menu.statuses,
+            [
+                (STATUS_ONLINE_ID, text::TRAY_STATUS_ONLINE),
+                (STATUS_IDLE_ID, text::TRAY_STATUS_IDLE),
+                (STATUS_DND_ID, text::TRAY_STATUS_DND),
+                (STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE),
+            ]
+        );
+        assert_eq!(menu.quit, (QUIT_ID, text::TRAY_QUIT));
+        assert_eq!(menu.tooltip, text::TRAY_TOOLTIP);
+    }
 }

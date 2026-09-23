@@ -287,6 +287,7 @@ describe("retentionNotice (B7-15c)", () => {
       "By default this server deletes messages after 30 days; attachments are removed with their messages.",
     );
     expect(retentionNotice(info({ messages_days: 1 }))).toContain("after 1 day;");
+    expect(retentionNotice(info({ messages_days: 1095 }))).toContain("after 1095 days;");
   });
 
   it("states that 0 keeps messages until they are deleted", () => {

@@ -31,10 +31,16 @@ describe("B9-20 catalogs", () => {
   });
 
   it("uses a plural branch for the retention window and never concatenates fragments", () => {
-    expect(connectText("retention.deleted", { count: 1 })).toBe("deletes messages after 1 day");
-    expect(connectText("retention.deleted", { count: 30 })).toBe("deletes messages after 30 days");
+    expect(connectText("retention.deleted", { count: 1, days: "1" })).toBe(
+      "deletes messages after 1 day",
+    );
+    expect(connectText("retention.deleted", { count: 1095, days: "1095" })).toBe(
+      "deletes messages after 1095 days",
+    );
     expect(
-      connectText("retention.notice", { window: connectText("retention.deleted", { count: 30 }) }),
+      connectText("retention.notice", {
+        window: connectText("retention.deleted", { count: 30, days: "30" }),
+      }),
     ).toBe(
       "By default this server deletes messages after 30 days; attachments are removed with their messages.",
     );

@@ -180,7 +180,6 @@ function createSocketConnection(): SocketConnection {
     }
     if (tauriInvoke === null) {
       // i18n-exempt: internal desktop seam guard, never rendered
-      // i18n-exempt: internal desktop seam guard, never rendered
       throw new Error("Tauri APIs not available");
     }
 
@@ -244,7 +243,6 @@ function createSocketConnection(): SocketConnection {
     await ensureApis();
     if (tauriInvoke === null) {
       // i18n-exempt: internal desktop seam guard, never rendered
-      // i18n-exempt: internal desktop seam guard, never rendered
       throw new Error("Tauri APIs not available");
     }
     await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
@@ -256,7 +254,6 @@ function createSocketConnection(): SocketConnection {
     disconnect,
     async send(text: string): Promise<void> {
       if (tauriInvoke === null) {
-        // i18n-exempt: internal desktop seam guard, never rendered
         // i18n-exempt: internal desktop seam guard, never rendered
         throw new Error("Tauri APIs not available");
       }

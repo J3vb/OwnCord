@@ -8,6 +8,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
+import { errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
@@ -585,7 +586,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // never a green "changed successfully" beside the warning toast.
           return outcome;
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.passwordChangeFailed");
+          const msg = errorText(err, account("toast.passwordChangeFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -604,7 +605,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           });
           showToast(account("toast.profileUpdated"), "success");
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.profileUpdateFailed");
+          const msg = errorText(err, account("toast.profileUpdateFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -619,7 +620,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           showToast(account("toast.avatarUpdated"), "success");
           return uploaded.url;
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.avatarUploadFailed");
+          const msg = errorText(err, account("toast.avatarUploadFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -639,7 +640,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           return await api.enableTotp(password);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.enableTotpFailed");
+          const msg = errorText(err, account("toast.enableTotpFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -651,7 +652,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           updateUser({ totp_enabled: true });
           showChangeOutcomeToast(outcome, account("toast.totpEnabled"));
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.confirmTotpFailed");
+          const msg = errorText(err, account("toast.confirmTotpFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -663,7 +664,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           updateUser({ totp_enabled: false });
           showChangeOutcomeToast(outcome, account("toast.totpDisabled"));
         } catch (err) {
-          const msg = err instanceof Error ? err.message : account("toast.disableTotpFailed");
+          const msg = errorText(err, account("toast.disableTotpFailed"));
           showToast(msg, "error");
           throw err;
         }

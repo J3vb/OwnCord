@@ -6,6 +6,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
+import { ApiClientError, errorText } from "@lib/api";
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
@@ -171,13 +172,16 @@ export function validateAvatarFile(
     return t("avatar.notImage");
   }
   if (file.size > MAX_AVATAR_BYTES) {
-    return t("avatar.tooLarge", { kb: MAX_AVATAR_BYTES / 1024 });
+    return t("avatar.tooLarge", { kb: String(MAX_AVATAR_BYTES / 1024) });
   }
   if (dimensions === null) {
     return t("avatar.unreadable");
   }
   if (dimensions.width > MAX_AVATAR_DIMENSION || dimensions.height > MAX_AVATAR_DIMENSION) {
-    return t("avatar.tooWide", { width: MAX_AVATAR_DIMENSION, height: MAX_AVATAR_DIMENSION });
+    return t("avatar.tooWide", {
+      width: String(MAX_AVATAR_DIMENSION),
+      height: String(MAX_AVATAR_DIMENSION),
+    });
   }
   return null;
 }
@@ -235,7 +239,7 @@ function buildAvatarUploader(
             }),
           );
         } catch (err) {
-          setText(errorEl, err instanceof Error ? err.message : t("profile.uploadFailed"));
+          setText(errorEl, errorText(err, t("profile.uploadFailed")));
         } finally {
           input.value = "";
           uploadBtn.disabled = false;
@@ -326,7 +330,7 @@ function buildProfileFields(
           );
         })
         .catch((err: unknown) => {
-          setText(statusEl, err instanceof Error ? err.message : t("profile.saveFailed"));
+          setText(statusEl, errorText(err, t("profile.saveFailed")));
         })
         .finally(() => {
           saveBtn.disabled = false;
@@ -451,7 +455,7 @@ function buildPasswordSection(
           finish();
         })
         .catch((err: unknown) => {
-          setText(pwError, err instanceof Error ? err.message : t("password.changeFailed"));
+          setText(pwError, errorText(err, t("password.changeFailed")));
           finish();
         });
     },
@@ -542,7 +546,7 @@ function buildTotpEnrollForm(
           setText(submitBtn, t("totp.submit"));
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : t("totp.enableFailed"));
+          setText(errorEl, errorText(err, t("totp.enableFailed")));
           submitBtn.disabled = false;
           setText(submitBtn, t("totp.submit"));
         });
@@ -646,7 +650,7 @@ function buildTotpConfirmArea(
           onEnrolled();
         })
         .catch((err: unknown) => {
-          setText(confirmError, err instanceof Error ? err.message : t("totp.codeWrong"));
+          setText(confirmError, errorText(err, t("totp.codeWrong")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.verify"));
         });
@@ -752,9 +756,11 @@ function buildTotpDisableView(
           onDisabled();
         })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : t("totp.disableFailed");
-          const is403Required = msg.toLowerCase().includes("required");
-          setText(errorEl, is403Required ? t("totp.requiredByServer") : msg);
+          const requiredByServer = err instanceof ApiClientError && err.code === "FORBIDDEN";
+          setText(
+            errorEl,
+            requiredByServer ? t("totp.requiredByServer") : errorText(err, t("totp.disableFailed")),
+          );
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.confirmDisable"));
         });
@@ -990,7 +996,7 @@ function buildSessionRow(
           // The server kept the session, so the row comes back.
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);
-          showToast(err instanceof Error ? err.message : t("devices.signOutFailed"), "error");
+          showToast(errorText(err, t("devices.signOutFailed")), "error");
         });
     },
     { signal },
@@ -1102,10 +1108,7 @@ function buildSessionsSection(
           load();
         })
         .catch((err: unknown) => {
-          setText(
-            errorEl,
-            err instanceof Error ? err.message : t("devices.signOutEverywhereFailed"),
-          );
+          setText(errorEl, errorText(err, t("devices.signOutEverywhereFailed")));
         })
         .finally(() => {
           confirmBtn.disabled = false;
@@ -1268,7 +1271,7 @@ function buildDeleteAccountSection(
           // Success — cleanup is handled by the callback (clears auth, navigates away)
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : t("delete.failed"));
+          setText(errorEl, errorText(err, t("delete.failed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("delete.confirm"));
         });
@@ -1398,10 +1401,7 @@ export function buildAccountTab(
           editForm.style.display = "none";
         })
         .catch((err: unknown) => {
-          setText(
-            usernameError,
-            err instanceof Error ? err.message : t("profile.usernameSaveFailed"),
-          );
+          setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
         });
     },
     { signal },

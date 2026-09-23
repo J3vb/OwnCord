@@ -2,13 +2,13 @@
 //!
 //! Rust owns a few surfaces the renderer never draws: the tray menu and
 //! tooltip, the startup failure dialog, and the certificate/TOFU messages.
-//! They live in ONE table here, and the extraction test below fails if a
-//! user-visible literal reappears at a call site. English is the only shipped
-//! language, matching the renderer catalogs (`Client/src/i18n/`).
+//! They live in ONE table here. English is the only shipped language, matching
+//! the renderer catalogs (`Client/src/i18n/`).
 //!
-//! Rust errors returned to the renderer are classified as codes elsewhere; the
-//! renderer maps them to catalog text and shows the raw text only as a fallback
-//! detail. This table is only for text a user reads directly.
+//! The certificate refusals also reach the renderer, which classifies them by
+//! the `cert-tofu` event's `status` (`first_use`, `mismatch`) and shows its own
+//! catalog text; it reads only the stored fingerprint out of the mismatch
+//! message. Other Rust command errors are not classified as codes yet.
 
 // --- Tray menu and tooltip -------------------------------------------------
 
@@ -25,15 +25,15 @@ pub const TRAY_TOOLTIP: &str = "OwnCord";
 
 // The startup failure dialog is `#[cfg(not(target_os = "linux"))]` in lib.rs
 // (Linux reports a fatal startup error to the console instead), so these are
-// unused there.
-#[cfg(not(target_os = "linux"))]
+// unused there outside the tests.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const STARTUP_DIALOG_TITLE: &str = "OwnCord failed to start";
-#[cfg(not(target_os = "linux"))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const STARTUP_DIALOG_BODY: &str =
     "The application encountered a startup error and cannot continue.\n\n{error}";
 
 /// The startup dialog body with the raw error detail appended verbatim.
-#[cfg(not(target_os = "linux"))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn startup_dialog_body(error: &str) -> String {
     STARTUP_DIALOG_BODY.replace("{error}", error)
 }
@@ -64,11 +64,37 @@ pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Every user-visible native literal must come from this table. The scan is
-    /// the extraction test: it reads the call-site sources and fails when a
-    /// literal defined here is hard-coded there again.
     #[test]
-    fn user_visible_literals_live_only_in_this_table() {
+    fn startup_dialog_reads_the_table() {
+        assert_eq!(STARTUP_DIALOG_TITLE, "OwnCord failed to start");
+        assert_eq!(
+            startup_dialog_body("boom"),
+            "The application encountered a startup error and cannot continue.\n\nboom"
+        );
+    }
+
+    #[test]
+    fn certificate_messages_read_the_table() {
+        assert_eq!(
+            cert_not_trusted("example.com:8443"),
+            "certificate for example.com:8443 is not yet trusted; confirm the fingerprint to continue"
+        );
+        // The proxies build the mismatch message through tofu, so check it there.
+        assert_eq!(
+            crate::tofu::mismatch_message("example.com:8443", "aa:bb", "cc:dd"),
+            "Certificate fingerprint changed for example.com:8443.\n\
+             Stored:  aa:bb\n\
+             Current: cc:dd\n\
+             This may indicate a man-in-the-middle attack or a server certificate rotation.\n\
+             Use accept_cert_fingerprint to trust the new certificate."
+        );
+    }
+
+    /// Supplementary guard: the tests above and tray.rs's check what each
+    /// surface shows; this one fails when a call site hard-codes the table's
+    /// text again instead of referencing it.
+    #[test]
+    fn call_sites_do_not_repeat_the_table() {
         const CALL_SITES: &[(&str, &str)] = &[
             ("tray.rs", include_str!("tray.rs")),
             ("lib.rs", include_str!("lib.rs")),
@@ -76,9 +102,7 @@ mod tests {
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
         ];
-        // `mut` only on the platforms that push the dialog title below.
-        #[allow(unused_mut)]
-        let mut extracted: Vec<&str> = vec![
+        let quoted = [
             TRAY_SHOW_HIDE,
             TRAY_STATUS,
             TRAY_STATUS_ONLINE,
@@ -86,31 +110,24 @@ mod tests {
             TRAY_STATUS_DND,
             TRAY_STATUS_OFFLINE,
             TRAY_QUIT,
+            TRAY_TOOLTIP,
+            STARTUP_DIALOG_TITLE,
+        ]
+        .map(|literal| format!("\"{literal}\""));
+        let prose = [
+            "startup error and cannot continue",
+            "is not yet trusted; confirm the fingerprint",
+            "Certificate fingerprint changed for",
+            "man-in-the-middle attack",
         ];
-        #[cfg(not(target_os = "linux"))]
-        extracted.push(STARTUP_DIALOG_TITLE);
         for (name, source) in CALL_SITES {
-            for literal in &extracted {
+            for text in quoted.iter().map(String::as_str).chain(prose) {
                 assert!(
-                    !source.contains(&format!("\"{literal}\"")),
-                    "{name} hard-codes the user-visible literal {literal:?}; \
+                    !source.contains(text),
+                    "{name} hard-codes the user-visible text {text:?}; \
                      it belongs in text.rs and must be referenced from there"
                 );
             }
         }
-    }
-
-    #[test]
-    fn parameterised_messages_keep_their_shape() {
-        assert_eq!(
-            cert_not_trusted("example.com:8443"),
-            "certificate for example.com:8443 is not yet trusted; confirm the fingerprint to continue"
-        );
-        let msg = cert_mismatch("example.com:8443", "aa:bb", "cc:dd");
-        assert!(msg.contains("Stored:  aa:bb"), "{msg}");
-        assert!(msg.contains("Current: cc:dd"), "{msg}");
-        assert!(msg.starts_with("Certificate fingerprint changed for example.com:8443."));
-        #[cfg(not(target_os = "linux"))]
-        assert!(startup_dialog_body("boom").ends_with("boom"));
     }
 }

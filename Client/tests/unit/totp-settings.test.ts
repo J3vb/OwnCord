@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 import { updateUser } from "@stores/auth.store";
+import { ApiClientError } from "@lib/api";
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -668,7 +669,15 @@ describe("TOTP Settings", () => {
     it("shows 'required' error when server returns 403 for require_2fa policy", async () => {
       mockTotpEnabled = true;
       const options = makeOptions({
-        onDisableTotp: vi.fn().mockRejectedValue(new Error("2FA is required by server policy")),
+        onDisableTotp: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(
+              403,
+              "FORBIDDEN",
+              "two-factor authentication is required for this server",
+            ),
+          ),
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);

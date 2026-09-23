@@ -374,11 +374,11 @@ test.describe("B9-20 settings, account and voice text", () => {
     ] as const) {
       await switchSettingsTab(page, tab);
       const content = page.locator("[data-testid='settings-overlay'] .settings-content");
-      await expect(content.getByText(english, { exact: true }).or(content).first()).toBeVisible();
+      await expect(content.getByText(english, { exact: true }).first()).toBeVisible();
     }
   });
 
-  test("keeps expanded settings and account text whole and named at 940×500 with 20px text", async ({
+  test("keeps expanded settings and account text whole, named and keyboard-operable at 940×500 with 20px text", async ({
     page,
   }, testInfo) => {
     await startAtLargestText(page);
@@ -388,22 +388,27 @@ test.describe("B9-20 settings, account and voice text", () => {
     await openSettings(page);
     test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
 
-    for (const tab of [
-      "Notifications",
-      "Text & Images",
-      "Voice & Audio",
-      "Keybinds",
-      "Advanced",
-      "Logs",
-    ] as const) {
-      await switchSettingsTab(page, tab);
-      const content = page.locator("[data-testid='settings-overlay'] .settings-content");
-      // Every control on the tab has an accessible name built from the seam.
-      expect(await findUnnamedControls(content)).toEqual([]);
-    }
-
+    // Walk every tab from the keyboard: ArrowDown moves focus to the next tab
+    // and activates it, so each panel is rebuilt through the expanded seam.
+    const sidebar = page.locator("[data-testid='settings-overlay'] .settings-sidebar");
     const account = page.locator("[data-testid='settings-overlay'] .settings-content");
-    await switchSettingsTab(page, "Account");
+    const activeTab = sidebar.locator("[role='tab'][aria-selected='true']");
+    const tabCount = await sidebar.getByRole("tab").count();
+    await activeTab.focus();
+    const visited = new Set<string>();
+    for (let i = 0; i < tabCount; i++) {
+      await page.keyboard.press("ArrowDown");
+      await expect(activeTab).toBeFocused();
+      visited.add((await activeTab.getAttribute("id")) ?? "");
+      // Every control on the tab has an accessible name built from the seam.
+      expect(await findUnnamedControls(account)).toEqual([]);
+    }
+    expect(visited.size).toBe(tabCount);
+
+    // Home reaches Account, the first tab.
+    await page.keyboard.press("Home");
+    await expect(sidebar.locator("#settings-tab-account")).toBeFocused();
+    await expect(sidebar.locator("#settings-tab-account")).toHaveAttribute("aria-selected", "true");
     for (const [el, english] of [
       [account.locator(".account-field-label", { hasText: "Username" }), "Username"],
       [account.locator("[data-testid='profile-save-btn']"), "Save Profile"],
@@ -412,6 +417,26 @@ test.describe("B9-20 settings, account and voice text", () => {
       await expect(el).toHaveText(expanded(english));
       await expectWhole(el);
     }
+
+    // The deletion form opens, refuses an empty password and closes, all from
+    // the keyboard, with every control named.
+    const trigger = account.locator("[data-testid='delete-account-trigger']");
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const password = account.locator("[data-testid='delete-account-password']");
+    await expect(password).toBeFocused();
+    await expect(password).toHaveAccessibleName(expanded("Enter your password"));
+    expect(await findUnnamedControls(account)).toEqual([]);
+    await page.keyboard.press("Tab");
+    await expect(account.locator("[data-testid='delete-account-confirm']")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(account.locator("[data-testid='delete-account-error']")).toHaveText(
+      expanded("Password is required."),
+    );
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Space");
+    await expect(account.locator("[data-testid='delete-account-confirm-area']")).toBeHidden();
+    await expect(trigger).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     await testInfo.attach("settings-expanded-940x500-20px.png", {
@@ -452,6 +477,16 @@ test.describe("B9-20 settings, account and voice text", () => {
       ).toBeVisible();
     }
     expect(await findUnnamedControls(widget)).toEqual([]);
+
+    // Mute toggles from the keyboard under its expanded name.
+    const mute = widget.getByRole("button", { name: expanded("Mute") });
+    const pressed = await mute.getAttribute("aria-pressed");
+    await mute.focus();
+    await page.keyboard.press("Space");
+    await expect(mute).not.toHaveAttribute("aria-pressed", pressed ?? "");
+    await page.keyboard.press("Enter");
+    await expect(mute).toHaveAttribute("aria-pressed", pressed ?? "false");
+
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     await testInfo.attach("voice-widget-expanded-940x500-20px.png", {
       body: await page.screenshot(),

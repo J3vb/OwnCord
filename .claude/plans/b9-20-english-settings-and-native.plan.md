@@ -197,7 +197,7 @@ render path as a fallback; fail closed and record a blocker instead.
   retention, deletion), the recovery-kit and recovery-code sections, the
   unseen-sign-in notice and the main page's account toasts.
   `Client/src/i18n/voice.ts` (`voiceText`, new) owns the voice widget and grid,
-  the per-user volume menu, the update notifier, the incoming-call banner, the
+  the per-user volume menu, the incoming-call banner, the
   Linux screen picker, the push-to-talk key names and the voice/media error
   toasts. `settings.ts` grows the settings tabs, the connection-diagnostics
   panel, Voice & Audio and the support-bundle README. `connect.ts` (the startup
@@ -218,8 +218,25 @@ render path as a fallback; fail closed and record a blocker instead.
 - **Rust (Q7).** `Client/src-tauri/src/text.rs` is one constant table for the
   tray menu and tooltip, the startup failure dialog and the certificate/TOFU
   messages; `tray.rs`, `lib.rs`, `tofu.rs`, `ws_proxy.rs` and `http_proxy.rs`
-  reference it. `text.rs`'s `user_visible_literals_live_only_in_this_table`
-  fails if a user-visible literal reappears at a call site.
+  reference it. `tray.rs` builds its menu and tooltip from one spec that
+  `menu_and_tooltip_come_from_the_text_table` checks; `text.rs`'s tests check
+  the startup dialog body and the certificate messages (the mismatch through
+  `tofu::mismatch_message`, which both proxies call), and a supplementary
+  `call_sites_do_not_repeat_the_table` fails if a call site hard-codes the
+  table's text again. The certificate refusals reach the renderer as a
+  `cert-tofu` event classified by `status`, which it maps to connect-catalog
+  text; other Rust command errors are not classified as codes yet.
+- **Server errors (Q7).** `serverErrorText` and `errorText` in `lib/api.ts`
+  are the one mapping from a server error code to catalog text, used by the
+  ws `error` fallback toast, the Account tab, the recovery sections and the
+  main page's account toasts: `RATE_LIMITED` shows catalog text, an internal
+  failure shows the caller's own catalog fallback, and the server's message
+  appears only for an unmapped code. The code-gated `BANNED`, `CHANNEL_FULL`
+  and `VIDEO_LIMIT` branches show their catalog text and no longer prefer the
+  server's message, and the Account tab recognises "2FA required by this
+  server" by the `FORBIDDEN` code rather than by searching the message.
+- **Numbers.** Byte sizes, pixel sizes and retention days are passed as
+  strings, so the English stays ungrouped ("1024 KB", "1095 days").
 
 ### Accessibility fixes found by the expansion run
 
@@ -228,7 +245,9 @@ render path as a fallback; fail closed and record a blocker instead.
   accessible name; each now has one from the catalog.
 - **Logs** (`LogsTab.ts`): the filter and minimum-level selects had no
   accessible name; each now has one.
-- Both faults predate B9-20.
+- **Appearance** (`AppearanceTab.ts`): the font-size slider had no accessible
+  name; it now reads "Font Size".
+- All three faults predate B9-20.
 
 ### Bundle budget
 
@@ -264,11 +283,11 @@ was held by another lane.
 
 ### Accessibility blocks (BPR-091) for this journey
 
-| Block          | Status                                                                                                                                                               |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keyboard       | Automated: the settings tabs, the voice controls and the account forms are reached and operated from the keyboard; the B9-20 expansion cases find no unnamed control |
-| Screen reader  | Automated: accessible names come from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner**                              |
-| Focus          | No change: the tabs and dialogs keep B9-2's focus handling                                                                                                           |
-| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                   |
-| Reduced motion | No change: no animation changed                                                                                                                                      |
-| Zoom/reflow    | Automated at 940×500 with 20 px Large Font, English and expanded, for the settings tabs and the voice widget; OS zoom 200 % **pending owner**                        |
+| Block          | Status                                                                                                                                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard       | Automated at 940×500 with expanded text: every settings tab, Account included, is reached with ArrowDown/Home and scanned for unnamed controls; the account deletion form is opened, submitted and cancelled with Enter, Tab and Space; the voice widget's Mute toggles with Space and Enter |
+| Screen reader  | Automated: accessible names come from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner**                                                                                                                                                      |
+| Focus          | No change: the tabs and dialogs keep B9-2's focus handling                                                                                                                                                                                                                                   |
+| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                                                                                                                           |
+| Reduced motion | No change: no animation changed                                                                                                                                                                                                                                                              |
+| Zoom/reflow    | Automated at 940×500 with 20 px Large Font, English and expanded, for the settings tabs and the voice widget; OS zoom 200 % **pending owner**                                                                                                                                                |

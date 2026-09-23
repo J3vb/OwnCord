@@ -2,10 +2,10 @@ import { defineCatalog } from "./format";
 
 /**
  * Voice, video and media copy (B9-20): the voice widget and video grid
- * controls, the per-user volume menu, the update notifier, the incoming-call
- * banner, the Linux screen picker, the push-to-talk key names and the
- * connection-stats formatters. Loads with the main page and lazy voice
- * chunks, so none of it is in the startup chunk.
+ * controls, the per-user volume menu, the incoming-call banner, the Linux
+ * screen picker, the push-to-talk key names and the connection-stats
+ * formatters. Loads with the main page and lazy voice chunks, so none of it is
+ * in the startup chunk.
  */
 export const voiceText = defineCatalog("voice", {
   "status.idle": "Voice Connected",
@@ -55,20 +55,6 @@ export const voiceText = defineCatalog("voice", {
   "volume.serverUndeafen": "Server Undeafen",
   "volume.moveTo": "Move to",
   "volume.disconnect": "Disconnect",
-
-  "update.downloadingPercent": "Downloading update… {percent}%",
-  "update.downloadingMb": "Downloading update… {mb} MB",
-  "update.downloading": "Downloading update…",
-  "update.unavailable":
-    "This install cannot update itself. Ask your server administrator for the new version.",
-  "update.dismiss": "Dismiss",
-  "update.available": "Update v{version} available",
-  "update.now": "Update Now",
-  "update.later": "Later",
-  "update.installedRestarting": "Update installed. Restarting…",
-  "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
-  "update.failed": "Update failed. Please try again later.",
-  "update.retry": "Retry",
 
   "call.incoming": "Incoming call",
   "call.accept": "Accept",

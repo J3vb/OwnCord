@@ -390,11 +390,11 @@ export function handleVoiceError(payload: Payload<"error">, id: string | undefin
   // is to say what happened — without this the click was a silent no-op
   // with an explanation buried in the log.
   if (payload.code === "CHANNEL_FULL") {
-    showToast(payload.message || connectText("voice.channelFull"), "error");
+    showToast(connectText("voice.channelFull"), "error");
     return true;
   }
   if (payload.code === "VIDEO_LIMIT") {
-    showToast(payload.message || connectText("voice.videoLimit"), "error");
+    showToast(connectText("voice.videoLimit"), "error");
     // max_video has no SFU-level enforcement — the server only refuses the
     // DB write. Without this rollback the already-published track keeps
     // streaming to everyone while voice_state says camera/screenshare is

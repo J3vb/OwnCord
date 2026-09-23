@@ -133,8 +133,9 @@ export const connectText = defineCatalog("connect", {
   "session.expired": "Your session expired — sign in again.",
   "session.serverShutdown": "The server was shut down — you have been signed out.",
   "session.serverRestarting": "Server is restarting: {reason}",
-  "session.banned": "You have been banned",
+  "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
+  "error.rateLimited": "Too many requests. Try again later.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":
@@ -158,8 +159,8 @@ export const connectText = defineCatalog("connect", {
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "retention.kept": "keeps messages until they are deleted",
   "retention.deleted": {
-    one: "deletes messages after {count} day",
-    other: "deletes messages after {count} days",
+    one: "deletes messages after {days} day",
+    other: "deletes messages after {days} days",
   },
   "retention.notice":
     "By default this server {window}; attachments are removed with their messages.",
