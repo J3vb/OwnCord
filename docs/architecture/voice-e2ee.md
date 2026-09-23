@@ -289,7 +289,10 @@ camera off names that sid (`native_voice_unpublish_camera`), as the web path
 unpublishes its own track, so remote tiles close the same way; a late
 unpublish of a camera a newer publish already replaced is a no-op. The
 backend unpublishes the camera's live publication, which follows the SDK's
-republish (a new sid) after a full reconnect. Screen share still refuses on
+republish (a new sid) after a full reconnect. A republish that continues no
+live camera (camera off, or a newer camera published, while the SDK was
+between its unpublish and republish) is unpublished rather than left
+published with no frames. Screen share still refuses on
 Linux (phase 3).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
