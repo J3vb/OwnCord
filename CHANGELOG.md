@@ -199,6 +199,11 @@ server's internals were reorganised behind service boundaries.
   gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
   convert it to `plugin.json`. A directory carrying both could previously leave
   the server honouring a different manifest than the one approved at install.
+- **The desktop app no longer reappears on the old version after starting an
+  update.** Once the installer is launching, a launch handed to the still-running
+  old process (shortcut, `owncord://` link, autostart) is ignored instead of
+  bringing the old window back for the whole install. The update log now records
+  the version and PID at startup and the timing around the installer launch.
 
 ### Configuration
 

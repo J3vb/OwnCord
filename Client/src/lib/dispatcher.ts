@@ -32,6 +32,7 @@ import {
   handleMemberBan,
   handleMemberJoin,
   handleMemberUpdate,
+  handleNsfwAck,
   handlePresence,
   handleRolesUpdate,
   handleUserUpdate,
@@ -219,6 +220,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
 
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
+
+  unsubs.push(ws.on(S.NSFW_ACK, handleNsfwAck));
 
   // ── Members ───────────────────────────────────────────
 

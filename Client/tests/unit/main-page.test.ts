@@ -1080,9 +1080,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     try {
       // Server A's note about user 5 must land under a key scoped to server A
-      // — the same host scoping already applied to channel mutes, the NSFW
-      // gate and per-user volume (setChannelMutesHost/setNsfwGateHost/
-      // setAudioVolumeHost, all called with apiConfig.host above).
+      // — the same host scoping already applied to channel mutes and
+      // per-user volume (setChannelMutesHost/setAudioVolumeHost, both called
+      // with apiConfig.host above).
       expect(localStorage.getItem("owncord:dm-note:chat.example.com:5")).toBe("owes me money");
       // And it must not have gone to the legacy unscoped key, which server
       // B's unrelated user 5 would also read from.

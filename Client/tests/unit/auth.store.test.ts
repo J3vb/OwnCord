@@ -17,7 +17,7 @@ import { leaveVoice } from "@lib/livekitSession";
 import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stores/messages.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
-import { acknowledgeNsfw, isNsfwAcknowledged } from "../../src/lib/nsfw-gate";
+import { nsfwConsentRequired } from "../../src/features/content-consent/nsfw";
 import { addLogListener, type LogEntry } from "@lib/logger";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
@@ -161,17 +161,32 @@ describe("auth store", () => {
       expect(before).not.toBe(after);
     });
 
-    // v076: acknowledgements are per-viewer consent, not per-device. Host
-    // scoping cannot cover a second account on the SAME server, so the age
-    // gate must be re-armed on logout or the next user silently inherits it.
-    it("clears NSFW acknowledgements so the next account re-sees the age gate", () => {
+    // v076/B9-7: an acknowledgement belongs to one account on one server. It
+    // lives only in the channel store, so logout must leave nothing a second
+    // account on the same server could inherit before its own ready arrives.
+    it("drops the account's NSFW acknowledgements with its channels", () => {
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
-      acknowledgeNsfw(12);
-      expect(isNsfwAcknowledged(12)).toBe(true);
+      setChannels([
+        {
+          id: 12,
+          name: "spicy",
+          type: "text",
+          category: null,
+          position: 0,
+          nsfw: true,
+          nsfw_acknowledged: true,
+        },
+      ]);
+      expect(nsfwConsentRequired(channelsStore.getState().channels.get(12))).toBe(false);
 
       clearAuth();
 
-      expect(isNsfwAcknowledged(12)).toBe(false);
+      expect(channelsStore.getState().channels.get(12)).toBeUndefined();
+      // The next account's ready restates the label without its own row.
+      setChannels([
+        { id: 12, name: "spicy", type: "text", category: null, position: 0, nsfw: true },
+      ]);
+      expect(nsfwConsentRequired(channelsStore.getState().channels.get(12))).toBe(true);
     });
 
     it("records 'user' as the default logout reason", () => {

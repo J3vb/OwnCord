@@ -38,6 +38,7 @@ import {
   reduceSetAroundMessages,
   reduceInvalidateLoadedMessageWindows,
   reduceInvalidateChannelMessageWindow,
+  reduceClearChannelContent,
   reduceReattachToPresent,
   reducePrependMessages,
 } from "../features/messaging/historyWindows";
@@ -229,6 +230,16 @@ export function invalidateLoadedMessageWindows(): void {
  */
 export function invalidateChannelMessageWindow(channelId: number): void {
   messagesStore.setState((prev) => reduceInvalidateChannelMessageWindow(prev, channelId));
+}
+
+/**
+ * Forget every delivered row of one channel along with its window state, so
+ * nothing from it can render again until a fresh fetch — used when NSFW
+ * consent for the channel is gone (B9-7). Carries pending/failed rows, the
+ * user's own unsent text, like every other window-replacing writer.
+ */
+export function clearChannelContent(channelId: number): void {
+  messagesStore.setState((prev) => reduceClearChannelContent(prev, channelId));
 }
 
 /**
