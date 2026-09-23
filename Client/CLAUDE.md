@@ -97,13 +97,21 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   through `native/videoRenderer.ts` (WebGL, exposed as a canvas
   `MediaStreamTrack` so the grid stays MediaStream-based) and the camera is
   the webview's own `getUserMedia` track, pumped up the socket by
-  `native/cameraUplink.ts`. Keep the state machine platform-blind:
-  a Linux-only behaviour belongs in the adapter or the Rust session, never as
-  a branch in `joinOrchestration`/`mediaControl`. The interop proof is
+  `native/cameraUplink.ts`. Screen share captures in the backend
+  (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
+  `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
+  on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
+  video only (no screen-share audio on Linux). Keep the state machine
+  platform-blind: a Linux-only behaviour belongs in the adapter or the Rust
+  session, never as a branch in `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
-  (built with `cargo build --example native_voice_interop`); it covers audio
-  and video, each with a wrong-key control.
+  (built with `cargo build --example native_voice_interop`); it covers audio,
+  video and a synthetic-source screen share, each with a wrong-key control.
+  CI has no display: the X11 capturer runs only under
+  `xvfb-run cargo test -- --ignored x11`, and the Wayland portal only on a
+  real desktop.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
   `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.

@@ -392,6 +392,7 @@ describeNativeVoiceSuite(async () => {
     connectsAs: () => undefined,
     publishesCameraAs: () => undefined,
     hasDevices: () => undefined,
+    sharesScreenAs: () => undefined,
     commands: () => [],
     emits: async () => undefined,
   };

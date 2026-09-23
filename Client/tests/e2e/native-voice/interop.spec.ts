@@ -17,7 +17,15 @@
 //      and the browser's camera is read back through that socket; the socket
 //      refuses a wrong token and is gone after close;
 //   6. the video negative control: with a wrong key neither side decodes a
-//      single video frame.
+//      single video frame;
+//   7. a native screen share (a synthetic capture source, through the app's
+//      capture thread and publish) decodes in the browser with the same key,
+//      its local preview arrives on the frame socket, and repeated share
+//      stop/start releases every capturer;
+//   8. the screen-share negative control: with a wrong key the browser
+//      decodes not one frame of it.
+// Not exercised here: the X11 capturer and the Wayland portal (CI has no
+// display); see docs/architecture/voice-e2ee.md.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
 import { test, expect } from "@playwright/test";
 import { createHmac, randomBytes } from "node:crypto";
@@ -155,14 +163,19 @@ async function joinBrowserPeer(
         state.encErrors++;
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
-      room.on(lk.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      room.on(lk.RoomEvent.TrackSubscribed, (track, pub, participant) => {
         if (track.kind === lk.Track.Kind.Video) {
           // Count decoded frames the way a tile renders them.
           const el = track.attach() as HTMLVideoElement;
           el.muted = true;
           document.body.appendChild(el);
           const v = { frames: 0, width: 0, height: 0 };
-          videos.set(participant.identity, v);
+          // A screen share is read as `<identity>#screen`.
+          const key =
+            pub.source === lk.Track.Source.ScreenShare
+              ? `${participant.identity}#screen`
+              : participant.identity;
+          videos.set(key, v);
           const onFrame = (_now: number, meta: { width: number; height: number }) => {
             v.frames++;
             v.width = meta.width;
@@ -498,4 +511,122 @@ test("a native peer with the wrong key decodes no video and is decoded by no one
   expect(watching).toContain("user-1");
   const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
   expect(fromBrowser.reduce((sum, v) => sum + v.frames, 0)).toBe(0);
+});
+
+test("a native screen share decodes in the browser with the same key", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const nativeVideo: NativeVideo[] = [];
+  let resources: Record<string, number> = {};
+  let closed: Record<string, unknown> = {};
+  const threads: Array<{ phase: string; count: number; fds: number; captures: number }> = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "16",
+      "--screen",
+      "1280x720",
+      "--screen-cycles",
+      "5",
+    ],
+    ({ event }) => {
+      if (event.type === "threads")
+        threads.push(
+          event as unknown as { phase: string; count: number; fds: number; captures: number },
+        );
+      if (event.type === "video")
+        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+      if (event.type === "resources") resources = event.resources as Record<string, number>;
+      if (event.type === "closed") closed = event;
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+
+  // The share (15 fps, screencast content, VP8, E2EE) decodes at its size.
+  console.log(
+    `browser decoded native screen share: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  expect(browser.videoFrames).toBeGreaterThan(5 * 5);
+  expect([browser.videoWidth, browser.videoHeight]).toEqual([1280, 720]);
+  expect(browser.encErrors).toBe(0);
+  // The local preview arrives on the frame socket's screen route.
+  const preview = nativeVideo.filter((v) => v.identity === "preview");
+  expect(preview.length).toBeGreaterThan(0);
+  expect(Math.max(...preview.map((v) => v.frames))).toBeGreaterThan(5);
+  expect([preview.at(-1)!.width, preview.at(-1)!.height]).toEqual([1280, 720]);
+  // Five stop/start cycles leave exactly the live capture, published (mic +
+  // screen), and a stale stop did not end it; close releases it.
+  const before = threads.find((t) => t.phase === "screen-before")!;
+  const after = threads.find((t) => t.phase === "screen-after")!;
+  expect(before.captures).toBe(1);
+  expect(after.captures).toBe(1);
+  expect(resources.screenCaptures).toBe(1);
+  expect(resources.localTracks).toBe(2);
+  expect(closed.screenCaptures).toBe(0);
+  console.log(
+    `native peer threads: before=${before.count} after 5 screen share cycles=${after.count}; fds ${before.fds} -> ${after.fds}`,
+  );
+  // Like a camera toggle, each share is a new sender, whose idle threads
+  // livekit 0.9.1 keeps until the room closes (rust-sdks #1408 family).
+  // Measured 2026-09-23: +3.5 to +4.6 per cycle — one FrameCryptor and one
+  // VideoFrameTransformer thread per sender plus one or two
+  // VideoEncoderQueue threads (the screencast encoder can restart once).
+  // The capture thread itself is joined on stop and adds nothing, and file
+  // descriptors stay flat. Pinned as the ceiling; docs/architecture/voice-e2ee.md
+  // records it. Closing the room releases all but each sender's
+  // FrameCryptor thread (#1408 proper).
+  expect(after.count - before.count).toBeLessThanOrEqual(5 * 5 + 2);
+  expect(closed.threads as number).toBeLessThan(after.count);
+  expect(after.fds - before.fds).toBeLessThanOrEqual(2);
+});
+
+test("a native screen share with the wrong key is decoded by no one", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const wrongKey = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    wrongKey,
+    "--secs",
+    "14",
+    "--screen",
+    "1280x720",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(3_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+
+  // Subscribed to the share, and not one frame of it decoded.
+  expect(browser.videoFrames).toBe(0);
+  expect(browser.encErrors).toBeGreaterThan(0);
 });
