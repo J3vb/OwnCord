@@ -21,6 +21,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
+import { nsfwConsentText } from "../i18n/nsfwConsent";
 import { getKnownCategories } from "@stores/channels.store";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
@@ -259,8 +260,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
     appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
 
-    // NSFW flag. The copy states the limit of the feature: the server does not
-    // filter anything, so promising otherwise here would be a lie.
+    // NSFW flag. The hint says what the label does (B5-7/B9-7): the server
+    // withholds the channel's content from each member until they agree.
     const nsfwGroup = createElement("div", { class: "form-group" });
     const nsfwLabelRow = createElement("label", { class: "form-check" });
     const nsfwInput = createElement("input", {
@@ -270,11 +271,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     nsfwInput.checked = channelNsfw === true;
     const nsfwText = createElement("span", {}, "Age-restricted (NSFW)");
     appendChildren(nsfwLabelRow, nsfwInput, nsfwText);
-    const nsfwHint = createElement(
-      "div",
-      { class: "form-hint" },
-      "Members see a one-time warning each session before opening the channel, and the channel is marked in the sidebar. Nothing is filtered.",
-    );
+    const nsfwHint = createElement("div", { class: "form-hint" }, nsfwConsentText("editHint"));
     appendChildren(nsfwGroup, nsfwLabelRow, nsfwHint);
 
     appendChildren(body, typeGroup, nameGroup, topicGroup, categoryGroup, slowGroup, nsfwGroup);

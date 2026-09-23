@@ -191,7 +191,6 @@
       "How many members may be connected at once. 0 = unlimited.": 1,
       "Leave blank for no category": 1,
       "Members must wait this long between messages. Holders of Manage Messages are exempt.": 1,
-      "Members see a one-time warning each session before opening the channel, and the channel is marked in the sidebar. Nothing is filtered.": 1,
       "Name": 1,
       "Off": 1,
       "Save Changes": 2,

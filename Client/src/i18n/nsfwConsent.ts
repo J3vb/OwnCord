@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** NSFW consent copy (B9-7): the pre-load gate and the withdraw control. */
+/** NSFW consent copy (B9-7): the pre-load gate, the withdraw control and the label's edit hint. */
 export const nsfwConsentText = defineCatalog("nsfwConsent", {
   "gate.title": "#{name} is age-restricted",
   "gate.body":
@@ -15,4 +15,6 @@ export const nsfwConsentText = defineCatalog("nsfwConsent", {
   "bar.text": "Age-restricted channel. You agreed to view its content.",
   "bar.revoke": "Withdraw consent",
   "bar.revokeFailed": "Consent could not be withdrawn. Try again.",
+  editHint:
+    "Each member must agree before the channel's messages, images and files load; the server withholds them until then. The channel is marked in the sidebar.",
 });
