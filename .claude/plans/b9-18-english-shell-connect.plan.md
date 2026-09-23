@@ -238,11 +238,27 @@ render path as a fallback; fail closed and record a blocker instead.
   Log shown, the header squeezed the server icon and cut off the server name
   even in English at 940 px. With longer labels, the name went to zero width
   and Audit Log was cut off by the sidebar. The header now wraps its buttons
-  onto a second, right-aligned row, the same pattern B9-4 uses when the
-  Moderation entry is shown. A member without Audit Log keeps the one-row
-  header.
+  onto a second, right-aligned row. The base rule now covers the Moderation
+  entry too, replacing B9-4's separate `.with-moderation` rule. A member
+  without Audit Log keeps the one-row header.
 - **Add Server close button** (`ServerPanel.ts`) had no accessible name; it
   is now "Close".
+
+Found in gate testing after the record above (2026-09-23):
+
+- **Connect server-row meta** (`styles/login.css`). The expanded
+  incompatible-server badge ran under the status dot and out of the panel; the
+  meta line now wraps. Covered by a `b9-text-expansion` case at 940×500 with
+  20 px text.
+- **Member admin context menu** (`MemberList.ts`). Opened low in the list at
+  940×500, it ran past the bottom edge, leaving Force Logout, Ban and Block
+  unreachable; it is now clamped to the viewport and anchored by its bottom
+  edge when it does not fit below the pointer (`member-list.test.ts`).
+- **Channel dialog labels** (`CreateChannelModal.ts`, `EditChannelModal.ts`).
+  The Create Channel type select and the Edit Channel name and type controls
+  had no accessible name; each `.form-label` is now linked to its control
+  (`create-channel-modal.test.ts`, `edit-channel-modal.test.ts`). The fault
+  predates B9-18.
 
 ### Evidence
 
