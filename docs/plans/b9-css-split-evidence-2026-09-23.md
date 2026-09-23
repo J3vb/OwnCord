@@ -9,7 +9,7 @@
 
 B9-1 moves `Client/src/styles/app.css` into ordered fragments without changing
 a rule. Every result below was produced in this session by the command next to
-it. A row marked **NOT RUN** was not run.
+it. A row marked not run or pending was not run.
 
 ## Environment
 
@@ -97,16 +97,239 @@ src/styles/app.css` is 0), so without the helper those tests fail.
 
 ## Accessibility and visual evidence
 
-Because the emitted stylesheet is byte-identical, the rendered result in any
-WebView, theme, accent, scale or motion setting is the same as before this
-PR. That is the evidence for all six accessibility checks for this milestone:
-nothing they measure can have moved.
+The plan asks for desktop screenshots and computed-style samples for the six
+accessibility checks, before and after. They were captured with Playwright
+(1.63.0, bundled Chromium, headless) against the **built** app, not the dev
+server:
 
-| Check                                   | Status                                                                                                  |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Desktop screenshots, before/after       | **NOT RUN.** No desktop session on this host (as recorded by B9-0). Byte equality makes them identical. |
-| Keyboard, focus, contrast, motion, zoom | **NOT RUN natively.** Structural a11y smoke passed (above). No CSS output changed.                      |
-| NVDA / Orca                             | **NOT RUN.** No screen reader on this host; unchanged CSS output cannot change the tree.                |
+1. Build `vite build --config vite.config.desktop.ts` twice: once at this
+   branch, once with `Client/src/styles` checked out at `c80c8094` (the only
+   `Client/src` difference between the two commits). `diff -r` on the two
+   `dist/` trees: **identical**, all 27 assets.
+2. Serve each tree with `vite preview --outDir <dist> --strictPort` on its own
+   free port.
+3. Run the capture spec below against each, with the mocked Tauri session
+   from `Client/tests/e2e/helpers.ts`. Every state records a PNG and a JSON
+   sample: computed `color`, `background-color`, `outline-*`, `box-shadow`,
+   `font-size`, `line-height`, `transition-duration`, `animation-*`, `opacity`,
+   `display` and size for 18 shell, dialog and control selectors plus the
+   focused element; the viewport and scroll sizes; the root/body classes; and
+   Playwright's ARIA snapshot of `body`.
+
+| Check           | States captured (1280×800 unless noted)                                                                                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard, focus | In dark, neon-glow, midnight and light: shell; Tab from the document start; Ctrl+K quick switcher with an active option; Settings → Appearance with arrow-key focus on the tab list; member-picker modal after Tab. |
+| Contrast        | The same four themes, plus High Contrast on dark with a custom `#ffff00` accent (the Q8 fallback case).                                                                                                             |
+| Reduced motion  | OS `reduce` with the app setting off; OS `no-preference` with the app setting on.                                                                                                                                   |
+| Zoom/reflow     | 940×500 at text size 12 px; 940×500 at 20 px with Large Font; 940×500 at device scale 2 (200 %) and 20 px.                                                                                                          |
+| Screen reader   | ARIA snapshot of every state above (a structural proxy only; see the table below).                                                                                                                                  |
+
+**Result.** 26 states, before and after:
+
+- **Computed-style and ARIA samples:** 26 of 26 byte-identical (the
+  concatenated JSON hashes to `de695e3a…` on both sides).
+- **Screenshots:** 23 of 26 byte-identical. The other three
+  (`dark-05-modal-focus`, `midnight-05-modal-focus`,
+  `neon-glow-03-quick-switcher`) differ in 4 to 28 pixels, by at most 5/255
+  per channel. This is run-to-run rendering noise, not a CSS difference. A
+  second capture of the _before_ build differed from the first in the same
+  kinds of states (`neon-glow-03-quick-switcher`, `neon-glow-05-modal-focus`),
+  and the two builds are byte-identical.
+
+The PNGs (3.5 MB a side) are not committed. The spec regenerates them from any
+two builds.
+
+| Check                                   | Status                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Desktop screenshots, before/after       | **Run** in headless Chromium, with the result above. No native WebView2/WebKitGTK window on this host.                    |
+| Keyboard, focus, contrast, motion, zoom | **Run** as computed-style samples, with the result above. Native OS zoom and OS motion settings: not run.                 |
+| NVDA / Orca                             | **Owner-run, pending.** Q1 names the repository owner as the accessibility reviewer; an agent cannot run a screen reader. |
+
+<details>
+<summary>Capture spec and config: save as <code>Client/test-results/b9-evidence/pw.config.ts</code> and <code>capture.spec.ts</code> (gitignored), run from <code>Client/</code></summary>
+
+```sh
+B9_URL=http://127.0.0.1:<port> B9_OUT=<dir> npx playwright test -c test-results/b9-evidence/pw.config.ts
+```
+
+```ts
+import { defineConfig, devices } from "@playwright/test";
+export default defineConfig({
+  testDir: ".",
+  outputDir: "./pw-out",
+  workers: 1,
+  timeout: 60_000,
+  reporter: [["list"]],
+  use: { ...devices["Desktop Chrome"], baseURL: process.env.B9_URL },
+});
+```
+
+```ts
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import type { Page } from "@playwright/test";
+import { test, expect } from "../../tests/e2e/fixtures";
+import {
+  mockTauriFullSessionWithMessages,
+  navigateToMainPageReady,
+  openSettings,
+  switchSettingsTab,
+} from "../../tests/e2e/helpers";
+
+const OUT = process.env.B9_OUT!;
+mkdirSync(OUT, { recursive: true });
+
+const PROPS = [
+  "color",
+  "background-color",
+  "border-top-color",
+  "outline-style",
+  "outline-width",
+  "outline-color",
+  "outline-offset",
+  "box-shadow",
+  "font-size",
+  "line-height",
+  "transition-duration",
+  "animation-name",
+  "animation-duration",
+  "opacity",
+  "display",
+  "width",
+  "height",
+];
+const SELECTORS = [
+  "body",
+  ".sidebar",
+  ".channel-item",
+  ".channel-item.active",
+  ".message",
+  ".msg-text",
+  ".chat-header",
+  ".message-input",
+  ".member-list",
+  ".user-bar",
+  ".settings-panel",
+  ".settings-nav-item",
+  '.settings-nav-item[aria-selected="true"]',
+  ".quick-switcher",
+  ".quick-switcher__input",
+  '.quick-switcher__item[aria-selected="true"]',
+  ".dm-member-picker-modal",
+  ".toast-container",
+];
+
+async function record(page: Page, name: string): Promise<void> {
+  const sample = await page.evaluate(
+    ({ selectors, props }) => {
+      const pick = (el: Element | null) => {
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+      };
+      const active = document.activeElement;
+      return {
+        viewport: {
+          w: innerWidth,
+          h: innerHeight,
+          scrollW: document.documentElement.scrollWidth,
+          scrollH: document.documentElement.scrollHeight,
+        },
+        htmlClass: document.documentElement.className,
+        bodyClass: document.body.className,
+        focused: active
+          ? {
+              tag: active.tagName,
+              cls: active.className,
+              label: active.getAttribute("aria-label"),
+              style: pick(active),
+            }
+          : null,
+        styles: Object.fromEntries(selectors.map((s) => [s, pick(document.querySelector(s))])),
+      };
+    },
+    { selectors: SELECTORS, props: PROPS },
+  );
+  const aria = await page.locator("body").ariaSnapshot();
+  writeFileSync(join(OUT, `${name}.json`), JSON.stringify({ ...sample, aria }, null, 2));
+  await page.screenshot({ path: join(OUT, `${name}.png`), animations: "disabled", caret: "hide" });
+}
+
+async function boot(page: Page, prefs: Record<string, unknown>, theme: string): Promise<void> {
+  await page.addInitScript(
+    ({ p, t }) => {
+      localStorage.setItem("owncord:theme:active", t);
+      for (const [k, v] of Object.entries(p))
+        localStorage.setItem(`owncord:settings:${k}`, JSON.stringify(v));
+    },
+    { p: prefs, t: theme },
+  );
+  await mockTauriFullSessionWithMessages(page);
+  await page.goto("/");
+  await navigateToMainPageReady(page);
+}
+
+test.use({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+
+for (const theme of ["dark", "neon-glow", "midnight", "light"]) {
+  test(`shell, focus, dialogs — ${theme}`, async ({ page }) => {
+    await boot(page, {}, theme);
+    await record(page, `${theme}-01-shell`);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    for (let i = 0; i < 3; i++) await page.keyboard.press("Tab");
+    await record(page, `${theme}-02-keyboard-focus`);
+    await page.keyboard.press("Control+k");
+    await page.locator(".quick-switcher__input").fill("gen");
+    await expect(page.locator('.quick-switcher__item[aria-selected="true"]').first()).toBeVisible();
+    await record(page, `${theme}-03-quick-switcher`);
+    await page.keyboard.press("Escape");
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    await page.locator('.settings-nav-item[aria-selected="true"]').focus();
+    await page.keyboard.press("ArrowDown");
+    await record(page, `${theme}-04-settings-focus`);
+    await page.keyboard.press("Escape");
+    await page.locator(".sidebar-dm-section .category-add-btn").click();
+    await expect(page.locator(".dm-member-picker-modal")).toBeVisible();
+    await page.keyboard.press("Tab");
+    await record(page, `${theme}-05-modal-focus`);
+  });
+}
+
+test("contrast — high-contrast and custom accent", async ({ page }) => {
+  await boot(page, { highContrast: true, accentColor: "#ffff00" }, "dark");
+  await record(page, "contrast-01-high-contrast-custom-accent");
+});
+
+for (const motion of ["reduce", "no-preference"] as const) {
+  test(`motion — OS ${motion}, app reducedMotion on/off`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: motion });
+    await boot(page, { reducedMotion: motion === "no-preference" }, "neon-glow");
+    await record(page, `motion-${motion}`);
+  });
+}
+
+for (const [label, prefs] of [
+  ["font12", { fontSize: 12 }],
+  ["font20-large", { fontSize: 20, largeFont: true }],
+] as const) {
+  test(`zoom/reflow — 940x500 ${label}`, async ({ page }) => {
+    await page.setViewportSize({ width: 940, height: 500 });
+    await boot(page, prefs, "neon-glow");
+    await record(page, `reflow-940x500-${label}`);
+  });
+}
+
+test.describe("zoom 200%", () => {
+  test.use({ viewport: { width: 940, height: 500 }, deviceScaleFactor: 2 });
+  test("zoom/reflow — 1880x1000 physical at 200%", async ({ page }) => {
+    await boot(page, { fontSize: 20 }, "neon-glow");
+    await record(page, "reflow-200pct-font20");
+  });
+});
+```
+
+</details>
 
 ## Rollback
 
