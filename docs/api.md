@@ -797,7 +797,7 @@ Broadcasts a `user_update` on success, exactly like the PATCH above.
 The bytes are stored as an ordinary attachment with no channel, and
 `users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
 picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
-attachment only to its uploader, and additionally admits one that some user's
+attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
 it is replaced.
@@ -2258,6 +2258,8 @@ migration 052). Otherwise, including when that is unknown, `evidence` is
 `[]` and `evidence_withheld` is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
 snapshot is returned. Files the snapshot references are served by
 `GET /api/v1/files/{id}` under that route's own channel and consent checks.
+Once the source channel is deleted the file is unlinked, and that route
+serves it only to its uploader — `ADMINISTRATOR` included.
 
 ---
 

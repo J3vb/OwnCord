@@ -120,14 +120,18 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 //     checkSendPermission), none of which have an admin bypass, and it is
 //     checked ahead of the admin branch
 //     so that branch cannot skip it.
-//   - An administrator may read anything else.
-//   - An unlinked attachment is private to its uploader, except while some
+//   - A linked attachment in a guild channel needs READ_MESSAGES there, which
+//     an administrator is exempt from.
+//   - An unlinked attachment is private to its uploader, administrators
+//     included (decision 13: once its message or channel is deleted there is
+//     no label left to check consent against), except while some
 //     user's avatar column points at exactly its URL: an avatar has to be
 //     visible to the people who see the messages it sits next to, and the check
 //     being by exact URL is what makes the file stop being public the instant
 //     the avatar is replaced. A legacy row with no uploader (NULL uploader_id)
 //     is denied rather than served to any authenticated caller (M-2).
-//   - A linked attachment in a guild channel needs READ_MESSAGES there.
+//   - A labelled channel's attachment needs the caller's own NSFW
+//     acknowledgement, administrators included (checkNSFWConsent).
 //
 // Refusals stay distinguishable, so a caller can tell "not yours" from "not
 // there": a missing attachment answers 404, a permission failure 403, and an
@@ -164,23 +168,15 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 		}
 	}
 
-	if err := s.checkNSFWConsent(ctx, aa, actor); err != nil {
-		return err
-	}
-
-	if isAdmin {
-		return nil
-	}
-
 	if aa.ChannelID == nil {
 		return s.authorizeUnlinked(ctx, aa, actor)
 	}
-	return nil
+	return s.checkNSFWConsent(ctx, aa, actor)
 }
 
-// checkNSFWConsent is Authorize's B5-7 decision 13 gate: the NSFW check runs
-// BEFORE the admin bypass, so an administrator without a row is refused
-// exactly like anyone else — no bit and no admin bypass skips this. DMs
+// checkNSFWConsent is Authorize's B5-7 decision 13 gate: an administrator
+// without a row is refused exactly like anyone else — no bit and no admin
+// bypass skips this. DMs
 // cannot be labelled, so this only ever applies to a non-DM linked channel.
 func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
 	if aa.ChannelID == nil || aa.ChannelType == "dm" || !aa.ChannelNSFW {

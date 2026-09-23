@@ -323,7 +323,8 @@ func TestModerationEvidence_SourceChannelRelabelling(t *testing.T) {
 // if unlabelled again before the delete — or unknown (a report filed before
 // 052 whose channel was already gone): withheld, even from a moderator who
 // had acknowledged. Never labelled: the snapshot stays readable. Either way
-// the file itself, unlinked by the cascade, is refused to a moderator.
+// the file itself, unlinked by the cascade, is refused to a moderator and
+// to an administrator.
 func TestModerationEvidence_SourceChannelDeletion(t *testing.T) {
 	t.Run("labelled then deleted", func(t *testing.T) {
 		f := newEvidenceFixture(t, "message", true)
@@ -334,6 +335,14 @@ func TestModerationEvidence_SourceChannelDeletion(t *testing.T) {
 		f.deleteChannel()
 		f.expectEvidence(mod, service.EvidenceSourceChannelUnavailable)
 		f.expectFile(mod, http.StatusForbidden, "FORBIDDEN")
+	})
+	t.Run("labelled attachment report then deleted, read by an administrator", func(t *testing.T) {
+		f := newEvidenceFixture(t, "attachment", true)
+		admin := f.moderator("ev-admin", permissions.Administrator)
+
+		f.deleteChannel()
+		f.expectEvidence(admin, service.EvidenceSourceChannelUnavailable)
+		f.expectFile(admin, http.StatusForbidden, "FORBIDDEN")
 	})
 	t.Run("ordinary then deleted", func(t *testing.T) {
 		f := newEvidenceFixture(t, "message", false)
