@@ -14,7 +14,8 @@ commands and a twenty-first importer, so all twenty-one live under
 service (the twenty-second importer) and seven Linux-only `native_voice_*`
 commands, then phase 1b (same branch family, 2026-09-22), which added the two
 device commands, and phase 2 (branch `fm/linux-video-p2`, 2026-09-22), which
-added the two camera commands; the
+added the two camera commands. The
+registration-based correction was measured at `0beee8e` (`dev`, 2026-09-23). The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -59,22 +60,20 @@ Two consequences worth stating now, because they shape the interface design:
 
 ## What exists today
 
-Measured with `git grep`, not estimated:
+Measured from Tauri `generate_handler![...]` registrations and the TypeScript
+platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 22    |
-| Distinct `invoke` command names called from `Client/src/`  | 41    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 47    |
+| Distinct `invoke` command names called from `Client/src/`  | 42    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 45    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 47    |
 
-The handler count covers both attribute spellings — 35 `#[tauri::command]` plus
-12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
-brackets undercounts to 35. Attributes and registrations are two different
-counts: of the 47 attributed functions, 45 appear in `generate_handler!`
+The handler count covers the 45 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the twelve `native_voice_*` commands behind
 `#[cfg(target_os = "linux")]`, so a default build registers 44 on Linux and 32
@@ -83,33 +82,70 @@ elsewhere. The one environment-detection helper is
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
 
-Reproduce:
+Reproduce with `cd Client && npm test -- tests/unit/platform-contracts-counts.test.ts`.
+The test reads real static/dynamic imports, follows the platform service's invoke
+bindings (including aliases, lazy helpers and nested generic calls), and parses
+all Rust registration lists. Comments, string examples and unregistered
+`#[tauri::command]` functions do not count. The handler row is the union across
+platforms and features, including Linux native voice and optional devtools.
 
-```bash
-git grep -l "@tauri-apps" -- 'Client/src/**' | wc -l
-git grep -hoE '(tauriInvoke|invoke)(<[^>]*>)?\(\s*"[a-z_]+"' -- 'Client/src/**' \
-  | grep -oE '[a-z_]+"$' | tr -d '"' | sort -u | wc -l
+The name inventory below also detects equal-count substitutions: a command
+registered but absent here, or listed here but no longer registered, fails the
+guard. Keep it and the table in sync when changing registrations.
+
+<!-- registered-commands -->
+
+```text
+accept_cert_fingerprint
+check_client_update
+delete_credential
+delete_identity_key
+delete_pending_messages
+download_and_install_update
+external_image
+external_preview
+get_cert_fingerprint
+get_identity_pin
+get_settings
+load_credential
+load_identity_key
+load_pending_messages
+login_with_saved_password
+native_voice_build_info
+native_voice_clear_key
+native_voice_connect
+native_voice_debug_info
+native_voice_disconnect
+native_voice_list_devices
+native_voice_publish_camera
+native_voice_set_device
+native_voice_set_key
+native_voice_set_microphone
+native_voice_set_subscribed
+native_voice_unpublish_camera
+open_devtools
+ptt_listen_for_key
+ptt_polling_supported
+ptt_set_key
+ptt_start
+ptt_stop
+save_credential
+save_identity_key
+save_pending_messages
+save_settings
+start_http_proxy
+start_livekit_proxy
+stop_http_proxy
+stop_livekit_proxy
+store_identity_pin
+ws_connect
+ws_disconnect
+ws_send
 ```
 
-Note the alias: `Client/src/lib/ws.ts` binds `core.invoke` to a local
-`tauriInvoke` before calling it, so a regex that only matches `invoke("…")`
-undercounts by four (`ws_connect`, `ws_send`, `ws_disconnect`,
-`accept_cert_fingerprint`). Any future lint rule enforcing the seam must match
-the binding, not the call site.
-
-A second blind spot, found while B7-4 moved these call sites: the recipe cannot
-see a **nested** generic. `invoke<Record<string, unknown>>("get_settings")` in
-`platform/desktop/settings.ts` does not match, so the table's 30 counts
-distinct names _the recipe finds_; the tree calls 31.
-
-One registered Rust handler is never invoked from `Client/src/`:
-`get_cert_fingerprint`, which the native E2E harness calls directly
-(`Client/tests/e2e/native/helpers.ts`) and `Client/tests/e2e/helpers.ts` stubs.
-It stays registered as "consumed by tests, unconsumed in production" (B7 PRD
-open question 11). `probe_credential_store`, the one handler with no caller
-anywhere, was deleted in B7-0. An earlier revision of this paragraph also named
-`store_cert_fingerprint` and `ptt_get_key`; neither command has ever existed in
-`generate_handler!`, so nothing further is owed there.
+Three registered handlers have no production platform caller:
+`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics),
+and `stop_http_proxy`. They still belong in the registration inventory.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is
@@ -356,7 +392,7 @@ convention already used in the
 - [`docs/architecture/client.md`](client.md) — the client as-built
 
 Per this directory's maintenance rule: a PR that adds a new `@tauri-apps` import
-to `Client/src/`, or a new `#[tauri::command]`, updates the counts and the
+to `Client/src/`, or a new `generate_handler!` registration, updates the inventory, counts and the
 cluster table here in the same change. That rule is now enforced rather than
 promised — `Client/tests/unit/platform-contracts-counts.test.ts` re-derives all
 three counts from the tree and fails when the table above disagrees, so a
