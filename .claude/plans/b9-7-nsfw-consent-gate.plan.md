@@ -192,7 +192,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - **One authority.** The account's acknowledgement is a field on the channel
   store row (`Channel.nsfwAcknowledged`), written only from `ready`, a 204 from
   `PUT`/`DELETE /api/v1/channels/{id}/nsfw-acknowledgement`, and the `nsfw_ack`
-  frame (registered in `dispatcher.ts`, body in `features/channels/wsHandlers.ts`).
+  frame (registered in `dispatcher.ts`, body in `features/channels/wsHandlers.ts`),
+  or cleared by a server `403 NSFW_ACKNOWLEDGEMENT_REQUIRED` on a content read.
   Absent reads as not acknowledged. Clearing the label drops it (the server
   deletes the rows), so a relabel gates again; a re-sent `channel_create` keeps
   it. `lib/nsfw-gate.ts` and its sessionStorage keys are deleted, never migrated;
@@ -202,8 +203,11 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   pins, reaction users and single-channel search — so a gated channel is
   refused locally with the server's own `403 NSFW_ACKNOWLEDGEMENT_REQUIRED`
   before any request, and a response that lands after consent was withdrawn is
-  discarded. Whichever feature asks, nothing is fetched pre-consent. This is
-  stale-result suppression, not network cancellation.
+  discarded. A server refusal of a read the store thought consented marks the
+  channel not acknowledged, so the gate takes over (defence in depth: a resume
+  that missed an `nsfw_ack` already gets a full `ready`). Whichever feature
+  asks, nothing is fetched pre-consent. This is stale-result suppression, not
+  network cancellation.
 - **Gate before composition.** `ChannelController` mounts the header, then,
   for a gated channel, only the gate: no list, typing indicator, composer or
   history fetch, and the channel's delivered rows are dropped
@@ -215,12 +219,14 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - **Alternate entry points.** The pins panel does not open behind the gate,
   search behind it offers only server-wide search (the server already omits
   unacknowledged channels there), and a jump into a gated channel defers to the
-  gate without a toast. When the mounted channel falls behind the gate, the
-  pins panel, the search overlay and the image lightbox close. The global embed/media caches are URL-keyed and only
-  read while rendering a consented row, so they are not cleared.
+  gate without a toast. When any channel falls behind the gate, a pins panel
+  opened for it and the search overlay close (`ChatArea.ts`); when the mounted
+  channel does, the image lightbox closes too. The global embed/media caches
+  are URL-keyed and only read while rendering a consented row, so they are not
+  cleared.
 - **Files beyond the table:** `stores/messages.store.ts` and
   `features/messaging/historyWindows.ts` (the scoped scrub), the two loaders in
-  `OverlayManagers.ts` and `MessageJump.ts`, `EditChannelModal.ts` (hint copy),
+  `OverlayManagers.ts` and `MessageJump.ts`, the overlay closing in `ChatArea.ts`, `EditChannelModal.ts` (hint copy),
   `i18n/nsfwConsent.ts` (catalog), the `nsfw-gate.css` fragment, and the removed
   `setNsfwGateHost`/`clearNsfwAcknowledgements` calls in `MainPage.ts` and
   `auth.store.ts`. No navigation composition, token or import-order change.
