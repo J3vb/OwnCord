@@ -10,8 +10,9 @@
  *
  * Rows are keyed by request id and kept while the request stays pending, so
  * a frame about one request never moves focus off another. When the row
- * holding focus leaves, focus moves to the next request, else the previous
- * one, else the view's heading.
+ * holding focus leaves, focus moves to the next request's row, else the
+ * previous one, else the view's heading. The row, not its Accept button: a
+ * repeated Enter must not trust a different sender.
  */
 
 import type { DmRequestDecision } from "@lib/api";
@@ -120,7 +121,11 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
 
   const renderRow = (r: MessageRequest): Row => {
     const name = senderName(r);
-    const li = createElement("li", { class: "requests-item", "data-testid": "request-item" });
+    const li = createElement("li", {
+      class: "requests-item",
+      tabindex: "-1",
+      "data-testid": "request-item",
+    });
     const head = createElement("div", { class: "requests-item-head" });
     head.appendChild(createElement("h3", { class: "requests-sender" }, name));
     if (r.sender.username !== "" && r.sender.username !== name) {
@@ -193,7 +198,7 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   const refocus = (index: number, pending: readonly MessageRequest[]): void => {
     const next = pending[index] ?? pending[index - 1];
     const target =
-      (next !== undefined ? rows.get(next.id)?.buttons.get("accept") : undefined) ??
+      (next !== undefined ? rows.get(next.id)?.li : undefined) ??
       root.closest(".feature-view")?.querySelector<HTMLElement>(".feature-view-title");
     target?.focus();
   };

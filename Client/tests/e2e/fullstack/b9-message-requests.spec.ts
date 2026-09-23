@@ -171,8 +171,9 @@ test.describe("B9-6 Message Request decisions (real server)", () => {
       await bob.keyboard.press("Enter");
       await expect(item(bob, "carol")).toHaveCount(0);
       await expect(outcome(bob)).toHaveText("Ignored carol's request.");
-      // Focus moved to the next request instead of falling to the page.
-      await expect(bob.locator(":focus")).toHaveText("Accept");
+      // Focus moved to the next request's row instead of falling to the page,
+      // and not onto a decision a repeated Enter would take.
+      await expect(bob.locator(":focus")).toHaveAttribute("data-testid", "request-item");
       await testInfo.attach("b9-6-after-ignore.png", {
         body: await bob.screenshot(),
         contentType: "image/png",
