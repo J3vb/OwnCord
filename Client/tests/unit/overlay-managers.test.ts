@@ -71,8 +71,10 @@ vi.mock("@components/SearchOverlay", () => ({
   })),
 }));
 
+// B9-7: channel 99 is labelled NSFW and not acknowledged.
 vi.mock("@stores/channels.store", () => ({
   setActiveChannel: mockSetActiveChannel,
+  channelsStore: { getState: () => ({ channels: new Map([[99, { nsfw: true }]]) }) },
 }));
 
 vi.mock("@stores/messages.store", () => ({
@@ -288,6 +290,21 @@ describe("createPinnedPanelController", () => {
 
     expect(createPinnedMessages).toHaveBeenCalledOnce();
     expect(mockPinnedMessagesMount).toHaveBeenCalledWith(root);
+  });
+
+  it("does not open, fetch or toast behind an NSFW consent gate", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 99,
+    });
+
+    await controller.toggle();
+
+    expect(api.getPins).not.toHaveBeenCalled();
+    expect(createPinnedMessages).not.toHaveBeenCalled();
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("onUnpin catches API error, shows toast, and does NOT close the panel", async () => {
@@ -1237,6 +1254,18 @@ describe("createSearchOverlayController", () => {
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
     expect(mockSearchOverlayMount).toHaveBeenCalledWith(root);
+  });
+
+  it("offers only a server-wide search behind an NSFW consent gate", () => {
+    const controller = createSearchOverlayController({
+      api: makeMockApi() as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 99,
+    });
+
+    controller.open();
+
+    expect(vi.mocked(createSearchOverlay).mock.calls[0]![0].currentChannelId).toBeUndefined();
   });
 
   it("does nothing when root is null", () => {

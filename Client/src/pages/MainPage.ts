@@ -54,7 +54,6 @@ import {
 } from "@components/message-list/reaction-tooltip";
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
-import { setNsfwGateHost } from "@lib/nsfw-gate";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
@@ -176,7 +175,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // stores to the connected host — including the null case, so a disconnect
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
-  setNsfwGateHost(apiConfig.host ?? null);
   setAudioVolumeHost(apiConfig.host ?? null);
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a

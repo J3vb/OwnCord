@@ -282,7 +282,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Load per-server collapsed category state from localStorage, scoped to
   // the connected host (not the display name) — the same convention as
-  // setChannelMutesHost/setNsfwGateHost/setAudioVolumeHost. The display name
+  // setChannelMutesHost/setAudioVolumeHost. The display name
   // defaults to "OwnCord Server" on every unmodified install, so keying on
   // it would collapse two different servers' saved state onto one entry.
   loadCollapsedCategories(api.getConfig().host);

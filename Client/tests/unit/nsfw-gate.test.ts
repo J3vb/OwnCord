@@ -1,123 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  isNsfwAcknowledged,
-  acknowledgeNsfw,
-  clearNsfwAcknowledgements,
-  nsfwGateRequired,
-  setNsfwGateHost,
-} from "@lib/nsfw-gate";
-import { createNsfwGate } from "@components/NsfwGate";
-
-describe("nsfw-gate acknowledgements", () => {
-  beforeEach(() => {
-    sessionStorage.clear();
-  });
-
-  it("reports an un-acknowledged channel as not acknowledged", () => {
-    expect(isNsfwAcknowledged(42)).toBe(false);
-  });
-
-  it("remembers an acknowledgement", () => {
-    acknowledgeNsfw(42);
-    expect(isNsfwAcknowledged(42)).toBe(true);
-  });
-
-  it("keys the acknowledgement per channel", () => {
-    acknowledgeNsfw(42);
-    expect(isNsfwAcknowledged(43)).toBe(false);
-  });
-
-  // The promise is "once per session", so it must live in sessionStorage —
-  // localStorage would silently make it "once ever" and the flag would stop
-  // meaning anything after the first visit.
-  it("stores the acknowledgement in sessionStorage, not localStorage", () => {
-    acknowledgeNsfw(7);
-    expect(sessionStorage.length).toBeGreaterThan(0);
-    expect(localStorage.getItem("owncord:nsfw-ack:7")).toBeNull();
-  });
-
-  it("clears every acknowledgement", () => {
-    acknowledgeNsfw(1);
-    acknowledgeNsfw(2);
-    clearNsfwAcknowledgements();
-    expect(isNsfwAcknowledged(1)).toBe(false);
-    expect(isNsfwAcknowledged(2)).toBe(false);
-  });
-
-  it("leaves unrelated session keys alone when clearing", () => {
-    sessionStorage.setItem("unrelated", "keep me");
-    acknowledgeNsfw(1);
-    clearNsfwAcknowledgements();
-    expect(sessionStorage.getItem("unrelated")).toBe("keep me");
-  });
-
-  // A storage that throws must not hide the gate — erring toward asking again
-  // is harmless, where erring the other way drops the whole feature.
-  it("reads a throwing sessionStorage as not acknowledged", () => {
-    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-    expect(isNsfwAcknowledged(1)).toBe(false);
-    spy.mockRestore();
-  });
-
-  it("does not throw when the acknowledgement cannot be stored", () => {
-    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
-    expect(() => acknowledgeNsfw(1)).not.toThrow();
-    spy.mockRestore();
-  });
-
-  describe("host scoping", () => {
-    afterEach(() => {
-      // currentHost is module-level state that outlives a single test.
-      setNsfwGateHost(null);
-    });
-
-    // Regression for v076: an in-app server switch is SPA navigation, not a
-    // reload, so sessionStorage survives it. An unscoped key meant an ack for
-    // channel N on server A silently suppressed the gate for the unrelated
-    // channel N on server B.
-    it("does not leak an acknowledgement across two server hosts", () => {
-      setNsfwGateHost("a.example.com");
-      acknowledgeNsfw(12);
-      expect(isNsfwAcknowledged(12)).toBe(true);
-
-      setNsfwGateHost("b.example.com");
-      expect(isNsfwAcknowledged(12)).toBe(false);
-
-      setNsfwGateHost("a.example.com");
-      expect(isNsfwAcknowledged(12)).toBe(true);
-    });
-
-    it("falls back to the legacy unscoped key when no host has been set", () => {
-      acknowledgeNsfw(5);
-      expect(sessionStorage.getItem("owncord:nsfw-ack:5")).toBe("1");
-    });
-  });
-
-  describe("nsfwGateRequired", () => {
-    it("is false for a channel that is not flagged", () => {
-      expect(nsfwGateRequired({ id: 1, nsfw: false })).toBe(false);
-    });
-
-    it("is true for a flagged channel not yet acknowledged", () => {
-      expect(nsfwGateRequired({ id: 1, nsfw: true })).toBe(true);
-    });
-
-    it("is false once the channel has been acknowledged this session", () => {
-      acknowledgeNsfw(1);
-      expect(nsfwGateRequired({ id: 1, nsfw: true })).toBe(false);
-    });
-  });
-});
+import { createNsfwConsentBar, createNsfwGate } from "@components/NsfwGate";
 
 describe("NsfwGate component", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    sessionStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -126,87 +13,130 @@ describe("NsfwGate component", () => {
     container.remove();
   });
 
-  function mountGate(overrides?: {
-    onContinue?: () => void;
-    onCancel?: () => void;
-    channelId?: number;
-  }) {
-    const onContinue = overrides?.onContinue ?? vi.fn();
-    const gate = createNsfwGate({
-      channelId: overrides?.channelId ?? 9,
-      channelName: "spicy",
-      onContinue,
-      ...(overrides?.onCancel !== undefined ? { onCancel: overrides.onCancel } : {}),
-    });
+  function mountGate(overrides?: { onAccept?: () => Promise<void>; onCancel?: () => void }) {
+    const onAccept = overrides?.onAccept ?? vi.fn(() => Promise.resolve());
+    const onCancel = overrides?.onCancel ?? vi.fn();
+    const gate = createNsfwGate({ channelName: "spicy", onAccept, onCancel });
     gate.mount(container);
-    return { gate, onContinue };
+    const q = (id: string) => container.querySelector<HTMLElement>(`[data-testid='${id}']`)!;
+    return { gate, onAccept, onCancel, q };
   }
 
-  it("renders the warning over the container", () => {
-    const { gate } = mountGate();
-    const el = container.querySelector("[data-testid='nsfw-gate']");
-    expect(el).not.toBeNull();
-    expect(el?.textContent).toContain("This channel may contain sensitive content");
+  it("names the channel in a labelled region and states scope and privacy", () => {
+    const { gate, q } = mountGate();
+    const region = q("nsfw-gate");
+    expect(region.tagName).toBe("SECTION");
+    const title = document.getElementById(region.getAttribute("aria-labelledby")!);
+    expect(title?.textContent).toBe("#spicy is age-restricted");
+    const described = region
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(" ");
+    expect(described).toContain("not loaded until you agree");
+    expect(described).toContain("every device you sign in with");
+    expect(described).toContain("withdraw it at any time");
     gate.destroy?.();
   });
 
-  it("names the channel it is gating", () => {
+  // A stray Enter right after navigating in must never be read as consent.
+  it("moves focus to the heading, not to the accept button", () => {
     const { gate } = mountGate();
-    expect(container.querySelector(".nsfw-gate-title")?.textContent).toBe("#spicy");
+    expect(document.activeElement?.tagName).toBe("H2");
     gate.destroy?.();
   });
 
-  // The copy must not imply the server is filtering anything — it is not.
-  it("says plainly that nothing is filtered", () => {
-    const { gate } = mountGate();
-    expect(container.querySelector("[data-testid='nsfw-gate']")?.textContent).toContain(
-      "Nothing is filtered",
+  it("keeps the gate busy until the server confirms, without dropping focus", async () => {
+    let confirm!: () => void;
+    const onAccept = vi.fn(() => new Promise<void>((r) => (confirm = r)));
+    const { gate, q } = mountGate({ onAccept });
+    const accept = q("nsfw-gate-continue") as HTMLButtonElement;
+    accept.focus();
+
+    accept.click();
+    accept.click();
+
+    expect(onAccept).toHaveBeenCalledTimes(1);
+    expect(accept.getAttribute("aria-disabled")).toBe("true");
+    expect(accept.disabled).toBe(false);
+    expect(document.activeElement).toBe(accept);
+    expect(q("nsfw-gate").getAttribute("aria-busy")).toBe("true");
+    confirm();
+    await Promise.resolve();
+    gate.destroy?.();
+  });
+
+  it("stays up with an announced error when the acknowledgement fails", async () => {
+    const onAccept = vi.fn(() => Promise.reject(new Error("offline")));
+    const { gate, q } = mountGate({ onAccept });
+    const accept = q("nsfw-gate-continue");
+
+    accept.click();
+    await vi.waitFor(() =>
+      expect(q("nsfw-gate-error").textContent).toContain("could not be saved"),
     );
+
+    expect(q("nsfw-gate-error").getAttribute("role")).toBe("alert");
+    expect(accept.hasAttribute("aria-disabled")).toBe(false);
+    expect(q("nsfw-gate").hasAttribute("aria-busy")).toBe(false);
+    accept.click();
+    expect(onAccept).toHaveBeenCalledTimes(2);
     gate.destroy?.();
   });
 
-  it("records the acknowledgement and notifies on Continue", () => {
-    const onContinue = vi.fn();
-    const { gate } = mountGate({ onContinue, channelId: 11 });
-
-    (container.querySelector("[data-testid='nsfw-gate-continue']") as HTMLButtonElement).click();
-
-    expect(isNsfwAcknowledged(11)).toBe(true);
-    expect(onContinue).toHaveBeenCalledTimes(1);
+  it("declines from Go back and from Escape without accepting", () => {
+    const { gate, onAccept, onCancel, q } = mountGate();
+    q("nsfw-gate-back").click();
+    q("nsfw-gate").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onAccept).not.toHaveBeenCalled();
     gate.destroy?.();
   });
 
-  it("offers no Go Back button without an onCancel", () => {
+  it("orders decline before accept for keyboard users", () => {
     const { gate } = mountGate();
-    expect(container.querySelector("[data-testid='nsfw-gate-back']")).toBeNull();
+    const buttons = [...container.querySelectorAll("button")].map((b) => b.dataset["testid"]);
+    expect(buttons).toEqual(["nsfw-gate-back", "nsfw-gate-continue"]);
     gate.destroy?.();
   });
 
-  it("calls onCancel from Go Back without acknowledging", () => {
-    const onCancel = vi.fn();
-    const { gate } = mountGate({ onCancel, channelId: 12 });
-
-    (container.querySelector("[data-testid='nsfw-gate-back']") as HTMLButtonElement).click();
-
-    expect(onCancel).toHaveBeenCalledTimes(1);
-    // Declining must not be remembered as acceptance — the next open asks again.
-    expect(isNsfwAcknowledged(12)).toBe(false);
+  it("removes itself on destroy and ignores a failure that lands afterwards", async () => {
+    let fail!: () => void;
+    const { gate, q } = mountGate({
+      onAccept: () => new Promise<void>((_, reject) => (fail = () => reject(new Error("x")))),
+    });
+    const error = q("nsfw-gate-error");
+    q("nsfw-gate-continue").click();
     gate.destroy?.();
-  });
-
-  it("removes itself on destroy", () => {
-    const { gate } = mountGate();
-    gate.destroy?.();
+    fail();
+    await Promise.resolve();
     expect(container.querySelector("[data-testid='nsfw-gate']")).toBeNull();
+    expect(error.textContent).toBe("");
   });
+});
 
-  it("stops responding to clicks after destroy", () => {
-    const onContinue = vi.fn();
-    const gate = createNsfwGate({ channelId: 3, channelName: "spicy", onContinue });
-    gate.mount(container);
-    const btn = container.querySelector("[data-testid='nsfw-gate-continue']") as HTMLButtonElement;
-    gate.destroy?.();
-    btn.click();
-    expect(onContinue).not.toHaveBeenCalled();
+describe("NsfwConsentBar component", () => {
+  it("mounts first in its container and withdraws consent once at a time", async () => {
+    const container = document.createElement("div");
+    container.appendChild(document.createElement("div"));
+    let settle!: () => void;
+    const onRevoke = vi.fn(() => new Promise<void>((r) => (settle = r)));
+    const bar = createNsfwConsentBar({ onRevoke });
+    bar.mount(container);
+
+    expect(container.firstElementChild?.getAttribute("data-testid")).toBe("nsfw-consent-bar");
+    const revoke = container.querySelector<HTMLButtonElement>(
+      "[data-testid='nsfw-consent-revoke']",
+    )!;
+    expect(revoke.textContent).toBe("Withdraw consent");
+    revoke.click();
+    revoke.click();
+    expect(onRevoke).toHaveBeenCalledTimes(1);
+    expect(revoke.getAttribute("aria-disabled")).toBe("true");
+    settle();
+    await vi.waitFor(() => expect(revoke.hasAttribute("aria-disabled")).toBe(false));
+
+    bar.destroy?.();
+    expect(container.querySelector("[data-testid='nsfw-consent-bar']")).toBeNull();
   });
 });

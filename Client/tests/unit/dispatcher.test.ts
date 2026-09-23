@@ -1222,6 +1222,34 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
   });
 
+  it("wires nsfw_ack to the channel's consent state (B9-7)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(11, {
+        id: 11,
+        name: "spicy",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: true,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch };
+    });
+
+    mock.dispatch("nsfw_ack", { channel_id: 11, acknowledged: true });
+    expect(channelsStore.getState().channels.get(11)?.nsfwAcknowledged).toBe(true);
+    mock.dispatch("nsfw_ack", { channel_id: 11, acknowledged: false });
+    expect(channelsStore.getState().channels.get(11)?.nsfwAcknowledged).toBe(false);
+  });
+
   it("wires member_join to members store, using the payload's status", () => {
     mock.dispatch("member_join", {
       user: { id: 99, username: "newuser", avatar: null, role: "member" },

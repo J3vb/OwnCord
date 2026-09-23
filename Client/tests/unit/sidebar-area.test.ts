@@ -518,8 +518,8 @@ describe("SidebarArea", () => {
     it("scopes collapsed categories to the connected host, not the server display name", () => {
       // Two servers left at the operator default name collide on one
       // localStorage entry if persistence is keyed by display name instead
-      // of host — same reason setChannelMutesHost/setNsfwGateHost/
-      // setAudioVolumeHost are all host-scoped.
+      // of host — same reason setChannelMutesHost and
+      // setAudioVolumeHost are host-scoped.
       authStore.setState((prev) => ({ ...prev, serverName: "OwnCord Server" }));
       localStorage.setItem("owncord:collapsed:server-a.example.com", JSON.stringify(["General"]));
       localStorage.setItem("owncord:collapsed:OwnCord Server", JSON.stringify(["Text Channels"]));

@@ -33,14 +33,19 @@ export interface Channel {
   /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
   readonly slowMode: number;
   /**
-   * Flagged as possibly carrying sensitive content.
-   *
-   * The server stores and broadcasts this and does nothing else with it — no
-   * filtering, no restriction on who may read or post — so every consequence
-   * is this client's: a one-time-per-session age gate before the channel's
-   * messages are shown, and a marker on the sidebar row.
+   * Labelled age-restricted. The server withholds the channel's content from
+   * anyone who has not acknowledged it (B5-7); this client shows a consent
+   * gate instead of the channel and marks the sidebar row.
    */
   readonly nsfw: boolean;
+  /**
+   * The current account's own acknowledgement of the label, as the server
+   * last confirmed it (ready, a 204 from the acknowledgement route, or
+   * nsfw_ack). Absent or false means content stays gated; it is only ever
+   * true while `nsfw` is, because the server drops acknowledgements when the
+   * label is cleared.
+   */
+  readonly nsfwAcknowledged?: boolean;
   /**
    * Voice capacity limits (0 = unlimited). The server enforces both on join
    * (CHANNEL_FULL / VIDEO_LIMIT); these copies exist so the sidebar can show
@@ -105,6 +110,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // Older servers omit these; "absent" reads as unflagged / unlimited,
       // which is also what an unconfigured channel sends.
       nsfw: ch.nsfw ?? false,
+      nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
     });
@@ -173,6 +179,9 @@ export function addChannel(channel: ChannelCreatePayload): void {
       canSend: channel.can_send ?? existing?.canSend ?? true,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
+      // channel_create never carries the per-viewer acknowledgement; keep the
+      // known one while the label stays on.
+      nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
       voiceMaxUsers: channel.voice_max_users ?? 0,
       voiceMaxVideo: channel.voice_max_video ?? 0,
     });
@@ -203,12 +212,31 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.category !== undefined ? { category: update.category } : {}),
       ...(update.position !== undefined ? { position: update.position } : {}),
       ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
-      ...(update.nsfw !== undefined ? { nsfw: update.nsfw } : {}),
+      // Clearing the label deletes every acknowledgement server-side, so a
+      // later relabel starts gated again.
+      ...(update.nsfw !== undefined
+        ? { nsfw: update.nsfw, nsfwAcknowledged: update.nsfw && existing.nsfwAcknowledged === true }
+        : {}),
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);
+    return { ...prev, channels: next };
+  });
+}
+
+/**
+ * Record the server-confirmed acknowledgement of a labelled channel (B5-7).
+ * Ignored for an unknown or unlabelled channel, which has nothing to consent to.
+ */
+export function setNsfwAcknowledged(id: number, acknowledged: boolean): void {
+  channelsStore.setState((prev) => {
+    const existing = prev.channels.get(id);
+    if (existing === undefined || !existing.nsfw) return prev;
+    if ((existing.nsfwAcknowledged === true) === acknowledged) return prev;
+    const next = new Map(prev.channels);
+    next.set(id, { ...existing, nsfwAcknowledged: acknowledged });
     return { ...prev, channels: next };
   });
 }

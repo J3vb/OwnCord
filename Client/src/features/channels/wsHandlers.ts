@@ -10,6 +10,7 @@ import {
   removeChannel,
   addChannel,
   updateChannel,
+  setNsfwAcknowledged,
 } from "../../stores/channels.store";
 import {
   setMembers,
@@ -130,6 +131,11 @@ export function handleChannelCreate(payload: Payload<"channel_create">): void {
 
 export function handleChannelUpdate(payload: Payload<"channel_update">): void {
   updateChannel(payload);
+}
+
+/** Another device of this account acknowledged or revoked a labelled channel (B5-7). */
+export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
+  setNsfwAcknowledged(payload.channel_id, payload.acknowledged);
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {
