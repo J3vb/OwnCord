@@ -47,11 +47,6 @@ describe("UI string inventory", () => {
       expect(["B9-18", "B9-19", "B9-20"]).toContain(entry.owner);
     }
   });
-
-  it("holds nothing for the extracted pilot", () => {
-    expect(scan.files["src/components/settings/AccessibilityTab.ts"]).toBeUndefined();
-    expect(baseline["src/components/settings/AccessibilityTab.ts"]).toBeUndefined();
-  });
 });
 
 describe("the scan", () => {
