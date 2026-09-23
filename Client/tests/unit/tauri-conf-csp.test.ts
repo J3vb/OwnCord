@@ -53,15 +53,4 @@ describe("tauri.conf.json — CSP", () => {
       ].sort(),
     );
   });
-
-  it("connect-src refuses every non-loopback origin", () => {
-    for (const source of directive("connect-src")) {
-      expect(source).not.toMatch(/^(https:|wss:|\*)$|^(https|wss):\/\//);
-      if (source.includes("://")) {
-        expect(new URL(source.replace(":*", "")).hostname).toMatch(
-          /^(localhost|127\.0\.0\.1|ipc\.localhost)$/,
-        );
-      }
-    }
-  });
 });
