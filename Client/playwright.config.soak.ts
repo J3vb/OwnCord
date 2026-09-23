@@ -3,8 +3,9 @@ import fullstack from "./playwright.config.fullstack";
 
 // B7-11: the long-session soak's long run (`npm run test:e2e:soak`): the same
 // spec the PR soak runs, with enough cycles and an idle-connected phase. 200
-// cycles is the plan's floor: at the measured ~6.5 s per cycle, 300 cycles plus
-// the 30-minute idle phase would not fit the 60 minutes the run is sized to.
+// cycles is the plan's floor: at the measured 6.9 s per cycle (the recorded
+// run, docs/plans/b7-0-client-baseline-2026-09-19.md), 300 cycles plus the
+// 30-minute idle phase would not fit the 60 minutes the run is sized to.
 process.env.OWNCORD_SOAK_CYCLES ??= "200";
 process.env.OWNCORD_SOAK_IDLE_MIN ??= "30";
 
