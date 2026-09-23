@@ -227,8 +227,10 @@ func TestAttention_ReconnectWarmUpDoesNotRaise(t *testing.T) {
 func TestAttention_BootPressureIsRaisedNotLearned(t *testing.T) {
 	f := newAttentionFixture(t)
 	f.step()
-	for range attentionBaselineWarmup + 1 {
-		f.waitMs += 20_000 // 4x the 5000 ms/min floor
+	f.waitMs += 20_000 // 4x the 5000 ms/min floor
+	wantStatus(t, f.step(), "db_writer_wait", AttentionStatusOK)
+	for range attentionBaselineWarmup {
+		f.waitMs += 20_000
 		wantStatus(t, f.step(), "db_writer_wait", AttentionStatusWarning)
 	}
 	for range attentionBaselineWarmup {
@@ -246,7 +248,24 @@ func TestAttention_BootPressureIsRaisedNotLearned(t *testing.T) {
 	wantStatus(t, rep, "db_writer_wait", AttentionStatusWarning)
 }
 
-// The first measured level commits at once rather than reading as healthy.
+// One high first rate interval, such as the resume burst after a restart,
+// does not raise.
+func TestAttention_FirstRateIntervalNeedsSustain(t *testing.T) {
+	f := newAttentionFixture(t)
+	f.step()
+	f.waitMs += 20_000
+	f.drops += 50
+	f.step()
+	rep := f.step()
+	wantStatus(t, rep, "db_writer_wait", AttentionStatusOK)
+	wantStatus(t, rep, "delivery", AttentionStatusOK)
+	if len(rep.Warnings) != 0 {
+		t.Fatalf("one high first interval raised %+v", rep.Warnings)
+	}
+}
+
+// The first disk level and a stopped dispatch loop commit at once rather
+// than reading as healthy.
 func TestAttention_FirstMeasuredLevelCommits(t *testing.T) {
 	f := newAttentionFixture(t)
 	f.free = 100 << 20
