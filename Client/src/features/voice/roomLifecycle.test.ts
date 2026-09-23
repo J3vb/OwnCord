@@ -154,7 +154,7 @@ describe("createRoom", () => {
 describe("leaveVoice", () => {
   it("tears the session down to idle and kills the E2EE worker", async () => {
     const room = {
-      removeAllListeners: vi.fn(),
+      off: vi.fn(),
       disconnect: vi.fn(async () => {}),
     } as unknown as Room;
     const { host, lifecycle, ws, e2ee, audioElements, getState } = setup({
@@ -202,7 +202,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     const nativeRoom = {
       on: vi.fn(),
       disconnect: vi.fn(async () => {}),
-      removeAllListeners: vi.fn(),
+      off: vi.fn(),
       applyScreenshareVolumes: vi.fn(),
     };
     const createNativeRoom = vi.fn(

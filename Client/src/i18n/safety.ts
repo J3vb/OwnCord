@@ -44,6 +44,8 @@ export const safetyText = defineCatalog("safety", {
   "appeal.upheld": "upheld",
   "appeal.overturned": "overturned",
   "appeal.withdrawn": "withdrawn",
+  "appeals.unavailable":
+    "Kicks can't be appealed. While a ban is in effect you can't sign in to appeal here: contact the server's operator directly. Once a ban ends, it appears in your history and can be appealed.",
 });
 
 /** A server timestamp as a date and time, e.g. "Sep 23, 2026, 2:05 PM". */
