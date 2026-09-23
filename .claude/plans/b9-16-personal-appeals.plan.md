@@ -215,7 +215,9 @@ render path as a fallback; fail closed and record a blocker instead.
 - **Submission (Task 2):** one panel, outside both lists, holds the form: the
   sanction (kind, date, reason), an optional body (`maxlength` 4000; line
   breaks and tabs are sent as spaces because the server refuses control
-  characters) and Send/Cancel. Pending is `aria-busy`/`aria-disabled` and a
+  characters; a request over the server's 8,192-byte body limit, reachable
+  under 4,000 characters in multi-byte scripts, is refused before sending as
+  too long, the draft kept) and Send/Cancel. Pending is `aria-busy`/`aria-disabled` and a
   second press sends nothing. Refusals are named: `ALREADY_APPEALED`,
   `RATE_LIMITED`, 404/403 (gone), 400 (the server's reason, focus back on the
   text with `aria-invalid`), anything else "wasn't sent". The draft stays and
