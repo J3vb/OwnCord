@@ -107,9 +107,23 @@ export async function ensureLiveKitProxy(): Promise<number> {
   return proxyPort;
 }
 
+/** True when `url` is a plain ws:/http: URL on a loopback host — exactly the
+ *  LiveKit origins tauri.conf.json's connect-src allows. */
+function isLoopbackDirectUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return (
+      (protocol === "ws:" || protocol === "http:") &&
+      (hostname === "localhost" || hostname === "127.0.0.1")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve a LiveKit connection URL. Routes through the local Rust TLS
  *  proxy for remote servers (to handle self-signed certs), or returns
- *  the direct URL for local connections. */
+ *  the direct URL for a local server whose LiveKit is also on loopback. */
 async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
   if (serverHost !== null) {
     // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
@@ -124,7 +138,11 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
       host = serverHost.split(":")[0] ?? "";
     }
     const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-    if (isLocal && directUrl) {
+    // Only a loopback direct URL the CSP's connect-src admits is used as-is.
+    // Anything else (LiveKit Cloud, a TLS LiveKit on another host) goes
+    // through the tunnel like a remote server's, so the webview never needs
+    // an https:/wss: connect source.
+    if (isLocal && directUrl && isLoopbackDirectUrl(directUrl)) {
       livekitLog.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
       return directUrl;
     }

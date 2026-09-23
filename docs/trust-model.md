@@ -287,10 +287,10 @@ handle, and image bytes as a same-origin `blob:` URL. Its cache is
 byte-weighted and keyed by the server partition, and a page teardown drops
 it. The HTTP plugin's capability now allows only the loopback TOFU proxies
 (clause 8), and the CSP's `img-src` no longer allows `https:`, so an image the
-broker did not fetch cannot load. Two residuals are deliberate: the YouTube
-player is a frame load, which cannot be brokered into bytes, and keeps its
-fixed host (`frame-src`) and sandbox; and `connect-src` keeps `https:` because
-the LiveKit SDK makes its own renderer fetches to the operator's LiveKit host.
+broker did not fetch cannot load; `connect-src` allows no `https:` or `wss:`
+source either, only loopback. One residual is deliberate: the YouTube player
+is a frame load, which cannot be brokered into bytes, and keeps its fixed host
+(`frame-src`) and sandbox.
 
 **Clause 1 and the server's own files.** Attachments, avatars and custom
 emoji hosted by the connected OwnCord server are automatic fetches too, and

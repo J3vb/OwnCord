@@ -55,6 +55,22 @@ export function describeLiveKitProxiesSuite(
       ).resolves.toBe("ws://localhost:7880");
     });
 
+    // connect-src admits only loopback ws:/http:, so a local server whose
+    // LiveKit is elsewhere (Cloud, a TLS host) must tunnel, not go direct.
+    for (const directUrl of [
+      "wss://project.livekit.cloud",
+      "ws://sfu.example:7880",
+      "wss://localhost:7880",
+    ]) {
+      check(`tunnels a local server whose direct URL is ${directUrl}`, async () => {
+        ctx.native.succeedWith(40123);
+        ctx.subject.setLiveKitServerHost("localhost:8443");
+        await expect(ctx.subject.resolveLiveKitUrl("/livekit/rtc", directUrl)).resolves.toBe(
+          "ws://127.0.0.1:40123/livekit/rtc",
+        );
+      });
+    }
+
     check("passes an absolute URL through when no server host is set", async () => {
       ctx.native.succeedWith(40123);
       await expect(ctx.subject.resolveLiveKitUrl("wss://sfu.example/rtc")).resolves.toBe(
