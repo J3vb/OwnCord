@@ -3015,7 +3015,7 @@ Authorization is two-layered:
 | `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
 | `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`)                     | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)        | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
 | `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
