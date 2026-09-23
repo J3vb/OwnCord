@@ -418,6 +418,23 @@ describe("DeviceManager", () => {
       expect(mockGetLocalDevices).not.toHaveBeenCalled();
     });
 
+    it("re-applies a saved system-default output on the native backend so playout follows a hot-plugged default", async () => {
+      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      mockNativeAudioDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput"
+          ? [{ deviceId: "Built-in Mic" }]
+          : [{ deviceId: "Headphones" }, { deviceId: "Speakers" }],
+      );
+
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledTimes(1);
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+    });
+
     it("does not re-apply saved devices on the web path", async () => {
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "audioInputDevice") return "device-A";

@@ -1,6 +1,7 @@
 //! One native LiveKit room: connect over the loopback proxy URL, E2EE with the
 //! room key the TypeScript key exchange hands over, microphone publish and
-//! remote playout through libwebrtc's audio device module (ADM), camera
+//! capture through libwebrtc's audio device module (ADM), remote playout
+//! through our own mixer (`playout.rs`, for per-user volume), camera
 //! publish and remote video through the session's frame socket
 //! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
@@ -19,6 +20,7 @@ use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::playout::{self, Playout};
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
@@ -245,6 +247,8 @@ pub struct Resources {
     pub rooms: usize,
     pub local_tracks: usize,
     pub adm_refs: usize,
+    /// Remote audio tracks being read into the playout mixer.
+    pub audio_streams: usize,
     /// Open frame-socket connections (remote renderers plus camera upload).
     pub video_sockets: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
@@ -255,16 +259,18 @@ pub struct Resources {
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
-    /// The device name: the Linux device modules leave the GUID empty.
+    /// Capture: the device name (the Linux device modules leave the GUID
+    /// empty). Playout: the output host's stable device id.
     pub id: String,
     pub name: String,
-    /// The device module's index, what a switch selects by.
+    /// The position a switch selects by (the device module's index for
+    /// capture).
     #[serde(skip)]
     pub index: u16,
 }
 
-/// The platform's capture and playout devices, in the device module's order
-/// (the first entry is what it uses by default).
+/// The platform's capture and playout devices; the first entry of each is
+/// what is used by default.
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Devices {
@@ -272,24 +278,21 @@ pub struct Devices {
     pub outputs: Vec<DeviceInfo>,
 }
 
+fn inputs_of(audio: &PlatformAudio) -> Vec<DeviceInfo> {
+    audio
+        .recording_devices()
+        .map(|d| DeviceInfo {
+            id: d.name.clone(),
+            name: d.name,
+            index: d.index as u16,
+        })
+        .collect()
+}
+
 fn devices_of(audio: &PlatformAudio) -> Devices {
     Devices {
-        inputs: audio
-            .recording_devices()
-            .map(|d| DeviceInfo {
-                id: d.name.clone(),
-                name: d.name,
-                index: d.index as u16,
-            })
-            .collect(),
-        outputs: audio
-            .playout_devices()
-            .map(|d| DeviceInfo {
-                id: d.name.clone(),
-                name: d.name,
-                index: d.index as u16,
-            })
-            .collect(),
+        inputs: inputs_of(audio),
+        outputs: playout::list_outputs(),
     }
 }
 
@@ -297,15 +300,15 @@ fn devices_of(audio: &PlatformAudio) -> Devices {
 /// otherwise the module's default (the first listed), flagged as a fallback
 /// unless the default was what was asked for (an empty id). `None` when
 /// nothing is listed.
-fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
+pub(super) fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
     match listed.iter().find(|d| d.id == requested) {
         Some(d) => (Some(d.index), false),
         None => (listed.first().map(|d| d.index), !requested.is_empty()),
     }
 }
 
-/// A selected device: its name (empty: the default) and the device-module
-/// index last applied for it, which a hot-plug can shift.
+/// The selected capture device: its name (empty: the default) and the
+/// device-module index last applied for it, which a hot-plug can shift.
 #[derive(Default)]
 struct Selection {
     name: String,
@@ -419,8 +422,8 @@ pub struct NativeSession {
     mic: Option<LocalTrackPublication>,
     camera: CameraSlot,
     frames: FrameServer,
+    playout: Playout,
     input: Selection,
-    output: Selection,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -451,10 +454,12 @@ impl NativeSession {
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
         let camera = CameraSlot::default();
+        let playout = Playout::default();
         let forwarder = tokio::spawn(forward_events(
             events,
             on_event,
             frames.observer(),
+            playout.listener(),
             camera.clone(),
         ));
         Ok(Self {
@@ -464,8 +469,8 @@ impl NativeSession {
             mic: None,
             camera,
             frames,
+            playout,
             input: Selection::default(),
-            output: Selection::default(),
             forwarder,
         })
     }
@@ -483,6 +488,12 @@ impl NativeSession {
         self.room.subscribe()
     }
 
+    /// The playout mixer, for the interop example: CI has no output device,
+    /// so it pulls the mix itself to measure per-user volume end to end.
+    pub fn playout_mixer(&self) -> Arc<playout::Mixer> {
+        self.playout.mixer().clone()
+    }
+
     /// The frame socket's base URL, token included: only the webview (via
     /// the connect result) and the interop example may see it.
     pub fn frames_url(&self) -> &str {
@@ -493,14 +504,23 @@ impl NativeSession {
         self.room.local_participant().identity().to_string()
     }
 
-    /// Bring up the platform ADM: remote audio only plays out while one
-    /// exists, so the app calls this right after connect, independent of
-    /// whether the microphone is ever published.
+    /// Bring up playout on the default output device and the platform ADM for
+    /// capture. The app calls this right after connect, independent of
+    /// whether the microphone is ever published. The ADM's own playout is
+    /// switched to its synthetic mode, which keeps the decode pipeline (and
+    /// the echo canceller's reference) running without a device, so that
+    /// remote audio plays only through the gained mix in `playout.rs`.
     pub fn enable_platform_audio(&mut self, opts: AudioOptions) -> Result<(), String> {
         if self.audio.is_some() {
             return Ok(());
         }
+        if let Err(e) = self.playout.set_device("") {
+            log::warn!("[native_voice] playout unavailable: {e}");
+        }
         let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
+        LkRuntime::instance()
+            .pc_factory()
+            .set_adm_playout_enabled(false);
         audio
             .configure_audio_processing(AudioProcessingOptions {
                 echo_cancellation: opts.echo_cancellation,
@@ -520,7 +540,7 @@ impl NativeSession {
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
         if enabled {
-            self.reselect(DeviceKind::Input);
+            self.reselect_input();
         }
         let Some(publication) = &self.mic else {
             if !enabled {
@@ -549,45 +569,28 @@ impl NativeSession {
         Ok(())
     }
 
-    /// Point a stopped capture or playout stream at the selected device's
-    /// current index before it starts again.
-    fn reselect(&mut self, kind: DeviceKind) {
+    /// Point a stopped capture stream at the selected device's current index
+    /// before it starts again.
+    fn reselect_input(&mut self) {
         let Some(audio) = &self.audio else { return };
         let runtime = LkRuntime::instance();
         let f = runtime.pc_factory();
-        let listed = devices_of(audio);
-        let (running, selection, devices, what) = match kind {
-            DeviceKind::Input => (
-                f.recording_is_initialized(),
-                &mut self.input,
-                listed.inputs,
-                "capture",
-            ),
-            DeviceKind::Output => (
-                f.playout_is_initialized(),
-                &mut self.output,
-                listed.outputs,
-                "playout",
-            ),
-        };
-        if running {
+        if f.recording_is_initialized() {
             return;
         }
-        let (index, fell_back) = resolve_device(&selection.name, &devices);
+        let selection = &mut self.input;
+        let (index, fell_back) = resolve_device(&selection.name, &inputs_of(audio));
         if fell_back {
             log::warn!(
-                "[native_voice] {what} device {} not found; using the default",
+                "[native_voice] capture device {} not found; using the default",
                 selection.name
             );
         }
         let Some(index) = index else { return };
-        let selected = match kind {
-            DeviceKind::Input => f.set_recording_device(index),
-            DeviceKind::Output => f.set_playout_device(index),
-        };
+        let selected = f.set_recording_device(index);
         selection.index = selected.then_some(index);
         if !selected {
-            log::warn!("[native_voice] selecting {what} device {index} failed");
+            log::warn!("[native_voice] selecting capture device {index} failed");
         }
     }
 
@@ -698,11 +701,24 @@ impl NativeSession {
         let publication = participant
             .get_track_publication(&track_sid)
             .ok_or_else(|| format!("unknown track {sid}"))?;
-        if subscribed {
-            self.reselect(DeviceKind::Output);
-        }
         publication.set_subscribed(subscribed);
         Ok(())
+    }
+
+    /// Per-user volume: the gain for `identity`'s microphone, 1.0 is unity
+    /// (the web path's `RemoteParticipant.setVolume`, 0 to 2 in practice).
+    pub fn set_volume(&self, identity: &str, volume: f32) {
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::Microphone, volume);
+    }
+
+    /// The gain for `identity`'s screen-share audio, 1.0 is unity (the web
+    /// path's screen-share element volume, 0 to 1, 0 when muted).
+    pub fn set_screenshare_volume(&self, identity: &str, volume: f32) {
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
     pub fn devices(&self) -> Result<Devices, String> {
@@ -712,47 +728,33 @@ impl NativeSession {
             .ok_or_else(|| "no audio device module — platform audio unavailable".to_string())
     }
 
-    /// Switch the capture or playout device in place (the module restarts
-    /// the stream if it is running). An empty id selects the module's
-    /// default, its first enumerated device.
+    /// Switch the capture or playout device in place (a running stream is
+    /// restarted). An empty id selects the default, the first listed device.
     pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
         let kind = DeviceKind::parse(kind)?;
+        if kind == DeviceKind::Output {
+            return self.playout.set_device(device_id);
+        }
         let audio = self
             .audio
             .as_ref()
             .ok_or("no audio device module — platform audio unavailable")?;
-        let listed = devices_of(audio);
-        let (devices, what, selection) = match kind {
-            DeviceKind::Input => (listed.inputs, "capture", &mut self.input),
-            DeviceKind::Output => (listed.outputs, "playout", &mut self.output),
-        };
-        let (index, fell_back) = resolve_device(device_id, &devices);
-        let index = index.ok_or(format!("no {what} device"))?;
+        let (index, fell_back) = resolve_device(device_id, &inputs_of(audio));
+        let index = index.ok_or("no capture device")?;
         // PlatformAudio only switches by GUID, which is empty on Linux; the
         // runtime its device module lives in exposes the index-based calls.
         let runtime = LkRuntime::instance();
         let f = runtime.pc_factory();
-        let applied = selection.index;
-        let switched = match kind {
-            DeviceKind::Input => switch_stream(
-                applied,
-                index,
-                f.recording_is_initialized(),
-                || f.stop_recording(),
-                || f.set_recording_device(index),
-                || f.init_recording(),
-                || f.start_recording(),
-            ),
-            DeviceKind::Output => switch_stream(
-                applied,
-                index,
-                f.playout_is_initialized(),
-                || f.stop_playout(),
-                || f.set_playout_device(index),
-                || f.init_playout(),
-                || f.start_playout(),
-            ),
-        };
+        let selection = &mut self.input;
+        let switched = switch_stream(
+            selection.index,
+            index,
+            f.recording_is_initialized(),
+            || f.stop_recording(),
+            || f.set_recording_device(index),
+            || f.init_recording(),
+            || f.start_recording(),
+        );
         selection.index = switched.is_ok().then_some(index);
         switched?;
         selection.name = if fell_back {
@@ -762,7 +764,7 @@ impl NativeSession {
         };
         if fell_back {
             return Err(format!(
-                "{what} device {device_id} not found; switched to the default"
+                "capture device {device_id} not found; switched to the default"
             ));
         }
         Ok(())
@@ -774,6 +776,7 @@ impl NativeSession {
             local_tracks: usize::from(self.mic.is_some())
                 + usize::from(self.camera.lock().unwrap().is_some()),
             adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
+            audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
             threads: process_threads(),
         }
@@ -803,6 +806,7 @@ async fn forward_events(
     mut events: UnboundedReceiver<RoomEvent>,
     on_event: EventSink,
     frames: Observer,
+    playout: playout::Listener,
     camera: CameraSlot,
 ) {
     while let Some(ev) = events.recv().await {
@@ -840,6 +844,7 @@ async fn forward_events(
         // Before the webview hears of a video track, so its frame socket
         // finds it.
         frames.observe(&ev);
+        playout.observe(&ev);
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }

@@ -87,6 +87,14 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVolume: (...args: unknown[]) => {
+        host.calls.push(["setVolume", args]);
+        return Promise.resolve();
+      },
+      setScreenshareVolume: (...args: unknown[]) => {
+        host.calls.push(["setScreenshareVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
         return Promise.resolve();
@@ -296,6 +304,57 @@ describe("NativeRoom room surface", () => {
     const pubs = room.remoteParticipants.get("user-3")!.audioTrackPublications;
     expect(pubs.get("TR_mic")!.isSubscribed).toBe(false);
     expect(pubs.get("TR_stream")!.isSubscribed).toBe(true);
+  });
+
+  it("starts each participant at its saved volume and forwards volume changes", async () => {
+    const room = createNativeRoom(audio, (identity) => (identity === "user-2" ? 0.5 : 1));
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-2", tracks: [] }] },
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    expect(host.calls.filter(([n]) => n === "setVolume")).toEqual([
+      ["setVolume", [1, "user-2", 0.5]],
+      ["setVolume", [1, "user-3", 1]],
+    ]);
+    const p = room.remoteParticipants.get("user-3")!;
+    p.setVolume(1.8);
+    expect(p.getVolume()).toBe(1.8);
+    expect(host.calls.at(-1)).toEqual(["setVolume", [1, "user-3", 1.8]]);
+    await room.disconnect();
+    p.setVolume(0.2);
+    expect(host.calls.at(-1)).toEqual(["disconnect", [1]]);
+  });
+
+  it("sends each participant's screen-share audio volume, again after a rejoin", async () => {
+    const volumes = new Map([["user-2", 0.4]]);
+    const room = createNativeRoom(audio, undefined, (identity) => volumes.get(identity) ?? 1);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-2", tracks: [] }] },
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    const sent = () => host.calls.filter(([n]) => n === "setScreenshareVolume");
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+    ]);
+    host.calls.length = 0;
+    volumes.set("user-3", 0);
+    room.applyScreenshareVolumes();
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
+    ]);
+    // The backend keeps a gain for the session: a participant who left while
+    // it changed is sent the current one when they return.
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
+    volumes.set("user-2", 1);
+    host.calls.length = 0;
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+    expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {
