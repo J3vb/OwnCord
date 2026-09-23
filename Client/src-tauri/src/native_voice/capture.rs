@@ -160,10 +160,21 @@ impl Processor {
     }
 }
 
+/// A PulseAudio monitor source (`<sink>.monitor`) is the loopback of what a
+/// sink plays, not a microphone; like the Pulse device module and Chrome, the
+/// list leaves it out.
+fn is_monitor(id: &str) -> bool {
+    id.ends_with(".monitor")
+}
+
 fn input_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
+    let microphone = |d: &cpal::Device| d.id().is_ok_and(|id| !is_monitor(id.id()));
     host_devices(
-        host.default_input_device(),
-        host.input_devices().into_iter().flatten(),
+        host.default_input_device().filter(microphone),
+        host.input_devices()
+            .into_iter()
+            .flatten()
+            .filter(microphone),
     )
 }
 
@@ -418,6 +429,15 @@ mod tests {
             cancelled < echo * 0.1,
             "echo cancellation should remove over 90% (10 dB): {cancelled} vs {echo}"
         );
+    }
+
+    #[test]
+    fn monitor_sources_are_not_microphones() {
+        assert!(is_monitor(
+            "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+        ));
+        assert!(!is_monitor("alsa_input.pci-0000_00_1f.3.analog-stereo"));
+        assert!(!is_monitor("bluez_input.00_11_22_33_44_55.monitor-mic"));
     }
 
     #[test]

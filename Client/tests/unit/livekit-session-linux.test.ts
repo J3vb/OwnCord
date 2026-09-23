@@ -8,7 +8,9 @@
 //   - connect/microphone/disconnect are issued against the native session
 //     and released in the facade's own teardown;
 //   - a native-reported drop reconnects through the shared reconnect loop;
-//   - native resource counts are visible through getSessionDebugInfo.
+//   - native resource counts are visible through getSessionDebugInfo;
+//   - screen share captures natively through the shared enable/disable
+//     path, and a capture the desktop ends stops the share.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { NativeVoiceEnvelope } from "../../src/platform/contracts/nativeVoice";
 
@@ -145,6 +147,22 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setDevice", args]);
         return Promise.resolve();
       },
+      screenSources: () => {
+        host.commands.push(["screenSources", []]);
+        return Promise.resolve({ portal: true, sources: [] });
+      },
+      startScreen: (...args: unknown[]) => {
+        host.commands.push(["startScreen", args]);
+        return Promise.resolve({ capture: 3, width: 1920, height: 1080 });
+      },
+      publishScreen: (...args: unknown[]) => {
+        host.commands.push(["publishScreen", args]);
+        return Promise.resolve("TR_screen");
+      },
+      stopScreen: (...args: unknown[]) => {
+        host.commands.push(["stopScreen", args]);
+        return Promise.resolve();
+      },
       debugInfo: () => {
         host.commands.push(["debugInfo", []]);
         return Promise.resolve({ rooms: 1, localTracks: 1, captureStreams: 1, threads: 41 });
@@ -154,6 +172,21 @@ vi.mock("../../src/platform/desktop", () => ({
         return () => host.handlers.delete(handler);
       },
     },
+  },
+}));
+
+// jsdom has no WebGL or canvas capture: the preview renderer is a stub whose
+// track raises events like a real one.
+vi.mock("../../src/features/voice/native/videoRenderer", () => ({
+  NativeVideoRenderer: class {
+    readonly mediaStreamTrack = Object.assign(new EventTarget(), {
+      readyState: "live",
+      stop() {
+        this.readyState = "ended";
+      },
+    });
+    constructor(readonly url: string) {}
+    dispose() {}
   },
 }));
 
@@ -429,6 +462,57 @@ describe("LiveKitSession on the Linux native backend", () => {
     ]);
     expect(host.commands[0]).toEqual(["disconnect", [1]]);
     expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
+  });
+
+  it("screen share captures natively and stops when the desktop ends it", async () => {
+    const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
+    session.setWsClient(ws as never);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    host.commands.length = 0;
+    await session.enableScreenshare();
+    // Wayland here: the portal picks, so no source list is shown.
+    expect(host.commands).toEqual([
+      ["screenSources", []],
+      ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
+      [
+        "publishScreen",
+        [1, 3, { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 }],
+      ],
+    ]);
+    expect(ws.send).toHaveBeenLastCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: true },
+    });
+    expect(nativeCounters.screenTracks).toBe(1);
+
+    host.commands.length = 0;
+    // The user stops sharing from the desktop's indicator.
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 3 } });
+    await flush();
+    expect(host.commands).toEqual([["stopScreen", [1, 3]]]);
+    expect(ws.send).toHaveBeenLastCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: false },
+    });
+    expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("a cancelled portal dialog is reported as a refused share", async () => {
+    const onError = vi.fn();
+    session.setOnError(onError);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const { desktop } = await import("../../src/platform/desktop");
+    const real = desktop.nativeVoice.startScreen;
+    desktop.nativeVoice.startScreen = () =>
+      Promise.reject("screen capture was cancelled or refused");
+    try {
+      await session.enableScreenshare();
+    } finally {
+      desktop.nativeVoice.startScreen = real;
+    }
+    expect(onError).toHaveBeenCalledWith("Screen sharing permission denied");
+    expect(names()).not.toContain("publishScreen");
+    expect(nativeCounters.screenTracks).toBe(0);
   });
 
   it("a failed native connect leaves voice cleanly", async () => {

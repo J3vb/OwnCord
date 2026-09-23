@@ -10382,12 +10382,18 @@
       "line": 619,
       "severity": "high",
       "why": "Affected property: the bytes that reach the release tags are the bytes that were verified, and a failed verification leaves the tags where they were. The publication job validates after it has already written the tags, so a failure below the push leaves them moved.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-20",
       "hunt": "review-2026-09-20",
       "lens": "read-the-pipeline",
       "finder": "review-2026-09-20",
-      "fix": null
+      "fix": {
+        "commit": "5687b035ebaf3678e4228dda567f3f8fd8a3a00b",
+        "test": "node --test scripts/check-release-docker.test.mjs scripts/check-release-environment.test.mjs (29 pass); npm run check:hygiene (Node 26); actionlint 1.7.7 with ShellCheck; zizmor 1.30.1 --offline --no-progress .github/workflows/; node scripts/check-doc-counts.mjs; node .superpowers/render-ledger.mjs",
+        "revertProof": "pass: restoring release.yml from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e makes the new suite fail (13 failures). Moving the sole promotion step ahead of verification makes it fail (12 failures), including all 10 verification-failure cases detecting moved tags. Restoring the fix passes all 14 Docker publication tests."
+      },
+      "fixed": "2026-09-23",
+      "evidence": "The build pushes an untagged multi-architecture index by digest. Architecture presence, equality with both native-smoked configs, and Sigstore provenance verification use that immutable candidate before the final success-only imagetools create copies the same index to all release tags. Signing, SBOM/max provenance, release approval and upgrade/rollback gates remain. Failure-injection tests execute the workflow shell itself and assert every prior tag value remains unchanged with no promotion attempt. Registry transport failure during the final multi-tag write is not a transaction and is distinct from verification failure."
     },
     {
       "id": "OC-0449",

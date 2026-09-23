@@ -10,8 +10,11 @@
  * session id so a superseded join tears down only its own room. Video
  * frames never cross IPC: each session serves them on a loopback WebSocket
  * whose token-carrying URL arrives only in the `connect` result
- * (`NativeVoiceConnected.frames`). Browser outlook: not applicable — a
- * browser has its own WebRTC.
+ * (`NativeVoiceConnected.frames`). Screen share captures in the host
+ * (`startScreen`): the webview picks among `screenSources`, or, on Wayland,
+ * the desktop portal's own dialog picks and asks for consent; the webview
+ * sees the capture only as a preview on the frame socket. Browser outlook:
+ * not applicable — a browser has its own WebRTC.
  */
 export interface NativeVoiceAudioOptions {
   echoCancellation: boolean;
@@ -29,8 +32,12 @@ export interface NativeVoiceResources {
   captureStreams: number;
   /** Remote audio tracks being read into the playout mixer. */
   audioStreams: number;
-  /** Open frame-socket connections (remote renderers plus camera upload). */
+  /** Open frame-socket connections (remote renderers, camera upload and
+   *  screen preview). */
   videoSockets: number;
+  /** Screen capturers alive (each holds, on Wayland, a portal session);
+   *  zero once every share has stopped. */
+  screenCaptures: number;
   /** Process thread count, the observable for a leaked frame-cryptor thread. */
   threads: number;
 }
@@ -58,6 +65,9 @@ export type NativeVoiceEvent =
   | { type: "trackMuted"; identity: string; sid: string; muted: boolean }
   | { type: "activeSpeakers"; identities: string[] }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
+  /** Screen capture `capture` ended on its own after it started: stopped
+   *  from the desktop's sharing indicator, or the shared window closed. */
+  | { type: "screenCaptureEnded"; capture: number }
   | { type: "reconnecting" }
   | { type: "reconnected" }
   | { type: "disconnected"; reason: string };
@@ -99,6 +109,45 @@ export interface NativeVoiceCameraOptions {
   simulcast: boolean;
 }
 
+export interface NativeVoiceScreenSource {
+  /** What `startScreen` takes. */
+  id: string;
+  kind: "screen" | "window";
+  title: string;
+  /** An image URL of the source as it looks now, when it could be read. */
+  thumbnail: string | null;
+}
+
+/** What can be shared. `portal`: the desktop portal's dialog picks
+ *  (Wayland), so `sources` is empty and `startScreen` takes `"portal"`. */
+export interface NativeVoiceScreenSources {
+  portal: boolean;
+  sources: NativeVoiceScreenSource[];
+}
+
+/** Capture pacing and size cap; 0 for both sizes is the source size. */
+export interface NativeVoiceScreenCapture {
+  fps: number;
+  maxWidth: number;
+  maxHeight: number;
+}
+
+/** A started capture: its id and the first frame's size. */
+export interface NativeVoiceScreenStarted {
+  capture: number;
+  width: number;
+  height: number;
+}
+
+/** How the screen share is published: the capture's size and the web
+ *  path's `publishTrack` encoding for it. */
+export interface NativeVoiceScreenOptions {
+  width: number;
+  height: number;
+  maxBitrate: number;
+  maxFramerate: number;
+}
+
 export interface NativeVoice {
   /** Install or rotate the room key: the same base64 text the web key
    *  provider receives, so both derive the same key (index 0). */
@@ -126,6 +175,29 @@ export interface NativeVoice {
   /** Unpublish camera `sid` if it is still the published one; a sid a later
    *  publish replaced is a no-op. */
   unpublishCamera(session: number, sid: string): Promise<void>;
+  /** What can be shared, with thumbnails; enumerating is slow (one capture
+   *  per source). */
+  screenSources(): Promise<NativeVoiceScreenSources>;
+  /** Start capturing `source` (replacing any running capture) and resolve
+   *  once its first frame arrives — on Wayland after the portal dialog
+   *  completes; a cancelled or refused dialog rejects with "screen capture
+   *  was cancelled or refused".
+   *  The preview then plays on the frame socket's `/screen` route. */
+  startScreen(
+    session: number,
+    source: string,
+    capture: NativeVoiceScreenCapture,
+  ): Promise<NativeVoiceScreenStarted>;
+  /** Publish running capture `capture` (E2EE as the camera); resolves with
+   *  the publication's sid. */
+  publishScreen(
+    session: number,
+    capture: number,
+    options: NativeVoiceScreenOptions,
+  ): Promise<string>;
+  /** Unpublish and stop capture `capture`, releasing the capturer and any
+   *  portal session; a stale id is a no-op. */
+  stopScreen(session: number, capture: number): Promise<void>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;

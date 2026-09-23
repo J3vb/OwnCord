@@ -4,7 +4,8 @@
 //! remote playout through our own mixer (`playout.rs`, for per-user
 //! volume), camera
 //! publish and remote video through the session's frame socket
-//! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
+//! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
+//! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +23,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::capture::{self, Apm, Capture};
 use super::playout::{self, Playout};
+use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
@@ -108,6 +110,13 @@ pub enum Event {
     EncryptionStatus {
         identity: String,
         encrypted: bool,
+    },
+    /// Screen capture `capture` stopped on its own after it had started:
+    /// the user ended it from the desktop's sharing indicator, or the shared
+    /// window went away. The webview stops the share as the web path does
+    /// when a browser capture track ends.
+    ScreenCaptureEnded {
+        capture: u64,
     },
     Reconnecting,
     Reconnected,
@@ -253,8 +262,12 @@ pub struct Resources {
     pub capture_streams: usize,
     /// Remote audio tracks being read into the playout mixer.
     pub audio_streams: usize,
-    /// Open frame-socket connections (remote renderers plus camera upload).
+    /// Open frame-socket connections (remote renderers, camera upload and
+    /// screen preview).
     pub video_sockets: usize,
+    /// Screen capture threads alive, each holding a capturer (and, on
+    /// Wayland, a portal session): zero once every share is stopped.
+    pub screen_captures: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
@@ -316,6 +329,18 @@ impl DeviceKind {
     }
 }
 
+/// How the screen share is published: the capture's size and the web
+/// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
+/// effective frame rate).
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenOptions {
+    pub width: u32,
+    pub height: u32,
+    pub max_bitrate: u64,
+    pub max_framerate: f64,
+}
+
 /// How the camera is published, from the same presets the web path hands
 /// `publishTrack` (`CAMERA_PRESETS`, `CAMERA_PUBLISH_BITRATES`).
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -339,15 +364,15 @@ pub fn process_threads() -> usize {
         .unwrap_or(0)
 }
 
-/// The published camera. `issued` is the sid the webview was handed and must
-/// name to unpublish; `live` follows the SDK's republish after a full
-/// reconnect, which re-issues the sid of the same track.
-struct CameraPublication {
+/// A published camera or screen share. `issued` is the sid the webview was
+/// handed and must name to unpublish; `live` follows the SDK's republish
+/// after a full reconnect, which re-issues the sid of the same track.
+struct VideoPublication {
     issued: String,
     live: TrackSid,
 }
 
-impl CameraPublication {
+impl VideoPublication {
     fn new(sid: TrackSid) -> Self {
         Self {
             issued: sid.to_string(),
@@ -362,7 +387,14 @@ impl CameraPublication {
     }
 }
 
-type CameraSlot = Arc<Mutex<Option<CameraPublication>>>;
+type VideoSlot = Arc<Mutex<Option<VideoPublication>>>;
+
+/// The running screen capture: its id (what the webview names to publish or
+/// stop it) and the capturer thread.
+struct ScreenShare {
+    id: u64,
+    capture: ScreenCapture,
+}
 
 pub struct NativeSession {
     room: Room,
@@ -373,7 +405,11 @@ pub struct NativeSession {
     /// The published microphone's source, fed by `capture` (none when the
     /// interop example published a synthetic one).
     mic_source: Option<NativeAudioSource>,
-    camera: CameraSlot,
+    camera: VideoSlot,
+    screen: Option<ScreenShare>,
+    screen_publication: VideoSlot,
+    next_capture: u64,
+    on_event: EventSink,
     frames: FrameServer,
     playout: Playout,
     capture: Capture,
@@ -406,14 +442,15 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        let camera = CameraSlot::default();
+        let camera = VideoSlot::default();
+        let screen_publication = VideoSlot::default();
         let playout = Playout::default();
         let forwarder = tokio::spawn(forward_events(
             events,
-            on_event,
+            on_event.clone(),
             frames.observer(),
             playout.listener(),
-            camera.clone(),
+            [camera.clone(), screen_publication.clone()],
         ));
         Ok(Self {
             room,
@@ -422,6 +459,10 @@ impl NativeSession {
             mic: None,
             mic_source: None,
             camera,
+            screen: None,
+            screen_publication,
+            next_capture: 0,
+            on_event,
             frames,
             playout,
             capture: Capture::default(),
@@ -572,7 +613,7 @@ impl NativeSession {
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
         self.frames.set_camera(Some(source));
-        *self.camera.lock().unwrap() = Some(CameraPublication::new(sid.clone()));
+        *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
         Ok(sid.to_string())
     }
 
@@ -605,6 +646,111 @@ impl NativeSession {
                 log::warn!("[native_voice] camera unpublish: {e}");
             }
         }
+    }
+
+    /// Start capturing `target` for a screen share, replacing any capture
+    /// already running. Returns the capture's id and a receiver that resolves
+    /// with the first frame's size — on Wayland only once the user has
+    /// completed the portal's dialog — or with why capture never began
+    /// ([`screen::CANCELLED`] for a cancelled dialog). The caller awaits it
+    /// without holding the session, so a leave or a stop is never blocked
+    /// behind the dialog: either drops the capture, which resolves it.
+    pub async fn start_screen(
+        &mut self,
+        target: Target,
+        options: CaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        self.release_screen().await;
+        self.next_capture += 1;
+        let id = self.next_capture;
+        let on_event = self.on_event.clone();
+        let (capture, started) = ScreenCapture::start(target, options, move || {
+            on_event(Event::ScreenCaptureEnded { capture: id })
+        })?;
+        self.frames.set_screen(Some(capture.preview()));
+        self.screen = Some(ScreenShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Publish capture `capture` as the screen share (replacing an earlier
+    /// publish of it). E2EE covers it through the room's one key provider,
+    /// exactly as the camera. Returns the publication's sid.
+    pub async fn publish_screen(
+        &mut self,
+        capture: u64,
+        opts: ScreenOptions,
+    ) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        self.unpublish_screen().await;
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: opts.width,
+                height: opts.height,
+            },
+            true,
+        );
+        let track = LocalVideoTrack::create_video_track(
+            "screen_share",
+            RtcVideoSource::Native(source.clone()),
+        );
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(
+                LocalTrack::Video(track),
+                TrackPublishOptions {
+                    source: TrackSource::Screenshare,
+                    simulcast: false,
+                    video_encoding: Some(VideoEncoding {
+                        max_bitrate: opts.max_bitrate,
+                        max_framerate: opts.max_framerate,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let sid = publication.sid();
+        if let Some(screen) = &self.screen {
+            screen.capture.set_source(Some(source));
+        }
+        *self.screen_publication.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        Ok(sid.to_string())
+    }
+
+    /// Stop capture `capture` if it is still the running one (a stale id is
+    /// a no-op): unpublish it, and release the capturer and, on Wayland, the
+    /// portal session.
+    pub async fn stop_screen(&mut self, capture: u64) {
+        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            self.release_screen().await;
+        }
+    }
+
+    async fn unpublish_screen(&mut self) {
+        if let Some(screen) = &self.screen {
+            screen.capture.set_source(None);
+        }
+        let publication = self.screen_publication.lock().unwrap().take();
+        if let Some(publication) = publication {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.live)
+                .await
+            {
+                log::warn!("[native_voice] screen unpublish: {e}");
+            }
+        }
+    }
+
+    async fn release_screen(&mut self) {
+        self.unpublish_screen().await;
+        self.frames.set_screen(None);
+        // Dropping joins the capture thread.
+        self.screen.take();
     }
 
     /// Deafen support: (un)subscribe one remote publication.
@@ -656,10 +802,12 @@ impl NativeSession {
         Resources {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some())
-                + usize::from(self.camera.lock().unwrap().is_some()),
+                + usize::from(self.camera.lock().unwrap().is_some())
+                + usize::from(self.screen_publication.lock().unwrap().is_some()),
             capture_streams: self.capture.streams(),
             audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
+            screen_captures: screen::active_captures(),
             threads: process_threads(),
         }
     }
@@ -670,6 +818,7 @@ impl NativeSession {
     pub async fn close(mut self) {
         self.capture.stop();
         self.release_camera().await;
+        self.release_screen().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
                 .room
@@ -689,7 +838,7 @@ async fn forward_events(
     on_event: EventSink,
     frames: Observer,
     playout: playout::Listener,
-    camera: CameraSlot,
+    published: [VideoSlot; 2],
 ) {
     while let Some(ev) = events.recv().await {
         if let RoomEvent::LocalTrackRepublished {
@@ -699,26 +848,31 @@ async fn forward_events(
             ..
         } = &ev
         {
-            let orphan = {
-                let mut slot = camera.lock().unwrap();
+            let source = publication.source();
+            let slot = match source {
+                TrackSource::Camera => Some(&published[0]),
+                TrackSource::Screenshare => Some(&published[1]),
+                _ => None,
+            };
+            let orphan = slot.and_then(|slot| {
                 apply_republish(
-                    &mut slot,
-                    publication.source(),
+                    &mut slot.lock().unwrap(),
+                    source,
                     previous_sid,
                     &publication.sid(),
                 )
-            };
+            });
             if let Some(sid) = orphan {
-                // The camera was disabled (slot emptied) or replaced while the
+                // The video was stopped (slot emptied) or replaced while the
                 // SDK was between its unpublish and publish during a full
                 // reconnect: this fresh publication (a new sid) found nothing
                 // to attach to, so no frames are driven for it and the webview
-                // already considers the camera off. Unpublish it, or it lingers
-                // beside the next camera.
+                // already considers it off. Unpublish it, or it lingers beside
+                // the next one.
                 let participant = participant.clone();
                 tokio::spawn(async move {
                     if let Err(e) = participant.unpublish_track(&sid).await {
-                        log::warn!("[native_voice] orphan camera unpublish: {e}");
+                        log::warn!("[native_voice] orphan video unpublish: {e}");
                     }
                 });
             }
@@ -733,23 +887,23 @@ async fn forward_events(
     }
 }
 
-/// The camera slot's response to a local track's `LocalTrackRepublished`:
-/// adopt the new sid when the event continues the slot's live camera, or
-/// return the sid to unpublish when it does not — the camera was disabled
-/// (slot emptied) or a newer one replaced it while the SDK was between its
-/// unpublish and publish, leaving a publication nobody can drive. A non-camera
-/// republish returns `None`: the microphone is tracked by `NativeSession`
-/// itself, not here.
+/// A video slot's (camera or screen share) response to a local track's
+/// `LocalTrackRepublished`: adopt the new sid when the event continues the
+/// slot's live publication, or return the sid to unpublish when it does not —
+/// the video was stopped (slot emptied) or a newer one replaced it while the
+/// SDK was between its unpublish and publish, leaving a publication nobody can
+/// drive. A non-video republish returns `None`: the microphone is tracked by
+/// `NativeSession` itself, not here.
 fn apply_republish(
-    camera: &mut Option<CameraPublication>,
+    slot: &mut Option<VideoPublication>,
     source: TrackSource,
     previous_sid: &TrackSid,
     sid: &TrackSid,
 ) -> Option<TrackSid> {
-    if source != TrackSource::Camera {
+    if !matches!(source, TrackSource::Camera | TrackSource::Screenshare) {
         return None;
     }
-    match camera.as_mut() {
+    match slot.as_mut() {
         Some(c) if c.live == *previous_sid => {
             c.republished(previous_sid, sid.clone());
             None
@@ -851,7 +1005,7 @@ mod tests {
     #[test]
     fn camera_unpublish_follows_its_republished_sid() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut camera = CameraPublication::new(sid("TR_a"));
+        let mut camera = VideoPublication::new(sid("TR_a"));
         camera.republished(&sid("TR_mic"), sid("TR_mic2"));
         assert_eq!(camera.live, sid("TR_a"), "another track's republish");
         camera.republished(&sid("TR_a"), sid("TR_b"));
@@ -870,7 +1024,7 @@ mod tests {
     #[test]
     fn a_camera_republished_after_a_disable_is_orphaned_not_adopted() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut slot = Some(CameraPublication::new(sid("TR_a")));
+        let mut slot = Some(VideoPublication::new(sid("TR_a")));
         // The disable arrives inside the await, before the republish event,
         // emptying the slot.
         assert!(slot.take().is_some());
@@ -883,7 +1037,7 @@ mod tests {
 
         // The later enable publishes one camera, and its own republish is
         // adopted rather than orphaned: exactly one camera remains.
-        let mut slot = Some(CameraPublication::new(sid("TR_c")));
+        let mut slot = Some(VideoPublication::new(sid("TR_c")));
         assert_eq!(
             apply_republish(&mut slot, TrackSource::Camera, &sid("TR_c"), &sid("TR_d")),
             None
@@ -897,7 +1051,7 @@ mod tests {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
         // A newer camera owns the slot; the stale publication's republish
         // arrives with the old sid and must not be attached to it.
-        let mut slot = Some(CameraPublication::new(sid("TR_new")));
+        let mut slot = Some(VideoPublication::new(sid("TR_new")));
         assert_eq!(
             apply_republish(
                 &mut slot,

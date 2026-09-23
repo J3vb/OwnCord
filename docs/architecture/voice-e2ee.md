@@ -203,7 +203,9 @@ agent.
 capture and output devices, in or out of a call (see Audio parity, below; in
 phase 1b this was the device module's list), and
 `native_voice_set_device(session, kind, id)` switches in place; an empty id is
-the default (the first device listed).
+the default (the first device listed). The capture list leaves out
+PulseAudio monitor sources (`<sink>.monitor`, the loopback of what a sink
+plays), as the phase-1b device module and Chrome do.
 `NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
 saved-device switches at join and the settings tab's selectors work unchanged;
 `features/voice/native/devices.ts` gives the settings tab and the device
@@ -294,8 +296,7 @@ backend unpublishes the camera's live publication, which follows the SDK's
 republish (a new sid) after a full reconnect. A republish that continues no
 live camera (camera off, or a newer camera published, while the SDK was
 between its unpublish and republish) is unpublished rather than left
-published with no frames. Screen share still refuses on
-Linux (phase 3).
+published with no frames. Screen share is phase 3 (below).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
 room, whose single key provider and `KEY_INDEX` 0 already cover every sender
@@ -370,6 +371,106 @@ interop test pins that rate. Muting in place instead, as the microphone does,
 would avoid it but would leave a frozen tile on remote clients where the web
 path closes it. The #1408 fix (a vendored `webrtc-sys`, above) is the
 follow-up.
+
+### Phase 3: screen share
+
+**Capture is native.** The webview has no `getDisplayMedia` worth using, so
+the backend captures with libwebrtc's `DesktopCapturer`
+(`src-tauri/src/native_voice/screen.rs`), which is two different mechanisms:
+
+- **Wayland** (libwebrtc's own test: `XDG_SESSION_TYPE=wayland` and
+  `WAYLAND_DISPLAY` set): the xdg-desktop-portal ScreenCast flow over
+  PipeWire. The app cannot enumerate or choose anything; the portal's dialog is
+  both the picker and the consent, and it is never bypassed.
+  `native_voice_screen_sources` answers `portal: true`, the
+  webview shows no picker of its own, and `native_voice_start_screen("portal")`
+  raises the dialog. The portal's D-Bus replies complete on the default GLib
+  main context, which the app's GTK loop runs, so livekit's `glib-main-loop`
+  feature (a second loop on that context) stays off.
+- **X11**: `native_voice_screen_sources` enumerates screens (XRandR monitors)
+  and titled top-level windows, each with a thumbnail captured on the spot (a
+  PNG at most 120×68, which keeps even an incompressible one under 33 KB as a
+  data URL, so 30 sources cost about 1 MB of IPC), and the webview's picker
+  (`features/voice/native/screenPicker.ts`) shows them, so what will be shared is visible before sharing starts.
+
+**The shared path runs unchanged.** `lib/screenShare.ts`'s
+`enableScreenshare` makes one Linux-only call: instead of
+`createLocalScreenTracks` it asks the room for
+`localParticipant.createScreenTracks`, which `NativeRoom` implements as pick,
+then `native_voice_start_screen`. That resolves once the first frame arrives
+(on Wayland, after the dialog), so the web path's generation guard around the
+OS picker covers the portal dialog too; a cancelled or refused dialog rejects
+and is reported as a `NotAllowedError`, as a cancelled browser picker is. The
+returned `NativeScreenTrack` stands in for the browser track: its
+`mediaStreamTrack` is the local preview (the frame socket's `/screen` route,
+drawn by the same WebGL renderer as remote video), `publishTrack` publishes
+the capture (`native_voice_publish_screen`, `TrackSource::Screenshare`,
+screencast content, the web path's bitrate and frame rate), and `stop()` or
+unpublish ends it (`native_voice_stop_screen`). The capture's frame rate and
+size cap come from the same stream-quality presets as the web path. When the
+capture ends on its own (the user pressed stop on the desktop's sharing
+indicator, or the shared window closed), the backend sends
+`screenCaptureEnded` and the track raises `ended`, which the shared code
+already handles by stopping the share.
+
+**Capture ids scope everything.** Each start returns a capture id; publish
+and stop name it, and a stop naming a capture a newer start replaced is a
+no-op, the camera's stale-unpublish rule; a republish after a full reconnect
+follows the camera's rules too (the live sid is tracked, an orphan is
+unpublished). The start waits for its first frame
+without holding the session, so a leave or a stop while the portal dialog is
+open ends the wait instead of queueing behind it.
+
+**E2EE covers screen share exactly as the camera**: the same room, key
+provider and `KEY_INDEX` 0. **Screen-share audio is not shipped on Linux:**
+the desktop capturer has no audio, and capturing the system mix would need a
+separate PipeWire/Pulse monitor capture that the SDK does not provide, so a
+Linux share is video only. Remote screen shares (video and their audio) play
+on Linux through the phase 1 and 2 paths already.
+
+**Releasing it.** Each capture runs on its own thread, polling the capturer at
+the capture frame rate. Stopping (or leaving) joins that thread, which drops
+the capturer: that closes the X connection, or the portal session and its
+PipeWire stream. `getSessionDebugInfo().native` reports the TS side's
+`screenTracks` and the backend's `screenCaptures` (capture threads alive,
+zero once every share has stopped); `localTracks` counts the published share
+and `videoSockets` the preview socket. No lifecycle-inventory or guard
+baseline entries were added: the picker's listeners live on its own modal,
+which a `Disposable` owns.
+
+**Proof.** The interop test (`tests/e2e/native-voice/interop.spec.ts`) shares
+a synthetic 1280×720 source (moving bars, `--screen`) through the same
+capture thread, preview route and publish: Chromium decodes it at 1280×720
+with no decryption errors (measured 2026-09-23: 63–76 frames in 5 s at the
+15 fps capture rate), the preview arrives on the frame socket, and five
+stop/start cycles with a stale stop in each leave exactly the live capture.
+The wrong-key control decodes **0** frames of the share, with decryption
+errors. The X11 path was exercised on Xvfb (not in CI): enumeration found the
+screen and a titled window, each with a thumbnail, both captured (the screen
+scaled to the 1280×720 cap) — `screen.rs`'s ignored test,
+`xvfb-run cargo test -- --ignored x11` — and, in a one-off probe, closing the
+window ended its capture and released its thread.
+
+**Known leak, measured.** Like a camera toggle, each share is a new sender:
+five stop/start cycles grew the process by **+3.5 to +4.6 threads per
+cycle** (20 cycles alone: +65) — per sender one `FrameCryptor` and one
+`VideoFrameTransformer` thread and one or two `VideoEncoderQueue` threads
+(the screencast encoder sometimes restarts once). None of it is the capture
+thread, which is joined, and file descriptors stay flat (17 → 17 across 5
+and 20 synthetic cycles; on Xvfb, listing and capturing every source leaves
+the count unchanged, so each X connection closes with its capturer). Closing
+the room releases the encoder and transformer threads but not the
+`FrameCryptor` ones: after 20 cycles and close, 22 `FrameCryptor` threads
+remained (one per share plus the microphone's and the first share's) —
+rust-sdks #1408 itself, process-lifetime until the vendored fix. The interop
+test pins five threads per cycle as the ceiling and flat descriptors.
+
+**Not exercised:** the Wayland portal flow (no real Wayland desktop here or
+in CI: the dialog, the consent, cancelling it, and stopping from the
+desktop's indicator), X11 on a real desktop with a window manager, multiple
+monitors, and the packaged app driving a share end to end. The binary-size
+cost of linking libwebrtc's desktop-capture code is not measured here; the
+release legs show it.
 
 **Phase 0 verification.** The Linux client was built on GitHub-hosted
 `ubuntu-22.04` and `ubuntu-22.04-arm` runners, before (`dev` at `dba68fe8`)
