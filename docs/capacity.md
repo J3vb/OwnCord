@@ -655,6 +655,19 @@ now keeps each connection's send, typing and presence phase across reconnects
 type. OC-0445 records the diagnosis and OC-0454 the per-hop cost of a burst that
 is genuinely simultaneous.
 
+`K6_SEND_PHASE=aligned` reproduces that burst on purpose: every VU sends on the
+same epoch-aligned instant. The default, `spread`, is unchanged. A local
+re-profile (OC-0454, 2026-09-23; 4-CPU sandbox, server and k6 on two CPUs each)
+confirmed the hop is not the writer checkout. The message transaction holds
+the writer ~0.3 ms. The rest is the burst's 10,000 fan-out frames, each its own
+TLS record and write syscall, saturating two CPUs for ~100 ms. About half of
+the acknowledgement time k6 reports in a burst is the generator itself: a VU
+parses the other senders' frames before it reaches its own `chat_send_ok`.
+Since then a send takes the writer once, not twice: the author's read-state
+advance runs inside the message transaction. That halved writer waits and
+took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
+unchanged at 18 ms. These local figures are not reference-runner figures.
+
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 
