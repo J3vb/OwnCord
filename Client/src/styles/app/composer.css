@@ -1,0 +1,196 @@
+/* Message input */
+.message-input-wrap {
+  padding: 0 16px 20px;
+  flex-shrink: 0;
+  position: relative;
+}
+/* Attachment preview bar (above input box) */
+.attachment-preview-bar {
+  display: none;
+  gap: 8px;
+  padding: 8px 8px 4px;
+  background: var(--bg-input);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.attachment-preview-bar.visible {
+  display: flex;
+}
+.attachment-preview-item {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+.attachment-preview-img {
+  display: block;
+  max-width: 120px;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.attachment-preview-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 20px;
+}
+.attachment-preview-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-preview-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-circle);
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
+}
+.attachment-preview-remove:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.attachment-preview-item.uploading {
+  opacity: 0.6;
+}
+.attachment-preview-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: spinCentered 1s linear infinite;
+}
+@keyframes spinCentered {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+@keyframes iconSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.icon[data-icon="loader"] {
+  animation: iconSpin 1s linear infinite;
+}
+.attachment-upload-error {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--red);
+  background: rgba(237, 66, 69, 0.1);
+  border-radius: var(--radius-sm);
+}
+.attachment-preview-bar.visible + .message-input-box {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.message-input-box {
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: flex-end;
+  padding: 4px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+.message-input-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.input-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.input-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.msg-textarea {
+  flex: 1;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 14px;
+  resize: none;
+  padding: 8px 4px;
+  min-height: 36px;
+  max-height: 200px;
+  line-height: 1.4;
+}
+.msg-textarea::placeholder {
+  color: var(--text-micro);
+}
+.msg-textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+/* Composer disabled (offline / read-only / no permission): dim the whole bar. */
+.message-input-wrap.composer-disabled .message-input-box {
+  opacity: 0.6;
+}
+.message-input-wrap.composer-disabled .input-btn {
+  cursor: not-allowed;
+}
+
+/* ── Optimistic send states ── */
+/* Pending: the row is dimmed until the server confirms it. */
+.message.pending {
+  opacity: 0.6;
+}
+/* Failed: tint + an inline retry/discard affordance. */
+.message.failed {
+  opacity: 0.9;
+}
+.msg-send-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--danger, #e57373);
+}
+.msg-send-failed-text {
+  flex-shrink: 0;
+}
+.msg-send-retry,
+.msg-send-discard {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.msg-send-retry:hover,
+.msg-send-discard:hover {
+  background: rgba(229, 115, 115, 0.15);
+}

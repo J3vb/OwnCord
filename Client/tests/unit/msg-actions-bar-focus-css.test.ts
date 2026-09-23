@@ -10,12 +10,11 @@
 // buttons (they are in the tab order), but they stay `opacity: 0` and
 // `pointer-events: none` the whole time, so focus is invisible and Enter can
 // fire an action (e.g. delete) the user never saw highlighted.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe(".msg-actions-bar keyboard-focus visibility", () => {
-  const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+  const css = readAppCss();
 
   it("app.css reveals .msg-actions-bar when the message has focus-within, not just on hover", () => {
     // Match a `.message:focus-within .msg-actions-bar { ... }` rule (order of
