@@ -1,0 +1,408 @@
+//! Remote-audio playout with a gain per participant (per-user volume).
+//!
+//! The SDK's audio device module (ADM) mixes every remote track itself and
+//! exposes no per-track gain, so the ADM's playout is switched to its
+//! synthetic mode — it still pumps the decode pipeline every 10 ms and still
+//! hands that mix to the echo canceller as its reference — and playout
+//! happens here instead: each subscribed remote audio track is read as PCM
+//! through a `NativeAudioStream`, queued per track, and the output stream
+//! mixes the queues with each participant's gain.
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use futures_util::StreamExt;
+use livekit::prelude::*;
+use livekit::webrtc::audio_stream::native::NativeAudioStream;
+use tokio::task::JoinHandle;
+
+use super::session::{resolve_device, DeviceInfo};
+
+pub const SAMPLE_RATE: u32 = 48_000;
+/// A queue starts (or restarts after running dry) only once it holds this
+/// much, so the 10 ms pushes and the device's larger pulls do not alternate
+/// between sound and silence.
+const PRIME: usize = SAMPLE_RATE as usize * 30 / 1000;
+/// A queue that outgrows this (the device clock running slower than the
+/// sender's) drops its oldest audio back to `PRIME`.
+const MAX_QUEUED: usize = SAMPLE_RATE as usize * 200 / 1000;
+/// The device callback period: 20 ms, so about 40 ms of output latency.
+const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+struct Queue {
+    identity: String,
+    /// Only microphone audio follows the participant's volume, as on the web
+    /// path (`RemoteParticipant.setVolume` defaults to the microphone source).
+    follows_volume: bool,
+    samples: VecDeque<i16>,
+    primed: bool,
+}
+
+#[derive(Default)]
+struct MixerState {
+    queues: HashMap<String, Queue>,
+    gains: HashMap<String, f32>,
+}
+
+/// Mono 48 kHz queues, one per remote audio track, mixed on demand.
+#[derive(Default)]
+pub struct Mixer(Mutex<MixerState>);
+
+impl Mixer {
+    /// The volume for `identity`'s microphone, 1.0 is unity. Kept for the
+    /// session, so a gain set before the track arrives still applies.
+    pub fn set_gain(&self, identity: &str, gain: f32) {
+        lock(&self.0)
+            .gains
+            .insert(identity.to_string(), gain.max(0.0));
+    }
+
+    fn add(&self, sid: &str, identity: &str, follows_volume: bool) {
+        lock(&self.0).queues.insert(
+            sid.to_string(),
+            Queue {
+                identity: identity.to_string(),
+                follows_volume,
+                samples: VecDeque::with_capacity(MAX_QUEUED),
+                primed: false,
+            },
+        );
+    }
+
+    fn remove(&self, sid: &str) {
+        lock(&self.0).queues.remove(sid);
+    }
+
+    fn clear(&self) {
+        lock(&self.0).queues.clear();
+    }
+
+    pub fn push(&self, sid: &str, samples: &[i16]) {
+        let mut state = lock(&self.0);
+        let Some(q) = state.queues.get_mut(sid) else {
+            return;
+        };
+        q.samples.extend(samples);
+        if q.samples.len() > MAX_QUEUED {
+            let excess = q.samples.len() - PRIME;
+            q.samples.drain(..excess);
+        }
+    }
+
+    /// Fill interleaved `out` (`channels` wide) with the gained sum of every
+    /// primed queue, the mono mix copied to each channel.
+    pub fn mix(&self, out: &mut [f32], channels: usize) {
+        out.fill(0.0);
+        let channels = channels.max(1);
+        let frames = out.len() / channels;
+        let mut state = lock(&self.0);
+        let MixerState { queues, gains } = &mut *state;
+        for q in queues.values_mut() {
+            if !q.primed {
+                if q.samples.len() < PRIME {
+                    continue;
+                }
+                q.primed = true;
+            }
+            let gain = if q.follows_volume {
+                gains.get(&q.identity).copied().unwrap_or(1.0)
+            } else {
+                1.0
+            } / 32768.0;
+            let n = frames.min(q.samples.len());
+            for (frame, s) in out.chunks_exact_mut(channels).zip(q.samples.drain(..n)) {
+                let v = f32::from(s) * gain;
+                frame.iter_mut().for_each(|o| *o += v);
+            }
+            if n < frames {
+                q.primed = false;
+            }
+        }
+        out.iter_mut().for_each(|o| *o = o.clamp(-1.0, 1.0));
+    }
+}
+
+type Readers = Arc<Mutex<HashMap<String, JoinHandle<()>>>>;
+
+/// The room-event side of playout: starts and stops the per-track readers.
+pub struct Listener {
+    mixer: Arc<Mixer>,
+    readers: Readers,
+}
+
+impl Listener {
+    pub fn observe(&self, event: &RoomEvent) {
+        match event {
+            RoomEvent::TrackSubscribed {
+                track: RemoteTrack::Audio(track),
+                publication,
+                participant,
+            } => {
+                let sid = publication.sid().to_string();
+                self.mixer.add(
+                    &sid,
+                    participant.identity().as_str(),
+                    publication.source() == TrackSource::Microphone,
+                );
+                let reader =
+                    tokio::spawn(read_track(self.mixer.clone(), sid.clone(), track.clone()));
+                if let Some(old) = lock(&self.readers).insert(sid, reader) {
+                    old.abort();
+                }
+            }
+            RoomEvent::TrackUnsubscribed { publication, .. } => {
+                let sid = publication.sid().to_string();
+                if let Some(reader) = lock(&self.readers).remove(&sid) {
+                    reader.abort();
+                }
+                self.mixer.remove(&sid);
+            }
+            RoomEvent::Disconnected { .. } => stop_readers(&self.readers, &self.mixer),
+            _ => {}
+        }
+    }
+}
+
+async fn read_track(mixer: Arc<Mixer>, sid: String, track: RemoteAudioTrack) {
+    let mut stream = NativeAudioStream::new(track.rtc_track(), SAMPLE_RATE as i32, 1);
+    while let Some(frame) = stream.next().await {
+        mixer.push(&sid, &frame.data);
+    }
+}
+
+fn stop_readers(readers: &Readers, mixer: &Mixer) {
+    lock(readers).drain().for_each(|(_, r)| r.abort());
+    mixer.clear();
+}
+
+/// The platform's output devices, the host default first — the order and
+/// id convention `session::Devices` promises the webview.
+fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
+    let info = |d: &cpal::Device, index: usize| -> Option<DeviceInfo> {
+        Some(DeviceInfo {
+            id: d.id().ok()?.to_string(),
+            name: d.description().ok()?.name().to_string(),
+            index: index as u16,
+        })
+    };
+    let mut listed: Vec<(DeviceInfo, cpal::Device)> = Vec::new();
+    let default = host.default_output_device();
+    let others = host.output_devices().into_iter().flatten();
+    for d in default.into_iter().chain(others) {
+        if let Some(i) = info(&d, listed.len()) {
+            if listed.iter().all(|(l, _)| l.id != i.id) {
+                listed.push((i, d));
+            }
+        }
+    }
+    listed
+}
+
+pub fn list_outputs() -> Vec<DeviceInfo> {
+    output_devices(&cpal::default_host())
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// A session's playout: the mixer, its readers and the output stream.
+#[derive(Default)]
+pub struct Playout {
+    mixer: Arc<Mixer>,
+    readers: Readers,
+    output: Option<cpal::Stream>,
+}
+
+impl Playout {
+    pub fn listener(&self) -> Listener {
+        Listener {
+            mixer: self.mixer.clone(),
+            readers: self.readers.clone(),
+        }
+    }
+
+    pub fn mixer(&self) -> &Arc<Mixer> {
+        &self.mixer
+    }
+
+    pub fn readers(&self) -> usize {
+        lock(&self.readers).len()
+    }
+
+    /// (Re)open the output stream on device `id` (empty: the default). An
+    /// unknown id opens the default and reports the fallback as an error,
+    /// the same contract as the capture switch.
+    pub fn set_device(&mut self, id: &str) -> Result<(), String> {
+        let listed = output_devices(&cpal::default_host());
+        let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
+        let (index, fell_back) = resolve_device(id, &infos);
+        let (_, device) = index
+            .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
+            .ok_or("no playout device")?;
+        self.output = None;
+        self.output = Some(open_output(&device, self.mixer.clone())?);
+        if fell_back {
+            return Err(format!(
+                "playout device {id} not found; switched to the default"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Playout {
+    fn drop(&mut self) {
+        stop_readers(&self.readers, &self.mixer);
+    }
+}
+
+fn open_output(device: &cpal::Device, mixer: Arc<Mixer>) -> Result<cpal::Stream, String> {
+    let channels = device
+        .default_output_config()
+        .map_err(|e| format!("playout device config: {e}"))?
+        .channels();
+    let build = |buffer_size| {
+        let mixer = mixer.clone();
+        device.build_output_stream::<f32, _, _>(
+            cpal::StreamConfig {
+                channels,
+                sample_rate: SAMPLE_RATE,
+                buffer_size,
+            },
+            move |out, _| mixer.mix(out, channels as usize),
+            // ponytail: a lost device only logs; the sound servers move the
+            // stream to another sink themselves, and a switch reopens it.
+            |e| log::warn!("[native_voice] playout stream: {e}"),
+            None,
+        )
+    };
+    let stream = build(cpal::BufferSize::Fixed(PERIOD_FRAMES))
+        .or_else(|_| build(cpal::BufferSize::Default))
+        .map_err(|e| format!("opening the playout stream: {e}"))?;
+    stream
+        .play()
+        .map_err(|e| format!("starting the playout stream: {e}"))?;
+    Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sine(amplitude: f32, len: usize) -> Vec<i16> {
+        (0..len)
+            .map(|i| (amplitude * (i as f32 * 0.1).sin()) as i16)
+            .collect()
+    }
+
+    fn rms(out: &[f32]) -> f32 {
+        (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt()
+    }
+
+    /// Pull `frames` mono frames from the mixer.
+    fn mixed(mixer: &Mixer, frames: usize) -> Vec<f32> {
+        let mut out = vec![0.0; frames];
+        mixer.mix(&mut out, 1);
+        out
+    }
+
+    #[test]
+    fn each_participant_is_scaled_by_its_own_gain() {
+        let tone = sine(8000.0, PRIME);
+        let level = |gain: Option<f32>| {
+            let m = Mixer::default();
+            m.add("TR_a", "user-1", true);
+            if let Some(g) = gain {
+                m.set_gain("user-1", g);
+            }
+            m.push("TR_a", &tone);
+            rms(&mixed(&m, PRIME))
+        };
+        let unity = level(None);
+        assert!(unity > 0.1, "unity rms {unity}");
+        assert!((level(Some(0.5)) / unity - 0.5).abs() < 0.01);
+        assert!((level(Some(2.0)) / unity - 2.0).abs() < 0.01);
+        assert_eq!(level(Some(0.0)), 0.0);
+    }
+
+    #[test]
+    fn a_gain_set_on_one_user_leaves_the_others_and_non_microphone_audio_alone() {
+        let tone = sine(8000.0, PRIME);
+        let m = Mixer::default();
+        m.add("TR_a", "user-1", true);
+        m.add("TR_b", "user-2", true);
+        m.add("TR_s", "user-1", false);
+        m.set_gain("user-1", 0.0);
+        for sid in ["TR_a", "TR_b", "TR_s"] {
+            m.push(sid, &tone);
+        }
+        let both = rms(&mixed(&m, PRIME));
+        let only = Mixer::default();
+        only.add("TR_b", "user-2", true);
+        only.push("TR_b", &tone);
+        let one = rms(&mixed(&only, PRIME));
+        // user-1's microphone is silenced; user-2 and user-1's screen-share
+        // audio (the same tone, in phase) remain: twice one track's level.
+        assert!((both / one - 2.0).abs() < 0.01, "{both} vs {one}");
+    }
+
+    #[test]
+    fn a_gain_set_before_the_track_arrives_applies_to_it() {
+        let m = Mixer::default();
+        m.set_gain("user-1", 0.0);
+        m.add("TR_a", "user-1", true);
+        m.push("TR_a", &sine(8000.0, PRIME));
+        assert_eq!(rms(&mixed(&m, PRIME)), 0.0);
+    }
+
+    #[test]
+    fn a_queue_plays_only_once_primed_and_reprimes_after_running_dry() {
+        let m = Mixer::default();
+        m.add("TR_a", "user-1", true);
+        m.push("TR_a", &vec![1000; PRIME - 1]);
+        assert!(mixed(&m, 10).iter().all(|&s| s == 0.0), "not primed yet");
+        m.push("TR_a", &[1000]);
+        let out = mixed(&m, PRIME + 10);
+        assert!(out[..PRIME].iter().all(|&s| s > 0.0));
+        assert!(out[PRIME..].iter().all(|&s| s == 0.0), "ran dry");
+        m.push("TR_a", &[1000; 10]);
+        assert!(mixed(&m, 10).iter().all(|&s| s == 0.0), "reprimes");
+    }
+
+    #[test]
+    fn mono_is_copied_to_every_channel_and_the_sum_is_clipped() {
+        let m = Mixer::default();
+        m.add("TR_a", "user-1", true);
+        m.set_gain("user-1", 10.0);
+        m.push("TR_a", &vec![20000; PRIME]);
+        let mut out = vec![0.0; 2 * 4];
+        m.mix(&mut out, 2);
+        assert!(out.iter().all(|&s| s == 1.0), "{out:?}");
+    }
+
+    #[test]
+    fn an_overfull_queue_drops_its_oldest_audio() {
+        let m = Mixer::default();
+        m.add("TR_a", "user-1", true);
+        m.push("TR_a", &vec![1; MAX_QUEUED]);
+        m.push("TR_a", &vec![2; PRIME]);
+        let state = lock(&m.0);
+        let q = &state.queues["TR_a"];
+        assert_eq!(q.samples.len(), PRIME);
+        assert!(q.samples.iter().all(|&s| s == 2), "kept the newest");
+    }
+
+    #[test]
+    fn audio_for_an_unknown_or_removed_track_is_ignored() {
+        let m = Mixer::default();
+        m.push("TR_x", &[1000; PRIME]);
+        m.add("TR_a", "user-1", true);
+        m.remove("TR_a");
+        m.push("TR_a", &[1000; PRIME]);
+        assert!(mixed(&m, PRIME).iter().all(|&s| s == 0.0));
+    }
+}

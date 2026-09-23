@@ -17,6 +17,7 @@
 //! session serves them on its own token-authenticated loopback socket
 //! (`video.rs`), whose URL the connect result carries. Key material and the
 //! frame-socket token are never logged.
+pub mod playout;
 pub mod session;
 pub mod video;
 
@@ -174,8 +175,8 @@ pub async fn native_voice_connect<R: Runtime>(
     });
     let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
-    // Playout needs the ADM even for a listen-only join. A headless box has
-    // no sound server: log and carry on, the mic publish reports it again.
+    // Playout is needed even for a listen-only join. A headless box has no
+    // sound server: log and carry on, the mic publish reports it again.
     if let Err(e) = session.enable_platform_audio(audio) {
         log::warn!("[native_voice] platform audio unavailable: {e}");
     }
@@ -315,6 +316,24 @@ pub async fn native_voice_set_subscribed(
         .await
         .current(session)?
         .set_subscribed(&identity, &sid, subscribed)
+}
+
+/// Per-user volume: `volume` is the gain for `identity`'s microphone (1.0 is
+/// unity), the value the web path hands `RemoteParticipant.setVolume`.
+#[tauri::command]
+pub async fn native_voice_set_volume(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    volume: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_volume(&identity, volume);
+    Ok(())
 }
 
 /// Native resource counts for `getSessionDebugInfo` (B7-11).

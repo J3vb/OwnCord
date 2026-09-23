@@ -29,15 +29,15 @@ const tauriImporters = srcTexts.filter((text) => text.includes("@tauri-apps")).l
 // core.invoke to a local tauriInvoke, so matching only invoke("…") misses four.
 // A nested generic is the other blind spot: invoke<Record<string, unknown>>(…)
 // does not match either, which is why get_settings — called exactly that way in
-// platform/desktop/settings.ts — is counted at 41 rather than 42.
+// platform/desktop/settings.ts — is counted at 42 rather than 43.
 const invokeNames = new Set(
   srcTexts.flatMap((text) =>
     [...text.matchAll(/(tauriInvoke|invoke)(<[^>]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[3]),
   ),
 ).size;
 
-// Both spellings count: 35 `#[tauri::command]` plus 12
-// `#[tauri::command(async)]`. Matching the exact bracket form undercounts to 35.
+// Both spellings count: 36 `#[tauri::command]` plus 12
+// `#[tauri::command(async)]`. Matching the exact bracket form undercounts to 36.
 const commandHandlers = readSources(srcTauri, /\.rs$/).reduce(
   (total, text) => total + (text.match(/#\[tauri::command/g)?.length ?? 0),
   0,
@@ -55,8 +55,8 @@ function documentedCount(label: string): number | undefined {
 describe("platform-contracts count table matches the tree", () => {
   it("counts what the table says it counts", () => {
     expect(tauriImporters).toBe(22);
-    expect(invokeNames).toBe(41);
-    expect(commandHandlers).toBe(47);
+    expect(invokeNames).toBe(42);
+    expect(commandHandlers).toBe(48);
   });
 
   it("states those same counts in the table", () => {

@@ -383,6 +383,7 @@ describeNativeVoiceSuite(async () => {
     disconnect: async () => undefined,
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
+    setVolume: async () => undefined,
     debugInfo: async () => undefined,
     listDevices: async () => undefined,
     setDevice: async () => undefined,

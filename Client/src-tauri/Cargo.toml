@@ -150,6 +150,12 @@ device_query = "2"
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
 livekit = "=0.9.1"
+# Remote-audio playout for native voice. The SDK's device module mixes every
+# remote track with no per-track gain, so per-user volume needs our own mixer
+# (native_voice/playout.rs) and our own output stream. The `pulseaudio` host is
+# a pure-Rust client (no libpulse link) that lists the same sink descriptions
+# the device module showed; plain ALSA is the fallback.
+cpal = { version = "0.18", features = ["pulseaudio"] }
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),

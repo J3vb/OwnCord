@@ -47,7 +47,11 @@ import { RoomLifecycle, type RoomLifecycleHost } from "./roomLifecycle";
 function setup(initial: SessionState = { type: "idle" }) {
   let state = initial;
   const audioPipeline = { setRoom: vi.fn(), teardownAudioPipeline: vi.fn() };
-  const audioElements = { setRoom: vi.fn(), cleanupAllAudioElementsFull: vi.fn() };
+  const audioElements = {
+    setRoom: vi.fn(),
+    cleanupAllAudioElementsFull: vi.fn(),
+    getEffectiveVolume: (userId: number) => userId / 10,
+  };
   const deviceManager = {
     setRoom: vi.fn(),
     setAudioPipeline: vi.fn(),
@@ -170,7 +174,9 @@ describe("RoomLifecycle on the Linux native backend", () => {
       disconnect: vi.fn(async () => {}),
       removeAllListeners: vi.fn(),
     };
-    const createNativeRoom = vi.fn(() => nativeRoom);
+    const createNativeRoom = vi.fn(
+      (_audio: unknown, _volumeOf: (identity: string) => number) => nativeRoom,
+    );
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
     const { attachDiagnosticListeners: attach } = await import("../../lib/livekitDiagnostics");
@@ -180,11 +186,13 @@ describe("RoomLifecycle on the Linux native backend", () => {
     const lifecycle = new LinuxLifecycle(ctx.host as unknown as RoomLifecycleHost);
     const room = await lifecycle.createRoom(1);
     expect(room).toBe(nativeRoom);
-    expect(createNativeRoom).toHaveBeenCalledWith({
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    });
+    expect(createNativeRoom).toHaveBeenCalledWith(
+      { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      expect.any(Function),
+    );
+    // Participants start at their saved per-user volume, keyed by user id.
+    const volumeOf = createNativeRoom.mock.calls[0]![1];
+    expect(volumeOf("user-7")).toBe(0.7);
     expect(vi.mocked(WebRoom).mock.calls.length).toBe(webRoomsBefore);
     expect(workers).toHaveLength(0);
     // The same eight handlers the web room gets (RoomEvent is stubbed empty

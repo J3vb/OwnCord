@@ -31,6 +31,10 @@
 //! frames to someone else: it prints the frame socket's URL, token included,
 //! so a webview harness can run the app's own renderer and camera pump
 //! against this session (the CPU measurement in docs/architecture/voice-e2ee.md).
+//! `--volume G` sets every remote participant's volume to G the way the
+//! per-user volume menu does, pulls the session's own playout mix at the
+//! device cadence (CI has no sound device to play it on) and reports its RMS
+//! once per second, next to the direct decode's `audio` events.
 #[cfg(target_os = "linux")]
 mod linux {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,6 +47,7 @@ mod linux {
     use livekit::webrtc::audio_source::native::NativeAudioSource;
     use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
     use livekit::webrtc::audio_stream::native::NativeAudioStream;
+    use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
     use owncord_client_lib::native_voice::session::{
         process_threads, shared_key_material, CameraOptions, Event, NativeSession,
     };
@@ -118,6 +123,31 @@ mod linux {
                 sum_sq = 0.0;
                 count = 0;
                 last = tokio::time::Instant::now();
+            }
+        }
+    }
+
+    /// Pull the playout mix every 10 ms, as the output device would, and
+    /// report its RMS once per second.
+    async fn meter_playout(mixer: Arc<Mixer>) {
+        let mut buf = vec![0.0f32; PLAYOUT_RATE as usize / 100];
+        let mut ticker = tokio::time::interval(Duration::from_millis(10));
+        let (mut sum_sq, mut count, mut ticks) = (0.0f64, 0u64, 0u32);
+        loop {
+            ticker.tick().await;
+            mixer.mix(&mut buf, 1);
+            // The same scale as the direct meter's i16 samples.
+            sum_sq += buf
+                .iter()
+                .map(|&s| (s as f64 * 32768.0).powi(2))
+                .sum::<f64>();
+            count += buf.len() as u64;
+            ticks += 1;
+            if ticks == 100 {
+                emit(serde_json::json!({
+                    "event": { "type": "playout", "rms": (sum_sq / count as f64).sqrt() }
+                }));
+                (sum_sq, count, ticks) = (0.0, 0, 0);
             }
         }
     }
@@ -219,6 +249,9 @@ mod linux {
             .unwrap_or("0")
             .parse()
             .map_err(|_| "--mute-cycles")?;
+        let volume: Option<f32> = arg("--volume")
+            .map(|v| v.parse().map_err(|_| "--volume"))
+            .transpose()?;
         let video: Option<(u32, u32)> = match arg("--video") {
             None => None,
             Some(v) => {
@@ -352,6 +385,9 @@ mod linux {
         }
 
         let mut meters = Vec::new();
+        if volume.is_some() {
+            meters.push(tokio::spawn(meter_playout(session.playout_mixer())));
+        }
         let deadline = tokio::time::sleep(Duration::from_secs(secs));
         tokio::pin!(deadline);
         loop {
@@ -359,6 +395,9 @@ mod linux {
                 _ = &mut deadline => break,
                 ev = room_events.recv() => match ev {
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), participant, .. }) => {
+                        if let Some(v) = volume {
+                            session.set_volume(participant.identity().as_str(), v);
+                        }
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(_), publication, participant }) => {

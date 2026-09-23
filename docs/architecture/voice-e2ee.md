@@ -131,14 +131,16 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 **Commands and events.** `native_voice_set_key` (install/rotate),
 `native_voice_clear_key` (leave), `native_voice_connect` → `{session, identity}`,
 `native_voice_disconnect(session)`, `native_voice_set_microphone`,
-`native_voice_set_subscribed` (deafen), `native_voice_debug_info`. Room events
+`native_voice_set_subscribed` (deafen), `native_voice_set_volume` (per-user
+volume, see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state, participant join/leave).
-No `TrackSubscribed` is raised: there is no browser track, capture and playout
-run in libwebrtc's audio device module (`PlatformAudio`) in the Rust process,
-with its APM (AEC/NS/AGC from the same preferences the web path uses) standing
-in for RNNoise on Linux by owner decision. Media never crosses IPC.
+No audio `TrackSubscribed` is raised: there is no browser track. Capture runs
+in libwebrtc's audio device module (`PlatformAudio`) in the Rust process, with
+its APM (AEC/NS/AGC from the same preferences the web path uses) standing in
+for RNNoise on Linux by owner decision; playout runs through the session's own
+mixer (Audio parity, below). Media never crosses IPC.
 
 **E2EE byte-compatibility.** The web path calls
 `ExternalE2EEKeyProvider.setKey(base64Text)`, which PBKDF2-derives from the
@@ -224,10 +226,10 @@ gain stage nor a level gate can be applied on the native capture path without
 either the app's own capture pipeline (capture → gain/VAD → APM with a reverse
 stream → `NativeAudioSource`, the report's 1b sketch) or a patched
 `webrtc-sys`. Linux relies on the engine's automatic gain control and Opus DTX
-instead, and the settings tab hides the Input Volume, Input Sensitivity, Output
-Volume and Enhanced Noise Suppression controls there with a note pointing at
-the system mixer; the three APM toggles stay and apply at the next join. Per-user volume (no per-track gain in the
-module) remains a later phase; camera and remote video are phase 2 (below),
+instead, and the settings tab hides the Input Volume, Input Sensitivity and Enhanced
+Noise Suppression controls there with a note pointing at the system mixer; the
+three APM toggles stay and apply at the next join. Per-user and output volume
+came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
 (PR livekit/rust-sdks#1408, open, CLA unsigned) that detaches the frame
@@ -387,3 +389,59 @@ Unstripped, x64 grew 35,109,848 → 35,977,288 (+867,440) and arm64 33,693,744 �
 52,288 (arm64). `Client/scripts/check-glibc-floor.sh` on the built binaries
 reports a highest strong requirement of GLIBC_2.34 on both architectures,
 within the Ubuntu 22.04 floor of 2.35.
+
+### Audio parity: per-user volume
+
+**Why an own mixer.** Per-user volume on the web path is livekit-client's
+`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.1,
+libwebrtc 0.3.48, and still 0.9.2 / 0.3.49) exposes no per-track gain: the
+device module mixes every remote track itself, and libwebrtc's own per-receiver
+`AudioSourceInterface::SetVolume` is not bound. So the session switches the
+device module's playout to its synthetic mode
+(`set_adm_playout_enabled(false)`, after `PlatformAudio` enables it) — which
+still pumps the decode pipeline every 10 ms and still hands that mix to the
+echo canceller as its reference — and plays remote audio itself
+(`src-tauri/src/native_voice/playout.rs`): each subscribed remote audio track
+is read as 48 kHz mono PCM through a `NativeAudioStream`, queued per track
+(played once 30 ms is queued, oldest audio dropped past 200 ms), and a
+`cpal` output stream (20 ms periods) mixes the queues with each participant's
+gain. `cpal` uses its pure-Rust PulseAudio host (PulseAudio and
+pipewire-pulse; no libpulse link) and falls back to ALSA.
+
+**What follows the gain.** `native_voice_set_volume(session, identity,
+volume)` sets the gain for that participant's microphone tracks (1 is unity;
+the value `AudioElements` computes as per-user volume × output volume), kept
+for the session so a gain set before the track arrives applies. Other sources
+play at unity, as on the web path, where `setVolume` defaults to the
+microphone. `NativeRoom` applies each participant's saved volume when the
+participant appears (the web path does it on the audio `TrackSubscribed`,
+which native never raises), and `setUserVolume` / `setOutputVolume` reach it
+through the shared `AudioElements` unchanged, so the volume menu and the
+settings tab's Output Volume slider (no longer hidden on Linux) work as on
+Windows, persisted the same way (`userVolume_<id>:<host>`, `outputVolume`).
+
+**Output devices** now come from the output host, not the device module:
+`native_voice_list_devices` lists `cpal`'s output devices (the host default
+first, ids are `cpal`'s stable device ids, names the sink descriptions) and an
+`audiooutput` switch reopens the output stream on the chosen device (an unknown
+id falls back to the default and reports it). A sink that disappears mid-call
+is moved by the sound server itself; the stream error is only logged.
+
+**Echo cancellation caveat.** The echo canceller's reference is the device
+module's synthetic mix: every remote track at unity, on the pump's clock
+rather than the sound card's. AEC3 estimates the delay and adapts to a
+scaled echo path, so one user at a non-unity volume is a gain it tracks; two
+users at different volumes talking at once is a mix the reference only
+approximates.
+
+**Proof.** `playout.rs`'s unit tests drive the mixer with synthetic tones
+(gain per participant, other participants and non-microphone audio untouched,
+a gain set before its track, priming and drift). The interop test
+(`--volume 0.5`) measures it end to end: the native peer pulls its session's
+own playout mix at the device cadence and compares it with the direct decode
+of the browser peer's E2EE audio — measured 2026-09-23: mixed RMS 1487 vs
+direct 2962, a ratio of 0.50. `getSessionDebugInfo().native.rust.audioStreams`
+counts the per-track readers. **Not exercised on real hardware:** the `cpal`
+output stream itself (no sound server on the build box or the CI runner), the
+PulseAudio host's device list and switching, and AEC with the synthetic
+reference; they need a PipeWire or PulseAudio desktop.

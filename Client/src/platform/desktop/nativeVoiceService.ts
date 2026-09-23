@@ -24,6 +24,8 @@ export const nativeVoice: NativeVoice = {
     invoke<void>("native_voice_set_microphone", { session, enabled }),
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
+  setVolume: (session, identity, volume) =>
+    invoke<void>("native_voice_set_volume", { session, identity, volume }),
   publishCamera: (session, options) =>
     invoke<string>("native_voice_publish_camera", { session, options }),
   unpublishCamera: (session, sid) =>

@@ -91,7 +91,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
   contract, and audio device lists come from `native/devices.ts` (the device
-  module's device names, not the webview's). Video frames never cross IPC:
+  module's capture names and `cpal`'s output ids, not the webview's). Remote
+  audio plays through the session's own mixer
+  (`src-tauri/src/native_voice/playout.rs`, for per-user volume), not the
+  device module. Video frames never cross IPC:
   each native session serves them on a token-authenticated `127.0.0.1`
   WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
   through `native/videoRenderer.ts` (WebGL, exposed as a canvas

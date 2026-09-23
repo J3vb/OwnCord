@@ -133,6 +133,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVolume: (...args: unknown[]) => {
+        host.commands.push(["setVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.commands.push(["setDevice", args]);
         return Promise.resolve();
@@ -152,7 +156,7 @@ vi.mock("../../src/platform/desktop", () => ({
 const prefs = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("@components/settings/helpers", () => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
-  savePref: vi.fn(),
+  savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -314,7 +318,33 @@ describe("LiveKitSession on the Linux native backend", () => {
       },
     });
     await flush();
-    expect(host.commands).toEqual([["setSubscribed", [1, "user-3", "TR_b", false]]]);
+    expect(host.commands).toEqual([
+      ["setVolume", [1, "user-3", 1]],
+      ["setSubscribed", [1, "user-3", "TR_b", false]],
+    ]);
+  });
+
+  it("per-user and output volume reach the native playout mixer", async () => {
+    prefs.set("userVolume_3", 50);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    host.commands.length = 0;
+    // A participant starts at their saved volume: the web path applies it on
+    // the audio TrackSubscribed, which the native room never raises.
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-4" } });
+    expect(host.commands).toEqual([
+      ["setVolume", [1, "user-3", 0.5]],
+      ["setVolume", [1, "user-4", 1]],
+    ]);
+    host.commands.length = 0;
+    // The volume menu, then the master output volume scaling everyone.
+    session.setUserVolume(4, 150);
+    session.setOutputVolume(50);
+    expect(host.commands).toEqual([
+      ["setVolume", [1, "user-4", 1.5]],
+      ["setVolume", [1, "user-3", 0.25]],
+      ["setVolume", [1, "user-4", 0.75]],
+    ]);
   });
 
   it("leaveVoice closes the native session and forgets the native key", async () => {
