@@ -199,22 +199,23 @@ keeps the web path; the browser e2e suites still pin a desktop Chrome user
 agent.
 
 **Device selection.** `native_voice_list_devices` enumerates the device
-module's capture and playout devices (through the live session's module, or a
-transient one outside a call) and `native_voice_set_device(session, kind, id)`
-switches in place; an empty id is the module's default (its first device).
+module's capture devices (through the live session's module, or a
+transient one outside a call) and the output devices (see Audio parity,
+below), and `native_voice_set_device(session, kind, id)` switches in place; an
+empty id is the default (the first device listed).
 `NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
 saved-device switches at join and the settings tab's selectors work unchanged;
 `features/voice/native/devices.ts` gives the settings tab and the device
-manager the native list on Linux (the ids are the module's device names —
+manager the native list on Linux (capture ids are the module's device names —
 the Linux device modules report no GUIDs — not the webview's; a switch
 resolves the name to the module's index, first match wins, and an unknown
 name falls back to the default and reports it) and is null everywhere else, leaving the web enumeration untouched.
 Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
-re-list through the native backend and re-applies both saved selections by
-name, which refreshes a device-module index the hot-plug shifted (an
-unchanged index leaves the running stream alone). Unmuting
-(`set_microphone(true)`) and resubscribing (`set_subscribed(true)`) also
-re-resolve the saved name before a stopped stream restarts.
+re-list through the native backend and re-applies both saved selections,
+which refreshes a device-module index the hot-plug shifted (an
+unchanged index or output device leaves the running stream alone). Unmuting
+(`set_microphone(true)`) also re-resolves the saved capture name before the
+stopped stream restarts.
 
 **Connect no longer holds the backend lock**: a leave, a key rotation or a
 device switch during a slow join proceeds, and a connect that a newer one
