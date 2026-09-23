@@ -15,13 +15,17 @@
 // socket: a subscribed remote video track is raised as `TrackSubscribed`
 // with a `NativeVideoRenderer`'s canvas track as its `mediaStreamTrack`, and
 // a published camera is the webview's own `LocalVideoTrack` (its preview)
-// pumped up the socket by a `CameraUplink`.
+// pumped up the socket by a `CameraUplink`. Screen share captures in the
+// backend: `createScreenTracks` picks a source (`screenPicker.ts`; on
+// Wayland the desktop portal's dialog) and starts the host capture, and the
+// `NativeScreenTrack` it returns is the local preview.
 //
 // Lifecycle (B7-11): the Tauri subscription is registered per connect() and
 // released in disconnect() with the late-resolve guard, and disconnect() is
 // scoped to this room's own native session id, so a superseded attempt tears
-// down only its own room. Every renderer and the camera pump is disposed
-// when its track goes away and, at the latest, in disconnect().
+// down only its own room. Every renderer, the camera pump and the screen
+// track are disposed when their track goes away and, at the latest, in
+// disconnect().
 import { DisconnectReason, RoomEvent } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { voiceStore } from "../../../stores/voice.store";
@@ -36,6 +40,13 @@ import type {
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
+import {
+  NativeScreenTrack,
+  captureOptions,
+  startError,
+  type ScreenCaptureRequest,
+} from "./screenTrack";
+import { pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
 
@@ -130,15 +141,16 @@ interface PublishOptions {
   videoEncoding?: { maxBitrate: number; maxFramerate?: number };
 }
 
-/** The local camera publication `getLocalCameraStream` and the diagnostics
- *  read. */
+/** A local camera or screen publication, as `getLocalCameraStream`,
+ *  `getLocalScreenshareStream` and the diagnostics read it. */
 interface NativeLocalPublication {
   readonly trackSid: string;
   readonly source: string;
   readonly kind: string;
   readonly isMuted: boolean;
   readonly track: PublishableTrack;
-  readonly uplink: CameraUplink;
+  /** The camera's frame pump; a screen share has none. */
+  readonly uplink?: CameraUplink;
 }
 
 export class NativeRoom {
@@ -165,12 +177,24 @@ export class NativeRoom {
       if (enabled) throw unsupported("setCameraEnabled(true)");
       await this.unpublishCamera();
     },
+    /** Only the disable is reachable, as for the camera. */
+    setScreenShareEnabled: async (enabled: boolean): Promise<void> => {
+      if (enabled) throw unsupported("setScreenShareEnabled(true)");
+      await this.unpublishScreen();
+    },
+    /** The native stand-in for `createLocalScreenTracks`: pick, then capture
+     *  in the host. Resolves once the capture delivers its first frame. */
+    createScreenTracks: (options?: ScreenCaptureRequest) => this.createScreenTracks(options),
     publishTrack: (track: PublishableTrack, options: PublishOptions) =>
-      this.publishCamera(track, options),
-    /** Takes the `mediaStreamTrack`, as the shared camera path passes it. */
+      (options.source ?? track.source) === "screen_share"
+        ? this.publishScreen(track, options)
+        : this.publishCamera(track, options),
+    /** Takes the `mediaStreamTrack`, as the shared camera and screen-share
+     *  paths pass it. */
     unpublishTrack: async (track: MediaStreamTrack): Promise<void> => {
-      if (this.localParticipant.trackPublications.get("camera")?.track.mediaStreamTrack === track)
-        await this.unpublishCamera();
+      const pubs = this.localParticipant.trackPublications;
+      if (pubs.get("camera")?.track.mediaStreamTrack === track) await this.unpublishCamera();
+      if (pubs.get("screen_share")?.track.mediaStreamTrack === track) await this.unpublishScreen();
     },
   };
 
@@ -184,6 +208,11 @@ export class NativeRoom {
   private unsubscribe: (() => void) | null = null;
   /** Events that arrived before connect() resolved with this room's id. */
   private pending: NativeVoiceEnvelope[] | null = null;
+  /** The live screen capture's track; null when not capturing. */
+  private screen: NativeScreenTrack | null = null;
+  /** The last capture the host ended, in case it ended before its track
+   *  existed (the event and the start result travel separately). */
+  private endedCapture: number | null = null;
 
   /** `volumeOf` is the saved volume a participant starts at: the web path
    *  applies it on the audio `TrackSubscribed`, which native never raises.
@@ -309,7 +338,7 @@ export class NativeRoom {
       // Disconnected meanwhile: the session (and its publish) is gone.
       throw new Error("native room disconnected during camera publish");
     }
-    this.localParticipant.trackPublications.get("camera")?.uplink.dispose();
+    this.localParticipant.trackPublications.get("camera")?.uplink?.dispose();
     const publication: NativeLocalPublication = {
       trackSid: sid,
       source: "camera",
@@ -330,9 +359,85 @@ export class NativeRoom {
     const camera = this.localParticipant.trackPublications.get("camera");
     if (camera === undefined) return;
     this.localParticipant.trackPublications.delete("camera");
-    camera.uplink.dispose();
+    camera.uplink?.dispose();
     if (this.sessionId !== null)
       await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
+  }
+
+  private async createScreenTracks(options?: ScreenCaptureRequest): Promise<NativeScreenTrack[]> {
+    if (this.sessionId === null) throw new Error("native room is not connected");
+    const session = this.sessionId;
+    const source = await pickScreenSource();
+    if (source === null) throw new DOMException("Screen share cancelled", "NotAllowedError");
+    if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");
+    const started = await desktop.nativeVoice
+      .startScreen(session, source, captureOptions(options))
+      .catch((err: unknown) => {
+        throw startError(err);
+      });
+    if (this.sessionId !== session) {
+      // Disconnected meanwhile: the session (and its capture) is gone.
+      throw new Error("native room disconnected during screen capture");
+    }
+    const track = new NativeScreenTrack(started, `${this.frames}/screen`, (t) =>
+      this.stopScreen(session, t),
+    );
+    this.screen?.stop();
+    this.screen = track;
+    if (this.endedCapture === track.capture) track.end();
+    return [track];
+  }
+
+  /** A stopped screen track: stop its host capture (a no-op for a capture a
+   *  newer one replaced) and forget its publication. */
+  private stopScreen(session: number, track: NativeScreenTrack): void {
+    if (this.screen === track) this.screen = null;
+    const pubs = this.localParticipant.trackPublications;
+    if (pubs.get("screen_share")?.track === track) pubs.delete("screen_share");
+    if (this.sessionId !== session) return;
+    desktop.nativeVoice
+      .stopScreen(session, track.capture)
+      .catch((err) => log.warn("native stopScreen failed", { capture: track.capture, err }));
+  }
+
+  private async publishScreen(
+    track: PublishableTrack,
+    options: PublishOptions,
+  ): Promise<NativeLocalPublication> {
+    if (this.sessionId === null) throw new Error("native room is not connected");
+    if (!(track instanceof NativeScreenTrack))
+      throw unsupported("publishing a browser screen track");
+    const encoding = options.videoEncoding;
+    if (encoding?.maxFramerate === undefined)
+      throw new Error("native screen publish needs videoEncoding.maxBitrate and maxFramerate");
+    const session = this.sessionId;
+    const sid = await desktop.nativeVoice.publishScreen(session, track.capture, {
+      width: track.width,
+      height: track.height,
+      maxBitrate: encoding.maxBitrate,
+      maxFramerate: encoding.maxFramerate,
+    });
+    if (this.sessionId !== session)
+      throw new Error("native room disconnected during screen publish");
+    const publication: NativeLocalPublication = {
+      trackSid: sid,
+      source: "screen_share",
+      kind: "video",
+      isMuted: false,
+      track,
+    };
+    this.localParticipant.trackPublications.set("screen_share", publication);
+    return publication;
+  }
+
+  /** Unpublishing a screen share stops its track, and with it the host
+   *  capture (which unpublishes): the shared code stops the track next
+   *  anyway, and stop() is idempotent. */
+  private async unpublishScreen(): Promise<void> {
+    const screen = this.localParticipant.trackPublications.get("screen_share");
+    if (screen === undefined) return;
+    this.localParticipant.trackPublications.delete("screen_share");
+    if (screen.track instanceof NativeScreenTrack) screen.track.stop();
   }
 
   /** Dispose every renderer and the camera pump without raising events: the
@@ -345,7 +450,12 @@ export class NativeRoom {
       }
     const camera = this.localParticipant.trackPublications.get("camera");
     this.localParticipant.trackPublications.delete("camera");
-    camera?.uplink.dispose();
+    camera?.uplink?.dispose();
+    // The session close releases the host capture; this is the preview.
+    this.screen?.stop();
+    this.screen = null;
+    this.endedCapture = null;
+    this.localParticipant.trackPublications.delete("screen_share");
   }
 
   /** A subscribed remote video track: open its renderer and raise it the way
@@ -494,6 +604,10 @@ export class NativeRoom {
           RoomEvent.ActiveSpeakersChanged,
           event.identities.map((identity) => ({ identity })),
         );
+        break;
+      case "screenCaptureEnded":
+        this.endedCapture = event.capture;
+        if (this.screen?.capture === event.capture) this.screen.end();
         break;
       case "encryptionStatus":
         // The backend's only signal that frames are not being protected —

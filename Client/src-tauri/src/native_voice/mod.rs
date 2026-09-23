@@ -15,14 +15,18 @@
 //! Room events reach the webview as one Tauri event, `native-voice`, whose
 //! payload carries the session id. Video frames do not cross IPC: each
 //! session serves them on its own token-authenticated loopback socket
-//! (`video.rs`), whose URL the connect result carries. Key material and the
-//! frame-socket token are never logged.
+//! (`video.rs`), whose URL the connect result carries. Screen share captures
+//! natively (`screen.rs`): the webview picks a source, or leaves the pick to
+//! the desktop portal on Wayland, and sees the capture only as a preview on
+//! the frame socket. Key material and the frame-socket token are never
+//! logged.
 pub mod playout;
+pub mod screen;
 pub mod session;
 pub mod video;
 
 use serde::Serialize;
-use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources};
+use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources, ScreenOptions};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
 
@@ -68,6 +72,7 @@ impl Inner {
             Some((_, s)) => s.resources(),
             None => Resources {
                 threads: session::process_threads(),
+                screen_captures: screen::active_captures(),
                 ..Default::default()
             },
         }
@@ -298,6 +303,92 @@ pub async fn native_voice_unpublish_camera(
         .await
         .current(session)?
         .unpublish_camera(&sid)
+        .await;
+    Ok(())
+}
+
+/// What can be shared: screens and windows with thumbnails on X11, or
+/// `portal: true` on Wayland, where the desktop portal's dialog picks.
+#[tauri::command]
+pub async fn native_voice_screen_sources() -> Result<screen::Sources, String> {
+    tauri::async_runtime::spawn_blocking(screen::list_sources)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenStarted {
+    /// The id `native_voice_publish_screen`, `native_voice_stop_screen` and
+    /// the `screenCaptureEnded` event carry.
+    capture: u64,
+    width: u32,
+    height: u32,
+}
+
+/// Start capturing `source` (a `native_voice_screen_sources` id, or
+/// `portal`), replacing any running capture, and resolve once the first
+/// frame arrives: on Wayland that is after the user completed the portal's
+/// dialog, and a cancelled dialog rejects with [`screen::CANCELLED`]. The
+/// session is released while waiting, so a leave or stop meanwhile ends the
+/// wait instead of queueing behind it. Frames then preview on the frame
+/// socket's `screen` route.
+#[tauri::command]
+pub async fn native_voice_start_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    source: String,
+    capture: screen::CaptureOptions,
+) -> Result<ScreenStarted, String> {
+    let target = screen::Target::parse(&source)?;
+    let (id, started) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .start_screen(target, capture)
+        .await?;
+    let (width, height) = started
+        .await
+        .map_err(|_| "screen capture stopped before it started".to_string())??;
+    Ok(ScreenStarted {
+        capture: id,
+        width,
+        height,
+    })
+}
+
+/// Publish running capture `capture` as the screen share; returns its sid.
+#[tauri::command]
+pub async fn native_voice_publish_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+    options: ScreenOptions,
+) -> Result<String, String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .publish_screen(capture, options)
+        .await
+}
+
+/// Unpublish and stop capture `capture`, releasing the capturer and any
+/// portal session; a stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_stop_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .stop_screen(capture)
         .await;
     Ok(())
 }
