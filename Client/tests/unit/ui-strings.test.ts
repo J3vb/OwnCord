@@ -25,7 +25,7 @@ const texts = (source: string): string[] =>
 
 describe("UI string inventory", () => {
   const scan = scanTree();
-  const baseline = loadBaseline();
+  const baseline = loadBaseline() ?? {};
 
   it("has no new UI text and no stale baseline entry", () => {
     expect(scan.errors).toEqual([]);
@@ -131,6 +131,15 @@ describe("the scan", () => {
     expect(result.errors).toEqual(["src/fixture.ts:4: i18n-exempt needs a reason"]);
   });
 
+  it("does not carry a trailing exemption over to the next line", () => {
+    expect(
+      texts(`
+        const code = "Rate Limited"; // i18n-exempt: wire code
+        setText(el, "Upload failed, try again");
+      `),
+    ).toEqual(["Upload failed, try again"]);
+  });
+
   it("does not follow a value through a variable (documented limit)", () => {
     expect(texts(`const name = "general"; setText(el, name);`)).toEqual([]);
   });
@@ -158,5 +167,12 @@ describe("the baseline ratchet", () => {
   it("only shrinks an existing baseline", () => {
     expect(shrink(scanOf([3, "Save"], [5, "Cancel"]), baseline)).toEqual(baseline);
     expect(shrink(scanOf(), baseline)).toEqual({});
+  });
+
+  it("never reseeds an empty baseline, only a missing one", () => {
+    expect(shrink(scanOf([3, "Retry now"]), {})).toEqual({});
+    expect(shrink(scanOf([3, "Retry now"]), null)).toEqual({
+      "src/a.ts": { owner: ownerOf("src/a.ts"), strings: { "Retry now": 1 } },
+    });
   });
 });

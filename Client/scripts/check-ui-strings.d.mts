@@ -17,12 +17,12 @@ export function ownerOf(file: string): string;
 export function looksLikeProse(text: string): boolean;
 export function scanSource(file: string, source: string): { findings: Finding[]; errors: string[] };
 export function scanTree(): Scan;
-export function loadBaseline(): Baseline;
+export function loadBaseline(): Baseline | null;
 export function compare(
   scan: Scan,
-  baseline: Baseline,
+  baseline: Baseline | null,
 ): {
   added: (Finding & { file: string })[];
   stale: { file: string; text: string; baseline: number; actual: number }[];
 };
-export function shrink(scan: Scan, baseline: Baseline): Baseline;
+export function shrink(scan: Scan, baseline: Baseline | null): Baseline;

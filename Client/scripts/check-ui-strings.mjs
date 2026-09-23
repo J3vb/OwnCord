@@ -22,7 +22,7 @@
 //
 // Exempt a literal that is intentionally not app copy (a wire identifier, a
 // user-data default, an internal error that never reaches the UI) with a
-// comment carrying a reason on the same line or the line above:
+// comment carrying a reason on the same line or on a comment-only line above:
 //   // i18n-exempt: protocol error code, mapped to catalog text by the caller
 //
 // The baseline (scripts/ui-strings-baseline.json) is the migration inventory:
@@ -350,13 +350,12 @@ function classify(node) {
   return { sink: false, category: "other" };
 }
 
-/** The reason on an `i18n-exempt:` comment on the literal's line or the line above. */
+/** The reason on an `i18n-exempt:` comment on the literal's line or a comment-only line above. */
 function exemption(sourceLines, line) {
-  for (const l of [line, line - 1]) {
-    const m = /\/\/\s*i18n-exempt:(.*)$/.exec(sourceLines[l] ?? "");
-    if (m) return m[1].trim();
-  }
-  return null;
+  const m =
+    /\/\/\s*i18n-exempt:(.*)$/.exec(sourceLines[line] ?? "") ??
+    /^\s*\/\/\s*i18n-exempt:(.*)$/.exec(sourceLines[line - 1] ?? "");
+  return m ? m[1].trim() : null;
 }
 
 /**
@@ -414,8 +413,9 @@ function counts(findings) {
   return out;
 }
 
+/** The baseline, or null when the file does not exist yet. */
 export function loadBaseline() {
-  return existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : {};
+  return existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : null;
 }
 
 /**
@@ -424,6 +424,7 @@ export function loadBaseline() {
  * known); `stale` are baseline entries above the scanned count.
  */
 export function compare(scan, baseline) {
+  baseline ??= {};
   const added = [];
   const stale = [];
   for (const [file, findings] of Object.entries(scan.files)) {
@@ -446,11 +447,12 @@ export function compare(scan, baseline) {
 
 /**
  * The shrunk baseline: every entry capped at its scanned count, empties
- * dropped. Never adds. With no baseline yet it records the whole scan, which
- * is how the inventory was first taken.
+ * dropped. Never adds, even to an empty baseline. Only with no baseline file
+ * (null) does it record the whole scan, which is how the inventory was first
+ * taken.
  */
 export function shrink(scan, baseline) {
-  const fresh = Object.keys(baseline).length === 0;
+  const fresh = baseline === null;
   const out = {};
   for (const [file, findings] of Object.entries(scan.files)) {
     const actual = counts(findings);
