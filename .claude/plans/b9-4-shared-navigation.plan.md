@@ -1,6 +1,8 @@
 # Plan: B9-4 — Add the agreed shared navigation integration points
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-4-impl` from `dev` `500f99a4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+
+Implemented at `71737d93ab1f917d05081894b1ddc2f64ffdfbe4`.
 
 > **Milestone:** B9-4 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-4-shared-navigation`; branch from current `dev`, PR to `dev` only.
@@ -37,6 +39,50 @@ at the actual implementation base; record drift before coding.
 | 1   | SidebarArea composes channels/DMs, server switching, voice and user controls.                              | `Client/src/pages/main-page/SidebarArea.ts:1-52`; `Client/src/pages/main-page/SidebarArea.ts:61-83`                      |
 | 2   | Global UI state currently distinguishes channels and DMs and carries connection/session-replacement state. | `Client/src/stores/ui.store.ts:8-28`; `Client/src/stores/ui.store.ts:43-52`                                              |
 | 3   | MainPage creates the shared sidebar and owns channel mounting and teardown.                                | `Client/src/pages/MainPage.ts:482-490`; `Client/src/pages/MainPage.ts:947-990`; `Client/src/pages/MainPage.ts:1043-1045` |
+
+### Drift at the implementation base (2026-09-23)
+
+Re-read at `500f99a413070c9ae7613c49137a688e581116ea` (B9-3 merged). `git log
+0beee8e4..500f99a4` over the three rows' files is empty: every cited line range
+still holds. The entry preconditions hold as the PRD records them — B9-3 merged,
+Q9's gate conditions met and Q2 decided on 2026-09-23. `dev` later gained
+`281c3b2b` and `6fd8cc0c`, which touch none of these files; they were merged in.
+
+### Implementation decisions and file-table amendments
+
+- **One state owner.** `uiStore.activeView` holds the open content view; the
+  content navigator (`features/navigation/contentView.ts`) is its only writer
+  and owns the view's `Disposable`, DOM and focus. The state dies with the page:
+  `MainPage.destroy()` and `onAuthCleared` both tear the view down, so a profile
+  switch or logout never carries a view, or its private content, to the next
+  session.
+- **No active channel while a view is open.** Opening clears `activeChannelId`
+  after remembering it as `channelBeforeDm`. Otherwise the hidden channel would
+  count as on screen: `wsHandlers.ts` and `notifications.ts` suppress unread
+  and notifications for the active channel. MainPage's existing
+  active-channel subscriber tears the chat surface down. Choosing any channel
+  or DM (the one the user came from included) replaces the view.
+- **Back is the sidebar's path.** `SidebarArea.returnToChannel()` is the DM back
+  arrow's body, extracted unchanged. Close and Escape call it. Focus returns to
+  the entry that opened the view, or, when that entry left with DM mode, to the
+  returned channel's composer.
+- **Nothing shows before its feature.** `NAVIGATION_DESTINATIONS` is empty in
+  this build. The Requests section, the DM header badge, the Moderation button
+  and the Safety tab each render only when their destination has an entry.
+  Production has no test hook for registering a view, so
+  `b9-navigation.spec.ts` proves the absence and the unchanged routes in the
+  real app (it also runs against the production bundle). The transitions
+  through a destination run against inert views in `navigation.test.ts`.
+- **Files beyond the table**, each a Q2 surface the table's groups did not name:
+  `Client/src/lib/permissions.ts` (`canModerateMembers`, beside
+  `canViewAuditLog`); `Client/src/pages/main-page/SidebarDmSection.ts` (the DM
+  header's pending-request badge, apart from unread);
+  `Client/src/components/SettingsOverlay.ts` (the Safety tab seam and
+  `openSettings("Safety")` landing); `Client/src/i18n/navigation.ts` (new) and
+  one `tabs.safety` key in `Client/src/i18n/settings.ts`;
+  `Client/src/styles/app/chat-area.css` and `member-list.css` (the view column
+  and badge rules, in their owning fragments); and the unit tests whose
+  `UiState` fixtures gained the two new fields.
 
 ## Patterns to mirror
 
@@ -175,3 +221,81 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Place Requests beside DMs, Moderation Center behind a permission-gated server entry and personal notices/appeals in a safety view; or use a new top-level navigation rail. The first changes familiar workflows less; the rail is more visible but has a larger navigation and reflow cost. Badge semantics (pending requests versus unread) also need an explicit choice.
 
 **Drafting recommendation (historical):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.
+
+## Implementation record (2026-09-23)
+
+### How a feature plugs in
+
+A feature milestone adds one entry to `NAVIGATION_DESTINATIONS` in
+`Client/src/features/navigation/destinations.ts` and nothing else in the shell:
+
+- `requests: { build, pending }` (B9-5). `pending` is the live count behind
+  "Message Requests (N)" and the DM header badge.
+- `moderation: { build }` (B9-11). It is shown and openable only with
+  `MODERATE_MEMBERS`, and closed at once on losing it.
+- `safety: { build(signal) }` (B9-10/15/16). A Q4 notice opens it with
+  `openSettings("Safety")`.
+
+`build` receives `{ signal, close }`. The signal aborts on close, replacement,
+permission loss, sign-out and page teardown, so bind every listener, request and
+timer to it and drop late results. The view renders inside a named region under
+a heading and a Close button that the navigator supplies. A control that
+handles Escape itself calls `preventDefault()` first.
+
+### Shared-file reservation procedure
+
+Registering a destination is a one-line edit to `destinations.ts` plus the
+feature's own directory and catalog, and takes no reservation. An edit to
+`MainPage.ts`, `SidebarArea.ts`, `SidebarDmSection.ts`, `SettingsOverlay.ts`,
+`ui.store.ts`, `features/navigation/contentView.ts`, `dispatcher.ts`, `api.ts`
+or `types.ts` takes the PRD's single-writer lane: name it in the PR
+description, keep one such PR open at a time, merge `dev` in (not rebase)
+before review, and land in order.
+
+### Evidence
+
+Implementation `71737d93ab1f917d05081894b1ddc2f64ffdfbe4` on base
+`500f99a4`; Node 26.9.0, vitest 4.1.11, Playwright Chromium, Linux.
+
+| Check                                                                                                                                                                                                       | Result                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Affected unit files before the change (`main-page`, `sidebar-area`, `settings-overlay`, `sidebar-dm-section`, `ui.store`, `ui-strings`)                                                                     | 284 passed                                                                  |
+| `npx vitest run --maxWorkers=4` (whole client)                                                                                                                                                              | 290 files, 6,375 passed, 149 expected-fail                                  |
+| `src/features/navigation/navigation.test.ts`                                                                                                                                                                | 25 passed                                                                   |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint)                                                                                                            | clean                                                                       |
+| `npm run build:budget && npm run check:budgets`                                                                                                                                                             | all ok; MainPage 58,491 B of 60,000 B, startup closure 87,294 B of 91,000 B |
+| Playwright (dev server): `b9-navigation`, `main-layout`, `profile-switch`                                                                                                                                   | 8 passed                                                                    |
+| Playwright (dev server): `a11y-smoke`, `sidebar-header`, `settings-overlay`, `settings-tabs-extra`, `dm-system`, `b9-primitives`, `b9-text-expansion`, `logout-flow`, `channel-sidebar`, `admin-moderation` | 92 passed                                                                   |
+| `npm run check:docs`, Prettier on changed files                                                                                                                                                             | passed                                                                      |
+
+**Failing controls.** Each guard below was removed in turn and the named suite
+re-run. Every one failed, and each was restored before commit: clearing the
+active channel on open; the permission-loss recheck; the sign-out teardown; the
+Escape handled-by-view guard; a channel choice closing the view; opener focus
+restore (`navigation.test.ts`); the sidebar's `MODERATE_MEMBERS` gate; the DM
+redraw keeping the Requests entry's element; the badge hiding at zero
+(`sidebar-area.test.ts`); the Settings tab request (`settings-overlay.test.ts`);
+and page teardown destroying the view (`main-page.test.ts`).
+
+### Accessibility (Q1)
+
+- **Keyboard:** every entry is a `<button>`, and the Safety tab joins the
+  arrow-key tablist (unit). The view closes on its Close button or Escape. In
+  e2e, the settings route opens with Enter and closes with Escape. Gap:
+  `DmSidebar`'s back header is a click-only `div`. It predates this milestone
+  and is recorded for the B9-21 shell pass; the content views' own back
+  (Close/Escape) does not depend on it.
+- **Screen reader:** the view is a `region` named by its `h2`. Its Close button
+  is named "Close <view>". Entries carry `aria-current="page"` while their view
+  is open. The DM header badge reads "N pending message requests" from
+  `.sr-only` text, with the digit hidden. **NVDA and Orca recordings are
+  owner-run and pending.**
+- **Focus:** the heading receives focus on open. On close, focus returns to the
+  opener, or to the returned channel's composer once the opener is gone or
+  hidden. Permission loss and switching views follow the same rules (unit).
+- **Contrast, reduced motion, zoom/reflow:** the new badge and view header use
+  B9-2 tokens (`--text-normal` on `--bg-tertiary`, `--border-strong`, the
+  chat-header rules), and nothing new animates. None of these surfaces renders
+  until a destination ships, so the 940×500 / 20 px and contrast measurements
+  of each rendered entry and view belong to the milestone that registers it
+  (B9-5, B9-11, B9-10/15/16).

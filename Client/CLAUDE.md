@@ -21,6 +21,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   Unit tests that pin CSS rules assert on the Lightning CSS parse of it
   through `tests/helpers/app-css.ts`, never on its source text
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
+- `src/features/navigation/` is the B9-4 destination map (Q2) and content
+  navigator: a feature plugs in by adding its entry to `destinations.ts`, never
+  by editing MainPage/SidebarArea; `uiStore.activeView` has one writer there
 - `src/i18n/` holds the English catalogs (B9-3); rules are in `format.ts`'s
   header. `tests/unit/ui-strings.test.ts` fails on new UI text outside a
   catalog, against the shrink-only `scripts/ui-strings-baseline.json`

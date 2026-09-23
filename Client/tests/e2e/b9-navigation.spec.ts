@@ -1,0 +1,130 @@
+/**
+ * B9-4: the shared navigation seams in the real shell.
+ *
+ * This build ships no destination yet — Message Requests (B9-5), the
+ * Moderation Center (B9-11) and the Safety tab (B9-10/15/16) each add their
+ * own entry — so what the running app must show is the owner's Q2 rule: no
+ * empty or nonfunctional destination, and the familiar channel, DM and
+ * settings routes unchanged with the content-view column in place. The
+ * transitions through a destination (open, Close/Escape back to the channel,
+ * replacement, permission loss, sign-out) run against inert views in
+ * src/features/navigation/navigation.test.ts, because this spec also runs
+ * against the production bundle, which has no test-only way to register one.
+ */
+import type { Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import {
+  buildTauriMockScript,
+  MOCK_LOGIN_RESPONSE,
+  MOCK_MESSAGES,
+  submitLogin,
+  waitForWsReady,
+} from "./helpers";
+
+const DM_CHANNELS = [
+  {
+    channel_id: 100,
+    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
+    last_message_id: 500,
+    last_message: "Hey there!",
+    last_message_at: "2026-03-15T12:00:00Z",
+    unread_count: 0,
+  },
+];
+
+async function signIn(page: Page): Promise<void> {
+  await submitLogin(page);
+  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
+  await waitForWsReady(page);
+  await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
+}
+
+/** The content-view column exists, is hidden, and claims no landmark. */
+async function expectNoView(page: Page): Promise<void> {
+  const view = page.locator("[data-testid='feature-view']");
+  await expect(view).toBeAttached();
+  await expect(view).toBeHidden();
+  await expect(view).not.toHaveAttribute("role", /./);
+  await expect(page.locator("[data-testid='chat-area']")).toBeVisible();
+}
+
+test.describe("B9-4 shared navigation", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ],
+        simulateWsFlow: true,
+        // The mock signs in as "admin", whose role holds ADMINISTRATOR and so
+        // MODERATE_MEMBERS: the strongest case for a Moderation entry.
+        readyOverrides: { dm_channels: DM_CHANNELS },
+      }),
+    );
+    await page.goto("/");
+    await signIn(page);
+  });
+
+  test("shows no destination entry before its feature ships (Q2)", async ({ page }) => {
+    // Moderation would sit beside Audit Log; Audit Log is there, Moderation is not.
+    await expect(page.locator("[data-testid='audit-log-btn']")).toBeVisible();
+    await expect(page.locator("[data-testid='moderation-btn']")).toHaveCount(0);
+    // No pending-request badge on the DM header.
+    await expect(page.locator("[data-testid='dm-requests-badge']")).toHaveCount(0);
+    await expectNoView(page);
+
+    // DM mode has no Message Requests section at its top.
+    await page.locator("[data-testid='dm-entry']").first().click();
+    await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
+    await expect(page.locator("[data-testid='dm-requests-entry']")).toHaveCount(0);
+    await expectNoView(page);
+
+    // Settings has no Safety tab, and the arrow keys skip nothing hidden.
+    await page.locator("button[aria-label='Settings']").click();
+    await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
+    const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
+    await expect(tabs.filter({ hasText: "Safety" })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Account" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
+  });
+
+  test("channel → DM → back → settings → logout → sign in again keeps the shell whole", async ({
+    page,
+  }) => {
+    const header = page.locator("[data-testid='chat-header-name']");
+
+    // channels → DM
+    await page.locator("[data-testid='dm-entry']").first().click();
+    await expect(header).toHaveText("otheruser");
+    await expectNoView(page);
+
+    // DM → back: the channelBeforeDm path content views also take (Q2).
+    await page.locator("[data-testid='dm-back-header']").click();
+    await expect(header).toHaveText("general");
+    await expect(page.locator("[data-testid='channel-sidebar']")).toBeVisible();
+    await expectNoView(page);
+
+    // → settings, Escape closes it and focus returns to the opener.
+    const gear = page.locator("button[aria-label='Settings']");
+    await gear.focus();
+    await page.keyboard.press("Enter");
+    const overlay = page.locator("[data-testid='settings-overlay']");
+    await expect(overlay).toHaveClass(/open/);
+    await page.keyboard.press("Escape");
+    await expect(overlay).not.toHaveClass(/open/);
+    await expect(gear).toBeFocused();
+
+    // → logout
+    await gear.click();
+    await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await expect(page.locator("[data-testid='app-layout']")).toHaveCount(0, { timeout: 10_000 });
+
+    // → the next session starts on a channel, with no view left over.
+    await signIn(page);
+    await expectNoView(page);
+    await expect(page.locator("[data-testid='settings-overlay']")).not.toHaveClass(/open/);
+  });
+});
