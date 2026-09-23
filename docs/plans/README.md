@@ -89,7 +89,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Ledger at 2026-09-23: **446 fixed / 1 open / 4 declined / 1 duplicate = 452**
+Current ledger summary (updated 2026-09-23): **446 fixed / 1 open / 4 declined / 1 duplicate = 452**
 (PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
 change; OC-0448 was fixed by verifying container digests before moving release
 tags; the OC-0446/OC-0447 harness corrections completed channel spreading and
@@ -103,9 +103,13 @@ tooling does check:
 
 ```
 node .superpowers/render-ledger.mjs --check   # the ledger's schema is valid
-node scripts/check-doc-counts.mjs             # documents agree with it, and
-                                              # FINDINGS.md is not stale
+node scripts/check-doc-counts.mjs             # current summaries agree with it
 ```
+
+Dated baselines and signed scorecards retain their as-measured observations
+at the cited source commits. They are not live ledger summaries and are not
+enforced by the count check. Correct an overwritten observation with a dated
+note and its source revision; do not refresh it to match new ledger totals.
 
 ## Adding a plan
 

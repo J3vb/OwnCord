@@ -74,6 +74,9 @@ together as if each row were a unique defect:
 
 ## Canonical findings-ledger truth
 
+Current summary: this table tracks the live ledger, independently of dated
+baselines and scorecards.
+
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     446 |

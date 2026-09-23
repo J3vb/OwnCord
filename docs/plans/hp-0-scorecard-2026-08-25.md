@@ -15,32 +15,39 @@ complete. Part-closes `R-08`.
 Acceptance is not a claim that OwnCord is beta-ready. It is a claim that the
 baseline is **truthful, reproducible, and sufficient to begin B1**.
 
+> **Correction — 2026-09-23 (B10 / B1/G-04):** Later live-ledger updates
+> overwrote the path-resolution row and Question 2. Restored the signed
+> observations from `7c286abe` (HP-0 acceptance, PR #1410), checked against
+> its cited source ledger at `6a1561fa`: 348 records, including 38 open
+> (11 medium / 27 low). The hunt, path and phase observations below belong
+> to that 2026-08-25 measurement, not today's ledger.
+
 ## Question 1 — what is green, red, unavailable, and unverified
 
-| Metric                                | Baseline                     | Target             | Actual                                         | Evidence                                                                               |
-| ------------------------------------- | ---------------------------- | ------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Required checks green                 | refresh in B0                | 100%               | **green** — 10 pinned checks pass              | PR #1410 on `dev`; pinned set below                                                    |
-| Open P0                               | 4 (G-01, G-02, G-03, C-06)   | 0 for B0           | **0** — all four closed                        | [b0-baseline](b0-baseline-2026-08-25.md) dispositions                                  |
-| Open P1                               | 45                           | 0 by B10           | **45**, none in B0 scope                       | [register](repo-health-issue-register-2026-08-23.md), phases B1–B10                    |
-| Unresolved security findings          | private count                | 0 by B10           | **7**, all publicly owned, 0 unmapped          | Question 4 below                                                                       |
-| Requirement rows release-qualified    | 0                            | 100% by B10        | **0**                                          | [traceability](beta-requirements-traceability-2026-08-23.md)                           |
-| Server aggregate coverage             | 74.6%                        | ratchet in B3      | **74.6%** measured                             | b0-baseline, measured                                                                  |
-| Client honest coverage                | refresh in B0                | ratchet in B7      | **not measured** — see gaps                    | `C-03`, B7                                                                             |
-| Static-analysis warnings              | 471 Oxlint                   | 0 unapproved by B7 | **471**, unchanged                             | `C-02`, B7                                                                             |
-| Server builds (4 tag variants)        | —                            | pass               | **pass** ×4                                    | measured                                                                               |
-| `go vet` / `-race` / `-tags deadlock` | —                            | pass               | **pass**                                       | measured                                                                               |
-| `golangci-lint`                       | claimed broken (G-05)        | pass               | **0 issues**, 19 linters, 1.18s                | G-05 **refuted**                                                                       |
-| Client unit + integration             | 2 failing                    | green              | **5257 passed / 0 failed**                     | G-01, G-02 fixed                                                                       |
-| Client `tsc` / `lint` / `prettier`    | —                            | pass               | **pass**                                       | measured                                                                               |
-| Playwright                            | never terminated             | green and exits    | **293 passed, exit 0, 37s**                    | `C-06` fixed                                                                           |
-| Rust tests + clippy                   | **carried, not re-measured** | pass               | **115 passed, clippy `-D warnings` exit 0**    | **re-measured 2026-08-25**; CI `Rust Unit Tests` green on Linux                        |
-| Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                                        |
-| Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                                               |
-| Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                                     |
-| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 452 records**                 | 378 re-verified 2026-08-29; OC-0379–0383 path-verified at their 2026-08-31/09-01 fixes |
-| Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                                                  |
-| 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                                             |
-| Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                                     |
+| Metric                                | Baseline                     | Target             | Actual                                         | Evidence                                                            |
+| ------------------------------------- | ---------------------------- | ------------------ | ---------------------------------------------- | ------------------------------------------------------------------- |
+| Required checks green                 | refresh in B0                | 100%               | **green** — 10 pinned checks pass              | PR #1410 on `dev`; pinned set below                                 |
+| Open P0                               | 4 (G-01, G-02, G-03, C-06)   | 0 for B0           | **0** — all four closed                        | [b0-baseline](b0-baseline-2026-08-25.md) dispositions               |
+| Open P1                               | 45                           | 0 by B10           | **45**, none in B0 scope                       | [register](repo-health-issue-register-2026-08-23.md), phases B1–B10 |
+| Unresolved security findings          | private count                | 0 by B10           | **7**, all publicly owned, 0 unmapped          | Question 4 below                                                    |
+| Requirement rows release-qualified    | 0                            | 100% by B10        | **0**                                          | [traceability](beta-requirements-traceability-2026-08-23.md)        |
+| Server aggregate coverage             | 74.6%                        | ratchet in B3      | **74.6%** measured                             | b0-baseline, measured                                               |
+| Client honest coverage                | refresh in B0                | ratchet in B7      | **not measured** — see gaps                    | `C-03`, B7                                                          |
+| Static-analysis warnings              | 471 Oxlint                   | 0 unapproved by B7 | **471**, unchanged                             | `C-02`, B7                                                          |
+| Server builds (4 tag variants)        | —                            | pass               | **pass** ×4                                    | measured                                                            |
+| `go vet` / `-race` / `-tags deadlock` | —                            | pass               | **pass**                                       | measured                                                            |
+| `golangci-lint`                       | claimed broken (G-05)        | pass               | **0 issues**, 19 linters, 1.18s                | G-05 **refuted**                                                    |
+| Client unit + integration             | 2 failing                    | green              | **5257 passed / 0 failed**                     | G-01, G-02 fixed                                                    |
+| Client `tsc` / `lint` / `prettier`    | —                            | pass               | **pass**                                       | measured                                                            |
+| Playwright                            | never terminated             | green and exits    | **293 passed, exit 0, 37s**                    | `C-06` fixed                                                        |
+| Rust tests + clippy                   | **carried, not re-measured** | pass               | **115 passed, clippy `-D warnings` exit 0**    | **re-measured 2026-08-25**; CI `Rust Unit Tests` green on Linux     |
+| Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                     |
+| Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                            |
+| Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                  |
+| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 348 records**                 | re-verified at `6a1561fa`                                           |
+| Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                               |
+| 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                          |
+| Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                  |
 
 ### Accepted with known gaps
 
@@ -63,45 +70,27 @@ Nothing here is a B1 blocker.
 
 **No confirmed issue blocks B1.**
 
-Open ledger, re-verified 2026-08-29; counts re-derived 2026-08-31 after B3-9
-(PR #1454) closed `OC-0345`, `OC-0346`, `OC-0376`, `OC-0377`, `OC-0378`, the
-2026-08-31 post-merge audit recorded `OC-0379` fixed on arrival, the B3-8
-role family closed `OC-0374`, and its message/read-state family closed
-`OC-0323`, `OC-0357` and `OC-0358`; B4-3 closed `OC-0321`; B4-12(a) closed `OC-0313` and `OC-0329`; B4-12(b) closed `OC-0314`; B4-12(d) closed `OC-0340` and `OC-0341`; B4-7's second half closed `OC-0354`; B4-12(c) closed `OC-0324`; re-derived again 2026-09-20 when the
-2026-09-20 review added `OC-0448`-`OC-0450`, and 2026-09-23 when PR #1707's
-presence retry fix closed `OC-0451` (added by N14), `OC-0448` was fixed by
-verifying container digests before moving release tags, and the
-`OC-0446`/`OC-0447` harness corrections completed channel spreading and
-restart measurement:
+Open ledger, re-verified at `6a1561fa`:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 446     |
-| open      | **1**   |
-| declined  | 4       |
+| fixed     | 306     |
+| open      | **38**  |
+| declined  | 3       |
 | duplicate | 1       |
-| **total** | **452** |
+| **total** | **348** |
 
-Of the 42 open records:
+Of the 38 open records:
 
-- **1 high, 8 medium, 33 low. Zero critical.** The high is `OC-0350`, an
-  admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
-- Three hunts: 19 from `general-2026-08-22-b`, 22 from `general-2026-08-29`,
-  1 from `b2-1-fixture-capture-2026-08-28` (the 2026-08-29 hunt count is down two: `OC-0374` closed with the role family, `OC-0354` in B4-7's second half; the 2026-08-22 count is down seven more: `OC-0313` and `OC-0329` closed in B4-12(a), `OC-0321` in B4-3, `OC-0314` in B4-12(b), `OC-0340` and `OC-0341` in B4-12(d), `OC-0324` in B4-12(c)). The three
-  `b3-1-auth-characterization-2026-08-29` records (defects the auth
-  characterization rows pinned as-is) were fixed in B3-9 on 2026-08-30.
-- **All 42 resolve to a live `file:line`** — 0 dead paths, re-checked
-  2026-08-29; the five B3-9 closed were live then and are fixed now.
-  `OC-0323` used to be the exception (its line had drifted past end of file
-  when B2 work shortened `Server/service/channel.go`); the message/read-state
-  family fixed it, so the exception is gone rather than carried.
-- 29 sit under `Client/`, 13 under `Server/`.
-- **None of the 2026-08-22 records is assigned to B1**; their register phases
-  span B2–B10. The 2026-08-29 records are not yet phased in the register.
+- **11 medium, 27 low. Zero high, zero critical.**
+- All from one hunt, `general-2026-08-22-b`.
+- **All 38 resolve to a live `file:line`** — 0 dead paths across all 348 records,
+  re-checked at this commit, not carried from B0's check at `5cc08889`.
+- 22 sit under `Client/tauri-client/`, 16 under `Server/`.
+- **None is assigned to B1.** Their register phases span B2–B10 only.
 
-The 2026-08-22 records are therefore accepted as _counted, non-stale, and
-assigned_ rather than individually adjudicated; the 2026-08-29 records are
-counted and path-checked but not yet phased. Deciding each is bughunt-fix work. The 22 under the
+They are therefore accepted as _counted, non-stale, and assigned_ rather than
+individually adjudicated. Deciding each is bughunt-fix work. The 22 under the
 client path are a **sequencing input to B1-1**, not a blocker: the flatten must
 re-point their recorded paths, and the same dead-path check above is the proof.
 
