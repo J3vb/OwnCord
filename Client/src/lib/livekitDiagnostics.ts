@@ -3,6 +3,7 @@ import type { Room } from "livekit-client";
 import { RoomEvent, Track } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
+import { onRoom } from "../features/voice/releaseRoom";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
 
@@ -10,19 +11,19 @@ const log = createLogger("livekitDiagnostics");
 
 /** Attach lightweight diagnostic-only event listeners to a Room. */
 export function attachDiagnosticListeners(room: Room): void {
-  room.on(RoomEvent.Reconnecting, () => {
+  onRoom(room, RoomEvent.Reconnecting, () => {
     log.warn("LiveKit room reconnecting");
   });
-  room.on(RoomEvent.Reconnected, () => {
+  onRoom(room, RoomEvent.Reconnected, () => {
     log.info("LiveKit room reconnected");
   });
-  room.on(RoomEvent.SignalReconnecting, () => {
+  onRoom(room, RoomEvent.SignalReconnecting, () => {
     log.debug("LiveKit signal reconnecting");
   });
-  room.on(RoomEvent.MediaDevicesError, (error: Error) => {
+  onRoom(room, RoomEvent.MediaDevicesError, (error: Error) => {
     log.error("LiveKit media device error", { error: error.message });
   });
-  room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+  onRoom(room, RoomEvent.ConnectionQualityChanged, (quality, participant) => {
     if (participant.isLocal) {
       log.debug("Local connection quality changed", { quality });
     }
