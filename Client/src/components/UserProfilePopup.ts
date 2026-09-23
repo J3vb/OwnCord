@@ -51,6 +51,8 @@ export interface UserProfilePopupOptions {
   readonly onCall?: (userId: number) => void;
   /** Called when the user clicks "Report" (B9-10); the popup closes first. */
   readonly onReport?: (userId: number) => void;
+  /** Called once when the popup closes, however it was closed. */
+  readonly onClose?: () => void;
 }
 
 export type UserProfilePopupComponent = MountableComponent & {
@@ -105,10 +107,9 @@ export function createUserProfilePopup(
   }
 
   function close(): void {
-    if (overlay !== null) {
-      overlay.remove();
-      overlay = null;
-    }
+    if (overlay === null) return;
+    overlay.remove();
+    overlay = null;
     popup = null;
     disposable.destroy();
 
@@ -116,6 +117,7 @@ export function createUserProfilePopup(
     if (previousFocus instanceof HTMLElement) {
       previousFocus.focus();
     }
+    options.onClose?.();
   }
 
   /**

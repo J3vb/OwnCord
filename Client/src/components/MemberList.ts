@@ -277,7 +277,7 @@ function createMemberItem(
     const seq = ++popupSeq;
     void import("@components/UserProfilePopup").then(({ createUserProfilePopup }) => {
       if (seq !== popupSeq || signal.aborted) return;
-      activePopup = createUserProfilePopup({
+      const popup = createUserProfilePopup({
         user: {
           id: live.id,
           username: live.username,
@@ -295,8 +295,12 @@ function createMemberItem(
         ...(isSelf || onReportUser === undefined
           ? {}
           : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+        onClose: () => {
+          if (activePopup === popup) activePopup = null;
+        },
       });
-      activePopup.mount(document.body);
+      activePopup = popup;
+      popup.mount(document.body);
     });
   };
   item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });

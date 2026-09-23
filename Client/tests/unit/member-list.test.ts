@@ -775,6 +775,35 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
   });
 
+  it("returns focus to the row that opened the profile after an earlier one closed (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const rowA = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    const rowB = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    const openFrom = async (row: HTMLElement): Promise<void> => {
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+      );
+    };
+    const escape = (): void => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    };
+
+    await openFrom(rowA);
+    escape();
+    expect(document.activeElement).toBe(rowA);
+
+    await openFrom(rowB);
+    escape();
+    expect(document.activeElement).toBe(rowB);
+  });
+
   it("describes each row by its custom status and presence, kept current (B9-10)", () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
