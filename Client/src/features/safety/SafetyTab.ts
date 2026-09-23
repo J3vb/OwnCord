@@ -2,12 +2,14 @@
  * The Settings "Safety" tab body (B9-15): the current restriction and the
  * caller's own moderation history (GET /users/me/moderation). Shows only what
  * that member-safe read returns: never an actor, reporter, evidence or note.
- * Loaded on first open (destinations.ts), outside the MainPage chunk.
+ * Its Appeals section (B9-16) files, withdraws and tracks the caller's own
+ * appeals. Loaded on first open (destinations.ts), outside the MainPage chunk.
  */
 
 import type { OwnModerationAction } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { formatUntil, formatWhen, safetyText as t } from "../../i18n/safety";
+import { createAppealsSection, replaceKeepingFocus, type AppealsApi } from "./Appeals";
 import { refreshOwnModeration, safetyStore, serverNow, serverTime } from "./store";
 
 function historyStatus(row: OwnModerationAction): string[] {
@@ -30,7 +32,10 @@ function historyStatus(row: OwnModerationAction): string[] {
   return parts;
 }
 
-function buildHistoryRow(row: OwnModerationAction): HTMLLIElement {
+function buildHistoryRow(
+  row: OwnModerationAction,
+  appealButton: (row: OwnModerationAction) => HTMLButtonElement | null,
+): HTMLLIElement {
   const li = createElement("li", {
     class: "safety-history-row",
     "data-testid": `safety-history-${row.id}`,
@@ -53,11 +58,20 @@ function buildHistoryRow(row: OwnModerationAction): HTMLLIElement {
   if (status.length > 0) {
     li.appendChild(createElement("p", { class: "setting-desc" }, status.join(" · ")));
   }
+  const appeal = appealButton(row);
+  if (appeal !== null) li.appendChild(appeal);
   return li;
 }
 
-/** Fill the Safety tab `pane` (the Q2 destination the banner links to). */
-export function renderSafetyTab(pane: HTMLDivElement, signal: AbortSignal): void {
+/**
+ * Fill the Safety tab `pane` (the Q2 destination the banner links to).
+ * Without `api` the history offers no Appeal and the appeals no Withdraw.
+ */
+export function renderSafetyTab(
+  pane: HTMLDivElement,
+  signal: AbortSignal,
+  api: AppealsApi | null = null,
+): void {
   const restrictions = createElement("p", { class: "setting-desc", role: "status" });
   const historyStatusEl = createElement("p", { class: "setting-desc", role: "status" });
   const retry = createElement(
@@ -67,15 +81,22 @@ export function renderSafetyTab(pane: HTMLDivElement, signal: AbortSignal): void
   );
   retry.addEventListener("click", () => refreshOwnModeration(), { signal });
   const list = createElement("ul", { class: "safety-history", "aria-label": t("tab.history") });
+  const historyHeading = createElement(
+    "h3",
+    { class: "safety-heading", tabindex: "-1" },
+    t("tab.history"),
+  );
+  const appeals = createAppealsSection(api, signal);
 
   pane.append(
     createElement("h3", { class: "safety-heading" }, t("tab.restrictions")),
     restrictions,
-    createElement("h3", { class: "safety-heading" }, t("tab.history")),
+    historyHeading,
     createElement("p", { class: "setting-desc" }, t("tab.historyHint")),
     historyStatusEl,
     retry,
     list,
+    appeals.root,
   );
 
   function render(): void {
@@ -92,7 +113,12 @@ export function renderSafetyTab(pane: HTMLDivElement, signal: AbortSignal): void
     else if (history === null) status = t("tab.loading");
     else if (history.length === 0) status = t("tab.empty");
     setText(historyStatusEl, status);
-    list.replaceChildren(...(historyFailed ? [] : (history ?? []).map(buildHistoryRow)));
+    const rows = historyFailed ? [] : (history ?? []);
+    replaceKeepingFocus(
+      list,
+      rows.map((row) => buildHistoryRow(row, appeals.appealButton)),
+      historyHeading,
+    );
   }
 
   render();
