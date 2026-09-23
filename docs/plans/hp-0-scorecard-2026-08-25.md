@@ -76,8 +76,8 @@ restart measurement:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 445     |
-| open      | **2**   |
+| fixed     | 446     |
+| open      | **1**   |
 | declined  | 4       |
 | duplicate | 1       |
 | **total** | **452** |
