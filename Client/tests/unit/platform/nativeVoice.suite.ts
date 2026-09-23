@@ -64,6 +64,7 @@ export function describeNativeVoiceSuite(
       await ctx.subject.setMicrophone(7, true);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
       await ctx.subject.setVolume(7, "user-9", 0.5);
+      await ctx.subject.setScreenshareVolume(7, "user-9", 0.25);
       await ctx.subject.disconnect(7);
       await ctx.subject.clearRoomKey();
       expect(ctx.native.commands()).toEqual([
@@ -73,6 +74,7 @@ export function describeNativeVoiceSuite(
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },
         ],
         ["native_voice_set_volume", { session: 7, identity: "user-9", volume: 0.5 }],
+        ["native_voice_set_screenshare_volume", { session: 7, identity: "user-9", volume: 0.25 }],
         ["native_voice_disconnect", { session: 7 }],
         ["native_voice_clear_key", undefined],
       ]);

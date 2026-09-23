@@ -51,6 +51,8 @@ function setup(initial: SessionState = { type: "idle" }) {
     setRoom: vi.fn(),
     cleanupAllAudioElementsFull: vi.fn(),
     getEffectiveVolume: (userId: number) => userId / 10,
+    getScreenshareGain: (userId: number) => userId / 20,
+    setScreenshareGainListener: vi.fn(),
   };
   const deviceManager = {
     setRoom: vi.fn(),
@@ -85,7 +87,16 @@ function setup(initial: SessionState = { type: "idle" }) {
     applyMicMuteState: vi.fn(async () => {}),
   };
   const lifecycle = new RoomLifecycle(host as unknown as RoomLifecycleHost);
-  return { host, lifecycle, ws, e2ee, audioPipeline, deviceManager, getState: () => state };
+  return {
+    host,
+    lifecycle,
+    ws,
+    e2ee,
+    audioPipeline,
+    audioElements,
+    deviceManager,
+    getState: () => state,
+  };
 }
 
 beforeEach(() => {
@@ -173,9 +184,14 @@ describe("RoomLifecycle on the Linux native backend", () => {
       on: vi.fn(),
       disconnect: vi.fn(async () => {}),
       removeAllListeners: vi.fn(),
+      applyScreenshareVolumes: vi.fn(),
     };
     const createNativeRoom = vi.fn(
-      (_audio: unknown, _volumeOf: (identity: string) => number) => nativeRoom,
+      (
+        _audio: unknown,
+        _volumeOf: (identity: string) => number,
+        _screenshareVolumeOf: (identity: string) => number,
+      ) => nativeRoom,
     );
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
@@ -189,10 +205,17 @@ describe("RoomLifecycle on the Linux native backend", () => {
     expect(createNativeRoom).toHaveBeenCalledWith(
       { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       expect.any(Function),
+      expect.any(Function),
     );
     // Participants start at their saved per-user volume, keyed by user id.
     const volumeOf = createNativeRoom.mock.calls[0]![1];
     expect(volumeOf("user-7")).toBe(0.7);
+    // Screen-share audio too, and a later change is re-read by the room.
+    const screenshareVolumeOf = createNativeRoom.mock.calls[0]![2];
+    expect(screenshareVolumeOf("user-7")).toBe(0.35);
+    const listener = ctx.audioElements.setScreenshareGainListener.mock.calls[0]![0] as () => void;
+    listener();
+    expect(nativeRoom.applyScreenshareVolumes).toHaveBeenCalledTimes(1);
     expect(vi.mocked(WebRoom).mock.calls.length).toBe(webRoomsBefore);
     expect(workers).toHaveLength(0);
     // The same eight handlers the web room gets (RoomEvent is stubbed empty

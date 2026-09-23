@@ -131,8 +131,9 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 **Commands and events.** `native_voice_set_key` (install/rotate),
 `native_voice_clear_key` (leave), `native_voice_connect` → `{session, identity}`,
 `native_voice_disconnect(session)`, `native_voice_set_microphone`,
-`native_voice_set_subscribed` (deafen), `native_voice_set_volume` (per-user
-volume, see Audio parity below), `native_voice_debug_info`. Room events
+`native_voice_set_subscribed` (deafen), `native_voice_set_volume` and
+`native_voice_set_screenshare_volume` (per-user and screen-share audio volume,
+see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state, participant join/leave).
@@ -411,31 +412,44 @@ pipewire-pulse; no libpulse link) and falls back to ALSA.
 **What follows the gain.** `native_voice_set_volume(session, identity,
 volume)` sets the gain for that participant's microphone tracks (1 is unity;
 the value `AudioElements` computes as per-user volume × output volume), kept
-for the session so a gain set before the track arrives applies. Other sources
-play at unity, as on the web path, where `setVolume` defaults to the
-microphone. `NativeRoom` applies each participant's saved volume when the
-participant appears (the web path does it on the audio `TrackSubscribed`,
-which native never raises), and `setUserVolume` / `setOutputVolume` reach it
-through the shared `AudioElements` unchanged, so the volume menu and the
-settings tab's Output Volume slider (no longer hidden on Linux) work as on
-Windows, persisted the same way (`userVolume_<id>:<host>`, `outputVolume`).
+for the session so a gain set before the track arrives applies.
+`native_voice_set_screenshare_volume(session, identity, volume)` does the same
+for their screen-share audio, with the value the web path gives its
+screen-share audio element: the stream tile's volume (0–1) × output volume,
+clamped to 0–1, and 0 while the tile mutes it. Any other source plays at unity.
+`NativeRoom` applies each participant's saved volumes when the participant
+appears (the web path does it on the audio `TrackSubscribed`, which native
+never raises), and `setUserVolume` / `setOutputVolume` reach it through the
+shared `AudioElements` unchanged. The screen-share volume lives on
+`AudioElements`' audio elements on the web path, which native never creates,
+so `AudioElements` tells the native room when a tile's volume or mute or the
+output volume changes (a listener only `RoomLifecycle.createNativeRoom` sets)
+and the room re-sends the gains that changed. The volume menu, the tile's
+stream volume and mute, and the settings tab's Output Volume slider (no
+longer hidden on Linux) thus work as on Windows, persisted the same way
+(`userVolume_<id>:<host>`, `outputVolume`).
 
 **Output devices** now come from the output host, not the device module:
 `native_voice_list_devices` lists `cpal`'s output devices (the host default
 first, ids are `cpal`'s stable device ids, names the sink descriptions) and an
 `audiooutput` switch reopens the output stream on the chosen device (an unknown
-id falls back to the default and reports it). A sink that disappears mid-call
-is moved by the sound server itself; the stream error is only logged.
+id falls back to the default and reports it; the device already playing is
+left alone, and a device that fails to open leaves the current stream
+playing). A sink that disappears mid-call is moved by the sound server itself;
+the stream error is only logged.
 
 **Echo cancellation caveat.** The echo canceller's reference is the device
 module's synthetic mix: every remote track at unity, on the pump's clock
 rather than the sound card's. AEC3 estimates the delay and adapts to a
 scaled echo path, so one user at a non-unity volume is a gain it tracks; two
 users at different volumes talking at once is a mix the reference only
-approximates.
+approximates. The follow-up RNNoise PR closes this: it moves capture to the
+app's own pipeline, where the app owns the APM, and feeds the actual played
+mix (post-gain, including the queue delay) as the AEC reverse stream.
 
 **Proof.** `playout.rs`'s unit tests drive the mixer with synthetic tones
-(gain per participant, other participants and non-microphone audio untouched,
+(gain per participant and per microphone or screen-share audio, other
+participants and other audio untouched,
 a gain set before its track, priming and drift). The interop test
 (`--volume 0.5`) measures it end to end: the native peer pulls its session's
 own playout mix at the device cadence and compares it with the direct decode

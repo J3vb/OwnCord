@@ -33,11 +33,28 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// Which of a participant's volumes a queue follows, as on the web path: the
+/// microphone's (`RemoteParticipant.setVolume`) or the screen-share audio's
+/// (the stream tile's volume and mute). Other audio plays at unity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Volume {
+    Microphone,
+    ScreenShare,
+}
+
+impl Volume {
+    fn of(source: TrackSource) -> Option<Self> {
+        match source {
+            TrackSource::Microphone => Some(Self::Microphone),
+            TrackSource::ScreenshareAudio => Some(Self::ScreenShare),
+            _ => None,
+        }
+    }
+}
+
 struct Queue {
     identity: String,
-    /// Only microphone audio follows the participant's volume, as on the web
-    /// path (`RemoteParticipant.setVolume` defaults to the microphone source).
-    follows_volume: bool,
+    volume: Option<Volume>,
     samples: VecDeque<i16>,
     primed: bool,
 }
@@ -45,7 +62,8 @@ struct Queue {
 #[derive(Default)]
 struct MixerState {
     queues: HashMap<String, Queue>,
-    gains: HashMap<String, f32>,
+    /// Per identity, indexed by `Volume`.
+    gains: [HashMap<String, f32>; 2],
 }
 
 /// Mono 48 kHz queues, one per remote audio track, mixed on demand.
@@ -53,20 +71,18 @@ struct MixerState {
 pub struct Mixer(Mutex<MixerState>);
 
 impl Mixer {
-    /// The volume for `identity`'s microphone, 1.0 is unity. Kept for the
-    /// session, so a gain set before the track arrives still applies.
-    pub fn set_gain(&self, identity: &str, gain: f32) {
-        lock(&self.0)
-            .gains
-            .insert(identity.to_string(), gain.max(0.0));
+    /// `identity`'s `volume`, 1.0 is unity. Kept for the session, so a gain
+    /// set before the track arrives still applies.
+    pub fn set_gain(&self, identity: &str, volume: Volume, gain: f32) {
+        lock(&self.0).gains[volume as usize].insert(identity.to_string(), gain.max(0.0));
     }
 
-    fn add(&self, sid: &str, identity: &str, follows_volume: bool) {
+    fn add(&self, sid: &str, identity: &str, volume: Option<Volume>) {
         lock(&self.0).queues.insert(
             sid.to_string(),
             Queue {
                 identity: identity.to_string(),
-                follows_volume,
+                volume,
                 samples: VecDeque::with_capacity(MAX_QUEUED),
                 primed: false,
             },
@@ -108,11 +124,11 @@ impl Mixer {
                 }
                 q.primed = true;
             }
-            let gain = if q.follows_volume {
-                gains.get(&q.identity).copied().unwrap_or(1.0)
-            } else {
-                1.0
-            } / 32768.0;
+            let gain = q
+                .volume
+                .and_then(|v| gains[v as usize].get(&q.identity).copied())
+                .unwrap_or(1.0)
+                / 32768.0;
             let n = frames.min(q.samples.len());
             for (frame, s) in out.chunks_exact_mut(channels).zip(q.samples.drain(..n)) {
                 let v = f32::from(s) * gain;
@@ -146,7 +162,7 @@ impl Listener {
                 self.mixer.add(
                     &sid,
                     participant.identity().as_str(),
-                    publication.source() == TrackSource::Microphone,
+                    Volume::of(publication.source()),
                 );
                 let reader =
                     tokio::spawn(read_track(self.mixer.clone(), sid.clone(), track.clone()));
@@ -214,7 +230,8 @@ pub fn list_outputs() -> Vec<DeviceInfo> {
 pub struct Playout {
     mixer: Arc<Mixer>,
     readers: Readers,
-    output: Option<cpal::Stream>,
+    /// The open output stream and the id of the device it plays on.
+    output: Option<(String, cpal::Stream)>,
 }
 
 impl Playout {
@@ -233,18 +250,21 @@ impl Playout {
         lock(&self.readers).len()
     }
 
-    /// (Re)open the output stream on device `id` (empty: the default). An
-    /// unknown id opens the default and reports the fallback as an error,
-    /// the same contract as the capture switch.
+    /// Open the output stream on device `id` (empty: the default), unless it
+    /// already plays there. An unknown id opens the default and reports the
+    /// fallback as an error, the same contract as the capture switch. A
+    /// device that fails to open leaves the current stream playing.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
         let listed = output_devices(&cpal::default_host());
         let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
         let (index, fell_back) = resolve_device(id, &infos);
-        let (_, device) = index
+        let (info, device) = index
             .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
             .ok_or("no playout device")?;
-        self.output = None;
-        self.output = Some(open_output(&device, self.mixer.clone())?);
+        if self.output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
+            let stream = open_output(&device, self.mixer.clone())?;
+            self.output = Some((info.id, stream));
+        }
         if fell_back {
             return Err(format!(
                 "playout device {id} not found; switched to the default"
@@ -275,7 +295,7 @@ fn open_output(device: &cpal::Device, mixer: Arc<Mixer>) -> Result<cpal::Stream,
             },
             move |out, _| mixer.mix(out, channels as usize),
             // ponytail: a lost device only logs; the sound servers move the
-            // stream to another sink themselves, and a switch reopens it.
+            // stream to another sink themselves, and switching device reopens it.
             |e| log::warn!("[native_voice] playout stream: {e}"),
             None,
         )
@@ -315,9 +335,9 @@ mod tests {
         let tone = sine(8000.0, PRIME);
         let level = |gain: Option<f32>| {
             let m = Mixer::default();
-            m.add("TR_a", "user-1", true);
+            m.add("TR_a", "user-1", Some(Volume::Microphone));
             if let Some(g) = gain {
-                m.set_gain("user-1", g);
+                m.set_gain("user-1", Volume::Microphone, g);
             }
             m.push("TR_a", &tone);
             rms(&mixed(&m, PRIME))
@@ -330,19 +350,19 @@ mod tests {
     }
 
     #[test]
-    fn a_gain_set_on_one_user_leaves_the_others_and_non_microphone_audio_alone() {
+    fn a_gain_set_on_one_user_leaves_the_others_and_their_screen_share_audio_alone() {
         let tone = sine(8000.0, PRIME);
         let m = Mixer::default();
-        m.add("TR_a", "user-1", true);
-        m.add("TR_b", "user-2", true);
-        m.add("TR_s", "user-1", false);
-        m.set_gain("user-1", 0.0);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
+        m.add("TR_b", "user-2", Some(Volume::Microphone));
+        m.add("TR_s", "user-1", Some(Volume::ScreenShare));
+        m.set_gain("user-1", Volume::Microphone, 0.0);
         for sid in ["TR_a", "TR_b", "TR_s"] {
             m.push(sid, &tone);
         }
         let both = rms(&mixed(&m, PRIME));
         let only = Mixer::default();
-        only.add("TR_b", "user-2", true);
+        only.add("TR_b", "user-2", Some(Volume::Microphone));
         only.push("TR_b", &tone);
         let one = rms(&mixed(&only, PRIME));
         // user-1's microphone is silenced; user-2 and user-1's screen-share
@@ -351,10 +371,26 @@ mod tests {
     }
 
     #[test]
+    fn screen_share_audio_follows_its_own_gain_and_other_audio_plays_at_unity() {
+        let tone = sine(8000.0, PRIME);
+        let level = |volume: Option<Volume>| {
+            let m = Mixer::default();
+            m.add("TR_s", "user-1", volume);
+            m.set_gain("user-1", Volume::ScreenShare, 0.25);
+            m.set_gain("user-1", Volume::Microphone, 2.0);
+            m.push("TR_s", &tone);
+            rms(&mixed(&m, PRIME))
+        };
+        let unity = level(None);
+        assert!(unity > 0.1, "unity rms {unity}");
+        assert!((level(Some(Volume::ScreenShare)) / unity - 0.25).abs() < 0.01);
+    }
+
+    #[test]
     fn a_gain_set_before_the_track_arrives_applies_to_it() {
         let m = Mixer::default();
-        m.set_gain("user-1", 0.0);
-        m.add("TR_a", "user-1", true);
+        m.set_gain("user-1", Volume::Microphone, 0.0);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
         m.push("TR_a", &sine(8000.0, PRIME));
         assert_eq!(rms(&mixed(&m, PRIME)), 0.0);
     }
@@ -362,7 +398,7 @@ mod tests {
     #[test]
     fn a_queue_plays_only_once_primed_and_reprimes_after_running_dry() {
         let m = Mixer::default();
-        m.add("TR_a", "user-1", true);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
         m.push("TR_a", &vec![1000; PRIME - 1]);
         assert!(mixed(&m, 10).iter().all(|&s| s == 0.0), "not primed yet");
         m.push("TR_a", &[1000]);
@@ -376,8 +412,8 @@ mod tests {
     #[test]
     fn mono_is_copied_to_every_channel_and_the_sum_is_clipped() {
         let m = Mixer::default();
-        m.add("TR_a", "user-1", true);
-        m.set_gain("user-1", 10.0);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
+        m.set_gain("user-1", Volume::Microphone, 10.0);
         m.push("TR_a", &vec![20000; PRIME]);
         let mut out = vec![0.0; 2 * 4];
         m.mix(&mut out, 2);
@@ -387,7 +423,7 @@ mod tests {
     #[test]
     fn an_overfull_queue_drops_its_oldest_audio() {
         let m = Mixer::default();
-        m.add("TR_a", "user-1", true);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
         m.push("TR_a", &vec![1; MAX_QUEUED]);
         m.push("TR_a", &vec![2; PRIME]);
         let state = lock(&m.0);
@@ -400,7 +436,7 @@ mod tests {
     fn audio_for_an_unknown_or_removed_track_is_ignored() {
         let m = Mixer::default();
         m.push("TR_x", &[1000; PRIME]);
-        m.add("TR_a", "user-1", true);
+        m.add("TR_a", "user-1", Some(Volume::Microphone));
         m.remove("TR_a");
         m.push("TR_a", &[1000; PRIME]);
         assert!(mixed(&m, PRIME).iter().all(|&s| s == 0.0));

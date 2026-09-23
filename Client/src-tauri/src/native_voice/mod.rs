@@ -336,6 +336,24 @@ pub async fn native_voice_set_volume(
     Ok(())
 }
 
+/// Screen-share audio volume: the gain for `identity`'s screen-share audio (1.0
+/// is unity, 0 when muted), the value the web path gives its audio element.
+#[tauri::command]
+pub async fn native_voice_set_screenshare_volume(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    volume: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_screenshare_volume(&identity, volume);
+    Ok(())
+}
+
 /// Native resource counts for `getSessionDebugInfo` (B7-11).
 #[tauri::command]
 pub async fn native_voice_debug_info(

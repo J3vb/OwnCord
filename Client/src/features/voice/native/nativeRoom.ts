@@ -93,6 +93,7 @@ export class NativeRemotePublication {
 export class NativeRemoteParticipant {
   readonly trackPublications = new Map<string, NativeRemotePublication>();
   private volume = 1;
+  private screenshareVolume = 1;
   constructor(
     readonly identity: string,
     private readonly room: NativeRoom,
@@ -113,6 +114,12 @@ export class NativeRemoteParticipant {
   setVolume(volume: number): void {
     this.volume = volume;
     this.room.setVolume(this.identity, volume);
+  }
+  /** Screen-share audio's playout gain (0 when muted), sent on change. */
+  setScreenshareVolume(volume: number): void {
+    if (volume === this.screenshareVolume) return;
+    this.screenshareVolume = volume;
+    this.room.setScreenshareVolume(this.identity, volume);
   }
 }
 
@@ -186,10 +193,13 @@ export class NativeRoom {
   private pending: NativeVoiceEnvelope[] | null = null;
 
   /** `volumeOf` is the saved volume a participant starts at: the web path
-   *  applies it on the audio `TrackSubscribed`, which native never raises. */
+   *  applies it on the audio `TrackSubscribed`, which native never raises.
+   *  `screenshareVolumeOf` is their screen-share audio's, which the web path
+   *  sets on its audio element; `applyScreenshareVolumes` re-reads it. */
   constructor(
     private readonly audio: NativeVoiceAudioOptions,
     private readonly volumeOf: (identity: string) => number = () => 1,
+    private readonly screenshareVolumeOf: (identity: string) => number = () => 1,
   ) {}
 
   // --- Emitter (the livekit Room surface roomLifecycle wires) ---
@@ -378,6 +388,21 @@ export class NativeRoom {
       .catch((err) => log.warn("native setVolume failed", { identity, volume, err }));
   }
 
+  /** Screen-share audio volume: forwarded from the participant model. */
+  setScreenshareVolume(identity: string, volume: number): void {
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setScreenshareVolume(this.sessionId, identity, volume)
+      .catch((err) => log.warn("native setScreenshareVolume failed", { identity, volume, err }));
+  }
+
+  /** Re-read every participant's screen-share audio volume after a change
+   *  to it, its mute or the output volume. */
+  applyScreenshareVolumes(): void {
+    for (const p of this.remoteParticipants.values())
+      p.setScreenshareVolume(this.screenshareVolumeOf(p.identity));
+  }
+
   private releaseSubscription(): void {
     const stop = this.unsubscribe;
     this.unsubscribe = null;
@@ -400,6 +425,7 @@ export class NativeRoom {
     if (p === undefined) {
       this.remoteParticipants.set(identity, (p = new NativeRemoteParticipant(identity, this)));
       p.setVolume(this.volumeOf(identity));
+      p.setScreenshareVolume(this.screenshareVolumeOf(identity));
     }
     return p;
   }
@@ -510,6 +536,7 @@ function unsupported(what: string): Error {
 export function createNativeRoom(
   audio: NativeVoiceAudioOptions,
   volumeOf?: (identity: string) => number,
+  screenshareVolumeOf?: (identity: string) => number,
 ): NativeRoom {
-  return new NativeRoom(audio, volumeOf);
+  return new NativeRoom(audio, volumeOf, screenshareVolumeOf);
 }

@@ -704,7 +704,17 @@ impl NativeSession {
     /// Per-user volume: the gain for `identity`'s microphone, 1.0 is unity
     /// (the web path's `RemoteParticipant.setVolume`, 0 to 2 in practice).
     pub fn set_volume(&self, identity: &str, volume: f32) {
-        self.playout.mixer().set_gain(identity, volume);
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::Microphone, volume);
+    }
+
+    /// The gain for `identity`'s screen-share audio, 1.0 is unity (the web
+    /// path's screen-share element volume, 0 to 1, 0 when muted).
+    pub fn set_screenshare_volume(&self, identity: &str, volume: f32) {
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
     pub fn devices(&self) -> Result<Devices, String> {

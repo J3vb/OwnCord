@@ -114,6 +114,9 @@ export interface NativeVoice {
   /** Per-user volume: play `identity`'s microphone at `volume` (1 is unity),
    *  the value the web path hands `RemoteParticipant.setVolume`. */
   setVolume(session: number, identity: string, volume: number): Promise<void>;
+  /** Play `identity`'s screen-share audio at `volume` (1 is unity, 0 when
+   *  muted), the value the web path gives its screen-share audio element. */
+  setScreenshareVolume(session: number, identity: string, volume: number): Promise<void>;
   /** Publish (or replace) the camera; its frames then go up the session's
    *  frame socket. E2EE covers it with the room key, as for the microphone.
    *  Resolves with the publication's sid. */

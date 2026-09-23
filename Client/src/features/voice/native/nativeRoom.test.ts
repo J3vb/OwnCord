@@ -91,6 +91,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setVolume", args]);
         return Promise.resolve();
       },
+      setScreenshareVolume: (...args: unknown[]) => {
+        host.calls.push(["setScreenshareVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
         return Promise.resolve();
@@ -321,6 +325,27 @@ describe("NativeRoom room surface", () => {
     await room.disconnect();
     p.setVolume(0.2);
     expect(host.calls.at(-1)).toEqual(["disconnect", [1]]);
+  });
+
+  it("forwards each participant's screen-share audio volume when it changes", async () => {
+    const volumes = new Map([["user-2", 0.4]]);
+    const room = createNativeRoom(audio, undefined, (identity) => volumes.get(identity) ?? 1);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-2", tracks: [] }] },
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    const sent = () => host.calls.filter(([n]) => n === "setScreenshareVolume");
+    // Unity is the backend's default, so only user-2's saved volume is sent.
+    expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 0.4]]]);
+    volumes.set("user-3", 0);
+    room.applyScreenshareVolumes();
+    room.applyScreenshareVolumes();
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
+    ]);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {

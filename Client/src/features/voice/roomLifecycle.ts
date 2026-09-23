@@ -216,7 +216,9 @@ export class RoomLifecycle {
         autoGainControl: loadPref("autoGainControl", true),
       },
       (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
+      (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
     );
+    this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
     // The adapter is structurally the subset of Room the modules call; the
     // cast is the one seam where the two backends meet.
     const newRoom = nativeRoom as unknown as Room;

@@ -137,6 +137,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setVolume", args]);
         return Promise.resolve();
       },
+      setScreenshareVolume: (...args: unknown[]) => {
+        host.commands.push(["setScreenshareVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.commands.push(["setDevice", args]);
         return Promise.resolve();
@@ -340,10 +344,30 @@ describe("LiveKitSession on the Linux native backend", () => {
     // The volume menu, then the master output volume scaling everyone.
     session.setUserVolume(4, 150);
     session.setOutputVolume(50);
-    expect(host.commands).toEqual([
+    expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
       ["setVolume", [1, "user-4", 1.5]],
       ["setVolume", [1, "user-3", 0.25]],
       ["setVolume", [1, "user-4", 0.75]],
+    ]);
+  });
+
+  it("screen-share audio follows the tile's volume and mute and the output volume", async () => {
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    host.commands.length = 0;
+    const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
+    // Per-user stream volume x master output, clamped to 0-1; muted is 0.
+    session.setScreenshareAudioVolume(3, 0.8);
+    session.setOutputVolume(50);
+    session.muteScreenshareAudio(3, true);
+    session.muteScreenshareAudio(3, false);
+    session.setOutputVolume(200);
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-3", 0.8]],
+      ["setScreenshareVolume", [1, "user-3", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
+      ["setScreenshareVolume", [1, "user-3", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
     ]);
   });
 
