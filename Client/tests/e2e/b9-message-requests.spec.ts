@@ -394,8 +394,9 @@ test.describe("B9-6 Message Request decisions", () => {
     await page.keyboard.press("Enter");
     await expect(items(page)).toHaveCount(1);
     await expect(outcome(page)).toHaveText("Deleted Unknown user's request.");
-    // Removal moves focus to the next request: here, the one before it.
-    await expect(first.getByRole("button", { name: "Accept" })).toBeFocused();
+    // Removal moves focus to the next request's row: here, the one before it.
+    await expect(first).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
 
     // Ignore the last one with Space: focus falls back to the heading.
     await first.getByRole("button", { name: "Ignore" }).focus();
