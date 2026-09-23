@@ -3159,6 +3159,24 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("remote video is not paused by adaptiveStream", () => {
+    // The video grid plays each remote camera from its own MediaStream and
+    // never attach()es the track, so adaptiveStream sees no visible element.
+    // LiveKit re-checks on every server stream-state update (an SFU bandwidth
+    // pause and resume) and then pauses the camera for good: in CI a peer
+    // decoded one frame of a rejoined camera and nothing after it.
+    it("builds the Room with adaptiveStream off at the default quality", async () => {
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as { adaptiveStream?: unknown };
+      expect(lastOptions.adaptiveStream).toBe(false);
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {

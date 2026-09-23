@@ -159,9 +159,15 @@ export class RoomLifecycle {
     // removes from one discarded before it connected.
     Room.cleanupRegistry = false;
     const newRoom = new Room({
-      // Adaptive features reduce quality based on subscriber viewport —
-      // disable for "source" quality to maintain full resolution.
-      adaptiveStream: !isSource,
+      // adaptiveStream sizes and pauses a remote video by the elements it was
+      // attach()ed to, but the video grid plays its own MediaStream and never
+      // calls attach(). LiveKit re-checks visibility on every server
+      // stream-state update (an SFU bandwidth pause and resume), finds no
+      // visible element and pauses the camera for the rest of the
+      // subscription: the tile freezes on its last frame.
+      adaptiveStream: false,
+      // Dynacast stops publishing unused simulcast layers — off for "source"
+      // quality to keep full resolution.
       dynacast: !isSource,
       audioCaptureDefaults: {
         echoCancellation: loadPref("echoCancellation", true),
