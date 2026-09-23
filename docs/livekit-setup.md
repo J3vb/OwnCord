@@ -170,7 +170,7 @@ Client                     OwnCord Server              LiveKit Server
 **Client connection paths:**
 
 - **Proxy path** (`/livekit`): Client connects through OwnCord's HTTPS server. Avoids mixed-content issues.
-- **Direct URL** (`ws://localhost:7880`): Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` goes through the proxy path.
+- **Direct URL** (`ws://localhost:7880`): Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` goes through the proxy path, except on Linux desktop, where native voice uses a local server's `direct_url` as-is ([security.md](security.md#tauri-capabilities-least-privilege)).
 
 ---
 

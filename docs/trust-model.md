@@ -579,8 +579,8 @@ redirects, content types and concurrency (`Server/safefetch/classify.go`,
 The **desktop client** reaches, on its own: the server; LiveKit **signalling**
 through the server's `/livekit/*` proxy for remote servers, or **directly** to
 the LiveKit URL the server hands out when the server is local and that URL is
-itself loopback `ws:`/`http:` (`Client/src/lib/livekitUrlResolver.ts`
-`resolve`, `direct_url`); LiveKit **media**
+itself loopback `ws:`/`http:` (on Linux, where voice is native, whatever
+URL it is) (`Client/src/lib/livekitUrlResolver.ts` `resolve`, `direct_url`); LiveKit **media**
 always directly, to the SFU's advertised ICE endpoints on TCP 7881 / UDP
 50000–60000 (`Server/ws/livekit_process.go:130-133`; `docs/deployment.md`
 §Firewall and Ports); `www.youtube.com` and `img.youtube.com` for video

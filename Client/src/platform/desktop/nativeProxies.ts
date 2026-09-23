@@ -124,7 +124,8 @@ function isLoopbackDirectUrl(url: string): boolean {
 
 /** Resolve a LiveKit connection URL. Routes through the local Rust TLS
  *  proxy for remote servers (to handle self-signed certs), or returns
- *  the direct URL for a local server whose LiveKit is also on loopback. */
+ *  the direct URL for a local server whose LiveKit is also on loopback
+ *  (or any local server's, on Linux where voice is native). */
 async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
   if (serverHost !== null) {
     // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
