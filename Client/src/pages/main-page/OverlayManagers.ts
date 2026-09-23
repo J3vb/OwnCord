@@ -5,6 +5,7 @@
 
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
+import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
@@ -141,9 +142,10 @@ export function createQuickSwitcherManager(
         open();
       }
     };
-    document.addEventListener("keydown", handler);
+    const owner = new Disposable();
+    document.addEventListener("keydown", handler, { signal: owner.signal });
     return () => {
-      document.removeEventListener("keydown", handler);
+      owner.destroy();
       close();
     };
   }

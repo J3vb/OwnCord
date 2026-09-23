@@ -383,11 +383,18 @@ describeNativeVoiceSuite(async () => {
     disconnect: async () => undefined,
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
+    setVolume: async () => undefined,
+    setScreenshareVolume: async () => undefined,
     debugInfo: async () => undefined,
+    listDevices: async () => undefined,
+    setDevice: async () => undefined,
     onEvent: () => () => undefined,
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
     connectsAs: () => undefined,
+    publishesCameraAs: () => undefined,
+    hasDevices: () => undefined,
+    sharesScreenAs: () => undefined,
     commands: () => [],
     emits: async () => undefined,
   };

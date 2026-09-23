@@ -3,11 +3,29 @@
 // backend's command surface and its one event subscription. There is no
 // legacy binding — the capability is new with the Linux voice work.
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { NativeVoice, NativeVoiceEnvelope } from "../../../src/platform/contracts/nativeVoice";
+import type {
+  NativeVoice,
+  NativeVoiceDevices,
+  NativeVoiceEnvelope,
+  NativeVoiceScreenSources,
+  NativeVoiceScreenStarted,
+} from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
-  /** The host answers the next connect with this session and identity. */
-  connectsAs(session: number, identity: string): void;
+  /** The host answers the next connect with this session, identity and
+   *  frame-socket URL. */
+  connectsAs(session: number, identity: string, frames: string): void;
+  /** The host answers the next camera publish with this publication sid. */
+  publishesCameraAs(sid: string): void;
+  /** The host reports these devices on the next enumeration. */
+  hasDevices(devices: NativeVoiceDevices): void;
+  /** The host reports these shareable sources, then answers the next
+   *  screen capture start and publish with these. */
+  sharesScreenAs(
+    sources: NativeVoiceScreenSources,
+    started: NativeVoiceScreenStarted,
+    sid: string,
+  ): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
@@ -39,20 +57,23 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
-    check("connect resolves the host's session id and identity", async () => {
-      ctx.native.connectsAs(7, "user-42");
+    check("connect resolves the host's session id, identity and frame socket", async () => {
+      ctx.native.connectsAs(7, "user-42", "ws://127.0.0.1:9/token");
       await expect(ctx.subject.connect("ws://127.0.0.1:7881/lk", "tok", audio)).resolves.toEqual({
         session: 7,
         identity: "user-42",
+        frames: "ws://127.0.0.1:9/token",
       });
       expect(ctx.native.commands()).toEqual([
         ["native_voice_connect", { url: "ws://127.0.0.1:7881/lk", token: "tok", audio }],
       ]);
     });
 
-    check("scopes microphone, subscription and disconnect to a session id", async () => {
+    check("scopes microphone, subscription, volume and disconnect to a session id", async () => {
       await ctx.subject.setMicrophone(7, true);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
+      await ctx.subject.setVolume(7, "user-9", 0.5);
+      await ctx.subject.setScreenshareVolume(7, "user-9", 0.25);
       await ctx.subject.disconnect(7);
       await ctx.subject.clearRoomKey();
       expect(ctx.native.commands()).toEqual([
@@ -61,8 +82,67 @@ export function describeNativeVoiceSuite(
           "native_voice_set_subscribed",
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },
         ],
+        ["native_voice_set_volume", { session: 7, identity: "user-9", volume: 0.5 }],
+        ["native_voice_set_screenshare_volume", { session: 7, identity: "user-9", volume: 0.25 }],
         ["native_voice_disconnect", { session: 7 }],
         ["native_voice_clear_key", undefined],
+      ]);
+    });
+
+    check("publishes the camera per session and unpublishes it by its sid", async () => {
+      const camera = {
+        width: 1280,
+        height: 720,
+        maxBitrate: 1_700_000,
+        maxFramerate: 30,
+        simulcast: true,
+      };
+      ctx.native.publishesCameraAs("TR_cam");
+      await expect(ctx.subject.publishCamera(7, camera)).resolves.toBe("TR_cam");
+      await ctx.subject.unpublishCamera(7, "TR_cam");
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_publish_camera", { session: 7, options: camera }],
+        ["native_voice_unpublish_camera", { session: 7, sid: "TR_cam" }],
+      ]);
+    });
+
+    check("lists shareable sources, and starts, publishes and stops a capture", async () => {
+      const sources: NativeVoiceScreenSources = {
+        portal: false,
+        sources: [{ id: "screen:1", kind: "screen", title: "DP-1", thumbnail: null }],
+      };
+      const capture = { fps: 30, maxWidth: 1920, maxHeight: 1080 };
+      const publish = { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 };
+      ctx.native.sharesScreenAs(sources, { capture: 2, width: 1920, height: 1080 }, "TR_screen");
+      await expect(ctx.subject.screenSources()).resolves.toEqual(sources);
+      await expect(ctx.subject.startScreen(7, "screen:1", capture)).resolves.toEqual({
+        capture: 2,
+        width: 1920,
+        height: 1080,
+      });
+      await expect(ctx.subject.publishScreen(7, 2, publish)).resolves.toBe("TR_screen");
+      await ctx.subject.stopScreen(7, 2);
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_screen_sources", undefined],
+        ["native_voice_start_screen", { session: 7, source: "screen:1", capture }],
+        ["native_voice_publish_screen", { session: 7, capture: 2, options: publish }],
+        ["native_voice_stop_screen", { session: 7, capture: 2 }],
+      ]);
+    });
+
+    check("lists the host's devices and switches by their ids", async () => {
+      const devices = {
+        inputs: [{ id: "guid-mic", name: "USB Mic" }],
+        outputs: [{ id: "guid-spk", name: "Speakers" }],
+      };
+      ctx.native.hasDevices(devices);
+      await expect(ctx.subject.listDevices()).resolves.toEqual(devices);
+      await ctx.subject.setDevice(7, "audioinput", "guid-mic");
+      await ctx.subject.setDevice(7, "audiooutput", "");
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_list_devices", undefined],
+        ["native_voice_set_device", { session: 7, kind: "audioinput", deviceId: "guid-mic" }],
+        ["native_voice_set_device", { session: 7, kind: "audiooutput", deviceId: "" }],
       ]);
     });
 

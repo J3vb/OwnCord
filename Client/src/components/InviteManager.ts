@@ -3,6 +3,7 @@
  * Create, copy, and revoke invite codes.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -53,7 +54,7 @@ function formatInviteInfo(invite: InviteItem): string {
 // ---------------------------------------------------------------------------
 
 export function createInviteManager(options: InviteManagerOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let instance: ModalInstance | null = null;
   let listEl: HTMLDivElement | null = null;
   let emptyEl: HTMLDivElement | null = null;
@@ -86,7 +87,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
         () => {
           options.onCopyLink(invite.code);
         },
-        { signal: ac.signal },
+        { signal: disposable.signal },
       );
 
       // Revoking kills a live invite link — two-click confirm, then an
@@ -140,7 +141,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
               options.onError?.("Failed to revoke invite");
             });
         },
-        { signal: ac.signal },
+        { signal: disposable.signal },
       );
 
       appendChildren(actions, copyBtn, revokeBtn);
@@ -161,7 +162,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", { class: "modal-close", "aria-label": "Close" });
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
+    closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -199,7 +200,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
             options.onError?.("Failed to create invite");
           });
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     footer.appendChild(createBtn);
 
@@ -227,7 +228,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           options.onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Click overlay to close
@@ -238,12 +239,12 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           options.onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     instance?.destroy();
     instance = null;
     listEl = null;

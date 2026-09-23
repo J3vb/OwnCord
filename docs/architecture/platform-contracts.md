@@ -12,6 +12,12 @@ commands and a twenty-first importer, so all twenty-one live under
 `native_voice_build_info` command, and phase 1 (branch `fm/linux-voice-p1`,
 2026-09-22), which added the `NativeVoice` contract, its desktop facade and
 service (the twenty-second importer) and seven Linux-only `native_voice_*`
+commands, then phase 1b (same branch family, 2026-09-22), which added the two
+device commands, and phase 2 (branch `fm/linux-video-p2`, 2026-09-22), which
+added the two camera commands, and audio parity (branch
+`fm/linux-audio-parity`, 2026-09-23), which added the per-user and
+screen-share audio volume commands, and phase 3 (branch
+`fm/linux-screenshare-p3`, 2026-09-23), which added the four screen-share
 commands; the
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
@@ -62,23 +68,24 @@ Measured with `git grep`, not estimated:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 22    |
-| Distinct `invoke` command names called from `Client/src/`  | 37    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 43    |
+| Distinct `invoke` command names called from `Client/src/`  | 47    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 53    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 47    |
 
-The handler count covers both attribute spellings — 31 `#[tauri::command]` plus
+The handler count covers both attribute spellings — 41 `#[tauri::command]` plus
 12 `#[tauri::command(async)]` — so a `git grep '#\[tauri::command\]'` with exact
-brackets undercounts to 31. Attributes and registrations are two different
-counts: of the 43 attributed functions, 41 appear in `generate_handler!`
+brackets undercounts to 41. Attributes and registrations are two different
+counts: of the 53 attributed functions, 51 appear in `generate_handler!`
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the eight `native_voice_*` commands behind
-`#[cfg(target_os = "linux")]`, so a default build registers 40 on Linux and 32
+`#[cfg(feature = "devtools")]` and the eighteen `native_voice_*` commands behind
+`#[cfg(target_os = "linux")]`, so a default build registers 50 on Linux and 32
 elsewhere. The one environment-detection helper is
-`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a user-agent check
-that selects the native voice backend; it is not a desktop/browser seam.
+`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
+Linux user-agent check that selects the native voice backend; it is not a
+desktop/browser seam.
 
 Reproduce:
 

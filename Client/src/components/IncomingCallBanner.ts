@@ -9,6 +9,7 @@
  * All state lives in @lib/call-ring — this only draws whatever it is handed.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -27,7 +28,7 @@ export interface IncomingCallBannerComponent extends MountableComponent {
 export function createIncomingCallBanner(
   options: IncomingCallBannerOptions,
 ): IncomingCallBannerComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   const root = createElement("div", {
     class: "incoming-call-banner",
@@ -56,7 +57,7 @@ export function createIncomingCallBanner(
     },
     "Accept",
   );
-  acceptBtn.addEventListener("click", () => options.onAccept(), { signal: ac.signal });
+  acceptBtn.addEventListener("click", () => options.onAccept(), { signal: disposable.signal });
 
   const declineBtn = createElement(
     "button",
@@ -67,7 +68,7 @@ export function createIncomingCallBanner(
     },
     "Decline",
   );
-  declineBtn.addEventListener("click", () => options.onDecline(), { signal: ac.signal });
+  declineBtn.addEventListener("click", () => options.onDecline(), { signal: disposable.signal });
 
   const actions = createElement("div", { class: "incoming-call-actions" });
   appendChildren(actions, acceptBtn, declineBtn);
@@ -89,7 +90,7 @@ export function createIncomingCallBanner(
       container.appendChild(root);
     },
     destroy(): void {
-      ac.abort();
+      disposable.destroy();
       root.remove();
     },
     setRing,

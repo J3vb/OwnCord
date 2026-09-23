@@ -4,6 +4,7 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
@@ -39,8 +40,8 @@ const MIN_SEARCH_INTERVAL_MS = 500;
 // ---------------------------------------------------------------------------
 
 export function createSearchOverlay(options: SearchOverlayOptions): MountableComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let root: HTMLDivElement | null = null;
   let resultsDiv: HTMLDivElement;
@@ -262,7 +263,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       searchAbort.abort();
       searchAbort = null;
     }
-    ac.abort();
+    disposable.destroy();
     root?.remove();
     root = null;
   }

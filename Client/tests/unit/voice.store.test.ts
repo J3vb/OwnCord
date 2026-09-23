@@ -29,6 +29,11 @@ import {
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
+// vi.resetModules() below would hand the re-imported module a fresh logger,
+// which re-installs the logger's app-lifetime pref-change listener on every
+// reset. Those tests re-import against this already-loaded instance instead,
+// so the singleton stays one.
+import * as appLogger from "../../src/lib/logger";
 
 function resetStore(): void {
   voiceStore.setState(() => ({
@@ -1092,7 +1097,9 @@ describe("voice store", () => {
   describe("module INITIAL_STATE (fresh import, untouched by any reset)", () => {
     it("defaults every flag to false — the describe blocks above only ever observe state after the outer beforeEach's resetStore() has already overwritten it, and that local helper doesn't even set localServerMuted/localServerDeafened/pttGated/encryptionDegraded (they'd read `undefined` there, not the real default)", async () => {
       vi.resetModules();
+      vi.doMock("../../src/lib/logger", () => appLogger);
       const fresh = await import("../../src/stores/voice.store");
+      vi.doUnmock("../../src/lib/logger");
       const state = fresh.voiceStore.getState();
       expect(state.localMuted).toBe(false);
       expect(state.localDeafened).toBe(false);

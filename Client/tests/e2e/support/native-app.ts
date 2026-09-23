@@ -55,6 +55,13 @@ export async function startNativeApp(
     context.setDefaultTimeout(30_000);
     context.setDefaultNavigationTimeout(45_000);
     const page = await waitForFirstPage(context, running, startupDeadline - Date.now());
+    // WebView2 exposes a page as soon as it starts loading its own
+    // "Loading <url>" interstitial, before the app document has navigated in.
+    // Returning that page made any spec that asserts immediately (title,
+    // __TAURI_INTERNALS__) race the navigation. index.html's <title> is static
+    // markup, so the app document is present as soon as its title is "OwnCord" —
+    // wait for that, across the navigation, before handing the page out.
+    await expect(page).toHaveTitle("OwnCord");
     console.log(`native app ready: CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`);
     return {
       cdpURL: `http://127.0.0.1:${port}`,

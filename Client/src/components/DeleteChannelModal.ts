@@ -3,6 +3,7 @@
  * Shows channel name and requires explicit confirmation.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -17,7 +18,7 @@ export interface DeleteChannelModalOptions {
 
 export function createDeleteChannelModal(options: DeleteChannelModalOptions): MountableComponent {
   const { channelName, onConfirm, onClose } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let instance: ModalInstance | null = null;
 
   function mount(container: Element): void {
@@ -32,7 +33,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onClose, { signal: ac.signal });
+    closeBtn.addEventListener("click", onClose, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -60,7 +61,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
       { class: "btn-modal-cancel", type: "button" },
       "Cancel",
     );
-    cancelBtn.addEventListener("click", onClose, { signal: ac.signal });
+    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
     const deleteBtn = createElement(
       "button",
@@ -93,7 +94,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
           }
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(footer, cancelBtn, deleteBtn);
@@ -122,7 +123,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Escape cancels — it must never stand in for the destructive confirm.
@@ -135,12 +136,12 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
           onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     instance?.destroy();
     instance = null;
   }

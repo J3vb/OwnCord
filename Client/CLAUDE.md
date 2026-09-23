@@ -87,14 +87,52 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   [docs/architecture/voice-e2ee.md](../docs/architecture/voice-e2ee.md).
 - Linux voice runs in that backend (`src-tauri/src/native_voice/`) behind the
   `livekitSession` facade: `features/voice/native/platform.ts`'s
-  `isLinuxDesktop()` is the only switch, `RoomLifecycle.createRoom` builds a
-  `NativeRoom` adapter there and `E2EEWorker.applyRoomKey` sends the key over
-  the `NativeVoice` platform contract. Keep the state machine platform-blind:
-  a Linux-only behaviour belongs in the adapter or the Rust session, never as
-  a branch in `joinOrchestration`/`mediaControl`. The interop proof is
+  `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
+  only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
+  `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
+  contract, and audio device lists come from `native/devices.ts` (the device
+  module's capture names and `cpal`'s output ids, not the webview's). Remote
+  audio plays through the session's own mixer
+  (`src-tauri/src/native_voice/playout.rs`, for per-user volume), not the
+  device module. Video frames never cross IPC:
+  each native session serves them on a token-authenticated `127.0.0.1`
+  WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
+  through `native/videoRenderer.ts` (WebGL, exposed as a canvas
+  `MediaStreamTrack` so the grid stays MediaStream-based) and the camera is
+  the webview's own `getUserMedia` track, pumped up the socket by
+  `native/cameraUplink.ts`. Screen share captures in the backend
+  (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
+  `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
+  on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
+  video only (no screen-share audio on Linux). Keep the state machine
+  platform-blind: a Linux-only behaviour belongs in the adapter or the Rust
+  session, never as a branch in `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
-  (built with `cargo build --example native_voice_interop`).
+  (built with `cargo build --example native_voice_interop`); it covers audio,
+  video and a synthetic-source screen share, each with a wrong-key control.
+  CI has no display: the X11 capturer runs only under
+  `xvfb-run cargo test -- --ignored x11`, and the Wayland portal only on a
+  real desktop.
+- **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
+  (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
+  `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
+  `tests/unit/lifecycle-ownership.test.ts` classifies every production site
+  from the syntax tree and fails on an unowned one that is not on an exact,
+  shrink-only allowlist (R1 long-lived-target listeners need `signal`/`once`;
+  R2 intervals keep their handle and clear it in-file; R3 `setTimeout` keeps
+  its handle, or a signal owns it through `setOwnedTimeout` (`src/lib/dom.ts`);
+  R4 `new AbortController` is only for the primitives and named cancellation
+  tokens). A stale entry also fails, so the lists only shrink.
+  `tests/helpers/lifecycle.ts` installs a guard from `tests/setup.ts` that
+  fails a unit test leaving a bare `window`/`document` listener or a real
+  interval alive, unless its file is on the shrink-only
+  `tests/lifecycle-guard-baseline.json`, whose `reasons` justify each entry; do
+  not add an entry without a reason. The runtime proof is the CDP soak
+  (`tests/e2e/support/lifecycle-probe.ts`,
+  `tests/e2e/fullstack/long-session.spec.ts`), which needs
+  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR.
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.

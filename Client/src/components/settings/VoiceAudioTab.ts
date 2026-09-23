@@ -13,6 +13,8 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
 } from "@lib/livekitSession";
+import { nativeAudioDevices } from "../../features/voice/native/devices";
+import { isLinuxDesktop } from "../../features/voice/native/platform";
 
 const log = createLogger("VoiceAudioTab");
 
@@ -100,6 +102,13 @@ function buildVoiceAudioTabInner(
   registerCameraInvalidation: CameraInvalidationRegistrar,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
+  // its capture path exposes no gain or level hook, so the input volume and
+  // sensitivity controls below would be dead there. They are built as usual and
+  // removed at the end, with one note in their place; the prefs keep being
+  // written so another platform's profile is untouched. Output volume works:
+  // the engine's playout mixer applies it with each user's volume.
+  const nativeAudio = isLinuxDesktop();
 
   // Input device selector
   const inputHeader = createElement("h3", {}, "Input Device");
@@ -364,7 +373,17 @@ function buildVoiceAudioTabInner(
       [videoSelect, "videoinput", "videoInputDevice", "Camera"],
     ];
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
+      // On Linux the audio lists come from the native backend (the ids the
+      // session can actually select); cameras are the webview's everywhere.
+      const [nativeInputs, nativeOutputs, all] = await Promise.all([
+        nativeAudioDevices("audioinput"),
+        nativeAudioDevices("audiooutput"),
+        navigator.mediaDevices.enumerateDevices(),
+      ]);
+      const devices =
+        nativeInputs === null || nativeOutputs === null
+          ? all
+          : [...nativeInputs, ...nativeOutputs, ...all.filter((d) => d.kind === "videoinput")];
       if (signal.aborted) return;
 
       for (const [select, kind, prefKey, label] of selects) {
@@ -504,63 +523,66 @@ function buildVoiceAudioTabInner(
   // the tab is rebuilt, since this function runs again on every build.
 
   // Start mic level monitoring for visual feedback
-  void (async () => {
-    const thisRequest = ++micRequestId;
-    try {
-      const savedDevice = loadPref<string>("audioInputDevice", "");
-      const constraints: MediaStreamConstraints = {
-        audio: savedDevice ? { deviceId: { exact: savedDevice } } : true,
-        video: false,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      // Race guard: teardown (cleanup or abort) may have run while we awaited
-      // — opening the mic now would leave it hot with nobody left to stop it,
-      // and registerMic would re-arm state cleanupMic() already cleared.
-      if (signal.aborted || thisRequest !== micRequestId) {
-        for (const track of stream.getTracks()) track.stop();
-        return;
-      }
-      const audioCtx = new AudioContext();
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.5;
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-      let latestFrame = 0;
-      function updateMeter(): void {
-        if (signal.aborted) return;
-        analyser.getByteFrequencyData(dataArray);
-        // Compute RMS normalized to 0-1
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          const v = (dataArray[i] ?? 0) / 255;
-          sum += v * v;
+  // The meter previews the webview's microphone; on the native engine the
+  // saved device id is the engine's, and the meter is hidden anyway.
+  if (!nativeAudio)
+    void (async () => {
+      const thisRequest = ++micRequestId;
+      try {
+        const savedDevice = loadPref<string>("audioInputDevice", "");
+        const constraints: MediaStreamConstraints = {
+          audio: savedDevice ? { deviceId: { exact: savedDevice } } : true,
+          video: false,
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Race guard: teardown (cleanup or abort) may have run while we awaited
+        // — opening the mic now would leave it hot with nobody left to stop it,
+        // and registerMic would re-arm state cleanupMic() already cleared.
+        if (signal.aborted || thisRequest !== micRequestId) {
+          for (const track of stream.getTracks()) track.stop();
+          return;
         }
-        const rms = Math.sqrt(sum / dataArray.length);
-        // Scale for visual: use sqrt for more visible quiet sounds
-        const visual = Math.min(Math.sqrt(rms) * 2, 1);
-        meterLevel.style.width = `${visual * 100}%`;
+        const audioCtx = new AudioContext();
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.5;
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
 
-        // Color: green if above threshold, yellow/red if below
-        const threshold = ((100 - currentSensitivity) / 100) * 0.15;
-        if (rms >= threshold) {
-          meterLevel.style.background = "#43b581"; // green — voice detected
-        } else {
-          meterLevel.style.background = "#faa61a"; // yellow — below threshold
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        let latestFrame = 0;
+        function updateMeter(): void {
+          if (signal.aborted) return;
+          analyser.getByteFrequencyData(dataArray);
+          // Compute RMS normalized to 0-1
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            const v = (dataArray[i] ?? 0) / 255;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / dataArray.length);
+          // Scale for visual: use sqrt for more visible quiet sounds
+          const visual = Math.min(Math.sqrt(rms) * 2, 1);
+          meterLevel.style.width = `${visual * 100}%`;
+
+          // Color: green if above threshold, yellow/red if below
+          const threshold = ((100 - currentSensitivity) / 100) * 0.15;
+          if (rms >= threshold) {
+            meterLevel.style.background = "#43b581"; // green — voice detected
+          } else {
+            meterLevel.style.background = "#faa61a"; // yellow — below threshold
+          }
+
+          latestFrame = requestAnimationFrame(updateMeter);
+          registerMic(stream, audioCtx, latestFrame);
         }
-
         latestFrame = requestAnimationFrame(updateMeter);
         registerMic(stream, audioCtx, latestFrame);
+      } catch (err) {
+        log.warn("Mic access denied or unavailable — meter stays empty", err);
       }
-      latestFrame = requestAnimationFrame(updateMeter);
-      registerMic(stream, audioCtx, latestFrame);
-    } catch (err) {
-      log.warn("Mic access denied or unavailable — meter stays empty", err);
-    }
-  })();
+    })();
 
   // ── Audio processing toggles ──────────────────────────────────────
   const audioToggles: ReadonlyArray<{
@@ -596,10 +618,17 @@ function buildVoiceAudioTabInner(
   ];
 
   for (const item of audioToggles) {
+    // RNNoise attaches to a browser track; the native engine's own noise
+    // suppression stands in for it on Linux (owner decision).
+    if (nativeAudio && item.key === "enhancedNoiseSuppression") continue;
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
     const label = createElement("div", { class: "setting-label" }, item.label);
-    const desc = createElement("div", { class: "setting-desc" }, item.desc);
+    // The native engine reads these at connect, not live.
+    const descText = nativeAudio
+      ? `${item.desc}. Applies when you next join a voice channel.`
+      : item.desc;
+    const desc = createElement("div", { class: "setting-desc" }, descText);
     appendChildren(info, label, desc);
 
     const isOn = loadPref<boolean>(item.key, item.fallback);
@@ -614,6 +643,20 @@ function buildVoiceAudioTabInner(
 
     appendChildren(row, info, toggle);
     section.appendChild(row);
+  }
+
+  if (nativeAudio) {
+    for (const control of [inputVolumeHeader, inputVolumeRow, sensitivityHeader, meterWrap])
+      control.remove();
+    const note = createElement(
+      "p",
+      { class: "setting-desc", "data-testid": "native-audio-note" },
+      "On Linux, audio runs in the app's native engine. Your microphone level and voice " +
+        "sensitivity are handled by the engine's automatic gain control and silence " +
+        "detection, so the input volume and input sensitivity controls are not available " +
+        "here. Use your system mixer to adjust your microphone level.",
+    );
+    inputSelect.after(note);
   }
 
   return section;

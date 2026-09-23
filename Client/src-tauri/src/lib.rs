@@ -168,7 +168,27 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_subscribed,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_screenshare_volume,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_list_devices,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_device,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_unpublish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_screen_sources,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_screen,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

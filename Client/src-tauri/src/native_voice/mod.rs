@@ -13,11 +13,20 @@
 //! room (`native_voice_disconnect` is a no-op for any other id), mirroring
 //! the facade's "cleanup is scoped to the attempt's own room" rule.
 //! Room events reach the webview as one Tauri event, `native-voice`, whose
-//! payload carries the session id. Key material is never logged.
+//! payload carries the session id. Video frames do not cross IPC: each
+//! session serves them on its own token-authenticated loopback socket
+//! (`video.rs`), whose URL the connect result carries. Screen share captures
+//! natively (`screen.rs`): the webview picks a source, or leaves the pick to
+//! the desktop portal on Wayland, and sees the capture only as a preview on
+//! the frame socket. Key material and the frame-socket token are never
+//! logged.
+pub mod playout;
+pub mod screen;
 pub mod session;
+pub mod video;
 
 use serde::Serialize;
-use session::{AudioOptions, Event, NativeSession, Resources};
+use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources, ScreenOptions};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
 
@@ -47,11 +56,23 @@ impl Inner {
             _ => Err(format!("native voice session {id} is not current")),
         }
     }
+    /// After an unlocked connect of session `id` with `connected_key`: the
+    /// key it must switch to (`Some` when a rotation landed meanwhile), or
+    /// an error when a newer connect or a leave (cleared key) superseded it.
+    fn key_after_connect(&self, id: u64, connected_key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        match &self.key {
+            Some(k) if self.next_id == id => Ok((k.as_slice() != connected_key).then(|| k.clone())),
+            _ => Err(format!(
+                "native voice session {id} superseded during connect"
+            )),
+        }
+    }
     fn resources(&self) -> Resources {
         match &self.session {
             Some((_, s)) => s.resources(),
             None => Resources {
                 threads: session::process_threads(),
+                screen_captures: screen::active_captures(),
                 ..Default::default()
             },
         }
@@ -119,9 +140,17 @@ pub struct Connected {
     session: u64,
     /// Our LiveKit identity (`user-<id>...`), for the participant model.
     identity: String,
+    /// The session's frame-socket base URL, token included.
+    frames: String,
 }
 
 /// Connect a new session, superseding any live one.
+///
+/// The state lock is held only to take the key, retire the old session and
+/// allocate the id — never across the network connect — so a leave, a key
+/// rotation or a device switch during a slow join is not blocked behind it.
+/// A connect that loses the race to a newer one closes its own room and
+/// reports it, the same supersession outcome the facade's checkpoints expect.
 #[tauri::command]
 pub async fn native_voice_connect<R: Runtime>(
     app: AppHandle<R>,
@@ -130,36 +159,85 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
-    let mut inner = state.inner.lock().await;
-    let key = inner
-        .key
-        .clone()
-        .ok_or("no E2EE room key installed before connect")?;
-    if let Some((old, s)) = inner.session.take() {
-        log::info!("[native_voice] superseding session {old}");
-        s.close().await;
-    }
-    inner.next_id += 1;
-    let id = inner.next_id;
+    let (id, key) = {
+        let mut inner = state.inner.lock().await;
+        let key = inner
+            .key
+            .clone()
+            .ok_or("no E2EE room key installed before connect")?;
+        if let Some((old, s)) = inner.session.take() {
+            log::info!("[native_voice] superseding session {old}");
+            s.close().await;
+        }
+        inner.next_id += 1;
+        (inner.next_id, key)
+    };
     let sink_app = app.clone();
     let on_event = std::sync::Arc::new(move |event: Event| {
         if let Err(e) = sink_app.emit(EVENT_NAME, Envelope { session: id, event }) {
             log::warn!("[native_voice] event emit failed: {e}");
         }
     });
+    let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
-    // Playout needs the ADM even for a listen-only join. A headless box has
-    // no sound server: log and carry on, the mic publish reports it again.
+    // Playout is needed even for a listen-only join. A headless box has no
+    // sound server: log and carry on, the mic publish reports it again.
     if let Err(e) = session.enable_platform_audio(audio) {
         log::warn!("[native_voice] platform audio unavailable: {e}");
     }
     let identity = session.local_identity();
+    let mut inner = state.inner.lock().await;
+    let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
+    wipe(&mut connected_key);
+    match rotated {
+        Err(e) => {
+            log::info!("[native_voice] {e}");
+            session.close().await;
+            return Err(e);
+        }
+        Ok(Some(k)) => session.set_key(k),
+        Ok(None) => {}
+    }
     log::info!("[native_voice] session {id} connected as {identity}");
+    let frames = session.frames_url().to_string();
     inner.session = Some((id, session));
     Ok(Connected {
         session: id,
         identity,
+        frames,
     })
+}
+
+/// Enumerate the platform audio devices. Uses the live session's device
+/// module when there is one, otherwise a transient one (the settings tab
+/// lists devices outside a call).
+#[tauri::command]
+pub async fn native_voice_list_devices(
+    state: tauri::State<'_, NativeVoiceState>,
+) -> Result<session::Devices, String> {
+    let inner = state.inner.lock().await;
+    match &inner.session {
+        Some((_, s)) => s.devices(),
+        None => session::list_devices_transient(),
+    }
+}
+
+/// Select the capture (`kind == "audioinput"`) or playout (`"audiooutput"`)
+/// device by the id `native_voice_list_devices` reported; an empty id means
+/// the platform default.
+#[tauri::command]
+pub async fn native_voice_set_device(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    kind: String,
+    device_id: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_device(&kind, &device_id)
 }
 
 /// Close session `session` if it is still the live one.
@@ -193,6 +271,128 @@ pub async fn native_voice_set_microphone(
         .await
 }
 
+/// Publish (or replace) the camera; its frames then arrive on the session's
+/// frame socket. Returns the publication sid `native_voice_unpublish_camera`
+/// takes.
+#[tauri::command]
+pub async fn native_voice_publish_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    options: CameraOptions,
+) -> Result<String, String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .publish_camera(options)
+        .await
+}
+
+/// Unpublish camera `sid` if it is still the published one; a stale sid is a
+/// no-op.
+#[tauri::command]
+pub async fn native_voice_unpublish_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    sid: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .unpublish_camera(&sid)
+        .await;
+    Ok(())
+}
+
+/// What can be shared: screens and windows with thumbnails on X11, or
+/// `portal: true` on Wayland, where the desktop portal's dialog picks.
+#[tauri::command]
+pub async fn native_voice_screen_sources() -> Result<screen::Sources, String> {
+    tauri::async_runtime::spawn_blocking(screen::list_sources)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenStarted {
+    /// The id `native_voice_publish_screen`, `native_voice_stop_screen` and
+    /// the `screenCaptureEnded` event carry.
+    capture: u64,
+    width: u32,
+    height: u32,
+}
+
+/// Start capturing `source` (a `native_voice_screen_sources` id, or
+/// `portal`), replacing any running capture, and resolve once the first
+/// frame arrives: on Wayland that is after the user completed the portal's
+/// dialog, and a cancelled dialog rejects with [`screen::CANCELLED`]. The
+/// session is released while waiting, so a leave or stop meanwhile ends the
+/// wait instead of queueing behind it. Frames then preview on the frame
+/// socket's `screen` route.
+#[tauri::command]
+pub async fn native_voice_start_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    source: String,
+    capture: screen::CaptureOptions,
+) -> Result<ScreenStarted, String> {
+    let target = screen::Target::parse(&source)?;
+    let (id, started) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .start_screen(target, capture)
+        .await?;
+    let (width, height) = started
+        .await
+        .map_err(|_| "screen capture stopped before it started".to_string())??;
+    Ok(ScreenStarted {
+        capture: id,
+        width,
+        height,
+    })
+}
+
+/// Publish running capture `capture` as the screen share; returns its sid.
+#[tauri::command]
+pub async fn native_voice_publish_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+    options: ScreenOptions,
+) -> Result<String, String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .publish_screen(capture, options)
+        .await
+}
+
+/// Unpublish and stop capture `capture`, releasing the capturer and any
+/// portal session; a stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_stop_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .stop_screen(capture)
+        .await;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn native_voice_set_subscribed(
     state: tauri::State<'_, NativeVoiceState>,
@@ -207,6 +407,42 @@ pub async fn native_voice_set_subscribed(
         .await
         .current(session)?
         .set_subscribed(&identity, &sid, subscribed)
+}
+
+/// Per-user volume: `volume` is the gain for `identity`'s microphone (1.0 is
+/// unity), the value the web path hands `RemoteParticipant.setVolume`.
+#[tauri::command]
+pub async fn native_voice_set_volume(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    volume: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_volume(&identity, volume);
+    Ok(())
+}
+
+/// Screen-share audio volume: the gain for `identity`'s screen-share audio (1.0
+/// is unity, 0 when muted), the value the web path gives its audio element.
+#[tauri::command]
+pub async fn native_voice_set_screenshare_volume(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    volume: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_screenshare_volume(&identity, volume);
+    Ok(())
 }
 
 /// Native resource counts for `getSessionDebugInfo` (B7-11).
@@ -236,6 +472,21 @@ mod tests {
         let mut key = Some(vec![7u8; 4]);
         wipe(&mut key);
         assert!(key.is_none());
+    }
+
+    #[test]
+    fn key_after_connect_applies_a_rotation_and_rejects_supersession() {
+        let mut inner = Inner {
+            key: Some(vec![1]),
+            session: None,
+            next_id: 3,
+        };
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
+        inner.key = Some(vec![2]);
+        assert_eq!(inner.key_after_connect(3, &[1]), Ok(Some(vec![2])));
+        assert!(inner.key_after_connect(2, &[1]).is_err());
+        inner.key = None;
+        assert!(inner.key_after_connect(3, &[1]).is_err());
     }
 
     #[test]

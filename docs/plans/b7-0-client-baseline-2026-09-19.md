@@ -278,3 +278,370 @@ marker assertion catches that regression exactly rather than by size.
 "Runtime" in the milestone name is bundle-size-only: startup time and memory
 have a defined method above and are measured on a real desktop; no
 runtime-timing gate is added in CI.
+
+## B7-11 long-session baseline (Task 0 and Task 3, 2026-09-22)
+
+This section is B7-11's PR 11a (instruments, no production file changed) evidence
+append: the recount at the 11a base, the ownership classification, the guard
+baseline, and the soak calibration. It is an evidence append, not a status row.
+
+### Task 0 recount at the pre-rebase 11a base (`27d3d47d`, from `dev` `e5eb4b19`)
+
+The plan's Verify rows re-derive unchanged at the 11a base:
+
+- `addEventListener(` 409 calls: 288 with `signal`, 28 `once: true`, 93 with
+  neither, in 31 files. `removeEventListener(` 29.
+- Timers: `setTimeout(` 69 (17 discarded handles), `setInterval(` 7 (all cleared
+  in their own file), `clearTimeout(` 68, `clearInterval(` 7.
+- `new AbortController` 55 constructions in 45 files. `AbortController` or
+  `AbortSignal` named in 71 files.
+- Lifecycle primitives: 2 (`lib/disposable.ts`, `lib/sessionScope.ts`).
+  `Disposable` is imported by 3 files, `SessionScope` by 2.
+- Suite: 274 files, 6 124 passed + 140 expected fail; statements coverage
+  94.33 % (16 937 / 17 955). Startup closure 85 678 / 91 000 B, `MainPage`
+  57 263 / 60 000 B. (Verify row 11's statement count is unchanged; the row's
+  row 6/7/8 numbers are the ones above.)
+
+### Ownership classification (the R1/R3/R4 allowlists)
+
+`tests/unit/lifecycle-ownership.test.ts` pins exact, shrink-only allowlists at
+the base:
+
+- **R1** (long-lived-target listeners without `signal`/`once`): 22 sites — 16
+  app-lifetime singletons (module-load preference/storage/visibility listeners,
+  the `main.ts` bootstrap singletons, `safe-render`'s global handlers) and 6
+  per-mount sites paired with a hand-written `removeEventListener`
+  (`MemberList`/`MessageInput` outside-click, `deviceManager` devicechange,
+  `GlobalKeybinds`, `OverlayManagers`).
+- **R3** (discarded `setTimeout` handles): 17 sites, all self-bounded (a
+  button-label or error-class reset on a node the caller owns: `AdvancedTab`
+  ×5, `LogsTab` ×4, `content-parser` ×2, and one each in `MemberList`, `Toast`,
+  `channel-sidebar/context-menu`, `volume-menu`, `lib/context-menu`,
+  `LoginForm`).
+- **R4** (`new AbortController` outside the two primitives): 53 sites — 8
+  cancellation tokens with a named owner (`api.ts` ×3, `profiles.ts`,
+  `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`,
+  `ChannelController.ts`), 5 per-render children, and 40 component/overlay
+  lifetimes. 11b moves the lifetimes and children onto `Disposable`, leaving
+  the 8 tokens.
+- **R2** (intervals): 0 sites fail — every `setInterval` keeps its handle and
+  clears it in its own file.
+
+Informational counts printed by the test: 93 bare listeners in 31 files,
+`requestAnimationFrame` 16 / `cancelAnimationFrame` 6, 3 observer files
+(`MessageList`, `VideoGrid`, `media-visibility`), and 3 native `listen(` sites
+under `src/platform/desktop/`.
+
+### Unit lifecycle guard baseline
+
+`tests/helpers/lifecycle.ts` records every non-`once` `window`/`document`
+registration and releases each when its signal aborts, so a component that was
+never destroyed stays red even though every listener it carries has a signal
+(the OC-0335 class). At the base, **14 files** leak and are listed in
+`tests/lifecycle-guard-baseline.json`; 11b adds each file's missing teardown and
+empties the list. The plan's row 10 counted 20 files with a throwaway probe that
+did not release signal-owned listeners, and it also counted jsdom's own
+`requestAnimationFrame` timer (jsdom implements rAF on an internal
+`setInterval`); the real guard excludes both. Full suite with the guard on: 276
+files, 6 139 passed + 140 expected fail.
+
+### Soak calibration
+
+Command: `cd Client && OWNCORD_SOAK_CYCLES=20 OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:fullstack -- long-session`,
+Linux x86_64 Chromium, ~2.3 minutes for the 20-cycle test (the whole
+`client-fullstack` suite is 6.0 minutes, inside the config's 20-minute
+`globalTimeout`, so no `playwright.config.fullstack.ts` change was needed).
+
+**Pre-rebase history.** Every run below up to "At the rebased head" was made
+before the branch was rebased from base `9f2d92eb` onto `b252d0ea`. The commits
+those runs cite (`03570460`, `7eaa1570`, `fa8c72a3`, `80f1dcbb`, `e02ef7ec`,
+`0c343204`, `c9a2204f`) are pre-rebase SHAs that the branch history no longer
+contains. They are kept as history. The rebase brought in production changes on
+the soak's per-cycle path (`VoiceAudioTab.ts`, `roomLifecycle.ts`,
+`livekitSession.ts`, `deviceManager.ts`) and a `userAgent` override in
+`playwright.config.fullstack.ts`. The at-head evidence is the "At the rebased
+head" runs.
+
+**Bars and why they are phase-grouped.** The plan's cycle logs out and back in
+every 10 cycles and samples every 5, so the raw sample series alternates between
+the settled mid-session state and the torn-down post-logout state. A single
+least-squares slope over that would read the reset, not the app, and give the
+mid-session sample no weight (review finding `soak-mid-session-blind`). The bars
+therefore group samples like-for-like by their phase in the 10-cycle login
+generation (`cycle % 10`): the 5/15/25 series is one mid-session line, the
+10/20 series the post-logout line. A metric passes only when every series' slope
+is within its ceiling; `documents` and `intervals` must be exactly flat in every
+series; heap uses the same per-series last ≤ first × 1.10 with a 25 KB/cycle
+slope. Slopes are regressed on the cycle number, so the "per cycle" label is
+literal (review finding `slope-units`).
+
+**Ceilings.** `nodes` and `listeners` carry the known logout-path leak (below),
+so rather than leaving them at the plan's 0.05 they are ratcheted a small margin
+above their measured per-cycle slopes: listeners 0.15/cycle and nodes 2/cycle
+(measured 0.1 and 1.6, run-to-run spread 0). Any growth past that fails the PR
+soak; 11c's Task 12 fixes the leak and removes the ceilings, returning both to
+0.05.
+
+**Five 20-cycle calibration runs** on the uncommitted working tree that became
+pre-rebase `7eaa1570` (on top of `03570460`), under the earlier 0.5/8 ceilings. Their
+numbers are the committed phase-grouped evaluation's output (the ceilings do not
+change what is measured). All five passed; every count metric was identical
+across them (run-to-run spread 0 on all counts):
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 464      |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 788      |
+| 3   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 391      |
+| 4   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 560      |
+| 5   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 12 431     |
+
+`documents` 1, `intervals` 1, `timeouts` 1, and sockets/peerConnections/tracks/
+audioContexts 0 in every run, all flat. The **LiveKit `error reading from signal
+stream … WS closed unexpectedly`** console line did **not** appear in any of the
+five runs: it is intermittent, emitted when the every-5th-cycle application
+reconnect drops the socket LiveKit's signaling connection rides on, and it is
+expected because that step deliberately severs the transport. It has been seen
+with close code 1006 and, in a later run, 1000; the pattern accepts
+either code. It is on
+the named expected-line list (with `[ws] ws_send failed {error: WS is not open}`)
+so a run that does see it still passes, while any other `console.error` fails.
+
+**The known leak.** Over 40 cycles with post-reset sampling, the post-logout
+series grows monotonically while the mid-session series is flat:
+
+| Cycle (phase)     | nodes                     | listeners             |
+| ----------------- | ------------------------- | --------------------- |
+| 5 / 15 / 25 / 35  | 3453                      | 211                   |
+| 10 / 20 / 30 / 40 | 2102 → 2118 → 2134 → 2150 | 192 → 193 → 194 → 195 |
+
+That is about one listener and 1.6 nodes per logout/login. The soak (and the
+ratchet ceilings) are the finding's evidence; 11c writes the regression test and
+fixes it.
+
+Two measurement fixes the calibration needed, both in the probe: quiesce drains
+one second before sampling (leaving a voice room and closing a socket finish on
+microtasks/timers after their synchronous call returns), and `AbortController`s
+are counted by `!signal.aborted` rather than reachability (the media probe keeps
+every peer, track and socket it sees, so "reachable" never falls — the plan's
+own trap).
+
+**Runs at the 0.15/2 ceilings** (pre-rebase `7eaa1570` plus the working-tree change that
+sets these ceilings; nothing else differs):
+
+- **Planted control, failed as intended, but on nodes only.** A throwaway
+  `window.addEventListener("resize", () => void section)` in the Account tab's
+  mount (added on every settings visit, so every cycle) failed the soak on the
+  nodes bar (`phase 5: 6087→6207`, 12/cycle against the 2/cycle ceiling). The
+  **listeners bar stayed green** (phase 5 `217→217`, worst slope 0.1): the samples
+  were c0 191, c5 217, c10 193, c15 217, c20 194. The plant grows listeners
+  within a login generation (c5 is +6 over the clean 211), but the soak's
+  re-login goes through `login()` in `tests/e2e/fullstack/fixtures.ts`, which
+  calls `page.goto("/")`. That is a full navigation, so every 10-cycle generation
+  starts on a fresh page and the plant's listeners are dropped. The phase-grouped
+  bars compare c5 against c15, both 5 cycles into a fresh page, so a leak that
+  only lives within one page cannot move them. Only growth that outlives the
+  navigation is visible (see the owner decision below). The plant was then
+  removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, passed.** nodes 3489 → 3453 (−3.6), listeners 192 → 193
+  (0.1), AbortControllers 20, heap slope 11 762; documents, intervals and timeouts
+  1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
+  the five calibration runs.
+
+**Trial: a within-page series** (pre-rebase `fa8c72a3` plus a working-tree change, later
+committed as `80f1dcbb`, that added a cycle-9 sample and regressed each page's
+cycle-5/9 pair for nodes and listeners; ceilings still 0.15/2). The clean run
+failed, so the trial was reverted (below).
+
+- **Planted control, failed on both bars.** The same Account-tab resize plant
+  failed listeners (`page 0: 217→261; page 1: 217→261`, 11/cycle) and nodes
+  (`page 0: 6087→8728; page 1: 6207→8952`, plus `phase 5` and `phase 9`). The
+  plant was then removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, failed.** With no plant, the within-page series grow
+  on every page: listeners `211→251` (10/cycle) and nodes `3489→4398` and
+  `3453→4362` (about 227/cycle). The samples were:
+
+  | Cycle | nodes | listeners | AbortControllers | timeouts |
+  | ----- | ----- | --------- | ---------------- | -------- |
+  | 0     | 2072  | 190       | 20               | 2        |
+  | 5     | 3489  | 211       | 39               | 1        |
+  | 9     | 4398  | 251       | 55               | 1        |
+  | 10    | 2102  | 192       | 20               | 1        |
+  | 15    | 3453  | 211       | 39               | 1        |
+  | 19    | 4362  | 251       | 55               | 1        |
+  | 20    | 2118  | 193       | 20               | 1        |
+
+  The growth is identical on both pages, and AbortControllers (not
+  page-regressed) rise the same way (39 → 55). So the client does accumulate per
+  cycle within one page, and the navigation at every re-login had been hiding
+  it from the phase series. The ceilings were not loosened. The cycle-5 sample
+  follows the every-5th-cycle reconnect and the cycle-9 sample does not, so
+  some of the rise may be state the reconnect resets rather than a leak.
+
+**Owner decision: deviation from plan Task 3.** Task 3 asks to observe the
+listener bar go red on the PR soak. In 11a it does not: the cycle-9 sample and
+the within-page series were reverted, and the soak keeps the phase-only
+evaluation with ceilings listeners 0.15 and nodes 2 per cycle. The planted
+control is caught by the nodes bar only. A listener leak that accumulates within
+one page lifetime and is released by the re-login navigation is **not covered**
+by the 11a soak; by owner decision that coverage is deferred to B7-11c.
+
+**Open question for 11c.** Between c5 and c9 of one page the clean client grew
+listeners about 211 → 251 (10/cycle), nodes about 227/cycle and live
+AbortControllers 39 → 55, identically on both pages. The comparison is not
+like-for-like (c5 follows a reconnect, c9 does not), so whether this is a leak
+or state the reconnect resets is unanswered. 11c answers it before it adds
+within-page coverage.
+
+**Clean runs after the revert** (pre-rebase `80f1dcbb` plus the working-tree change
+that reverts its spec and probe to the phase-only evaluation, with only comments
+differing from `fa8c72a3`). **Needs a decision: neither run passed.** Neither
+failure comes from the bars, and nothing was tuned.
+
+1. **Timed out** at the 13-minute test timeout in a cycle's DM step. The
+   `upp-message-btn` in Bob's profile popup kept going unstable and detaching,
+   so `click()` never landed. The bars were never evaluated.
+2. **Every bar passed** (nodes 3489 → 3453, −3.6; listeners 192 → 193, 0.1;
+   AbortControllers 20; heap slope 11 771; documents, intervals and timeouts 1;
+   sockets/peerConnections/tracks/audioContexts 0), matching the calibration
+   runs. The run still failed the console check: LiveKit logged
+   `error reading from signal stream … WS closed unexpectedly with code 1000`,
+   and the expected-line pattern accepts only code 1006.
+
+Both failures came from the soak's interaction and console steps, not from the
+leak bars.
+
+**Stabilised soak, two consecutive clean runs** (pre-rebase `e02ef7ec`, which retries the
+DM step as one unit and accepts close code 1000; bars and ceilings unchanged).
+The DM step closes any popup, clicks Bob's row, waits for the popup's `.open`
+card and clicks its Message button, retrying the whole sequence until the DM
+header shows. No step uses a fixed sleep. The LiveKit
+expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 828     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 896     |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
+
+**Idempotent DM retry**, run once on pre-rebase `0c343204` and passed with the same bars
+(nodes −3.6, listeners 0.1, AbortControllers 20, heap slope 11 350). That
+version waited for the DM view outside the retry, so a Message click that
+silently did nothing was not retried.
+
+**DM open fully inside the retry** (pre-rebase `c9a2204f`). Each attempt returns at once if the DM header is
+already visible. So a retry after Message has switched the sidebar to DMs no
+longer waits for Bob's member row, which that switch removes. Otherwise the
+attempt opens the popup, clicks Message and waits up to the config's default
+15 s for the DM header, so a click that silently does nothing is retried. No
+step uses a fixed sleep. Two consecutive clean 20-cycle runs both passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 11 735     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 962     |
+
+**At the rebased head** (`0823d20f`, on base `b252d0ea`; spec and ceilings
+unchanged). The server and client were rebuilt at this commit. Two consecutive
+clean 20-cycle runs both passed, with every count bar as before and the nodes
+count one node higher at both ends:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 250      |
+| 2   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 984      |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat.
+
+**Owner decision: the five-run at-head calibration moves to B7-11c.** The
+intent asks for the 20-cycle soak to be run at least five times locally to show
+it is not flaky. The five recorded calibration runs are pre-rebase and predate
+the DM-step and console-pattern changes. For 11a the at-head evidence is the two
+consecutive passing runs at the rebased head, and 11c re-runs the five at its
+head.
+
+## B7-11b ownership move (Tasks 5–11, 2026-09-22)
+
+PR 11b's evidence append: a behaviour-preserving move of the ad-hoc owners onto
+`Disposable` (and, where a signal already owns the work, `setOwnedTimeout` in
+`lib/dom.ts`). Base is `dev` `e73b9223` (11a merged). It is an evidence append,
+not a status row.
+
+### Allowlists and counts, base → 11b head
+
+| Measure                                         | Base | 11b | Floor reached                                                                                                                                   |
+| ----------------------------------------------- | ---: | --: | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 long-lived-target listeners allowlisted      |   22 |  17 | 16 app-lifetime + 1 per-mount (`deviceManager`, see below)                                                                                      |
+| R3 discarded `setTimeout` handles allowlisted   |   17 |   3 | self-bounded only: `Toast` fallback removal, `content-parser` ×2                                                                                |
+| R4 `new AbortController` outside the primitives |   53 |   8 | the 8 named cancellation tokens                                                                                                                 |
+| Files constructing their own `AbortController`  |   45 |   8 | the 2 primitives + `api.ts`, `profiles.ts`, `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`, `ChannelController.ts` |
+| Files importing `Disposable`                    |    3 |  42 |                                                                                                                                                 |
+| `tests/lifecycle-guard-baseline.json` files     |   16 |   1 | `media-visibility.test.ts` (singleton under test, no release)                                                                                   |
+
+Inventory script (the plan's appendix) at base →
+`{ add: 409, signal: 288, once: 28, bare: 93, remove: 29, setTimeout: 69, discarded: 17, setInterval: 7, ac: 55, acFiles: 45, bareFiles: 31 }`;
+at the 11b head →
+`{ add: 410, signal: 293, once: 29, bare: 88, remove: 23, setTimeout: 56, discarded: 3, setInterval: 7, ac: 10, acFiles: 8, bareFiles: 28 }`.
+`setTimeout` falls by 13 because 14 discarded sites now go through
+`setOwnedTimeout`, which holds the one kept `setTimeout`.
+
+### Sites that stay, and why
+
+- **`deviceManager.ts:102` devicechange (R1, per-mount).** It keeps its
+  hand-paired start/stop. `device-manager.test.ts:136-156` pins the bare
+  `addEventListener("devicechange", fn)` call shape and the explicit
+  `removeEventListener` in three assertions. A signal-owned listener would need
+  those assertions edited, and 11b edits no assertion. By owner decision the
+  plan's never-edit-an-assertion rule outranks this one move, so Task 5's "R1's
+  allowlist is down to 16" is met at 17, and 17 is the 11b floor. **Task 12
+  (11c) candidate.**
+- **`ChannelController.ts` `channelAbort` (R4, token).** It is not forked from the
+  `SessionScope`. A fork would also cancel in-flight channel loads at logout,
+  where today they run to a guarded no-op. That is behaviour, so it stays a token
+  owned by the next channel switch. **Task 12 candidate.**
+- **`content-parser.ts` copy-button resets (R3).** `renderMessageContent` takes no
+  owner, so nothing can clear them. They only relabel a button the code block
+  owns.
+- **`media-visibility.test.ts` (guard baseline).** `ensureVisibilityListener` is a
+  once-guarded app-lifetime singleton and the unit under test. It has no release.
+
+### Guard baseline teardown
+
+Every other listed file now releases what it opened (a `destroy()`, a dismissal,
+or the page signal's abort). Six files (`e2eeWorker`, `voice-audio-tab`, which
+are the two Linux voice 1b leaks, `updater`, `voice.store`, `channel-mutes` and
+`settings-overlay`'s re-import test) leaked because `vi.resetModules()`
+re-evaluated the modules that install an app-lifetime window listener at load
+(`logger`, `channel-mutes`, the message-list renderers). They now re-import
+against the already-loaded instances of those modules. No assertion changed. The
+one removed `expect` line in `tests/**` is the inventory's per-mount count,
+tightened from 6 to 1.
+
+### Gates
+
+- Unit suite: 282 files, 6 195 passed + 147 expected fail (base 6 191 + 147; the
+  4 new cases are `setOwnedTimeout`'s). `typecheck`, `typecheck:build`,
+  `typecheck:e2e`, `lint` and `knip` are clean. The mutation shard union is exact
+  (104 files; no new `src/` file).
+- Bundle: startup closure 85 654 → 85 918 B (budget 91 000); `MainPage`
+  57 289 → 57 164 B (budget 60 000).
+- **PR soak, 20 cycles**, Linux Chromium, one run each at base `e73b9223` and at
+  the 11b head:
+
+| Metric (warm → final, slope) | Base               | 11b head           |
+| ---------------------------- | ------------------ | ------------------ |
+| nodes                        | 3490 → 3454 (−3.6) | 3490 → 3454 (−3.6) |
+| listeners                    | 192 → 193 (0.1)    | 192 → 193 (0.1)    |
+| abortControllers             | 20 → 20 (0)        | 22 → 22 (0)        |
+| heap slope (B/cycle)         | 10 320             | 10 840             |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets, peerConnections,
+tracks and audioContexts 0 in both runs, all flat. Nothing grows faster. The
+one level change is live `AbortController`s, +2 and flat. `GlobalKeybinds` and
+`OverlayManagers` each own their `document` keydown listener through a
+page-lifetime `Disposable` now, where before they hand-paired a
+`removeEventListener`. The heap slope is inside 11a's recorded run-to-run range
+(9 250–12 431).

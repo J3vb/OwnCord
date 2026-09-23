@@ -11,7 +11,24 @@
 //      silence and decryption errors in the browser, and hears silence —
 //      the media really is encrypted, not passed through;
 //   3. repeated native joins do not leak threads (rust-sdks #1408 measure);
-//   4. repeated mute/unmute keeps the publication, so it adds no threads.
+//   4. repeated mute/unmute keeps the publication, so it adds no threads;
+//   5. video decodes in both directions with the same key: the native camera
+//      (uploaded over the app's loopback frame socket) plays in the browser,
+//      and the browser's camera is read back through that socket; the socket
+//      refuses a wrong token and is gone after close;
+//   6. the video negative control: with a wrong key neither side decodes a
+//      single video frame;
+//   7. per-user volume: the native session's own playout mix plays the
+//      browser peer at the volume set for it (the runner has no sound
+//      device, so the peer pulls the mix itself);
+//   8. a native screen share (a synthetic capture source, through the app's
+//      capture thread and publish) decodes in the browser with the same key,
+//      its local preview arrives on the frame socket, and repeated share
+//      stop/start releases every capturer;
+//   9. the screen-share negative control: with a wrong key the browser
+//      decodes not one frame of it.
+// Not exercised here: the X11 capturer and the Wayland portal (CI has no
+// display); see docs/architecture/voice-e2ee.md.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
 import { test, expect } from "@playwright/test";
 import { createHmac, randomBytes } from "node:crypto";
@@ -29,6 +46,8 @@ const API_SECRET = "e2e-secret-at-least-32-characters-long";
 const ROOM = "native-interop";
 /** 440 Hz sine, amplitude 8000 of 32768: RMS = 8000/32768/sqrt(2). */
 const EXPECTED_SINE_RMS = 8000 / 32768 / Math.SQRT2;
+/** The per-user volume the native peer plays the browser peer at. */
+const PEER_VOLUME = 0.5;
 
 const livekitBinary = process.env.OWNCORD_E2E_LIVEKIT_BINARY;
 const nativePeer = process.env.OWNCORD_NATIVE_VOICE_PEER;
@@ -122,6 +141,7 @@ async function joinBrowserPeer(
   url: string,
   token: string,
   keyBase64: string,
+  video = false,
 ) {
   // livekit-server answers "OK" at /, which is enough of an origin for a
   // worker and WebRTC; the SDK and its worker come from node_modules.
@@ -131,11 +151,12 @@ async function joinBrowserPeer(
   await page.goto(`http://127.0.0.1:${livekitPort}/`);
   await page.addScriptTag({ path: join(livekitDist, "livekit-client.umd.js") });
   await page.evaluate(
-    async ({ url, token, keyBase64 }) => {
+    async ({ url, token, keyBase64, video }) => {
       const lk = (window as unknown as { LivekitClient: typeof import("livekit-client") })
         .LivekitClient;
       const meters = new Map<string, { sumSq: number; samples: number }>();
-      const state = { encErrors: 0, subscribed: [] as string[], meters };
+      const videos = new Map<string, { frames: number; width: number; height: number }>();
+      const state = { encErrors: 0, subscribed: [] as string[], meters, videos };
       (window as unknown as { __interop: typeof state }).__interop = state;
       const keyProvider = new lk.ExternalE2EEKeyProvider();
       await keyProvider.setKey(keyBase64);
@@ -147,7 +168,28 @@ async function joinBrowserPeer(
         state.encErrors++;
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
-      room.on(lk.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      room.on(lk.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+        if (track.kind === lk.Track.Kind.Video) {
+          // Count decoded frames the way a tile renders them.
+          const el = track.attach() as HTMLVideoElement;
+          el.muted = true;
+          document.body.appendChild(el);
+          const v = { frames: 0, width: 0, height: 0 };
+          // A screen share is read as `<identity>#screen`.
+          const key =
+            pub.source === lk.Track.Source.ScreenShare
+              ? `${participant.identity}#screen`
+              : participant.identity;
+          videos.set(key, v);
+          const onFrame = (_now: number, meta: { width: number; height: number }) => {
+            v.frames++;
+            v.width = meta.width;
+            v.height = meta.height;
+            el.requestVideoFrameCallback(onFrame);
+          };
+          el.requestVideoFrameCallback(onFrame);
+          return;
+        }
         if (track.kind !== lk.Track.Kind.Audio) return;
         state.subscribed.push(participant.identity);
         // Chromium only decodes a remote track that is attached somewhere.
@@ -169,8 +211,9 @@ async function joinBrowserPeer(
       });
       await room.connect(url, token);
       await room.localParticipant.setMicrophoneEnabled(true);
+      if (video) await room.localParticipant.setCameraEnabled(true);
     },
-    { url, token, keyBase64 },
+    { url, token, keyBase64, video },
   );
 }
 
@@ -182,15 +225,21 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
           encErrors: number;
           subscribed: string[];
           meters: Map<string, { sumSq: number; samples: number }>;
+          videos: Map<string, { frames: number; width: number; height: number }>;
         };
       }
     ).__interop;
     const m = state.meters.get(identity);
+    const v = state.videos.get(identity);
     return {
       encErrors: state.encErrors,
       subscribed: state.subscribed,
       rms: m && m.samples > 0 ? Math.sqrt(m.sumSq / m.samples) : 0,
       samples: m?.samples ?? 0,
+      videoSubscribed: v !== undefined,
+      videoFrames: v?.frames ?? 0,
+      videoWidth: v?.width ?? 0,
+      videoHeight: v?.height ?? 0,
     };
   }, identity);
 }
@@ -200,13 +249,17 @@ async function resetBrowserMeters(page: import("@playwright/test").Page) {
   await page.evaluate(() => {
     const state = (
       window as unknown as {
-        __interop: { meters: Map<string, { sumSq: number; samples: number }> };
+        __interop: {
+          meters: Map<string, { sumSq: number; samples: number }>;
+          videos: Map<string, { frames: number }>;
+        };
       }
     ).__interop;
     for (const m of state.meters.values()) {
       m.sumSq = 0;
       m.samples = 0;
     }
+    for (const v of state.videos.values()) v.frames = 0;
   });
 }
 
@@ -218,6 +271,8 @@ test("native and browser peers decode each other's audio with the same key", asy
   const nativeAudio: Array<{ identity: string; rms: number; frames: number }> = [];
   const encryption: Array<{ identity: string; encrypted: boolean }> = [];
   const threads: Array<{ phase: string; count: number }> = [];
+  const devices: Array<{ ok: boolean; detail: string }> = [];
+  const playout: number[] = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -232,6 +287,8 @@ test("native and browser peers decode each other's audio with the same key", asy
       "5",
       "--mute-cycles",
       "10",
+      "--volume",
+      String(PEER_VOLUME),
     ],
     ({ event }) => {
       if (event.type === "audio")
@@ -240,6 +297,9 @@ test("native and browser peers decode each other's audio with the same key", asy
         encryption.push(event as unknown as { identity: string; encrypted: boolean });
       if (event.type === "threads")
         threads.push(event as unknown as { phase: string; count: number });
+      if (event.type === "devices")
+        devices.push(event as unknown as { ok: boolean; detail: string });
+      if (event.type === "playout") playout.push((event as unknown as { rms: number }).rms);
     },
   );
 
@@ -268,6 +328,10 @@ test("native and browser peers decode each other's audio with the same key", asy
     identity: "user-1",
     encrypted: true,
   });
+  // Device enumeration ran without crashing; a headless runner has no sound
+  //    server, so either outcome is recorded rather than asserted.
+  expect(devices).toHaveLength(1);
+  console.log(`native device enumeration: ok=${devices[0]!.ok} ${devices[0]!.detail}`);
   // 4. rust-sdks #1408: five join/leave cycles before the real join. Measured
   //    2026-09-22 with livekit 0.9.1: +2 threads per cycle with one remote
   //    participant (one leaked FrameCryptor thread per cryptor: ours and the
@@ -285,6 +349,18 @@ test("native and browser peers decode each other's audio with the same key", asy
   const muteAfter = threads.find((t) => t.phase === "mute-after")!.count;
   console.log(`native peer threads: before=${muteBefore} after 10 mute cycles=${muteAfter}`);
   expect(muteAfter - muteBefore).toBeLessThanOrEqual(2);
+  // 7. Per-user volume: the playout mix carries the browser peer (the only
+  //    remote) at PEER_VOLUME of its decoded level. Compared as energy over
+  //    the settled seconds of each per-second meter; the beep's gaps and the
+  //    two meters' unaligned windows are what the tolerance absorbs.
+  const energy = (rms: number[]) =>
+    Math.sqrt(rms.slice(3).reduce((sum, r) => sum + r * r, 0) / Math.max(1, rms.length - 3));
+  const direct = energy(fromBrowser.map((a) => a.rms));
+  const mixed = energy(playout);
+  console.log(`native playout at volume ${PEER_VOLUME}: mixed=${mixed} direct=${direct}`);
+  expect(playout.length).toBeGreaterThan(5);
+  expect(mixed / direct).toBeGreaterThan(PEER_VOLUME * 0.7);
+  expect(mixed / direct).toBeLessThan(PEER_VOLUME * 1.3);
 });
 
 test("a native peer with the wrong key hears silence and is heard as silence", async ({ page }) => {
@@ -324,4 +400,254 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   // The native side still plays the browser track out, and it is silence.
   expect(fromBrowser.length).toBeGreaterThan(0);
   expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
+});
+
+type NativeVideo = { identity: string; frames: number; width: number; height: number; at: number };
+
+test("native and browser peers decode each other's video with the same key", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
+
+  const nativeVideo: NativeVideo[] = [];
+  const socket: Array<Record<string, unknown>> = [];
+  let resources: Record<string, number> = {};
+  let closed: Record<string, unknown> = {};
+  const threads: Array<{ phase: string; count: number }> = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "16",
+      "--video",
+      "640x360",
+      "--camera-cycles",
+      "5",
+    ],
+    ({ event }) => {
+      if (event.type === "threads")
+        threads.push(event as unknown as { phase: string; count: number });
+      if (event.type === "video")
+        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+      if (event.type === "frameSocket") socket.push(event);
+      if (event.type === "resources") resources = event.resources as Record<string, number>;
+      if (event.type === "closed") closed = event;
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await resetBrowserMeters(page);
+  const settledAt = Date.now();
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2");
+  await peer.done;
+
+  // The native camera (RGBA over the frame socket, VP8, E2EE) decodes in the
+  // browser at the published size and a real frame rate, with no decrypt errors.
+  console.log(
+    `browser decoded native video: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  expect(browser.videoFrames).toBeGreaterThan(5 * 10);
+  expect([browser.videoWidth, browser.videoHeight]).toEqual([640, 360]);
+  expect(browser.encErrors).toBe(0);
+  // The browser's camera decodes natively and arrives through the frame socket.
+  const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
+  const perSecond = fromBrowser.map((v) => v.frames);
+  console.log(`native decoded browser video, frames/s after settle: ${perSecond.join(",")}`);
+  expect(fromBrowser.length).toBeGreaterThan(0);
+  expect(Math.max(...perSecond)).toBeGreaterThan(10);
+  expect(fromBrowser.at(-1)!.width).toBeGreaterThan(0);
+  // The frame socket: loopback-bound, refuses a wrong or missing token, and
+  // is torn down with the session.
+  expect(socket).toEqual([
+    expect.objectContaining({ loopback: true, wrongTokenRefused: true, noTokenRefused: true }),
+  ]);
+  expect(resources.localTracks).toBe(2);
+  expect(resources.videoSockets).toBe(2);
+  expect(closed.frameSocketGone).toBe(true);
+  const camBefore = threads.find((t) => t.phase === "camera-before")!.count;
+  const camAfter = threads.find((t) => t.phase === "camera-after")!.count;
+  console.log(`native peer threads: before=${camBefore} after 5 camera cycles=${camAfter}`);
+  // Each camera off/on unpublishes and republishes (as the web path does, so
+  // remote tiles close), and each publish is a new sender. Measured
+  // 2026-09-22 with livekit 0.9.1: +3 idle threads per cycle — the sender's
+  // FrameCryptor thread (rust-sdks #1408) plus the VideoEncoderQueue and
+  // VideoFrameTransformer threads it keeps alive. Pinned as the ceiling, as
+  // for the join cycles above; docs/architecture/voice-e2ee.md records it.
+  expect(camAfter - camBefore).toBeLessThanOrEqual(3 * 5 + 2);
+});
+
+test("a native peer with the wrong key decodes no video and is decoded by no one", async ({
+  page,
+}) => {
+  const key = randomBytes(32).toString("base64");
+  const wrongKey = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
+
+  const nativeVideo: NativeVideo[] = [];
+  const watching: string[] = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      wrongKey,
+      "--secs",
+      "14",
+      "--video",
+      "640x360",
+    ],
+    ({ event }) => {
+      if (event.type === "video")
+        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+      if (event.type === "videoWatch") watching.push(String(event.identity));
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(3_000);
+  await resetBrowserMeters(page);
+  const settledAt = Date.now();
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2");
+  await peer.done;
+
+  // Same settled window as the audio control: receiver cryptors attach on
+  // TrackSubscribed, so frames before it are not the measurement.
+  expect(browser.videoFrames).toBe(0);
+  expect(browser.encErrors).toBeGreaterThan(0);
+  // The native side subscribed and opened its frame socket, and not one
+  // frame of the browser's camera decoded.
+  expect(watching).toContain("user-1");
+  const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
+  expect(fromBrowser.reduce((sum, v) => sum + v.frames, 0)).toBe(0);
+});
+
+test("a native screen share decodes in the browser with the same key", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const nativeVideo: NativeVideo[] = [];
+  let resources: Record<string, number> = {};
+  let closed: Record<string, unknown> = {};
+  const threads: Array<{ phase: string; count: number; fds: number; captures: number }> = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "16",
+      "--screen",
+      "1280x720",
+      "--screen-cycles",
+      "5",
+    ],
+    ({ event }) => {
+      if (event.type === "threads")
+        threads.push(
+          event as unknown as { phase: string; count: number; fds: number; captures: number },
+        );
+      if (event.type === "video")
+        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+      if (event.type === "resources") resources = event.resources as Record<string, number>;
+      if (event.type === "closed") closed = event;
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+
+  // The share (15 fps, screencast content, VP8, E2EE) decodes at its size.
+  console.log(
+    `browser decoded native screen share: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  expect(browser.videoFrames).toBeGreaterThan(5 * 5);
+  expect([browser.videoWidth, browser.videoHeight]).toEqual([1280, 720]);
+  expect(browser.encErrors).toBe(0);
+  // The local preview arrives on the frame socket's screen route.
+  const preview = nativeVideo.filter((v) => v.identity === "preview");
+  expect(preview.length).toBeGreaterThan(0);
+  expect(Math.max(...preview.map((v) => v.frames))).toBeGreaterThan(5);
+  expect([preview.at(-1)!.width, preview.at(-1)!.height]).toEqual([1280, 720]);
+  // Five stop/start cycles leave exactly the live capture, published (mic +
+  // screen), and a stale stop did not end it; close releases it.
+  const before = threads.find((t) => t.phase === "screen-before")!;
+  const after = threads.find((t) => t.phase === "screen-after")!;
+  expect(before.captures).toBe(1);
+  expect(after.captures).toBe(1);
+  expect(resources.screenCaptures).toBe(1);
+  expect(resources.localTracks).toBe(2);
+  expect(closed.screenCaptures).toBe(0);
+  console.log(
+    `native peer threads: before=${before.count} after 5 screen share cycles=${after.count}; fds ${before.fds} -> ${after.fds}`,
+  );
+  // Like a camera toggle, each share is a new sender, whose idle threads
+  // livekit 0.9.1 keeps until the room closes (rust-sdks #1408 family).
+  // Measured 2026-09-23: +3.5 to +4.6 per cycle — one FrameCryptor and one
+  // VideoFrameTransformer thread per sender plus one or two
+  // VideoEncoderQueue threads (the screencast encoder can restart once).
+  // The capture thread itself is joined on stop and adds nothing, and file
+  // descriptors stay flat. Pinned as the ceiling; docs/architecture/voice-e2ee.md
+  // records it. Closing the room releases all but each sender's
+  // FrameCryptor thread (#1408 proper).
+  expect(after.count - before.count).toBeLessThanOrEqual(5 * 5 + 2);
+  expect(closed.threads as number).toBeLessThan(after.count);
+  expect(after.fds - before.fds).toBeLessThanOrEqual(2);
+});
+
+test("a native screen share with the wrong key is decoded by no one", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const wrongKey = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    wrongKey,
+    "--secs",
+    "14",
+    "--screen",
+    "1280x720",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(3_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+
+  // Subscribed to the share, and not one frame of it decoded.
+  expect(browser.videoFrames).toBe(0);
+  expect(browser.encErrors).toBeGreaterThan(0);
 });

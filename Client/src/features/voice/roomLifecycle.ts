@@ -29,7 +29,7 @@ import {
 } from "../../lib/screenShare";
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
-import type { SessionState } from "./sessionState";
+import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
@@ -209,11 +209,16 @@ export class RoomLifecycle {
    *  event wiring applies. */
   private async createNativeRoom(): Promise<Room> {
     const { createNativeRoom } = await import("./native/nativeRoom");
-    const nativeRoom = createNativeRoom({
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      autoGainControl: loadPref("autoGainControl", true),
-    });
+    const nativeRoom = createNativeRoom(
+      {
+        echoCancellation: loadPref("echoCancellation", true),
+        noiseSuppression: loadPref("noiseSuppression", true),
+        autoGainControl: loadPref("autoGainControl", true),
+      },
+      (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
+      (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
+    );
+    this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
     // The adapter is structurally the subset of Room the modules call; the
     // cast is the one seam where the two backends meet.
     const newRoom = nativeRoom as unknown as Room;
@@ -299,6 +304,7 @@ export class RoomLifecycle {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
+    this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
     if (room !== null) {
       room.removeAllListeners();

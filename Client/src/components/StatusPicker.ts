@@ -4,6 +4,7 @@
  * with all status options. Intended for use in the UserBar.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -63,8 +64,8 @@ function colorForStatus(status: UserStatus): string {
 // ---------------------------------------------------------------------------
 
 export function createStatusPicker(options: StatusPickerOptions): StatusPickerComponent {
-  const ac = new AbortController();
-  const { signal } = ac;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   let currentStatus: UserStatus = options.currentStatus;
   let root: HTMLDivElement | null = null;
@@ -291,7 +292,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     checkEls = new Map();
     root?.remove();
     root = null;

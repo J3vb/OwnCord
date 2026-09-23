@@ -15,7 +15,22 @@ export const nativeVoice: NativeVoice = {
   setMicrophone: async (session, enabled) => (await service()).setMicrophone(session, enabled),
   setSubscribed: async (session, identity, sid, subscribed) =>
     (await service()).setSubscribed(session, identity, sid, subscribed),
+  setVolume: async (session, identity, volume) =>
+    (await service()).setVolume(session, identity, volume),
+  setScreenshareVolume: async (session, identity, volume) =>
+    (await service()).setScreenshareVolume(session, identity, volume),
+  publishCamera: async (session, options) => (await service()).publishCamera(session, options),
+  unpublishCamera: async (session, sid) => (await service()).unpublishCamera(session, sid),
+  screenSources: async () => (await service()).screenSources(),
+  startScreen: async (session, source, capture) =>
+    (await service()).startScreen(session, source, capture),
+  publishScreen: async (session, capture, options) =>
+    (await service()).publishScreen(session, capture, options),
+  stopScreen: async (session, capture) => (await service()).stopScreen(session, capture),
   debugInfo: async () => (await service()).debugInfo(),
+  listDevices: async () => (await service()).listDevices(),
+  setDevice: async (session, kind, deviceId) =>
+    (await service()).setDevice(session, kind, deviceId),
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.
