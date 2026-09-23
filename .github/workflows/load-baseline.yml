@@ -51,7 +51,7 @@
 #     which is the only reason that value is there. No lk cohort: the churn
 #     exercises the control plane, not the media path.
 #   restart — 100 connections at the capacity rate while the WORKFLOW, not k6,
-#     stops the server 30 s into the sustain (T+90s) and starts it again on the
+#     stops the server between equal steady windows (T+135s) and restarts the
 #     same container. The drain contract under load is 30 s
 #     (internal/app/lifecycle.go shutdownBudget), not the 20 s an idle server
 #     proves, so the step fails on a non-zero exit or a drain over 30 s.
@@ -285,15 +285,12 @@ jobs:
           recovery_s=30
           restart_at=$(((2 * ramp_s + sustain_s - recovery_s) / 2))
 
-          # The ceiling search spreads its connections over this many text
-          # channels (OC-0447). Each connection posts one message per
-          # K6_SEND_INTERVAL_MS (2 s), so one channel carries N/2 messages per
-          # second at step N -- past the server's topicRateLimitPerSecond (100,
-          # a constant in the code) from N=200 up, which is why every step at
-          # or above 200 was shed and the search could not see a hardware
-          # ceiling above it. 150 messages/s per channel leaves a third of the
-          # limiter unused as headroom.
-          ceiling_channels=$(((CEILING_MAX + 149) / 150))
+          # OC-0447: at the default 2 s send interval, each VU can send
+          # once in a sliding 1 s window even if every timer aligns. Budget
+          # at most 50 of the server's 100 topic messages/s, including the
+          # observer's arbitrary slot in the VU-id pool. ws-load.js validates
+          # this again (and requires more channels for faster custom sends).
+          ceiling_channels=$(((CEILING_MAX + 1 + 49) / 50))
           # An `[ ] && assign` here would abort the step: GitHub runs this
           # shell with -e, and a false test leaves the whole AND-list at
           # status 1.

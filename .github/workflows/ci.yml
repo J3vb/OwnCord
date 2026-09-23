@@ -589,6 +589,9 @@ jobs:
         with:
           node-version: 26
 
+      - name: Check k6 harness measurement contracts (offline)
+        run: node --test Server/scripts/k6/ws-load.test.mjs
+
       - name: Self-test the count matcher
         run: node --test scripts/check-doc-counts.test.mjs
 
