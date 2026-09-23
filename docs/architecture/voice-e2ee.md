@@ -437,11 +437,14 @@ id falls back to the default and reports it; the device already playing is
 left alone, and a device that fails to open leaves the current stream
 playing). A sink that disappears mid-call is moved by the sound server itself;
 the stream error is only logged. The stream is opened on a concrete sink, so
-"System default" (an empty id) follows the default only through the
-hot-plug re-apply above: a `devicechange` re-applies it, which reopens the
-stream when the default sink has moved. **Follow-up:** a default changed in
-the system mixer with no hot-plug leaves playout on the old sink until the
-next device change, switch or join; closing it needs a default-sink watcher.
+"System default" (an empty id) would stay on the sink it opened on. A
+`devicechange` re-applies it (the hot-plug re-apply above), and a default
+changed in the system mixer with no hot-plug raises no `devicechange`, so
+while "System default" is selected a watcher thread asks the sound server for
+the default sink every 2 s and reopens the stream there when it moves. It
+polls through the host connection that opened the stream, adds one thread
+for the call, and is stopped and joined when another device is chosen or the
+session closes.
 
 **Echo cancellation reference.** At first the echo canceller's reference was
 the device module's synthetic mix (every remote track at unity, on the pump's

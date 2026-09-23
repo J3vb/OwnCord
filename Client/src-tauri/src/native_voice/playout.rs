@@ -9,7 +9,10 @@
 //! with each participant's gain into the device's front pair. What it plays
 //! is also the echo canceller's reference (`capture::Reference`).
 use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle as Thread;
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use futures_util::StreamExt;
@@ -38,6 +41,10 @@ const MAX_QUEUED: usize = SAMPLE_RATE as usize * 200 / 1000;
 const TRIM_AFTER: usize = SAMPLE_RATE as usize * 2;
 /// The device callback period: 20 ms, so about 40 ms of output latency.
 const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
+/// How often "System default" checks where the default sink is. A default
+/// changed in the system mixer raises no `devicechange`, so this poll is the
+/// only thing that notices it.
+const FOLLOW_EVERY: Duration = Duration::from_secs(2);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -295,15 +302,20 @@ pub fn list_outputs() -> Vec<DeviceInfo> {
         .collect()
 }
 
+/// The open output stream and the id of the device it plays on.
+type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
+
 /// A session's playout: the mixer, its readers and the output stream.
 #[derive(Default)]
 pub struct Playout {
     mixer: Arc<Mixer>,
     readers: Readers,
-    /// The open output stream and the id of the device it plays on.
-    output: Option<(String, cpal::Stream)>,
+    /// Shared with the watcher, which reopens it when the default moves.
+    output: Output,
     /// The processing whose echo canceller hears what is played.
     reference: Option<Arc<Apm>>,
+    /// Follows the default sink while "System default" is selected.
+    watcher: Option<Watcher>,
 }
 
 impl Playout {
@@ -332,15 +344,95 @@ impl Playout {
     /// already plays there. An unknown id opens the default and reports the
     /// fallback as an error, the same contract as the capture switch. A
     /// device that fails to open leaves the current stream playing.
+    ///
+    /// The stream is pinned to a concrete sink, so an empty id also starts a
+    /// watcher that reopens it whenever the default sink moves, until another
+    /// device is chosen or the playout is dropped.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
-        let mixer = self.mixer.clone();
-        let reference = self.reference.clone().map(Reference::new);
-        switch_output(
-            &mut self.output,
-            id,
-            output_devices(&cpal::default_host()),
-            |device| open_output(device, mixer, reference),
-        )
+        // Stopped before the output is locked: it may be reopening it.
+        self.watcher = None;
+        let host = Arc::new(cpal::default_host());
+        let switch = {
+            let (output, mixer, reference) = (
+                self.output.clone(),
+                self.mixer.clone(),
+                self.reference.clone(),
+            );
+            let host = host.clone();
+            move |id: &str| {
+                let reference = reference.clone().map(Reference::new);
+                switch_output(&mut lock(&output), id, output_devices(&host), |device| {
+                    open_output(device, mixer.clone(), reference)
+                })
+            }
+        };
+        let result = switch(id);
+        if id.is_empty() {
+            let playing = lock(&self.output).as_ref().map(|(id, _)| id.clone());
+            // The watcher polls and reopens through the host that opened
+            // the stream, so it adds no sound-server connection of its own.
+            self.watcher = Some(Watcher::start(
+                FOLLOW_EVERY,
+                playing,
+                move || {
+                    host.default_output_device()?
+                        .id()
+                        .ok()
+                        .map(|d| d.to_string())
+                },
+                move || {
+                    if let Err(e) = switch("") {
+                        log::warn!("[native_voice] following the default sink: {e}");
+                    }
+                },
+            ));
+        }
+        result
+    }
+}
+
+/// A thread that calls `follow` each time the default sink changes, polled
+/// every `every`. Dropping it stops and joins the thread.
+struct Watcher {
+    stop: mpsc::Sender<()>,
+    thread: Option<Thread<()>>,
+}
+
+impl Watcher {
+    /// `playing` is the sink the stream is on; `default_sink` reports the
+    /// current default's id (`None` when the sound server did not answer,
+    /// which is never taken for a change).
+    fn start(
+        every: Duration,
+        playing: Option<String>,
+        mut default_sink: impl FnMut() -> Option<String> + Send + 'static,
+        mut follow: impl FnMut() + Send + 'static,
+    ) -> Self {
+        let (stop, stopped) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let mut last = playing;
+            while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
+                if let Some(now) = default_sink() {
+                    if last.as_ref() != Some(&now) {
+                        last = Some(now);
+                        follow();
+                    }
+                }
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -370,6 +462,7 @@ fn switch_output<D, S>(
 
 impl Drop for Playout {
     fn drop(&mut self) {
+        self.watcher = None;
         stop_readers(&self.readers, &self.mixer);
     }
 }
@@ -486,6 +579,59 @@ mod tests {
         });
         assert_eq!(result, Err("busy".to_string()));
         assert_eq!(output, Some(("speakers".to_string(), "speakers")));
+    }
+
+    /// A watcher over a default sink the test moves, reporting each follow.
+    fn watch(playing: Option<&str>) -> (Watcher, Arc<Mutex<Option<String>>>, mpsc::Receiver<()>) {
+        let default = Arc::new(Mutex::new(playing.map(str::to_string)));
+        let (followed, follows) = mpsc::channel();
+        let source = default.clone();
+        let watcher = Watcher::start(
+            Duration::from_millis(2),
+            playing.map(str::to_string),
+            move || lock(&source).clone(),
+            move || followed.send(()).unwrap(),
+        );
+        (watcher, default, follows)
+    }
+
+    const QUIET: Duration = Duration::from_millis(50);
+
+    #[test]
+    fn the_watcher_follows_each_move_of_the_default_sink_once() {
+        let (_watcher, default, follows) = watch(Some("speakers"));
+        assert!(follows.recv_timeout(QUIET).is_err(), "default unchanged");
+        *lock(&default) = Some("headphones".to_string());
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(follows.recv_timeout(QUIET).is_err(), "followed once");
+        // The sound server not answering is not a move, nor is its answer
+        // coming back unchanged.
+        *lock(&default) = None;
+        assert!(follows.recv_timeout(QUIET).is_err());
+        *lock(&default) = Some("headphones".to_string());
+        assert!(follows.recv_timeout(QUIET).is_err());
+        *lock(&default) = Some("speakers".to_string());
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn a_watcher_with_nothing_playing_follows_the_first_default_it_sees() {
+        let (_watcher, default, follows) = watch(None);
+        assert!(follows.recv_timeout(QUIET).is_err());
+        *lock(&default) = Some("speakers".to_string());
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn a_dropped_watcher_has_stopped_following() {
+        let (watcher, default, follows) = watch(Some("speakers"));
+        drop(watcher);
+        *lock(&default) = Some("headphones".to_string());
+        // Dropping joined the thread and with it the follow callback.
+        assert_eq!(
+            follows.recv_timeout(QUIET),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
     }
 
     #[test]
