@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ApiClient } from "@lib/api";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before any import that triggers store or lib loading
@@ -3227,6 +3228,7 @@ describe("SidebarArea", () => {
         const chatArea = document.createElement("div");
         const nav = createContentNavigator({
           destinations: destinations(),
+          api: {} as ApiClient,
           chatArea,
           rememberChannel: result.rememberChannel,
           forgetChannel: result.forgetChannel,

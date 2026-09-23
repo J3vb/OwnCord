@@ -179,6 +179,54 @@ export interface DmRequestDecisionResult {
   readonly decided_at: string | null;
 }
 
+/** GET /moderation/queue's `state` filter: "" is open and assigned together. */
+export type ModerationQueueFilter = "" | "open" | "assigned" | "closed";
+
+/** One row of GET /moderation/queue (B5-8), for MODERATE_MEMBERS holders
+ *  only. `id` is the opaque public id. Mirrors
+ *  Server/api/moderation_queue_handler.go's moderationQueueRowResponse. */
+export interface ModerationQueueRow {
+  readonly id: string;
+  readonly reporter_name: string;
+  readonly subject_name: string;
+  readonly target_type: string;
+  readonly target_ref: string;
+  readonly channel_id?: number;
+  readonly reason: string;
+  readonly state: string;
+  readonly assignee_id: number;
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly closed_at?: string;
+}
+
+/** GET /moderation/queue/{id}: the fields B9-11 reads. The server also sends
+ *  notes, events and actions (B9-12's); nothing here keeps them. */
+export interface ModerationReportDetail {
+  readonly id: string;
+  readonly target_type: string;
+  readonly channel_id?: number;
+  readonly reason: string;
+  readonly detail: string;
+  readonly state: string;
+  readonly assignee_id: number;
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly closed_at?: string;
+  /** The snapshot the server captured at filing; empty when withheld. */
+  readonly evidence: readonly {
+    readonly seq: number;
+    readonly author_id: number;
+    readonly content: string;
+    /** JSON array of {id, filename, mime, size}: references, never bytes. */
+    readonly attachments: string;
+    readonly captured_at: string;
+  }[];
+  /** NSFW_ACKNOWLEDGEMENT_REQUIRED or SOURCE_CHANNEL_UNAVAILABLE when withheld. */
+  readonly evidence_withheld?: string;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -557,6 +605,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getMyReports(signal?: AbortSignal): Promise<OwnReportSummary[]> {
       return request<OwnReportSummary[]>("GET", "/reports/mine", undefined, signal);
+    },
+
+    /** The moderator queue (B9-11). 403 without MODERATE_MEMBERS. */
+    getModerationQueue(
+      state: ModerationQueueFilter,
+      signal?: AbortSignal,
+    ): Promise<ModerationQueueRow[]> {
+      const query = state === "" ? "" : `?state=${state}`;
+      return request<ModerationQueueRow[]>("GET", `/moderation/queue${query}`, undefined, signal);
+    },
+
+    /** One report with its evidence (B9-11). 404 for a report about the caller. */
+    getModerationReport(id: string, signal?: AbortSignal): Promise<ModerationReportDetail> {
+      return request<ModerationReportDetail>(
+        "GET",
+        `/moderation/queue/${encodeURIComponent(id)}`,
+        undefined,
+        signal,
+      );
     },
 
     /** Records that the caller read their own warning. 404 when it is already

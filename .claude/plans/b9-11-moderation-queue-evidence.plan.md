@@ -1,6 +1,6 @@
 # Plan: B9-11 — Show the permission-gated moderation queue and authorized evidence
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-11-impl` from `dev` `64a41b3a1e6a0972059ec156a3f76f692fcccb99`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-11 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-11-moderation-queue-evidence`; branch from current `dev`, PR to `dev` only.
@@ -170,3 +170,175 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record (2026-09-23)
+
+### Drift at the implementation base
+
+Re-read at `64a41b3a` (B9-7 #1755 and B9-10 #1754 merged). Every inventory row
+still holds in substance; the line ranges moved:
+
+- Rows 1–2: #1735 (`714b55a0`) added `evidence_withheld` to the detail DTO, so
+  the DTOs are now `Server/api/moderation_queue_handler.go:17-107` and the
+  routes, the authorization-before-id-resolution helper and the list/detail
+  handlers `:120-275`.
+- Row 3: `guardConfidentiality` and `GuardSelfReviewFor` are now
+  `Server/service/report.go:432-468`, `Get` `:529-568`; `Queue` (`:492-515`)
+  also drops reports about the caller.
+- Row 4 / Task 1, the hard dependency, is **met**: the B5 evidence-consent
+  follow-up merged as #1735 and the owner accepted it on 2026-09-23 (PRD
+  entry-gate table, "B5 consent acceptance"). The contract this milestone
+  uses: `evidence_withheld` is `NSFW_ACKNOWLEDGEMENT_REQUIRED` (acknowledge
+  `channel_id` first) or `SOURCE_CHANNEL_UNAVAILABLE`, with `evidence` empty,
+  re-evaluated on every read (`Server/service/report_evidence.go`); tests
+  `Server/api/moderation_evidence_consent_test.go`
+  (`TestModerationEvidence_AcknowledgeAndRevoke`, `_ConsentIsPerModerator`,
+  `_AdministratorHasNoBypass`, `_SourceChannelRelabelling`,
+  `_SourceChannelDeletion`, `_UnlabelledSourceNeedsNoAcknowledgement`).
+- The B5 plan's exit-gate text cited as row 4 moved with #1748's
+  reconciliation; the condition is the "Conditions 3 and 4" row of its
+  [exit gate](../../docs/plans/b5-community-content-moderation-2026-09-04.md#exit-gate).
+
+No server, protocol or schema change was needed: `GET /api/v1/moderation/queue`
+(with `?state=open|assigned|closed`), `GET .../queue/{id}` and the `mod_queue`
+frame all exist on `dev`.
+
+### What shipped
+
+- **Entry and view (Q2).** `destinations.ts` registers `moderation`, so B9-4's
+  "Moderation" button beside Audit Log appears for `MODERATE_MEMBERS` holders
+  and opens the content view; close and Escape take the `channelBeforeDm`
+  path. There is no badge; the count is inside the view.
+- **Queue.** Loads only once the view opens (the navigator builds it only
+  with the permission). A "Show" filter over the server's own states (open
+  and in review — the default —, waiting, in review, closed) and the
+  server's result count ("2 reports open or in review"). Each row is one
+  button: target and reason, subject and reporter, status, date. No
+  pagination is assumed: the route has none.
+- **Detail.** A separate read per selected report, with its facts (about,
+  reported by, status, assignee, sent, closed), the reporter's details and
+  the evidence snapshot. Notes, events and actions are B9-12's; the adapter
+  drops them so they are not even kept in memory.
+- **Evidence.** Only the returned snapshot, ordered around the reported
+  message, as text: no link, embed, image, emoji or mention is rendered and
+  nothing is fetched, so external media is suppressed by construction.
+  Attachments show name, type and size "kept by reference only … may have been
+  deleted"; the upload id is dropped in the adapter, so nothing can fetch or
+  offer to restore the file.
+- **Consent.** `NSFW_ACKNOWLEDGEMENT_REQUIRED` shows B9-7's own gate
+  (`components/NsfwGate`, lazy) in place of the evidence. Continue records
+  the acknowledgement with the server (`PUT .../nsfw-acknowledgement`) and
+  only then re-reads the report; Go back closes the report. Returned evidence
+  is still withheld when this client holds no consent for its channel (a
+  revoke raced the read), and withdrawing consent anywhere (`nsfw_ack`)
+  removes shown evidence at once. The client only ever narrows the server's
+  answer.
+- **Authority and lifetime.** A 403 on any read clears every report on
+  screen and says the permission is gone; a 404 says the report is no longer
+  available and re-reads the queue, without probing. Every request is bound to
+  the view's signal and to the filter or selection it was made for, so a late
+  answer is dropped. `mod_queue` (now registered in `dispatcher.ts`, report
+  frames only) and a reconnect re-read the queue and the open report; the
+  frame carries no data and the feature store is a counter. A selected report
+  that leaves the list closes with a message and focus stays in the view.
+  Role loss, sign-out and profile switch go through B9-4's navigator, which
+  aborts the view: the DOM is emptied and the state dropped.
+
+### Implementation decisions and file-table amendments
+
+- **The view builder gets the API client.** B9-4's `FeatureViewContext` had
+  only `signal` and `close`, so it gains `api`; `contentView.ts` passes the
+  one it is given and `MainPage.ts` hands it over in the navigator's options
+  (one line). The tests that build a navigator pass a stub.
+- **Files beyond the table**, each a narrow part of the wiring:
+  `features/moderation/{view,wsHandlers}.ts` (the lazy destination shim, as
+  B9-5's `message-requests/view.ts`; the handler body the dispatcher door
+  requires), `i18n/moderation.ts` (catalog), `features/reports/myReports.ts`
+  (exports its target and reason labels for reuse),
+  `styles/app/chat-area.css` (the feature-view fragment that owns B9-4/B9-5's
+  view rules; tokens only, no import change),
+  `tests/e2e/b9-moderation-queue.spec.ts` (the Q1 checks, mocked),
+  `tests/e2e/b9-navigation.spec.ts` (its "no Moderation entry yet" check now
+  expects the real entry), and the navigator stubs in `navigation.test.ts`
+  and `tests/unit/sidebar-area.test.ts`. Unit tests are
+  `features/moderation/{queue,evidence}.test.ts`.
+- **Budget.** The queue, the evidence renderer and the catalog load on first
+  open. Measured at the base: startup 93,952 B, MainPage 63,300 B; with this
+  change 94,576 B of 95,000 B and 63,437 B of 64,000 B, no budget change. The
+  startup growth is the view CSS, the two API methods and the `mod_queue`
+  handler. Importing `formatFileSize` from `message-list/attachments` made
+  Rolldown split four shared modules out of the entry (+700 B), so the size
+  uses `lib/connectionStats`'s `formatByteSize` with the same arguments.
+
+### Evidence
+
+Base `64a41b3a`; Node 26.9.0, vitest 4.1.11, Playwright Chromium, Go 1.26.7,
+Linux.
+
+| Check                                                                                            | Result                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `npx vitest run --maxWorkers=4` (whole client)                                                   | 302 files, 6,572 passed, 152 expected-fail  |
+| `src/features/moderation/queue.test.ts`, `evidence.test.ts`                                      | 26 passed                                   |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint) | clean                                       |
+| `npm run build:budget && npm run check:budgets`                                                  | all ok; startup 94,576 B, MainPage 63,437 B |
+| Playwright (dev server): `b9-moderation-queue`, `b9-navigation`                                  | 12 and 3 passed                             |
+| Playwright fullstack (real Go server): `fullstack/b9-moderation-queue`                           | 2 passed                                    |
+| `npx prettier --check .`, `npm run check:docs`                                                   | clean (tracked files), passed               |
+
+The real-server journey uses synthetic accounts: alice (owner, and the
+subject), carol (reporter, through the server's route) and bob (moderator in
+the client, then demoted). It proves: the entry and view from the keyboard;
+the view's count equals the server's queue; a report's snapshot shows as text
+with its attachment by reference and no `img`/`a`; Escape closes the report
+onto its row, then the view; evidence from a channel labelled after filing is
+withheld behind B9-7's gate until bob's own acknowledgement, which is sent
+before the re-read; revoking consent from another device removes the shown
+evidence; a new report reaches the open view through `mod_queue`; nothing
+scrolls sideways at 940×500; bob's traffic holds no file, attachment or
+labelled-channel history read and no moderation route but the queue and
+report reads (plus B9-15's own-history read); demoting bob closes the view,
+hides the entry, empties the view's DOM and the server answers 403. The second
+test shows alice's queue, the server's and the view's, excludes the report
+about her, and a member has no entry and a 403.
+
+**Failing controls.** Each guard was removed in turn and the suite re-run;
+each failed and was restored: the local consent narrowing in the adapter
+(`evidence.test.ts`), 403 handling as a refusal (two `queue.test.ts` authority
+tests), the consent-revoke subscription and the late-detail drop
+(`queue.test.ts`). The 24×24 target check failed on the unstyled 18 px filter
+before it took the shared `form-input` class.
+
+### Accessibility (Q1)
+
+- **Keyboard:** the filter is a native `select` with a label; each report is
+  a native button; Tab and Shift+Tab move filter → rows in reading order;
+  Enter opens a report, Escape closes it onto its row, a second Escape
+  closes the view onto the channel with focus back on the entry
+  (`b9-moderation-queue.spec.ts`, keyboard test). No hover-only action.
+- **Screen reader:** the view is a region named "Moderation"; each row's
+  accessible name is its full sentence (target, reason, people, status,
+  date); the selected row has `aria-current`; the count and loading are
+  `role="status"`, refusals and failures `role="alert"`, both present before
+  their text changes; the report is a section named by its heading, facts a
+  description list. Every focusable control has a name
+  (`findUnnamedControls`). A refusal, closed view or withdrawn consent
+  removes the private text from the tree. **NVDA and Orca recordings are
+  owner-run and pending.**
+- **Focus:** the view heading on open; the report heading once a report
+  loads (only if the reader is still on its row); its row on Escape or Go
+  back; the first row or the filter when an open report disappears; the view
+  heading after a refusal. The ring passes Q1 on the rows and the filter in
+  every theme.
+- **Contrast:** measured in dark, neon-glow, midnight and light, each with
+  and without High Contrast: intro, filter label, count, selected and plain
+  row text, state, date, report title, facts, headings, reporter detail,
+  evidence author, text, marker and attachment, all ≥ 4.5:1; focus ≥ 3:1
+  (JSON attached per theme). The selected row and the reported message carry
+  a border as well as a colour.
+- **Motion:** the view has no animation or transition
+  (`animation-name: none`, `transition-duration: 0s` on rows, report and
+  evidence), so OS and in-app reduced motion have nothing to stop.
+- **Zoom/reflow:** at 940×500 with 20 px Large Font every control and
+  evidence line scrolls into view and neither the view nor the queue scrolls
+  sideways (screenshot attached); long unbroken text wraps. The OS 200 %
+  zoom check is owner-run and pending with the native recordings.
