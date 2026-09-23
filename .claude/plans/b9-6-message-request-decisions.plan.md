@@ -227,8 +227,9 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
 - **Focus on removal.** When the row holding focus (or its open confirm)
   leaves, for any reason, focus moves to the next request's row (not its
   Accept, so a repeated Enter cannot decide another request), else the
-  previous row, else the view heading; an open confirm for a request decided
-  elsewhere closes. After Accept, focus goes to the conversation's composer.
+  previous row, else the view heading. Focus on the list itself (a tab stop)
+  also moves to the heading when the list empties. An open confirm for a
+  request decided elsewhere closes. After Accept, focus goes to the conversation's composer.
 - **Bundle.** A value import of `lib/api` (`ApiClientError`) from the lazy
   inbox chunk split shared chunks out of the startup closure (+1.1 kB); the
   409/404 check matches the error by name instead. Measured against the
@@ -242,8 +243,8 @@ Node 26.9.0, vitest 4.1.11, Playwright 1.63.0 Chromium, Linux, head
 `0cc53ab6` (pre-squash; the PR's CI run is the exact-SHA record). The
 removal focus moved from the next request's Accept to its row after that
 head; the unit, mocked and fullstack assertions for the row (and its focus
-ring), and the unit test that a newer snapshot redraws a kept row's sender
-and preview, are recorded by the PR's CI run, not by the counts below.
+ring), and the unit tests that a newer snapshot redraws a kept row's sender
+and preview and that emptying a focused list focuses the heading, are recorded by the PR's CI run, not by the counts below.
 
 | Check                                                                                                                                                                                               | Result                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
