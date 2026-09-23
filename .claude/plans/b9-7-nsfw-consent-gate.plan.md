@@ -212,9 +212,11 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   for a gated channel, only the gate: no list, typing indicator, composer or
   history fetch, and the channel's delivered rows are dropped
   (`clearChannelContent`, a new `messages.store` mutator). A subscription on
-  the channel's consent state remounts it on any change — accepted, revoked
-  here or on another device, relabelled, or restated by `ready`. Revoking
-  aborts the mount's signal. The gate waits for the 204 before opening and
+  the channel's consent state remounts it whenever it crosses the gate —
+  accepted, revoked here or on another device, relabelled, or restated by
+  `ready`; labelling or unlabelling consented content only adds or removes the
+  withdraw bar, so the composer keeps its draft. Revoking aborts the mount's
+  signal. The gate waits for the 204 before opening and
   shows an error on failure. An acknowledged channel shows a withdraw bar.
 - **Alternate entry points.** The pins panel does not open behind the gate,
   search behind it offers only server-wide search (the server already omits
@@ -276,6 +278,8 @@ pre-B9-7 behaviour of loading under the overlay), 15 unit tests
 - **Focus:** the heading takes focus on mount, so a stray Enter is never
   consent; accept keeps focus through saving (`aria-disabled`, not
   `disabled`) and after a failure; revoking lands focus on the gate heading.
+  When the gate that held focus is removed, focus moves to the composer after
+  accepting, or to the sidebar after declining or Escape, never `<body>`.
   Focus rings measured at Q1 in every theme and High Contrast.
 - **Contrast:** heading, body, scope text and both buttons ≥ 4.5:1 in dark,
   neon-glow, midnight and light, with and without High Contrast; the bar's text

@@ -141,6 +141,8 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
     // 2. Decline leaves the channel; re-entering shows the gate again.
     await bob.getByTestId("nsfw-gate-back").click();
     await expect(gate(bob)).toHaveCount(0);
+    // Focus falls back to the sidebar, not <body>.
+    await expect(bob.locator(".unified-sidebar :focus")).toHaveCount(1);
     await shot(bob, "02-declined");
     await channelItem(bob, "general").click();
     await expect(gate(bob)).toBeVisible();
@@ -148,6 +150,7 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
     await expect(bob.locator(".nsfw-gate-title")).toBeFocused();
     await bob.keyboard.press("Escape");
     await expect(gate(bob)).toHaveCount(0);
+    await expect(bob.locator(".unified-sidebar :focus")).toHaveCount(1);
     await channelItem(bob, "general").click();
     await expect(gate(bob)).toBeVisible();
 
@@ -170,6 +173,8 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
     await bob.getByTestId("nsfw-gate-continue").click();
     await expect(bob.locator(".msg-text", { hasText: secret })).toHaveCount(1);
     await expect(bar(bob)).toBeVisible();
+    // Focus moves from the removed gate button to the new composer.
+    await expect(bob.locator("[data-testid='message-input'] textarea")).toBeFocused();
     await shot(bob, "04-accepted");
     const afterAccept = await bob.evaluate(
       () => (window as unknown as { __traffic: string[] }).__traffic,
@@ -234,9 +239,13 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
       await bob.getByTestId("nsfw-gate-continue").click();
       await expect(bar(bob)).toBeVisible();
       await expect(bob.locator(".msg-text", { hasText: secret })).toHaveCount(1);
+      // A half-typed message survives the unlabel: only the bar is removed.
+      const composer = bob.locator("[data-testid='message-input'] textarea");
+      await composer.fill("draft kept across unlabel");
       await server.api(`/admin/api/channels/${general.id}`, { nsfw: false }, owner, "PATCH");
       await expect(bar(bob)).toHaveCount(0);
       await expect(bob.locator(".msg-text", { hasText: secret })).toHaveCount(1);
+      await expect(composer).toHaveValue("draft kept across unlabel");
       await shot(bob, "08-unlabelled-no-bar");
     } finally {
       await device2.transport.close();
