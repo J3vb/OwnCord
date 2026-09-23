@@ -1,5 +1,5 @@
 {
-  "nextId": 454,
+  "nextId": 455,
   "findings": [
     {
       "id": "OC-0001",
@@ -10335,13 +10335,20 @@
       "severity": "medium",
       "why": "docs/capacity.md publishes < 150 ms / < 300 ms for send -> sender acknowledgement and < 200 ms / < 400 ms for send -> recipient delivery, both met with room by the B6-9 steady profile (57/83 ms and 60/85 ms). The B6-10 operational profile is the same 100 connections and the same 2-vCPU cgroup with the storm, the voice churn and the upload scenario running alongside, and both budgets break: self_signed measured ack 228/348 ms and delivery 250/361 ms, tls off measured ack 329/472 ms and delivery 333/470 ms. These were the only two thresholds either run crossed. The server was not CPU-bound while it happened -- the cgroup averaged 0.41 of 2 CPUs (self_signed) and 0.31 (off), peaking at 1.23 -- so the cost is in the fan-out path, not the machine. The extra fan-out is the voice churn: 58,243 voice_state broadcasts against 12,044 chat sends, i.e. roughly five times as many broadcasts per second as the capacity profile carries.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=operational, then read k6-summary.json from the constrained artifact: ws_broadcast_latency_ms p(95) 228 against its p(95)<150 threshold and ws_delivery_latency_ms p(95) 250 against p(95)<200.",
-      "evidence": "Run 35113946945 at e57335c7 (2026-09-16). Jobs 104854470744 (self_signed) and 104854471050 (tls off), constrained leg only. k6-summary.json: ws_broadcast_latency_ms thresholds p(95)<150 and p(99)<300 both ok:false on both legs; ws_delivery_latency_ms p(95)<200 ok:false on both, p(99)<400 ok:false on tls off. Published in docs/capacity.md, 'The operational profiles'. cpu.stat.log shows the cgroup never above 1.23 of 2 CPUs.",
-      "status": "open",
+      "evidence": "Run 35113946945 at e57335c7 (2026-09-16). Jobs 104854470744 (self_signed) and 104854471050 (tls off), constrained leg only. k6-summary.json: ws_broadcast_latency_ms thresholds p(95)<150 and p(99)<300 both ok:false on both legs; ws_delivery_latency_ms p(95)<200 ok:false on both, p(99)<400 ok:false on tls off. Published in docs/capacity.md, 'The operational profiles'. cpu.stat.log shows the cgroup never above 1.23 of 2 CPUs. Diagnosis 2026-09-23 (fm/oc-0445-fable): profiled on the reference runner (load-baseline.yml -f pprof=true, run 35850079680) and re-measured with per-phase and per-10 s tags on ws_broadcast_latency_ms. Ack p95 was 3-90 ms in every 10 s bucket up to t=180 s -- WebSocket login ramp, the uploads cohort's 100 bcrypt logins, quota refusals and voice churn included -- and 500-750 ms from the reconnect storm to the drain, on both TLS legs (run 35852682786; bcrypt cost 10 changed nothing, run 35852685308). Server-side timing on a 2-core rig: the SQLite writer checkout (ResetSession to IsValid) held 0.4-0.6 ms before and after the storm, the idle gap between checkouts 5.5-6 ms before and after, checkouts per second unchanged, Go scheduler latency unchanged (runtime/metrics), writer pool never reopened; only queue depth changed. Chat-send arrival phase within the 2 s send period: before the storm at most 10 of 100 senders in any 50 ms slot; after it all 100 in the same 50 ms slot every period. The storm closes every socket at one scenario instant and each new socket's setInterval(SEND_INTERVAL_MS) restarted from that instant, so 100 users pressed Enter together every 2 s for the rest of the run; 100 sends queue behind the single writer at ~6 ms a hop (each handoff waits out the previous send's 100-recipient TLS fan-out on 2 vCPUs), ~600 ms for the last in line. The 2026-09-16 figures and the #1717 A/B were dominated by this artifact; #1717's audience change cut reader waits ~30x but left the writer queue untouched. Validation, interleaved, both constrained legs: fix runs 35856013841 (self_signed ack 45/234 ms, delivery 48/231; off 85/266, 93/270; every threshold met) and 35856019988 (41/80, 43/81; 96/267, 98/266) against dev 35856016690 (287/427, 301/430; 373/452, 378/454) and 35856022553 (330/467, 337/470; 276/352, 283/357). Cgroup CPU 0.26-0.43 of 2 on the fix runs, 0.34-0.43 on dev. The residual per-hop cost under a genuinely simultaneous burst is OC-0454.",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Profile the channel broadcast path under a voice_state-heavy fan-out before touching the budget. The budget is not to be loosened: it is met with 3x room by the steady profile on the same hardware, so the operational shape is doing something the steady shape does not."
+      "suggestedFix": "Profile the channel broadcast path under a voice_state-heavy fan-out before touching the budget. The budget is not to be loosened: it is met with 3x room by the steady profile on the same hardware, so the operational shape is doing something the steady shape does not.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "4b2ea56b",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev fails 2 of 9 offline checks -- the phase-preservation test and the per-phase tag test; the fixed script passes all 9 under Node 26.9.0)",
+        "notes": "phasedInterval in ws-load.js keeps each VU's send, typing and presence timer phase across reconnects, and a resumed socket's first phased tick waits for auth_ok. ws_broadcast_latency_ms and ws_delivery_latency_ms carry phase=ramp|sustain|upload|storm under operational. The profiling behind the diagnosis was a one-off diagnostic build, described in docs/capacity.md; the workflow carries no profiling input."
+      }
     },
     {
       "id": "OC-0446",
@@ -10507,6 +10514,22 @@
         "revertProof": "pass"
       },
       "fixedDate": "2026-09-23"
+    },
+    {
+      "id": "OC-0454",
+      "title": "A simultaneous burst of N chat sends acknowledges the last sender ~N x 6 ms later on 2 vCPUs",
+      "file": "Server/db/db.go",
+      "line": 271,
+      "severity": "low",
+      "why": "Every chat send takes the single SQLite writer connection twice (the message transaction, then UpdateReadState) and each checkout is held only 0.4-0.6 ms, but the pool handoff to the next waiter takes ~5.5-6 ms because the woken sender competes for the two vCPUs with the previous send's 100-recipient TLS fan-out (writePump wakeups) and the per-statement helper goroutines. Under spread-out arrivals the queue is empty and a send acknowledges in ~5 ms; when N senders hit the writer in the same instant they serialize and the last one waits ~N x 6 ms. The operational profile's storm made all 100 senders phase-locked (OC-0445) and measured exactly that (~600 ms). A real population rarely synchronizes 100 keystrokes, but a burst of 20-30 (a shared reaction to one event) would cost the last sender 120-180 ms on the reference hardware, so the shape is worth knowing rather than a defect to fix blind.",
+      "repro": "Remove the phase preservation from Server/scripts/k6/ws-load.js: replace the three phasedInterval(socket, name, period, fn) calls with plain socket.setInterval(fn, period), so every socket's timers restart from the storm instant, then run the operational profile and read ws_broadcast_latency_ms{phase:upload}: about 500-750 ms p95 at 50 sends/s, against 40-90 ms with the same throughput spread out. Locally, count writer checkouts (sql.DBStats) and time the driver connection between ResetSession and IsValid: hold 0.4 ms, gap ~6 ms, both unchanged by the burst.",
+      "evidence": "Runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95). Local 2-core measurements 2026-09-23: checkout hold 0.40-0.60 ms, idle gap 5.5-6.1 ms, ~5000 checkouts per 30 s, before and after the storm; chat_send arrival histogram 10 vs 100 per 50 ms slot. runtime/metrics sched latency p50 0.4-0.65 ms, p99 5-25 ms, unchanged.",
+      "status": "open",
+      "found": "2026-09-23",
+      "hunt": "oc-0445-diagnosis",
+      "lens": "run-the-thing",
+      "finder": "fm/oc-0445-fable",
+      "suggestedFix": "Measure before touching: one checkout per send (UpdateReadState inside the message transaction, ignoring its error to keep it best-effort) halves the hops; batching writePump frames or lowering per-frame TLS cost shortens each hop. Neither is justified by a real-population shape yet."
     }
   ]
 }

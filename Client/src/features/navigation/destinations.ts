@@ -24,6 +24,7 @@
 
 import { buildInbox } from "../message-requests/Inbox";
 import { pendingRequestCount } from "../message-requests/store";
+import { buildSafetyTab } from "../safety/Notices";
 
 /** A destination that opens in the content area, in place of the chat column. */
 export type ContentViewId = "requests" | "moderation";
@@ -61,4 +62,5 @@ export interface NavigationDestinations {
 /** The destinations this build ships. */
 export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
   requests: { build: buildInbox, pending: pendingRequestCount },
+  safety: { build: buildSafetyTab },
 };

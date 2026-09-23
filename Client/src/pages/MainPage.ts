@@ -81,6 +81,7 @@ import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
 import { createContentNavigator } from "../features/navigation/contentView";
+import { createNoticesBanner } from "../features/safety/Notices";
 import type { ContentNavigator } from "../features/navigation/contentView";
 
 const log = createLogger("main-page");
@@ -533,20 +534,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
     });
 
+    // The composer of the channel on screen, else the sidebar's first control.
+    const focusReachable = (): void => {
+      const reachable =
+        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea") ??
+        sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
+      reachable?.focus();
+    };
+
     contentNav = createContentNavigator({
       destinations: NAVIGATION_DESTINATIONS,
       chatArea: chatAreaResult.chatArea,
       rememberChannel: sidebar.rememberChannel,
       forgetChannel: sidebar.forgetChannel,
       returnToChannel: sidebar.returnToChannel,
-      // The opener is gone (the Requests entry leaves with DM mode): the
-      // composer of the channel returned to, else the sidebar's first control.
-      fallbackFocus: () => {
-        const reachable =
-          chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea") ??
-          sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
-        reachable?.focus();
-      },
+      // The opener is gone (the Requests entry leaves with DM mode).
+      fallbackFocus: focusReachable,
     });
 
     appendChildren(
@@ -557,6 +560,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
+
+    // --- Moderation notices (B9-15, Q4): persistent, above the app row ---
+    const notices = new Disposable();
+    unsubscribers.push(() => notices.destroy());
+    root.insertBefore(
+      createNoticesBanner({ api, signal: notices.signal, fallbackFocus: focusReachable }),
+      app,
+    );
 
     // Settings overlay
     // Bumped by every local 2FA change so an in-flight profile refresh

@@ -23,8 +23,9 @@
 >
 > **B7-18 reconciled 2026-09-23. B7 is not closed.** Every build milestone
 > has merged. Three items held the exit open (C-10's B7 half, the client
-> voice-join budget, and the decision on `tauri-build` for `dev` PRs); the
-> voice-join budget is now recorded and enforced, so two remain; see
+> voice-join budget, and the decision on `tauri-build` for `dev` PRs); C-10's
+> B7 half is closed and the voice-join budget is now recorded and enforced,
+> so one remains; see
 > [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23).
 
 ## Problem
@@ -384,8 +385,8 @@ The Linux device check is owner-run and stays open after this signature. B7-18
 
 Reconciled against `git log` on `dev` at `8df46055` and the merged PRs linked
 in the milestone table. Every build milestone, B7-0 through B7-17, is merged
-and HP-7 is signed. **B7 is not closed.** Three items below were open; item 2
-closed 2026-09-23, so two remain and B7-18 stays `in-progress`. The phase
+and HP-7 is signed. **B7 is not closed.** Three items below were open; items 1
+and 2 closed 2026-09-23, so one remains and B7-18 stays `in-progress`. The phase
 closes when the owner resolves them.
 
 **What remains before B7 can close**
@@ -401,7 +402,9 @@ closes when the owner resolves them.
    Limitations", `docs/trust-model.md` C-09 section). No per-deployment
    allowlist contract exists. The owner can do the work, accept the residual
    with a reason in the register, or re-tag the row to a later phase with a
-   written reason (roadmap rule 2).
+   written reason (roadmap rule 2). _Closed 2026-09-23: `connect-src` is now
+   `'self'`, IPC and loopback `http:`/`ws:` only, and a non-loopback LiveKit
+   `direct_url` goes through the TOFU tunnel (register C-10)._
 2. **Closed 2026-09-23: the client voice-join budget is recorded and
    enforced.** The median of seven joins, from the click to decoded remote
    audio, is held to 1,500 ms (`Client/voice-join-budget.json`) by
