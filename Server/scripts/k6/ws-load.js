@@ -804,6 +804,10 @@ function passThroughThresholds() {
     for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
     out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
+    // The per-phase acknowledgement/delivery series (operationalTags). The
+    // run-wide budgets above stay the gate; these only materialize.
+    out[`ws_broadcast_latency_ms{phase:${p}}`] = ["p(95)>=0"];
+    out[`ws_delivery_latency_ms{phase:${p}}`] = ["p(95)>=0"];
   }
   // Tier and backpressure come in two shapes: the run total per tier/kind,
   // and the per-phase delta (a sub-metric key takes several comma-separated
@@ -946,6 +950,33 @@ let vuToken = null; // stored session token (a resume does not re-login)
 let vuLastSeq = 0; // highest seq this VU has seen on any connection
 let vuHoldEnd = 0; // wall-clock ms when this VU's first connection ends
 let vuStormDone = false; // the storm already fired for this VU
+// The phase (ms offset within the period) each periodic client timer took on
+// this VU's FIRST connection — see phasedInterval.
+const vuTimerPhase = {};
+
+// phasedInterval is setInterval whose ticks keep the phase the VU's first
+// connection established, across reconnects. The storm reopens every socket
+// in the same instant, and a plain setInterval started from that instant
+// would have all 100 users press Enter in the same few milliseconds every
+// SEND_INTERVAL_MS for the rest of the run — a metronome no population
+// produces, and one that queues N simultaneous sends behind the single
+// SQLite writer (OC-0445: ack p95 went from ~50 ms to ~600 ms at the storm
+// and stayed there, at unchanged throughput and an unchanged 0.4 ms per
+// write). A reconnect changes when a user is connected, not when they type,
+// so the timer re-anchors on its original phase instead.
+function phasedInterval(socket, name, periodMs, fn) {
+  const now = Date.now();
+  if (!(name in vuTimerPhase)) {
+    vuTimerPhase[name] = now % periodMs;
+    socket.setInterval(fn, periodMs);
+    return;
+  }
+  const delay = (((vuTimerPhase[name] - now) % periodMs) + periodMs) % periodMs;
+  socket.setTimeout(function () {
+    fn();
+    socket.setInterval(fn, periodMs);
+  }, delay);
+}
 let vuInVoice = false; // this VU believes it holds a voice session
 // Restart drill: contents of this VU's drain sends that got neither an ack
 // nor an error before the socket closed. VU scope on purpose — the socket
@@ -1159,7 +1190,7 @@ export default function () {
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
-                stepTags(true) ?? restartTags(),
+                stepTags(true) ?? restartTags() ?? operationalTags(),
               );
               delete pendingSends[data.id];
             }
@@ -1180,7 +1211,10 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags());
+              deliveryLatency.add(
+                Date.now() - at,
+                stepTags(true) ?? restartTags() ?? operationalTags(),
+              );
               deliveries.add(1, restartTags());
             }
             break;
@@ -1331,8 +1365,10 @@ export default function () {
     // resume (a replay resume sends no ready frame, protocol.md:305-315).
     // The interval keeps running for the whole hold — there is no message
     // cap, because the sustained fan-out IS the load being measured.
-    socket.setInterval(function () {
-      if (!ready && !resumedConn) {
+    phasedInterval(socket, "send", SEND_INTERVAL_MS, function () {
+      // A resumed socket's first phased tick can land before auth_ok; a
+      // frame sent before that is refused, so wait for the session.
+      if (!ready && !(resumedConn && authed)) {
         return;
       }
       const id = `${vuId}-${msgCount}-${Date.now()}`;
@@ -1357,22 +1393,22 @@ export default function () {
         IS_CEILING ? { ...stepTags(true), channel: String(VU_CHANNEL_ID) } : undefined,
       );
       msgCount++;
-    }, SEND_INTERVAL_MS); // chat_send is 10/sec; 1 per 2s is well under it
+    }); // chat_send is 10/sec; 1 per SEND_INTERVAL_MS (2 s) is well under it
 
     // Typing indicators (client->server type is typing_start, not "typing").
-    socket.setInterval(function () {
-      if (ready || resumedConn) {
+    phasedInterval(socket, "typing", 4000, function () {
+      if (ready || (resumedConn && authed)) {
         socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
       }
-    }, 4000);
+    });
 
     // Presence updates (client->server type is presence_update; bare
     // "presence" is the server->client broadcast).
-    socket.setInterval(function () {
+    phasedInterval(socket, "presence", 15000, function () {
       if (authed) {
         socket.send(envelope("presence_update", { status: "online" }));
       }
-    }, 15000);
+    });
 
     // Leave voice before the socket goes, so the run exercises the leave path
     // rather than relying on disconnect cleanup to tidy up 25 voice states.
@@ -1422,7 +1458,21 @@ let obsPrev = null;
 //             tagged `sustain`;
 //   sustain — the peak before either of those.
 function obsPhase(nowMs) {
-  const t = (nowMs - obsStart) / 1000;
+  return obsPhaseAt(nowMs, obsStart);
+}
+
+// operationalTags is the per-phase tag for sender acknowledgement and
+// recipient delivery under the operational profile (OC-0445): the same
+// boundaries the observer's obsPhase draws, anchored on this VU's own
+// scenario start (both scenarios start at t=0, as stormFireAt relies on), so a
+// run says WHICH phase missed the budget rather than only that one did.
+function operationalTags() {
+  if (!IS_OPERATIONAL) return undefined;
+  return { phase: obsPhaseAt(Date.now(), exec.scenario.startTime) };
+}
+
+function obsPhaseAt(nowMs, startMs) {
+  const t = (nowMs - startMs) / 1000;
   // The restart drill runs the observer too (OC-0446), and the evidence it is
   // there for is the per-phase writer-wait delta either side of the stop — so
   // its samples carry the RESTART phases. Falling through to the operational
@@ -1430,7 +1480,7 @@ function obsPhase(nowMs) {
   // on a run with no upload leg, leaving no pre/post-restart split at all.
   if (IS_RESTART) return restartPhaseAt(t);
   if (t < RAMP_S) return "ramp";
-  if (IS_OPERATIONAL && nowMs >= stormFireAt(obsStart) && nowMs <= stormFireAt(obsStart) + 30000) {
+  if (IS_OPERATIONAL && nowMs >= stormFireAt(startMs) && nowMs <= stormFireAt(startMs) + 30000) {
     return "storm";
   }
   if (t >= UPLOADS_START_S) return "upload";

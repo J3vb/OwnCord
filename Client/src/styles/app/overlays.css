@@ -193,6 +193,77 @@
   cursor: pointer;
 }
 
+/* ── Moderation notices (B9-15, Q4): persistent, never a modal ── */
+.moderation-notices {
+  display: none;
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-strong);
+}
+.moderation-notices.visible {
+  display: block;
+}
+.moderation-notice {
+  padding: 8px 16px;
+  border-left: 4px solid var(--yellow);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+.moderation-notice + .moderation-notice {
+  border-top: 1px solid var(--border);
+}
+.moderation-notice p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.moderation-notice-title strong {
+  color: var(--text-warning);
+}
+.moderation-notice-date {
+  color: var(--text-muted);
+}
+.moderation-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.moderation-notice-ack.ac-btn {
+  margin-left: 0;
+}
+.moderation-notice-link {
+  min-height: 24px;
+  color: var(--text-link);
+  text-decoration: underline;
+}
+.moderation-notice-status.form-error {
+  color: var(--text-danger);
+}
+.safety-heading {
+  margin: 16px 0 4px;
+  color: var(--header-primary);
+  font-size: 16px;
+}
+.safety-tab .safety-retry {
+  margin: 8px 0 0;
+}
+.safety-history {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.safety-history-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.safety-history-row p {
+  margin: 0 0 2px;
+}
+
 /* ── Search Overlay ── */
 .search-overlay {
   position: fixed;

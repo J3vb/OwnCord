@@ -62,6 +62,8 @@ export type WsErrorCode =
   | "INVALID_JSON"
   | "UNKNOWN_TYPE"
   | "SLOW_MODE"
+  // A send, reaction or voice join refused by an active moderator timeout.
+  | "TIMED_OUT"
   | "CONFLICT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
@@ -320,6 +322,28 @@ export interface ReadyPayload {
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
   readonly dm_channels?: readonly DmChannelPayload[];
+  /** The caller's unacknowledged warnings (B5-9). Absent from older servers. */
+  readonly notices?: readonly ReadyNotice[];
+}
+
+/** One of ready's notices: never the actor or the report link (Server/ws/serve_ready.go). */
+export interface ReadyNotice {
+  readonly id: number;
+  readonly kind: "warning";
+  readonly reason: string;
+  readonly created_at: string;
+}
+
+/**
+ * mod_action (B5-9): a warning or timeout applied to this user, targeted and
+ * not replayed. A lifted timeout arrives as id 0, kind "timeout" and a null
+ * expires_at (Server/ws/moderation_actions.go).
+ */
+export interface ModActionPayload {
+  readonly id: number;
+  readonly kind: "warning" | "timeout";
+  readonly reason: string;
+  readonly expires_at: string | null;
 }
 
 export interface ChatMessagePayload {
@@ -821,6 +845,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
