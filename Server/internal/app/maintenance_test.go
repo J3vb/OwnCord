@@ -482,3 +482,29 @@ func TestMaintenance_TickRecordsJobHealth(t *testing.T) {
 		}
 	}
 }
+
+// TestMaintenance_StartupRunsRecordJobHealth pins that the loop's start-up
+// runs reach the attention panel at once, rather than reading as "no
+// completed run" until the first tick fifteen minutes later; the tick-only
+// steps stay unknown until then.
+func TestMaintenance_StartupRunsRecordJobHealth(t *testing.T) {
+	attention := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
+	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
+	stop, done := make(chan struct{}), make(chan struct{})
+	close(stop) // the start-up runs still happen before the loop sees it
+	m.loop(context.Background(), stop, done)
+
+	attention.Evaluate(context.Background(), time.Now())
+	status := map[string]string{}
+	for _, sig := range attention.Report().Signals {
+		status[sig.ID] = sig.Status
+	}
+	for _, job := range []string{"Account erasure", "Storage recount", "Push subscriptions"} {
+		if got := status["job:"+job]; got != service.AttentionStatusOK {
+			t.Errorf("start-up job %q status = %q, want ok", job, got)
+		}
+	}
+	if got, ok := status["job:Message retention"]; ok && got != service.AttentionStatusUnknown {
+		t.Errorf("tick-only job status = %q before any tick, want unknown or unlisted", got)
+	}
+}

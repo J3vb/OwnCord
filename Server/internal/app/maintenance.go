@@ -86,18 +86,21 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
 	m := newMaintenance(log, cfg, database, svc)
 
+	// The attention panel (RI-07) lists every job, in step order, before the
+	// loop's start-up runs record the first outcomes.
+	for _, step := range m.steps() {
+		m.attention.RegisterJob(step.job, step.name)
+	}
+
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
 	go m.loop(bgCtx, stopMaintenance, maintenanceDone)
 
-	// The attention sampler (RI-07) lists every job before its first run and
-	// samples on its own minute cadence, independent of a long tick.
+	// The attention sampler samples on its own minute cadence, independent
+	// of a long tick.
 	attentionCtx, stopAttention := context.WithCancel(bgCtx)
 	attentionDone := make(chan struct{})
 	if m.attention != nil {
-		for _, step := range m.steps() {
-			m.attention.RegisterJob(step.job, step.name)
-		}
 		go func() {
 			defer close(attentionDone)
 			m.attention.Run(attentionCtx, service.AttentionInterval)
@@ -127,9 +130,7 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	defer close(maintenanceDone)
 	// Erasure jobs interrupted by the last shutdown (files journaled, not
 	// yet removed) finish now, not fifteen minutes from now (B4-9).
-	if err := m.resumeErasure(bgCtx); err != nil {
-		m.log.Warn("erasure jobs still pending", "error", err)
-	}
+	_ = m.runJob(bgCtx, "Account erasure")
 	// Deliberately NOT run here at start-up (round 5, Codex review): this
 	// runs AFTER initDatabase's ClearAllVoiceStates (database.go), which
 	// wipes every voice_states row on every restart regardless — a real
@@ -143,16 +144,12 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	// Storage counters charged by a process that died between the charge
 	// and the write are settled now, so a restart is a repair point rather
 	// than fifteen minutes of a user seeing a phantom charge (B5-2).
-	if err := m.recountStorage(bgCtx); err != nil {
-		m.log.Warn("storage recount failed", "error", err)
-	}
+	_ = m.runJob(bgCtx, "Storage recount")
 	// A VAPID key rotation takes effect on the first boot with the new key,
 	// not fifteen minutes later (B5-4): rows the rotation orphaned stop
 	// being listed the instant the new key is installed, but the sweep is
 	// what actually removes them.
-	if err := m.sweepPushSubscriptions(bgCtx); err != nil {
-		m.log.Warn("push subscription sweep failed", "error", err)
-	}
+	_ = m.runJob(bgCtx, "Push subscriptions")
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -207,14 +204,34 @@ func (m *maintenance) steps() []maintenanceStep {
 func (m *maintenance) tick(ctx context.Context) bool {
 	failed := false
 	for _, step := range m.steps() {
-		err := step.run(ctx)
-		m.attention.RecordJob(step.job, err, time.Now())
-		if err != nil {
-			m.log.Warn(step.name, "error", err)
+		if m.runStep(ctx, step) != nil {
 			failed = true
 		}
 	}
 	return failed
+}
+
+// runStep runs one step, records its outcome on the attention panel and logs
+// a failure under the step's name.
+func (m *maintenance) runStep(ctx context.Context, step maintenanceStep) error {
+	err := step.run(ctx)
+	m.attention.RecordJob(step.job, err, time.Now())
+	if err != nil {
+		m.log.Warn(step.name, "error", err)
+	}
+	return err
+}
+
+// runJob runs the step named job outside a tick — the loop's start-up
+// runs — so its outcome reaches the attention panel too, not only fifteen
+// minutes later.
+func (m *maintenance) runJob(ctx context.Context, job string) error {
+	for _, step := range m.steps() {
+		if step.job == job {
+			return m.runStep(ctx, step)
+		}
+	}
+	panic("maintenance: no step for job " + job)
 }
 
 func (m *maintenance) sweepSessions(ctx context.Context) error {
