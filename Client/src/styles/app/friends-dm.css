@@ -14,7 +14,7 @@
 }
 .dm-back-arrow {
   color: var(--accent-text);
-  font-size: 16px;
+  font-size: var(--font-size-lg);
 }
 .dm-back-info {
   flex: 1;
@@ -22,11 +22,11 @@
 .dm-back-title {
   color: var(--accent-text);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .dm-back-subtitle {
   color: var(--text-micro);
-  font-size: 9px;
+  font-size: var(--font-size-xxs);
 }
 
 /* ── Friends / DM View ── */
@@ -37,19 +37,19 @@
 .dm-search {
   width: 100%;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   color: var(--text-normal);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .dm-search::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 
 .dm-section-label {
   padding: 16px 16px 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   letter-spacing: 0.5px;
@@ -64,7 +64,7 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -92,7 +92,7 @@
 }
 .dm-item.active {
   background: var(--bg-active);
-  color: white;
+  color: var(--header-primary);
 }
 .dm-item .dm-avatar {
   width: 32px;
@@ -105,7 +105,7 @@
   justify-content: center;
   font-weight: 700;
   font-size: 13px;
-  color: white;
+  color: var(--on-fill);
 }
 .dm-item .dm-avatar .dm-status {
   position: absolute;
@@ -120,7 +120,7 @@
   border-color: var(--bg-active);
 }
 .dm-item .dm-name {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -147,19 +147,19 @@
 .dm-item .dm-unread {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: white;
+  border-radius: var(--radius-circle);
+  background: var(--header-primary);
   flex-shrink: 0;
 }
 /* Numeric unread / mention badges — same shape as the channel list's. */
 .dm-item .dm-unread-badge,
 .dm-item .dm-mention-badge {
-  color: white;
-  font-size: 10px;
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   min-width: 18px;
   height: 18px;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
   justify-content: center;

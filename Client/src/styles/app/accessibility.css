@@ -20,19 +20,19 @@
 /* High Contrast restores each theme's tested accent text and focus colours,
    overriding a custom accent's inline values (B9-2, owner decision Q8). */
 .high-contrast body {
-  --accent-text: #949cf7 !important;
-  --focus-ring: #949cf7 !important;
+  --accent-text: #a3aaf8 !important;
+  --focus-ring: #a3aaf8 !important;
 }
 .high-contrast body.theme-neon-glow {
-  --accent-text: #00c8ff !important;
-  --focus-ring: #00c8ff !important;
+  --accent-text: #2fd0ff !important;
+  --focus-ring: #2fd0ff !important;
 }
 /* Light surfaces need dark text: the white above would be invisible. */
 .high-contrast body.theme-light {
   --text-normal: #000000 !important;
   --text-muted: #2e3035 !important;
   --bg-active: rgba(0, 0, 0, 0.15) !important;
-  --accent-text: #4752c4 !important;
+  --accent-text: #4150c4 !important;
   --focus-ring: #4752c4 !important;
 }
 

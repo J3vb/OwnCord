@@ -33,7 +33,7 @@
 }
 .compact-mode .message .msg-text {
   line-height: 1.25;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .compact-mode .message .msg-time {
   display: none;
@@ -51,7 +51,7 @@
   padding: 3px 8px;
 }
 .compact-mode .channel-item .ch-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .compact-mode .channel-sidebar-header {
   height: 40px;
@@ -94,7 +94,7 @@
   font-size: 10px;
 }
 .compact-mode .member-item .mi-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .compact-mode .member-role-group {
   padding: 12px 16px 2px;
@@ -102,7 +102,7 @@
 /* Voice */
 .compact-mode .voice-user-item {
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .compact-mode .voice-user-item .vu-avatar {
   width: 16px;

@@ -58,8 +58,18 @@ type Rgba = readonly [number, number, number, number];
 
 function parseRgba(value: string): Rgba {
   const m = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?/.exec(value);
-  if (m === null) throw new Error(`unparseable computed colour: ${value}`);
-  return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
+  if (m !== null) {
+    return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
+  }
+  // color-mix() computes to color(srgb r g b / a), channels 0-1.
+  const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/.exec(value);
+  if (srgb === null) throw new Error(`unparseable computed colour: ${value}`);
+  const [r, g, b] = [srgb[1], srgb[2], srgb[3]].map((c) => Number(c) * 255) as [
+    number,
+    number,
+    number,
+  ];
+  return [r, g, b, srgb[4] === undefined ? 1 : Number(srgb[4])];
 }
 
 /** Composite a bottom-to-top stack of computed colours onto an opaque base. */

@@ -12,10 +12,10 @@
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-radius: var(--radius-md, 8px);
-  background: var(--bg-floating, var(--bg-secondary));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
   max-width: min(92vw, 460px);
 }
 .incoming-call-icon {
@@ -34,7 +34,7 @@
   white-space: nowrap;
 }
 .incoming-call-subtitle {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 .incoming-call-actions {
