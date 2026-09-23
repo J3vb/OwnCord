@@ -15,6 +15,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
   or extracted code uses `src/features/`, relative imports
+- `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`;
+  its import order is the cascade, so add rules to the owning fragment and
+  never reorder imports or move rules between fragments in a visual PR.
+  Unit tests that pin CSS source read it through `tests/helpers/app-css.ts`
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
@@ -90,11 +94,11 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
-  contract, and audio device lists come from `native/devices.ts` (the device
-  module's capture names and `cpal`'s output ids, not the webview's). Remote
-  audio plays through the session's own mixer
-  (`src-tauri/src/native_voice/playout.rs`, for per-user volume), not the
-  device module. Video frames never cross IPC:
+  contract, and audio device lists come from `native/devices.ts` (`cpal`'s
+  device ids, not the webview's). Audio I/O is the session's own `cpal`
+  streams, not the SDK's device module: `native_voice/capture.rs` (APM, then
+  RNNoise) and `native_voice/playout.rs` (per-user volume mixer, which also
+  feeds the echo canceller its reference). Video frames never cross IPC:
   each native session serves them on a token-authenticated `127.0.0.1`
   WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
   through `native/videoRenderer.ts` (WebGL, exposed as a canvas
@@ -132,7 +136,14 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   not add an entry without a reason. The runtime proof is the CDP soak
   (`tests/e2e/support/lifecycle-probe.ts`,
   `tests/e2e/fullstack/long-session.spec.ts`), which needs
-  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR.
+  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR; it also
+  runs over WebView2 in `client-native` and at length through
+  `npm run test:e2e:soak`. Its bars hold within one page as well as across
+  logins, so a leak the re-login navigation would release still fails. A native
+  voice backend keeps these rules plus three IPC ones (owned `listen()` with a
+  late-unlisten, native handles released in the web room's teardown, native
+  counts reported through `getSessionDebugInfo`):
+  [docs/architecture/client.md](../docs/architecture/client.md#lifecycle-ownership).
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.

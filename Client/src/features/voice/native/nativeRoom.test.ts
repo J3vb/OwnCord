@@ -91,7 +91,7 @@ vi.mock("../../../platform/desktop", () => ({
       },
       disconnect: (...args: unknown[]) => {
         host.calls.push(["disconnect", args]);
-        return Promise.resolve({ rooms: 0, localTracks: 0, admRefs: 0, threads: 12 });
+        return Promise.resolve({ rooms: 0, localTracks: 0, captureStreams: 0, threads: 12 });
       },
       setMicrophone: (...args: unknown[]) => {
         host.calls.push(["setMicrophone", args]);
@@ -148,7 +148,12 @@ import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
 import { setLocalDeafened } from "../../../stores/voice.store";
 
-const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+const audio = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  enhancedNoiseSuppression: false,
+};
 const emit = (envelope: NativeVoiceEnvelope) => {
   for (const h of host.handlers) h(envelope);
 };

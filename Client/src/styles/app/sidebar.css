@@ -1,0 +1,427 @@
+/* ── Unified Sidebar ── */
+.unified-sidebar {
+  width: 260px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.unified-sidebar-header {
+  height: 44px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-glow, var(--border));
+  flex-shrink: 0;
+}
+.unified-sidebar-header .server-icon-sm {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--accent-gradient, var(--accent));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+.unified-sidebar-header .server-name {
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+}
+.unified-sidebar-header .server-online {
+  color: var(--text-micro);
+  font-size: 9px;
+}
+.sidebar-invite-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary, var(--accent));
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    opacity var(--transition-fast);
+  flex-shrink: 0;
+}
+.sidebar-invite-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Channel Sidebar ── */
+.channel-sidebar {
+  width: 260px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.channel-sidebar-header {
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: none;
+  box-shadow: var(--elevation-low);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s ease;
+}
+.channel-sidebar-header:hover {
+  background: var(--bg-hover);
+}
+.channel-sidebar-header h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+}
+/* Mark All as Read — only rendered visible while something is unread. */
+.sidebar-mark-all-read {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.sidebar-mark-all-read.visible {
+  display: flex;
+}
+.sidebar-mark-all-read:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.channel-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.category {
+  padding: 16px 8px 4px 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.category-arrow {
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  display: inline-flex;
+  align-items: center;
+}
+.category-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.category-add-btn {
+  margin-left: auto;
+  font-size: 16px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+.category:hover .category-add-btn {
+  opacity: 1;
+}
+.category-add-btn:hover {
+  color: var(--text-normal);
+}
+.category-channels {
+  overflow: hidden;
+  transition: max-height 0.2s;
+}
+.category.collapsed + .category-channels {
+  max-height: 0 !important;
+  overflow: hidden;
+}
+
+.channel-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin: 1px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.1s;
+  position: relative;
+}
+.channel-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.channel-item.active {
+  background: var(--bg-active);
+  color: white;
+}
+/* Voice join/leave frozen while the WS socket is down (docs/architecture/ux/README.md §3). */
+.channel-item.voice.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.channel-item.voice.disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+.channel-draggable {
+  cursor: grab;
+}
+.channel-draggable:active {
+  cursor: grabbing;
+}
+.channel-reordering {
+  user-select: none;
+  cursor: grabbing !important;
+}
+.channel-reordering * {
+  cursor: grabbing !important;
+}
+.channel-draggable.dragging {
+  opacity: 0.3;
+}
+.channel-drop-indicator {
+  box-shadow:
+    0 2px 0 var(--accent) inset,
+    0 -2px 0 var(--accent) inset;
+  background: rgba(88, 101, 242, 0.15);
+  border-radius: var(--radius-sm);
+}
+.channel-item .ch-icon {
+  opacity: 0.6;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.channel-item.active .ch-icon {
+  opacity: 1;
+}
+.channel-item .ch-name {
+  font-size: 14px;
+  flex: 1;
+}
+.channel-item .unread-badge {
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.channel-item .unread-badge:empty {
+  display: none;
+}
+/* Mention badge — red, and rendered instead of (never beside) the unread badge. */
+.channel-item .mention-badge {
+  background: var(--red);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.channel-item .mention-badge:empty {
+  display: none;
+}
+.channel-item.mentioned .ch-name {
+  color: white;
+  font-weight: 600;
+}
+.channel-item.unread .ch-name {
+  color: white;
+  font-weight: 600;
+}
+.channel-item.unread::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 8px;
+  border-radius: 0 4px 4px 0;
+  background: white;
+}
+
+/* Voice users nested in sidebar */
+.voice-users-list {
+  padding: 2px 0 4px 36px;
+}
+.voice-user-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow: hidden;
+}
+.voice-user-item .vu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.voice-user-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.voice-user-item .vu-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+}
+.voice-user-item.speaking .vu-avatar {
+  box-shadow:
+    0 0 0 2px var(--green),
+    0 0 8px rgba(35, 165, 90, 0.3);
+  animation: speak-pulse 1.5s ease-in-out infinite;
+}
+@keyframes speak-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--green),
+      0 0 8px rgba(35, 165, 90, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--green),
+      0 0 14px rgba(35, 165, 90, 0.5);
+  }
+}
+.voice-user-item .vu-status,
+.voice-user-item .vu-muted {
+  margin-left: 2px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.voice-user-item .vu-status {
+  color: var(--text-muted);
+}
+.voice-user-item .vu-muted {
+  color: var(--red);
+}
+.voice-user-item .vu-name + .vu-status,
+.voice-user-item .vu-name + .vu-muted {
+  margin-left: auto;
+}
+/* E2EE identity verification badge (F3 TOFU); color + cursor set inline per state. */
+.voice-user-item .vu-verify {
+  margin-left: 2px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.voice-user-item .vu-name + .vu-verify {
+  margin-left: auto;
+}
+
+/* ── LIVE badge (voice channel sidebar) ── */
+.vu-live-badge {
+  background: #ed4245;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Inline stream preview (voice channel sidebar hover) ── */
+.vu-preview {
+  margin: 2px 0;
+  height: 0;
+  overflow: hidden;
+  transition: height var(--transition-slow) ease;
+}
+.vu-preview video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(0, 200, 255, 0.15);
+  box-shadow: 0 0 4px rgba(0, 200, 255, 0.08);
+  display: block;
+}
+.vu-preview video.preview-camera {
+  object-fit: cover;
+}
+.vu-preview video.preview-screen {
+  object-fit: cover;
+}
+.vu-preview-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(0, 200, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-faint);
+  font-size: var(--font-size-xxs);
+  cursor: pointer;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

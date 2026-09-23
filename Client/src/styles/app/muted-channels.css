@@ -1,0 +1,34 @@
+/* ── Muted channels ────────────────────────────────────────────────────── */
+
+/* A mute dims, it does not hide: the conversation is still there, it has just
+   stopped asking for attention. The mention badge is deliberately untouched. */
+.channel-item.muted .ch-name,
+.dm-item.muted .dm-name {
+  opacity: 0.45;
+}
+.unread-badge.muted,
+.dm-unread-badge.muted {
+  background: var(--text-micro) !important;
+  opacity: 0.7;
+}
+
+.settings-muted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.settings-muted-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.settings-muted-row .settings-muted-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

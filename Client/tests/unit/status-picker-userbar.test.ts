@@ -1,8 +1,7 @@
 // Read from disk rather than `import ... ?raw`: vitest stubs CSS modules
 // (its `css: false` default), which wins over the `?raw` suffix and yields an
 // empty string. A .ts source can use `?raw`; a stylesheet cannot.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
@@ -315,7 +314,7 @@ describe("StatusPicker wired to UserBar", () => {
   // is exactly how the trigger dot went invisible: the rules were deleted
   // but the component still emitted the old names).
   it("every class StatusPicker.ts emits has a rule in app.css, and both dots have an explicit size", () => {
-    const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+    const css = readAppCss();
 
     const ruleBody = (selector: string): string => {
       const match = new RegExp(`\\.${selector}\\s*\\{([^}]*)\\}`).exec(css);
@@ -348,7 +347,7 @@ describe("StatusPicker wired to UserBar", () => {
   // now, never re-sent on reconnect since restoreSavedPresence only re-sends
   // `status`, not `custom_status`).
   it("ub-status-picker--disabled actually disables the picker in app.css", () => {
-    const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+    const css = readAppCss();
     const match = /\.ub-status-picker--disabled\s*\{([^}]*)\}/.exec(css);
     expect(
       match,

@@ -14,6 +14,7 @@ import type { AudioElements } from "../../lib/audioElements";
 import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
 import type { SessionState } from "./sessionState";
+import { releaseRoom } from "./releaseRoom";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -141,8 +142,7 @@ export class JoinOrchestration {
    *  wiring but has not yet reached "connected" (it never re-wires after that
    *  point). */
   disconnectSupersededLocalRoom(localRoom: Room): void {
-    localRoom.removeAllListeners();
-    localRoom.disconnect().catch((err) => log.debug("Failed to disconnect superseded room", err));
+    releaseRoom(localRoom).catch((err) => log.debug("Failed to disconnect superseded room", err));
     if (this._state.type === "idle") this.syncModuleRooms();
   }
 
@@ -244,6 +244,9 @@ export class JoinOrchestration {
           this.disconnectSupersededLocalRoom(localRoom);
           return "superseded";
         }
+        releaseRoom(localRoom).catch((err) =>
+          log.debug("Failed to disconnect room after key exchange failure", err),
+        );
         // OC-0010: a channel switch queued during the wait (handleVoiceToken's
         // pendingJoin branch) preserves this attempt's type/joinGeneration, so
         // the ownership check above cannot distinguish it from "no newer join
@@ -439,9 +442,8 @@ export class JoinOrchestration {
         // event would otherwise tear down (or spawn a reconnect loop for)
         // whichever session owns `_state` by then — which, when this attempt
         // has been superseded, is a live one that belongs to a newer join.
-        localRoom.removeAllListeners();
         try {
-          void localRoom.disconnect();
+          void releaseRoom(localRoom);
         } catch (disconnectErr) {
           log.debug("Room disconnect during error cleanup failed (safe to ignore)", disconnectErr);
         }

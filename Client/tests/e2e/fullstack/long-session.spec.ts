@@ -5,58 +5,56 @@
  * a real server and real encrypted media, sampling Chromium's own counters
  * after a forced GC. It is the runtime half of the milestone: the static
  * inventory (tests/unit/lifecycle-ownership.test.ts) cannot see a listener on a
- * signal that outlives the thing it served (OC-0335/0336/0365). This sees such
- * a leak only when its growth survives the re-login: `login()` navigates, so
- * every 10-cycle generation starts on a fresh page. A listener leak that
- * accumulates within one page and is released by that navigation is not yet
- * covered; by owner decision that is deferred to B7-11c.
+ * signal that outlives the thing it served (OC-0335/0336/0365).
  *
  * The pass bar is "no net growth after warm-up" (tests/e2e/support/
- * lifecycle-probe.ts). Samples are taken at cycle 0, cycle 5 (warm) and every 5
- * cycles after. The series is attached to the Playwright report as JSON, so a
- * failure shows the curve.
+ * lifecycle-probe.ts). `login()` navigates, so every 10-cycle generation is a
+ * fresh page. Every 5th cycle starts with an application reconnect and every
+ * 10th ends with a logout. Samples are taken at cycle 0 and every 5 cycles,
+ * which compare like-for-like across pages, plus at cycles 6 and 9 of every
+ * page, which compare like-for-like within one page: both come after that
+ * page's reconnect and neither directly follows one. A
+ * leak that the re-login navigation releases shows only in that within-page
+ * pair. The series is attached to the Playwright report as JSON, so a failure
+ * shows the curve.
  *
  * Env:
  *   OWNCORD_SOAK_CYCLES    cycles to run (default 20)
  *   OWNCORD_SOAK_IDLE_MIN  idle-connected minutes sampled every 5 min (default 0)
  *
- * The long run (>= 200 cycles + 30 idle minutes) is 11c's Task 13, over this
- * same spec.
+ * The long run (>= 200 cycles + 30 idle minutes) is `npm run test:e2e:soak`,
+ * over this same spec.
  */
 import { test as base, expect } from "./fixtures";
 import { login } from "./fixtures";
 import type { ConsoleMessage, Page } from "@playwright/test";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
+import type { TestServer } from "../support/server";
 import {
   installTimerLedger,
   sampleLifecycle,
   evaluateBars,
   formatBars,
   describeLiveListeners,
+  idleHeapSlope,
+  IDLE_HEAP_BAR_SLOPE,
   type SlopeCeilings,
 } from "../support/lifecycle-probe";
+import { quiesce } from "../support/quiesce";
 import { openSettings, switchSettingsTab } from "../helpers";
 
 const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
 const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
-
 /**
- * The per-cycle slope ceiling for a metric with a known base leak.
- *
- * `evaluateBars` groups samples by their phase in the 10-cycle login generation,
- * so the post-logout series (cycles 10/20) carries the known logout-path leak:
- * about one listener and 1.6 nodes per logout/login. Rather than leaving the two
- * metrics at the plan's 0.05, each is ratcheted a small margin above that
- * measured per-cycle slope, so any further growth fails the PR soak. The
- * planted-listener control (a per-cycle unowned `window` listener) is caught by
- * the nodes bar, not the listeners bar: its listeners are released by the
- * re-login navigation, while the nodes it retains show in the phase-5 series.
- * The calibration runs, the planted-listener control and the at-head runs are in
- * docs/plans/b7-0-client-baseline-2026-09-19.md ("Soak calibration"). 11c's
- * Task 12 fixes the leak and removes these entries, returning both to the plan
- * bar.
+ * Phase-series ceilings for a metric with a known leak that survives the
+ * re-login navigation (the plan's PENDING_METRICS). 11c fixed the leaks the
+ * soak found, so it is empty and every metric holds the plan's 0.05 per cycle.
  */
-const PENDING_METRICS: SlopeCeilings = { listeners: 0.15, nodes: 2 };
+const PENDING_METRICS: SlopeCeilings = {};
+/** src/lib/autoIdle.ts's AUTO_IDLE_DELAY_MS. */
+const AUTO_IDLE_MS = 10 * 60_000;
+/** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
+const WITHIN_PAGE_PHASES = new Set([6, 9]);
 
 // The reconnect and logout steps deliberately drop the socket, so the client
 // logs its own transport failure while it is offline. Only the exact messages
@@ -82,44 +80,13 @@ const test = base.extend<{ alice: Page }>({
   },
 });
 
-async function quiesce(page: Page): Promise<void> {
-  // Close every overlay, return to the default channel and member-list state.
-  await page.keyboard.press("Escape").catch(() => {});
-  await page
-    .locator(".settings-close-btn")
-    .click({ timeout: 1000 })
-    .catch(() => {});
-  await page
-    .locator(".reaction-picker-wrap")
-    .click({ timeout: 1000 })
-    .catch(() => {});
-  await page
-    .locator("[data-testid='user-profile-overlay']")
-    .click({ timeout: 1000 })
-    .catch(() => {});
-  await page.keyboard.press("Escape").catch(() => {});
-  // Return to #general. Clicking the row is a no-op when it is already active,
-  // and after a logout the app has already landed there.
-  await page
-    .locator("[data-testid='channel-sidebar'] .channel-list .channel-item", { hasText: "general" })
-    .first()
-    .click();
-  // Wait for the app to be fully settled before measuring: a sample taken
-  // mid-render reads a smaller DOM and a partially-registered listener set.
-  await expect(page.getByTestId("app-layout")).toBeVisible();
-  await expect(page.locator("[data-testid='member-list']")).toBeVisible();
-  await expect(page.locator(".chat-header .ch-name")).toHaveText("general");
-  await expect(page.locator("[data-testid='message-input']")).toBeVisible();
-  // Toasts default to a 5 s duration; wait for the DOM to drain.
-  await expect
-    .poll(async () => page.locator(".toast").count(), { timeout: 15_000, intervals: [200] })
-    .toBe(0);
-  // Let asynchronous teardown drain before the GCs and the counters: leaving a
-  // voice room, closing a socket and disposing a session all finish on
-  // microtasks/timers after their synchronous call returns. Sampling in that
-  // window reads listeners and controllers that are already being released,
-  // which is a measurement bug, not a leak.
-  await page.waitForTimeout(1000);
+/** Log out from settings and log back in, as a user would. */
+async function relogin(page: Page, server: TestServer): Promise<void> {
+  await openSettings(page);
+  await page.locator(".settings-nav-item.danger").click();
+  await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
+  await login(page, server, "alice");
+  await expect(page.locator(".channel-item:not(.voice)", { hasText: "general" })).toBeVisible();
 }
 
 /** The row whose text contains `text`. */
@@ -172,8 +139,16 @@ async function runCycle(
   await ownRow.locator("[data-testid^='msg-edit-']").click();
   const edited = `${own}-edited`;
   await input.fill(edited);
-  await input.press("Enter");
-  await expect(page.locator(".msg-text", { hasText: edited })).toHaveCount(1);
+  // The composer drops a submit within SEND_DEBOUNCE_MS (200 ms) of the last
+  // send, its double-send guard, and a fast echo puts this edit inside it.
+  // Enter again until the edit lands; once it has, the composer is empty and
+  // Enter is a no-op.
+  await expect(async () => {
+    await input.press("Enter");
+    await expect(page.locator(".msg-text", { hasText: edited })).toHaveCount(1, {
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 30_000 });
 
   const editedRow = rowWithText(page, edited);
   await editedRow.hover();
@@ -208,6 +183,11 @@ async function runCycle(
     "Keybinds",
     "Advanced",
     "Logs",
+    // Back to the first tab: the last tab stays mounted while settings is
+    // closed, and the Logs view renders the logger's whole ring buffer
+    // (MAX_LOG_BUFFER, 500 entries), so ending on it would sample the ring's
+    // fill level, not a leak.
+    "Account",
   ]) {
     await switchSettingsTab(page, tab);
   }
@@ -274,7 +254,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   aliceTransport,
   server,
 }) => {
-  test.setTimeout(CYCLES * 30_000 + 180_000);
+  test.setTimeout(CYCLES * 30_000 + IDLE_MIN * 60_000 + 180_000);
   const cdp = await alice.context().newCDPSession(alice);
   const samples: Awaited<ReturnType<typeof sampleLifecycle>>[] = [];
 
@@ -307,15 +287,22 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   // remote media to decode when she rejoins each cycle.
   await joinVoice(bob);
 
+  // The first login in a fresh browser has no saved server profile yet, so the
+  // connect page has not fetched the server info that later pages render (the
+  // Account tab's retention notice). One relogin up front makes every sampled
+  // page start from the same stored state.
+  await relogin(alice, server);
+
   try {
     samples.push(await sampleLifecycle(alice, cdp, 0));
     for (let cycle = 1; cycle <= CYCLES; cycle++) {
-      await runCycle(alice, bob, cycle, purgeMessages, general.id);
-
-      // Every 5th cycle: an application reconnect. The server removes voice
-      // membership when the authenticated socket drops, so the client must
-      // leave the room (media.spec.ts asserts the same), otherwise the next
-      // cycle's join starts from a stuck "reconnecting voice" state.
+      // Every 5th cycle starts with an application reconnect, so each sample
+      // follows a full cycle of use rather than the reconnect's own settling
+      // (one 20-cycle run caught a node still in flux right after it). The
+      // server removes voice membership when the authenticated socket drops,
+      // so the client must not be left in the room (media.spec.ts asserts the
+      // same); Alice is out of voice here, having left at the previous cycle's
+      // end.
       if (cycle % 5 === 0) {
         await aliceTransport.offline();
         await expect(alice.locator(".reconnecting-banner")).toBeVisible();
@@ -327,19 +314,13 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
           .toBe(0);
       }
 
+      await runCycle(alice, bob, cycle, purgeMessages, general.id);
+
       // Every 10th cycle: a logout and a fresh login. This deliberately tears
       // the app down and rebuilds it, so counts fall to a fresh baseline.
-      if (cycle % 10 === 0) {
-        await openSettings(alice);
-        await alice.locator(".settings-nav-item.danger").click();
-        await expect(alice.locator("#host")).toBeVisible({ timeout: 30_000 });
-        await login(alice, server, "alice");
-        await expect(
-          alice.locator(".channel-item:not(.voice)", { hasText: "general" }),
-        ).toBeVisible();
-      }
+      if (cycle % 10 === 0) await relogin(alice, server);
 
-      if (cycle % 5 === 0) {
+      if (cycle % 5 === 0 || WITHIN_PAGE_PHASES.has(cycle % 10)) {
         await quiesce(alice);
         samples.push(await sampleLifecycle(alice, cdp, cycle));
         if (process.env.OWNCORD_SOAK_LISTENERS === "1") {
@@ -356,12 +337,17 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     // be exactly equal across the idle samples — a poller that allocates per
     // tick (health, connection stats, presence, heartbeat) shows up here. The PR
     // soak does not run it (OWNCORD_SOAK_IDLE_MIN defaults to 0); the long run
-    // does.
+    // does. After ten quiet minutes the app flips the user to Idle
+    // (AUTO_IDLE_DELAY_MS, src/lib/autoIdle.ts), a designed one-time change, so
+    // samples before that transition (plus a minute) are kept as -2 and only the
+    // later ones must be equal.
     if (IDLE_MIN > 0) {
-      const end = Date.now() + IDLE_MIN * 60_000;
+      const start = Date.now();
+      const end = start + IDLE_MIN * 60_000;
       while (Date.now() < end) {
         await new Promise((resolve) => setTimeout(resolve, Math.min(5 * 60_000, end - Date.now())));
-        samples.push(await sampleLifecycle(alice, cdp, -1));
+        const settled = Date.now() - start >= AUTO_IDLE_MS + 60_000;
+        samples.push(await sampleLifecycle(alice, cdp, settled ? -1 : -2));
       }
     }
   } finally {
@@ -383,14 +369,12 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     "no unexpected console.error lines",
   ).toEqual([]);
 
-  // Every metric is asserted. `PENDING_METRICS` no longer removes any from
-  // assertion; it raises the slope ceiling of the two metrics with a known,
-  // recorded base leak so the gate still fails on any further growth.
+  // Every metric is asserted at the plan's bar.
   expect(
     bars
       .filter((bar) => !bar.pass)
       .map((bar) => `${bar.metric}: ${bar.final} vs warm ${bar.warm} (slope ${bar.slope})`),
-    `metric bars (raised ceilings: ${Object.keys(PENDING_METRICS).join(", ") || "none"})`,
+    "metric bars",
   ).toEqual([]);
 
   // A short run (below the warm + 1 sample) has nothing to compare; a 20-cycle
@@ -421,5 +405,8 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         drifted.push(`${metric}: ${idle.map((s) => s[metric]).join("→")}`);
     }
     expect(drifted, "idle-phase counts must be exactly equal").toEqual([]);
+    expect(idleHeapSlope(samples), "idle-phase heap slope (B/min)").toBeLessThanOrEqual(
+      IDLE_HEAP_BAR_SLOPE,
+    );
   }
 });

@@ -59,10 +59,6 @@ reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 # Client/src-tauri/deny.toml, which is the authoritative list with the full
 # reachability argument. Kept in step with it.
 [[IgnoredVulns]]
-id = "RUSTSEC-2026-0285"
-reason = "rustls 0.23.43; fixed in 0.23.45, deferred to a dependency-owning bump (see deny.toml)"
-
-[[IgnoredVulns]]
 id = "RUSTSEC-2024-0429"
 reason = "glib 0.18.5 pinned by the Linux GTK stack; unreachable API (see deny.toml)"
 
