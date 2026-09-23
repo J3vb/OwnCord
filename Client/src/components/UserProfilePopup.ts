@@ -18,6 +18,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { roleColorVar } from "./message-list/formatting";
+import { reportEntryText } from "../i18n/reportEntry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +49,12 @@ export interface UserProfilePopupOptions {
   readonly onMessage?: (userId: number) => void;
   /** Called when the user clicks "Call". */
   readonly onCall?: (userId: number) => void;
+  /** Called when the user clicks "Report" (B9-10); the popup closes first. */
+  readonly onReport?: (userId: number) => void;
+  /** Called once when the popup closes, however it was closed. */
+  readonly onClose?: () => void;
+  /** Where focus goes on close when the opener has left the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export type UserProfilePopupComponent = MountableComponent & {
@@ -102,17 +109,19 @@ export function createUserProfilePopup(
   }
 
   function close(): void {
-    if (overlay !== null) {
-      overlay.remove();
-      overlay = null;
-    }
+    if (overlay === null) return;
+    overlay.remove();
+    overlay = null;
     popup = null;
     disposable.destroy();
 
     // Return focus to the element that was focused before opening
-    if (previousFocus instanceof HTMLElement) {
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus();
+    } else {
+      options.fallbackFocus?.()?.focus();
     }
+    options.onClose?.();
   }
 
   /**
@@ -301,6 +310,28 @@ export function createUserProfilePopup(
         { signal },
       );
       actions.appendChild(callBtn);
+    }
+
+    if (options.onReport !== undefined) {
+      const onReport = options.onReport;
+      const reportBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-report-btn",
+        "aria-haspopup": "dialog",
+      });
+      reportBtn.appendChild(createIcon("flag", 16));
+      reportBtn.appendChild(document.createTextNode(` ${reportEntryText("report")}`));
+      reportBtn.addEventListener(
+        "click",
+        () => {
+          // Close first: focus goes back to the opener, which the report
+          // dialog then remembers as the place to return to.
+          close();
+          onReport(user.id);
+        },
+        { signal },
+      );
+      actions.appendChild(reportBtn);
     }
 
     // Assemble the card: a banner strip and a body, with the avatar straddling

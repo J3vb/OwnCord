@@ -242,7 +242,7 @@ A feature milestone adds one entry to `NAVIGATION_DESTINATIONS` in
   "Message Requests (N)" and the DM header badge.
 - `moderation: { build }` (B9-11). It is shown and openable only with
   `MODERATE_MEMBERS`, and closed at once on losing it.
-- `safety: { build(signal) }` (B9-10/15/16). A Q4 notice opens it with
+- `safety: { build(signal, api) }` (B9-10/15/16; B9-10 added `api`). A Q4 notice opens it with
   `openSettings("Safety")`.
 
 `build` receives `{ signal, close }`. The signal aborts on close, replacement,

@@ -22,9 +22,10 @@
  * action behind a destination, and nothing here fetches to decide it.
  */
 
+import type { ApiClient } from "@lib/api";
 import { pendingRequestCount } from "../message-requests/store";
 import { buildInbox } from "../message-requests/view";
-import { buildSafetyTab } from "../safety/Notices";
+import { buildSafetyPane } from "../reports/safetyPane";
 
 /** A destination that opens in the content area, in place of the chat column. */
 export type ContentViewId = "requests" | "moderation";
@@ -55,12 +56,17 @@ export interface NavigationDestinations {
   readonly requests?: { readonly build: FeatureViewBuilder; readonly pending: CountSource };
   /** B9-11: the Moderation Center. The open-report count belongs inside the view. */
   readonly moderation?: { readonly build: FeatureViewBuilder };
-  /** B9-10/15/16: personal notices, restrictions, own reports and appeals. */
-  readonly safety?: { readonly build: (signal: AbortSignal) => HTMLDivElement };
+  /**
+   * B9-10/15/16: personal notices, restrictions, own reports and appeals.
+   * `signal` is the tab's lifetime; `api` reads the caller's own records.
+   */
+  readonly safety?: {
+    readonly build: (signal: AbortSignal, api: ApiClient) => HTMLDivElement;
+  };
 }
 
 /** The destinations this build ships. */
 export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
   requests: { build: buildInbox, pending: pendingRequestCount },
-  safety: { build: buildSafetyTab },
+  safety: { build: buildSafetyPane },
 };

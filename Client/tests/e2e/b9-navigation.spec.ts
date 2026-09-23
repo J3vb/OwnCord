@@ -1,12 +1,12 @@
 /**
  * B9-4: the shared navigation seams in the real shell.
  *
- * Message Requests (B9-5) and the Safety tab (B9-15) ship in this build;
- * their journeys are b9-message-requests.spec.ts and
- * b9-moderation-notices.spec.ts. The Moderation Center (B9-11) still has
- * no entry, so what the running app must show for it is the owner's Q2
- * rule: no empty or nonfunctional destination, and the familiar channel,
- * DM and settings routes unchanged with the content-view column in place. The
+ * Message Requests (B9-5) and the Safety tab (B9-15 and B9-10) ship in this
+ * build; their journeys are b9-message-requests.spec.ts,
+ * b9-moderation-notices.spec.ts and b9-reports.spec.ts. The Moderation Center
+ * (B9-11) still has no entry, so what the running app must show for it is the
+ * owner's Q2 rule: no empty or nonfunctional destination, and the familiar
+ * channel, DM and settings routes unchanged with the content-view column in place. The
  * transitions through a destination (open, Close/Escape back to the channel,
  * replacement, permission loss, sign-out) run against inert views in
  * src/features/navigation/navigation.test.ts, because this spec also runs
@@ -81,7 +81,7 @@ test.describe("B9-4 shared navigation", () => {
     await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
     await expectNoView(page);
 
-    // Settings has the Safety tab (B9-15) after Account, in the arrow-key order.
+    // Settings has the Safety tab (B9-10/15) after Account, in the arrow-key order.
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
     const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");

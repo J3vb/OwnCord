@@ -571,6 +571,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Bumped by every local 2FA change so an in-flight profile refresh
     // cannot overwrite it with an older answer.
     let totpEpoch = 0;
+    const safety = NAVIGATION_DESTINATIONS.safety;
     const settingsOverlay = createSettingsOverlay({
       onClose: () => closeSettings(),
       onChangePassword: async (oldPassword, newPassword) => {
@@ -622,7 +623,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onLogout: () => logout(api),
       getRetentionNotice: options.getRetentionNotice,
-      safetyTab: NAVIGATION_DESTINATIONS.safety?.build,
+      ...(safety === undefined ? {} : { safetyTab: (signal) => safety.build(signal, api) }),
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();

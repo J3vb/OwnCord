@@ -17,14 +17,13 @@ import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
-import {
-  createUserProfilePopup,
-  type UserProfilePopupComponent,
-} from "@components/UserProfilePopup";
+import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
 import { readableRoleColor } from "@lib/themes";
+import { showToast } from "@lib/toast";
+import { reportEntryText } from "../i18n/reportEntry";
 import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
@@ -44,6 +43,8 @@ export interface MemberListOptions {
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
+  readonly onReportUser?: (userId: number, name: string) => void;
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
@@ -181,6 +182,9 @@ function isAwayStatus(status: UserStatus): boolean {
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
 let activePopup: UserProfilePopupComponent | null = null;
+/** Bumped by every open and close, so a popup still loading when the user
+ *  moves on (or the list is destroyed) is dropped instead of mounted. */
+let popupSeq = 0;
 
 function closeActiveMenu(): void {
   if (activeMenu !== null) {
@@ -190,6 +194,7 @@ function closeActiveMenu(): void {
 }
 
 function closeActivePopup(): void {
+  popupSeq++;
   if (activePopup !== null) {
     activePopup.destroy?.();
     activePopup = null;
@@ -221,7 +226,13 @@ function createMemberItem(
   const item = createElement("div", {
     class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
+    role: "button",
+    tabindex: "0",
+    "aria-haspopup": "dialog",
+    "aria-label": memberDisplayName(member),
   });
+  const statusId = `mi-status-${member.id}`;
+  const customId = `mi-custom-status-${member.id}`;
 
   const avatar = createAvatarElement(
     { username: member.username, displayName: member.displayName, avatar: member.avatar },
@@ -230,6 +241,7 @@ function createMemberItem(
 
   const statusDot = createElement("div", {
     class: "mi-status",
+    id: statusId,
     style: `background: ${statusColor(member.status)}`,
     "aria-label": member.status,
     title: member.status,
@@ -251,45 +263,79 @@ function createMemberItem(
     const customEl = createElement("span", {
       class: "mi-custom-status",
       "data-testid": `member-custom-status-${member.id}`,
+      id: customId,
     });
     setText(customEl, custom);
     nameWrap.appendChild(customEl);
+    item.setAttribute("aria-describedby", `${customId} ${statusId}`);
+  } else {
+    item.setAttribute("aria-describedby", statusId);
   }
 
   appendChildren(item, avatar, nameWrap);
 
-  // Left-click opens the profile popup (previously dead code — built and
-  // tested but never mounted from anywhere).
+  // Left-click, Enter or Space opens the profile popup (previously dead code —
+  // built and tested but never mounted from anywhere). The row is a button so
+  // the profile, and its Report action, is reachable from the keyboard.
+  const openProfile = (anchorX: number, anchorY: number): void => {
+    closeActiveMenu();
+    closeActivePopup();
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    const isSelf = member.id === currentUserId;
+    const onMessageUser = opts.onMessageUser;
+    const onReportUser = opts.onReportUser;
+    // `member` is the row's render-time snapshot; a presence-only update
+    // (see patchPresence) recolors the dot in place without rebuilding the
+    // row, so that snapshot's `status` can be stale. Re-resolve against the
+    // live store so the popup always agrees with the dot it was opened from.
+    const live = membersStore.getState().members.get(member.id) ?? member;
+    const list = item.parentElement;
+    // Loaded on first open: the popup is only ever needed after a click, so
+    // it stays out of the main-page bundle.
+    const seq = ++popupSeq;
+    import("@components/UserProfilePopup").then(
+      ({ createUserProfilePopup }) => {
+        if (seq !== popupSeq || signal.aborted) return;
+        const popup = createUserProfilePopup({
+          user: {
+            id: live.id,
+            username: live.username,
+            avatar: live.avatar,
+            role: live.role,
+            status: live.status,
+            displayName: live.displayName,
+            customStatus: live.customStatus,
+          },
+          anchorX,
+          anchorY,
+          ...(isSelf || onMessageUser === undefined
+            ? {}
+            : { onMessage: (userId: number) => onMessageUser(userId) }),
+          ...(isSelf || onReportUser === undefined
+            ? {}
+            : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+          onClose: () => {
+            if (activePopup === popup) activePopup = null;
+          },
+          fallbackFocus: () =>
+            list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
+            list?.querySelector<HTMLElement>(".member-item") ??
+            null,
+        });
+        activePopup = popup;
+        popup.mount(document.body);
+      },
+      () => showToast(reportEntryText("profileLoadFailed"), "error"),
+    );
+  };
+  item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(
-    "click",
+    "keydown",
     (e) => {
-      closeActiveMenu();
-      closeActivePopup();
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      const isSelf = member.id === currentUserId;
-      const onMessageUser = opts.onMessageUser;
-      // `member` is the row's render-time snapshot; a presence-only update
-      // (see patchPresence) recolors the dot in place without rebuilding the
-      // row, so that snapshot's `status` can be stale. Re-resolve against the
-      // live store so the popup always agrees with the dot it was opened from.
-      const live = membersStore.getState().members.get(member.id) ?? member;
-      activePopup = createUserProfilePopup({
-        user: {
-          id: live.id,
-          username: live.username,
-          avatar: live.avatar,
-          role: live.role,
-          status: live.status,
-          displayName: live.displayName,
-          customStatus: live.customStatus,
-        },
-        anchorX: e.clientX,
-        anchorY: e.clientY,
-        ...(isSelf || onMessageUser === undefined
-          ? {}
-          : { onMessage: (userId: number) => onMessageUser(userId) }),
-      });
-      activePopup.mount(document.body);
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const rect = item.getBoundingClientRect();
+      openProfile(rect.right, rect.top);
     },
     { signal },
   );
