@@ -76,14 +76,16 @@ together as if each row were a unique defect:
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     442 |
-| Open      |       4 |
+| Fixed     |     445 |
+| Open      |       1 |
 | Declined  |       4 |
 | Duplicate |       1 |
 | **Total** | **451** |
 
-As of 2026-09-23, `OC-0451` (N14's back-to-back presence-status finding) is
-fixed by PR #1707.
+As of 2026-09-23, `OC-0446` and `OC-0447` (the k6 channel-spreading and
+restart-measurement harness fixes) and `OC-0448` (release tags moved only after
+digest verification) are fixed, and `OC-0451` (N14's back-to-back presence-status
+finding) is fixed by PR #1707.
 
 The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt (eighteen
 since fixed — eleven by B3-9 in PR #1454 and earlier, `OC-0323` by the B3-8

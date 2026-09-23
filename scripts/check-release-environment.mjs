@@ -38,6 +38,7 @@ const RELEASE_WORKFLOW = ".github/workflows/release.yml";
 const PUBLISH_MARKERS = [
   /^\s*push:\s*true\s*$/m,
   /^\s*push-to-registry:\s*true\s*$/m,
+  /docker buildx imagetools create/,
   /gh release create/,
 ];
 

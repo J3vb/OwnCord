@@ -10352,12 +10352,20 @@
       "why": "restartPhase() tags every delivery sample pre-restart or post-restart, which is what lets a missed budget be placed on one side of the stop. On the qualifying run the two sides are 34/51 ms and 393/452 ms -- an order of magnitude -- and the profile's run-level delivery budget (200/400 ms) is missed at 378/444 ms because of the post side. But the two windows are not comparable: pre-restart is the first 90 s, which is 60 s of ramp with most connections not yet on the wire plus 30 s at full fan-out, and post-restart is the remaining ~186 s all at full fan-out. The delivery rates confirm the imbalance (3,012/s before against ~4,620/s after). Server CPU inside the cgroup was flat across the stop (0.23 CPUs of 2 over the 30 s at full fan-out before it, 0.20 over the whole window after it), so CPU does not explain the gap either way, and no observer VU runs under the restart profile, so there are no per-phase writer-wait deltas to check. The drill therefore reports a large number it cannot attribute.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=restart, then compare ws_delivery_latency_ms{phase:pre-restart} (p95 34, count 271051) with ws_delivery_latency_ms{phase:post-restart} (p95 393, count 859303) in the constrained artifact's k6-summary.json.",
       "evidence": "Run 35113950011, job 104854480908, at e57335c7 (2026-09-16), constrained leg. The workflow sends the stop at RESTART_AT=90 (60 ramp + 30), so the pre-restart tag spans the ramp. cpu.stat.log for that run: 0.23 CPUs avg over 60-90 s, 0.20 CPUs avg over 100-240 s, with the cgroup counter reset at the second boot. Published with the caveat in docs/capacity.md, 'Restart under load'.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Hold the connections at full fan-out for as long before the stop as the drill runs after it (raise K6_RAMP's tail or push RESTART_AT out), and enable the observer VU under the restart profile so the per-phase writer-wait delta exists on both sides. Only then is a post-restart figure worth publishing as a server property."
+      "suggestedFix": "Hold the connections at full fan-out for as long before the stop as the drill runs after it (raise K6_RAMP's tail or push RESTART_AT out), and enable the observer VU under the restart profile so the per-phase writer-wait delta exists on both sides. Only then is a post-restart figure worth publishing as a server property.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "c698ba17f15712d394fda525566a56a1cfa1e08a",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e fails 5 of 7 offline checks; corrected harness passes all 7 under Node 26.9.0)",
+        "notes": "Completed the partial dev correction: explicit receipt-clock window boundaries, delivery/ack p95 and sample counts (empty = null/0), existing phase:pre-restart/recovery/post-restart series preserved, independent duration-based steady sample floors and invalid-window checks. The observer uses the scenario clock, ignores unavailable polls and rebases counters after a detected reboot.",
+        "loadRunValidation": "pending: A constrained restart run must verify the actual stop aligns with the scheduled boundary, the full cohort is back before the settled window, both steady windows carry the intended load, and publish recovery/settled/pre-stop p95s, counts, drain/resume/loss and phase wait evidence. No new load result or attribution of the historical 10x gap is claimed."
+      }
     },
     {
       "id": "OC-0447",
@@ -10365,15 +10373,23 @@
       "file": "Server/scripts/k6/ws-load.js",
       "line": 1184,
       "severity": "medium",
-      "why": "The sender loop sends one chat message every K6_SEND_INTERVAL_MS (2000) per connection into K6_CHANNEL_ID, and the ceiling-search profile points every step's connections at that single channel. Step 200 is therefore exactly 200 messages/s into one channel, and Server/ws/hub_stats.go:73 hard-codes topicRateLimitPerSecond = 100 per channel topic, enforced at Server/ws/hub_broadcast.go:402. The server log for the qualifying run carries 24,893 'hub: topic rate limit exceeded, dropping message' lines. Every step at or above 200 is shed by a constant in the code, and the latency reported there (27-30 s at step 300, ~29 s at 400 and 500) is the shed queue plus a quadratic single-channel fan-out, not the machine running out: the cgroup peaked at 1.93 of 2 CPUs and nr_throttled rose by 3 over the whole 500 s run. The plan's own rule is that a configuration or code cap must never be published as the ceiling, so this is a harness finding: the search as shaped cannot locate a hardware ceiling above 100 connections.",
+      "why": "The sender loop sends one chat message every K6_SEND_INTERVAL_MS (2000) per connection into K6_CHANNEL_ID, and the ceiling-search profile points every step's connections at that single channel. Step 200 is therefore exactly 100 messages/s into one channel, and Server/ws/hub_stats.go:73 hard-codes topicRateLimitPerSecond = 100 per channel topic, enforced at Server/ws/hub_broadcast.go:402. The server log for the qualifying run carries 24,893 'hub: topic rate limit exceeded, dropping message' lines. Every step at or above 200 is shed by a constant in the code, and the latency reported there (27-30 s at step 300, ~29 s at 400 and 500) is the shed queue plus a quadratic single-channel fan-out, not the machine running out: the cgroup peaked at 1.93 of 2 CPUs and nr_throttled rose by 3 over the whole 500 s run. The plan's own rule is that a configuration or code cap must never be published as the ceiling, so this is a harness finding: the search as shaped cannot locate a hardware ceiling above 100 connections.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=ceiling-search -f ceiling_max=500, then grep -c 'topic rate limit exceeded' the constrained artifact's server.log (24,893) and read ws_delivery_latency_ms{step:200} p(95) 397 ms against the 200 ms budget.",
       "evidence": "Run 35113953670, job 104854495119, at e57335c7 (2026-09-16), constrained leg. k6-summary.json per-step p95/p99 and obs_connected_users; obs_ws_conn_rejects 0 and login_giveups 0, so the cap is not max_ws_connections and not the login path. Steps 400 and 500 also failed to hold their population (370 of 400, 411 of 500) with host loadavg 3.43 and 3.76 on a 4-CPU runner and 797 'client send buffer full, closing connection to force reconnect' plus 857 write-pump errors in server.log. Published as such in docs/capacity.md, 'Ceiling search'.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number."
+      "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "c698ba17f15712d394fda525566a56a1cfa1e08a",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e fails 5 of 7 offline checks; corrected harness passes all 7 under Node 26.9.0)",
+        "notes": "Completed the partial dev correction: fail closed on unsafe/duplicate channel lists and size the cohort using a half-limit sliding-one-second send budget, including the observer VU slot. The workflow seeds 11 channels at 500 connections/2 s; posting and focus use the same stable channel, total offered sends are unchanged, and the summary includes each held step's planned rates, burst bound and observed per-channel attempts/counts. Server limit unchanged.",
+        "loadRunValidation": "pending: A constrained ceiling-search run must hold every requested population, confirm the expected total/per-channel offered rates and zero topic-limit log drops, and report generator/server utilization with fresh per-step latency figures. Multi-channel fan-out changes every step, so the old single-channel table is not a hardware-ceiling result for this shape."
+      }
     },
     {
       "id": "OC-0448",
@@ -10382,12 +10398,18 @@
       "line": 619,
       "severity": "high",
       "why": "Affected property: the bytes that reach the release tags are the bytes that were verified, and a failed verification leaves the tags where they were. The publication job validates after it has already written the tags, so a failure below the push leaves them moved.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-20",
       "hunt": "review-2026-09-20",
       "lens": "read-the-pipeline",
       "finder": "review-2026-09-20",
-      "fix": null
+      "fix": {
+        "commit": "5687b035ebaf3678e4228dda567f3f8fd8a3a00b",
+        "test": "node --test scripts/check-release-docker.test.mjs scripts/check-release-environment.test.mjs (29 pass); npm run check:hygiene (Node 26); actionlint 1.7.7 with ShellCheck; zizmor 1.30.1 --offline --no-progress .github/workflows/; node scripts/check-doc-counts.mjs; node .superpowers/render-ledger.mjs",
+        "revertProof": "pass: restoring release.yml from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e makes the new suite fail (13 failures). Moving the sole promotion step ahead of verification makes it fail (12 failures), including all 10 verification-failure cases detecting moved tags. Restoring the fix passes all 14 Docker publication tests."
+      },
+      "fixed": "2026-09-23",
+      "evidence": "The build pushes an untagged multi-architecture index by digest. Architecture presence, equality with both native-smoked configs, and Sigstore provenance verification use that immutable candidate before the final success-only imagetools create copies the same index to all release tags. Signing, SBOM/max provenance, release approval and upgrade/rollback gates remain. Failure-injection tests execute the workflow shell itself and assert every prior tag value remains unchanged with no promotion attempt. Registry transport failure during the final multi-tag write is not a transaction and is distinct from verification failure."
     },
     {
       "id": "OC-0449",

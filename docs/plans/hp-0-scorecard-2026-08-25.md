@@ -69,12 +69,15 @@ Open ledger, re-verified 2026-08-29; counts re-derived 2026-08-31 after B3-9
 role family closed `OC-0374`, and its message/read-state family closed
 `OC-0323`, `OC-0357` and `OC-0358`; B4-3 closed `OC-0321`; B4-12(a) closed `OC-0313` and `OC-0329`; B4-12(b) closed `OC-0314`; B4-12(d) closed `OC-0340` and `OC-0341`; B4-7's second half closed `OC-0354`; B4-12(c) closed `OC-0324`; re-derived again 2026-09-20 when the
 2026-09-20 review added `OC-0448`-`OC-0450`, and 2026-09-23 when PR #1707's
-presence retry fix closed `OC-0451` (added by N14):
+presence retry fix closed `OC-0451` (added by N14), `OC-0448` was fixed by
+verifying container digests before moving release tags, and the
+`OC-0446`/`OC-0447` harness corrections completed channel spreading and
+restart measurement:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 442     |
-| open      | **4**   |
+| fixed     | 445     |
+| open      | **1**   |
 | declined  | 4       |
 | duplicate | 1       |
 | **total** | **451** |

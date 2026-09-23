@@ -222,6 +222,9 @@ const CHECK_HYGIENE = [
   // job instead of a new required check.
   step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
   step("node", ["scripts/check-release-environment.mjs"], "."),
+  // OC-0448. Execute the release verification/promotion shell with a fake
+  // registry and assert that no release tag moves before verification passes.
+  step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
   // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
   // not narrow it: `>=24` admitted the owner's Node 26 while CI ran 24 and
   // nothing failed. `Client/.nvmrc` is the source of truth and this asserts

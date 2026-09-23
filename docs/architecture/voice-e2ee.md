@@ -137,11 +137,12 @@ see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state, participant join/leave).
-No audio `TrackSubscribed` is raised: there is no browser track. Capture runs
-in libwebrtc's audio device module (`PlatformAudio`) in the Rust process, with
-its APM (AEC/NS/AGC from the same preferences the web path uses) standing in
-for RNNoise on Linux by owner decision; playout runs through the session's own
-mixer (Audio parity, below). Media never crosses IPC.
+No audio `TrackSubscribed` is raised: there is no browser track. Capture and
+playout run in the Rust process on the session's own streams, with
+libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and
+RNNoise for Enhanced Noise Suppression (Audio parity, below). Phase 1 ran both
+through libwebrtc's audio device module (`PlatformAudio`); the audio-parity
+work replaced it. Media never crosses IPC.
 
 **E2EE byte-compatibility.** The web path calls
 `ExternalE2EEKeyProvider.setKey(base64Text)`, which PBKDF2-derives from the
@@ -158,11 +159,11 @@ logged; the backend zeroes its copy on clear.
 per connect and released in `disconnect()` with the late-resolve guard; the key
 is forgotten when the E2EE state is cleared on leave, queued on the
 `E2EEWorker` key write queue so it can never land after the next join's key.
-Mute keeps the microphone publication and mutes it in place (stopping ADM
-capture), so a mute toggle costs no renegotiation and no new frame cryptor.
+Mute keeps the microphone publication and mutes it in place (closing the
+input stream), so a mute toggle costs no renegotiation and no new frame cryptor.
 `getSessionDebugInfo().native` reports open native rooms, registered listeners
-and the backend's resource snapshot (rooms, local tracks, ADM refs, process
-threads); each read requests a fresh `native_voice_debug_info` snapshot, which
+and the backend's resource snapshot (rooms, local tracks, open capture
+streams, playout readers, frame sockets, process threads); each read requests a fresh `native_voice_debug_info` snapshot, which
 the next read reports.
 
 **Interop test (CI).** `Client/tests/e2e/native-voice/interop.spec.ts`, run by
@@ -185,8 +186,8 @@ RMS 0 and counts decryption errors, and the native side hears silence.
   leave the thread count flat.
 - #1187 (bundled BoringSSL vs a dynamic OpenSSL): `cargo tree -i openssl-sys`
   and `-i native-tls` match nothing — the client is rustls-only.
-- Not exercised: real ADM capture and playout. Every box this was built on has
-  no sound server; `PlatformAudio::new()` failing is handled (listen-only, the
+- Not exercised: real device capture and playout. Every box this was built on
+  has no sound server; a capture that cannot open is handled (listen-only, the
   existing toast) but the happy path on PulseAudio/PipeWire is untested here.
 
 ### Phase 1b: devices, detection, and what stays out
@@ -198,40 +199,38 @@ WebRTC still cannot do LiveKit E2EE. A Linux browser has no Tauri host and
 keeps the web path; the browser e2e suites still pin a desktop Chrome user
 agent.
 
-**Device selection.** `native_voice_list_devices` enumerates the device
-module's capture devices (through the live session's module, or a
-transient one outside a call) and the output devices (see Audio parity,
-below), and `native_voice_set_device(session, kind, id)` switches in place; an
-empty id is the default (the first device listed).
+**Device selection.** `native_voice_list_devices` enumerates the audio host's
+capture and output devices, in or out of a call (see Audio parity, below; in
+phase 1b this was the device module's list), and
+`native_voice_set_device(session, kind, id)` switches in place; an empty id is
+the default (the first device listed). The capture list leaves out
+PulseAudio monitor sources (`<sink>.monitor`, the loopback of what a sink
+plays), as the phase-1b device module and Chrome do.
 `NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
 saved-device switches at join and the settings tab's selectors work unchanged;
 `features/voice/native/devices.ts` gives the settings tab and the device
-manager the native list on Linux (capture ids are the module's device names —
-the Linux device modules report no GUIDs — not the webview's; a switch
-resolves the name to the module's index, first match wins, and an unknown
-name falls back to the default and reports it) and is null everywhere else, leaving the web enumeration untouched.
+manager the native list on Linux (the host's stable device ids, not the
+webview's; an unknown id falls back to the default and reports it) and is null
+everywhere else, leaving the web enumeration untouched.
 Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
-re-list through the native backend and re-applies both saved selections
-(and a saved default output, see Audio parity below),
-which refreshes a device-module index the hot-plug shifted (an
-unchanged index or output device leaves the running stream alone). Unmuting
-(`set_microphone(true)`) also re-resolves the saved capture name before the
-stopped stream restarts.
+re-list through the native backend and re-applies both saved selections, a
+saved "System default" included, so a stream on a device that went away or a
+default that moved follows (a stream already on the resolved device is left
+alone).
 
 **Connect no longer holds the backend lock**: a leave, a key rotation or a
 device switch during a slow join proceeds, and a connect that a newer one
 superseded closes its own room and reports it.
 
 **Still out, by owner decision (2026-09-22).** Input volume and the
-sensitivity (VAD) gate: the device-module track is a plain libwebrtc
-`LocalAudioSource`, which never hands capture frames to a sink, so neither a
-gain stage nor a level gate can be applied on the native capture path without
-either the app's own capture pipeline (capture → gain/VAD → APM with a reverse
-stream → `NativeAudioSource`, the report's 1b sketch) or a patched
-`webrtc-sys`. Linux relies on the engine's automatic gain control and Opus DTX
-instead, and the settings tab hides the Input Volume, Input Sensitivity and Enhanced
-Noise Suppression controls there with a note pointing at the system mixer; the
-three APM toggles stay and apply at the next join. Per-user and output volume
+sensitivity (VAD) gate: the phase-1 device-module track was a plain libwebrtc
+`LocalAudioSource`, which never hands capture frames to a sink, so neither
+could be applied there. The audio-parity capture path (below) now has such a
+stage, but input volume and the gate were not in its scope: Linux relies on the
+engine's automatic gain control and Opus DTX, and the settings tab hides the
+Input Volume and Input Sensitivity controls there with a note pointing at the
+system mixer; the processing toggles, Enhanced Noise Suppression included,
+apply at the next join. Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
@@ -498,13 +497,14 @@ within the Ubuntu 22.04 floor of 2.35.
 `RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.1,
 libwebrtc 0.3.48, and still 0.9.2 / 0.3.49) exposes no per-track gain: the
 device module mixes every remote track itself, and libwebrtc's own per-receiver
-`AudioSourceInterface::SetVolume` is not bound. So the session switches the
-device module's playout to its synthetic mode
-(`set_adm_playout_enabled(false)`, after `PlatformAudio` enables it) — which
-still pumps the decode pipeline every 10 ms and still hands that mix to the
-echo canceller as its reference — and plays remote audio itself
+`AudioSourceInterface::SetVolume` is not bound. So the device module's playout
+stays in its synthetic mode (the module is never acquired since the capture
+moved too, below; at first the session switched it with
+`set_adm_playout_enabled(false)`), which still pumps the decode pipeline every
+10 ms, and the session plays remote audio itself
 (`src-tauri/src/native_voice/playout.rs`): each subscribed remote audio track
-is read as 48 kHz mono PCM through a `NativeAudioStream`, queued per track
+is read as 48 kHz PCM through a `NativeAudioStream` (mono; screen-share audio
+stereo since the capture work, below), queued per track
 (played once 30 ms is queued, oldest audio dropped past 200 ms), and a
 `cpal` output stream (20 ms periods) mixes the queues with each participant's
 gain. `cpal` uses its pure-Rust PulseAudio host (PulseAudio and
@@ -544,14 +544,10 @@ stream when the default sink has moved. **Follow-up:** a default changed in
 the system mixer with no hot-plug leaves playout on the old sink until the
 next device change, switch or join; closing it needs a default-sink watcher.
 
-**Echo cancellation caveat.** The echo canceller's reference is the device
-module's synthetic mix: every remote track at unity, on the pump's clock
-rather than the sound card's. AEC3 estimates the delay and adapts to a
-scaled echo path, so one user at a non-unity volume is a gain it tracks; two
-users at different volumes talking at once is a mix the reference only
-approximates. The follow-up RNNoise PR closes this: it moves capture to the
-app's own pipeline, where the app owns the APM, and feeds the actual played
-mix (post-gain, including the queue delay) as the AEC reverse stream.
+**Echo cancellation reference.** At first the echo canceller's reference was
+the device module's synthetic mix (every remote track at unity, on the pump's
+clock). Since the capture moved to the app's own pipeline (below), the
+reference is what `playout.rs` actually hands the device.
 
 **Proof.** `playout.rs`'s unit tests drive the mixer with synthetic tones
 (gain per participant and per microphone or screen-share audio, other
@@ -562,6 +558,62 @@ own playout mix at the device cadence and compares it with the direct decode
 of the browser peer's E2EE audio — measured 2026-09-23: mixed RMS 1487 vs
 direct 2962, a ratio of 0.50. `getSessionDebugInfo().native.rust.audioStreams`
 counts the per-track readers. **Not exercised on real hardware:** the `cpal`
-output stream itself (no sound server on the build box or the CI runner), the
-PulseAudio host's device list and switching, and AEC with the synthetic
-reference; they need a PipeWire or PulseAudio desktop.
+output stream itself (no sound server on the build box or the CI runner) and
+the PulseAudio host's device list and switching; they need a PipeWire or
+PulseAudio desktop.
+
+### Audio parity: RNNoise and the capture path
+
+**Why an own capture.** The web path's Enhanced Noise Suppression is RNNoise
+(WASM) on the microphone track. The SDK's device module hands its capture
+straight to the encoder with no processing hook (its track is a plain
+`LocalAudioSource` that feeds no sink), so the microphone moved to the app's
+own `cpal` input stream (`src-tauri/src/native_voice/capture.rs`) and the
+device module is no longer acquired at all. Each 10 ms of mono 48 kHz capture
+goes through libwebrtc's standalone APM (`livekit::webrtc::native::apm`: echo
+cancellation, noise suppression and gain control from the same three
+preferences, plus a high-pass filter), then, with Enhanced Noise Suppression
+on, through RNNoise (`nnnoiseless`, a pure-Rust port of the same model), into
+an unbuffered `NativeAudioSource` that backs the published microphone track.
+Mute closes the input stream (the OS in-use indicator goes out) and keeps the
+publication; unmute reopens it on the device it last resolved, so a
+push-to-talk press does not enumerate devices.
+
+**APM and RNNoise together.** Both stay on when both are enabled, as on the
+web path, where the browser's processing precedes the RNNoise worklet. The
+order is fixed: the APM first, because echo cancellation needs the linear
+echo path that RNNoise would break, then RNNoise on what remains. The toggle
+is `enhancedNoiseSuppression`, read at join (`NativeVoiceAudioOptions`), and
+the settings tab shows it on Linux again.
+
+**The echo reference is the played mix.** The APM is shared: the capture
+feeds its forward stream and the playout's output callback feeds its reverse
+stream with exactly what it just gave the device (after every per-user and
+screen-share gain and the per-track queues' delay), mixed to mono from the
+front pair. The canceller estimates the remaining device delay itself.
+
+**Playout changes that came with it.** Screen-share audio is read and queued
+as stereo and keeps its left and right; everything plays on the device's
+front pair (a mono source on both), and a centre, LFE or surround channel
+stays silent. A per-track latency trim drops a queue back to its 30 ms prime
+level once it has stayed above prime plus one device period for two seconds
+straight, the backlog a stalled output callback leaves behind (the steady
+level after a pull stays under that bound). Two seconds is deliberately slow:
+a moment of network jitter refills a queue briefly and must not cost audio.
+
+**Proof, with synthetic audio (CI has no sound server).** `capture.rs`'s unit
+tests: RNNoise removes over 90% of the energy of steady white noise that the
+plain chain keeps (the noise-suppression energy test); feeding the played
+signal as the reference cancels a pure echo of it by over 10 dB once
+converged, where the chain without echo cancellation keeps it; frames reach
+the source only whole. `playout.rs` tests the front-pair layout, stereo
+screen-share audio, and the trim: a 100 ms stall's backlog kept for 1.8 s and
+trimmed after 2 s, a backlog that drains in time never trimmed. CPU cost,
+measured with `cargo test --release --lib cpu_cost -- --ignored --nocapture`
+on the build box (AMD Ryzen 9 5900X, 2026-09-23), per 10 ms frame of capture
+plus its reference: the APM alone (AEC and NS on) 61 µs (0.61% of one core),
+RNNoise alone 54 µs (0.54%), both together 102 µs (1.02%). RNNoise's cost is
+therefore about half a percent of one core on top of the APM. **Not exercised on real hardware:** the
+`cpal` input stream, the echo canceller against a real room's acoustics, and
+RNNoise on real speech; they need a PipeWire or PulseAudio desktop with a
+microphone.

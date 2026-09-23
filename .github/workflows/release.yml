@@ -693,6 +693,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      # `subject-name` must be lower-case for GHCR, and github.repository_owner
+      # is `J3vb`. The same normalisation docker-compose.yml already bakes in
+      # as ghcr.io/j3vb/owncord-server.
+      - name: Lower-case the image owner (GHCR rejects `J3vb`)
+        id: owner
+        shell: bash
+        run: echo "lower=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
       # One manifest carrying both architectures (B6-2). The smoke jobs this
       # job `needs` already ran each of these on its own hardware; the layers
       # come back from their per-architecture caches rather than being rebuilt.
@@ -706,7 +714,7 @@ jobs:
         shell: bash
         run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      - name: Build and push by digest (no release tags)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         env:
@@ -722,29 +730,31 @@ jobs:
           sbom: true
           provenance: mode=max
           build-args: VERSION=${{ env.VERSION }}
-          tags: ${{ steps.meta.outputs.tags }}
+          # Upload an untagged candidate. A cache miss or failed verification
+          # must leave EVERY release tag where it was (OC-0448).
+          outputs: type=image,name=ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server,push-by-digest=true,name-canonical=true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
             type=gha,scope=server-amd64
             type=gha,scope=server-arm64
           cache-to: type=gha,mode=max,scope=server-manifest
 
-      # Proof in the run log that both architectures actually shipped, rather
-      # than leaving it to be re-derived from the build step's output.
+      # Inspect the immutable candidate, never a mutable release tag. These
+      # checks must all pass before the final promotion can move any tag.
       - name: Verify the pushed manifest carries both architectures
+        id: verify-manifest
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE: ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          # metadata-action emits one tag per line; any of them resolves to the
-          # same manifest list, so the first is enough.
-          tag=$(echo "$TAGS" | head -n 1)
-          manifest=$(docker buildx imagetools inspect "$tag")
+          set -euo pipefail
+          manifest=$(docker buildx imagetools inspect "$IMAGE@$DIGEST")
           echo "$manifest"
           for arch in amd64 arm64; do
             case "$manifest" in
               *"linux/$arch"*) ;;
               *)
-                echo "::error::pushed manifest $tag is missing linux/$arch"
+                echo "::error::pushed manifest $IMAGE@$DIGEST is missing linux/$arch"
                 exit 1
                 ;;
             esac
@@ -767,45 +777,38 @@ jobs:
       # matched across two no-cache builds. This job passes because the smoke
       # legs prime exactly the scopes read below, so the push reuses those
       # layers verbatim; a mismatch therefore means the cache missed (evicted,
-      # or a scope renamed) and the image was rebuilt, not that a different
-      # image was published.
+      # or a scope renamed) and the candidate was rebuilt. It stays untagged:
+      # none of the release tags move unless this equality check passes.
       #
       # `jq` is preinstalled on ubuntu-latest and already relied on by `publish`.
       - name: Prove the smoked image configs are the pushed image configs
+        id: verify-configs
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE: ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server
+          DIGEST: ${{ steps.build.outputs.digest }}
           SMOKED_AMD64: ${{ needs.smoke-server-docker.outputs.imageid-amd64 }}
           SMOKED_ARM64: ${{ needs.smoke-server-docker.outputs.imageid-arm64 }}
         run: |
           set -euo pipefail
-          tag=$(echo "$TAGS" | head -n 1)
           for arch in amd64 arm64; do
             if [ "$arch" = "amd64" ]; then smoked="$SMOKED_AMD64"; else smoked="$SMOKED_ARM64"; fi
             if [ -z "$smoked" ]; then
               echo "::error::smoke-server-docker reported no image config for linux/$arch"
               exit 1
             fi
-            image=$(docker buildx imagetools inspect "$tag" \
+            platform_digest=$(docker buildx imagetools inspect "$IMAGE@$DIGEST" \
               --format "{{range .Manifest.Manifests}}{{if and (eq .Platform.OS \"linux\") (eq .Platform.Architecture \"$arch\")}}{{.Digest}}{{end}}{{end}}")
-            if [ -z "$image" ]; then
-              echo "::error::pushed manifest $tag carries no linux/$arch image"
+            if [ -z "$platform_digest" ]; then
+              echo "::error::pushed manifest $IMAGE@$DIGEST carries no linux/$arch image"
               exit 1
             fi
-            pushed=$(docker buildx imagetools inspect "$tag@$image" --raw | jq -r '.config.digest')
+            pushed=$(docker buildx imagetools inspect "$IMAGE@$platform_digest" --raw | jq -r '.config.digest')
             if [ "$smoked" != "$pushed" ]; then
               echo "::error::linux/$arch was smoked as image config $smoked but pushed as $pushed — check whether the gha cache scope server-$arch was hit before suspecting a genuinely different image (see the comment above this step)"
               exit 1
             fi
             echo "linux/$arch: smoked == pushed ($pushed)"
           done
-
-      # `subject-name` must be lower-case for GHCR, and github.repository_owner
-      # is `J3vb`. The same normalisation docker-compose.yml already bakes in
-      # as ghcr.io/j3vb/owncord-server.
-      - name: Lower-case the image owner (GHCR rejects `J3vb`)
-        id: owner
-        shell: bash
-        run: echo "lower=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       # Records the image in the public Sigstore log, and pushes the
       # attestation into the registry beside it, so a third party can verify
@@ -818,11 +821,37 @@ jobs:
           push-to-registry: true
 
       - name: Verify the image attestation
+        id: verify-attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STEPS_OWNER_OUTPUTS_LOWER: ${{ steps.owner.outputs.lower }}
           STEPS_BUILD_OUTPUTS_DIGEST: ${{ steps.build.outputs.digest }}
         run: gh attestation verify "oci://ghcr.io/${STEPS_OWNER_OUTPUTS_LOWER}/owncord-server@${STEPS_BUILD_OUTPUTS_DIGEST}" --repo "$GITHUB_REPOSITORY"
+
+      # Sole release-tag write, after every verification above. A single index
+      # source makes imagetools create copy that index verbatim, including its
+      # SBOM/provenance manifests; do not rebuild or assemble platform digests
+      # here. The verified digest is also the promotion source, never a tag.
+      # Registry writes across tags are not transactional: a transport failure
+      # during promotion can be partial, but a verification failure reaches no
+      # tag write at all. Leave this as the final, success-only step.
+      - name: Promote verified digest to release tags
+        id: promote-tags
+        env:
+          IMAGE: ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$TAGS"
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "::error::metadata-action reported no release tags"
+            exit 1
+          fi
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
 
   publish:
     name: Publish GitHub Release
