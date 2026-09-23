@@ -642,9 +642,9 @@ published as OC-0445) measured the load generator, not the server.** Per-10 s
 buckets on an unchanged server (run 35852682786) put send → acknowledgement
 p95 at 3–69 ms in every bucket up to the storm and at 506–582 ms in every
 bucket after it on the `self_signed` leg, and at 2–89 ms and 584–746 ms on the
-TLS-off leg. The storm closed every socket at one
-scenario instant, and each new socket's send timer was a plain `setInterval`
-from that instant, so from t=180 s all 100 senders sent in the same 50 ms slot
+TLS-off leg. The storm closed every socket at one scenario instant, and each
+new socket's send timer was a plain `setInterval` from that instant, so from
+t=180 s all 100 senders sent in the same 50 ms slot
 every 2 s. A hundred simultaneous sends queue behind the single SQLite writer
 at about 6 ms a hop — the checkout itself is held 0.4 ms; the hop is the next
 sender waiting out the previous send's 100-recipient fan-out on two vCPUs —
