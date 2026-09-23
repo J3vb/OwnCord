@@ -237,6 +237,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Get("/me", handleGetMe())
 		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/preview", bundles.preview)
 		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/download", bundles.download)
+		// Attention panel (RI-07): server health detail, ADMINISTRATOR like
+		// the support bundle that carries the same counters.
+		r.With(requirePerm(permissions.Administrator)).Get("/attention", handleGetAttention(svc.Attention))
 		mountUserRoutes(r, svc, hub, permInvalidator, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.

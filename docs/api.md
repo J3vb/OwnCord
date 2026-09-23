@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 175 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -51,6 +51,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/*`                                                           |
 | QUERY   | `/admin/*`                                                           |
 | TRACE   | `/admin/*`                                                           |
+| GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
 | GET     | `/admin/api/backups`                                                 |
@@ -3023,6 +3024,7 @@ Authorization is two-layered:
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
 | `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
@@ -3165,6 +3167,89 @@ Aggregate counts for the admin dashboard.
   "online_count": 3
 }
 ```
+
+---
+
+### GET /admin/api/attention
+
+The dashboard's attention panel (RI-07): server-side health signals and the
+deduplicated warnings raised from them. The server samples once a minute
+(the free space on the data volume, the SQLite writer pool's cumulative wait,
+reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
+backup file and each maintenance job's last run); this route only reads that
+state. Thresholds and hysteresis are in
+[server-configuration.md](server-configuration.md#admin-attention-panel-attention).
+Nothing here is exported off the host.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{
+  "evaluated_at": "2026-09-23T12:00:00Z",
+  "signals": [
+    {
+      "id": "disk",
+      "label": "Disk space",
+      "status": "unknown",
+      "detail": "disk space is not measured on this server",
+      "observed_at": "2026-09-23T12:00:00Z"
+    },
+    {
+      "id": "backup",
+      "label": "Last successful backup",
+      "status": "ok",
+      "value": "2026-09-23 03:00 UTC",
+      "threshold": "daily schedule: warn after 36h0m0s",
+      "detail": "9h0m0s old",
+      "observed_at": "2026-09-23T12:00:00Z"
+    }
+  ],
+  "warnings": [
+    {
+      "id": "job:Backups",
+      "severity": "warning",
+      "title": "Maintenance job failing: Backups",
+      "detail": "2 consecutive failed runs · disk I/O error",
+      "action": "Search Server Logs for …",
+      "first_observed": "2026-09-23T11:30:00Z",
+      "last_observed": "2026-09-23T12:00:00Z",
+      "occurrences": 1,
+      "recovered_at": null
+    }
+  ]
+}
+```
+
+- `status` is `ok`, `warning`, `critical` or `unknown`. `unknown` means the
+  server could not take the measurement (an unsupported platform, a failed
+  read, a rate with one sample so far, a job that has not run since start,
+  disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
+  both `0`).
+  It is never reported as healthy and neither raises nor clears a warning.
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
+  and `job:<name>` for each maintenance step.
+- The first disk level is reported at once, and a stopped dispatch loop as
+  soon as it is seen; every other level change, including a rate's first
+  warning, holds for two samples.
+  A rate's `threshold` is its `attention.*` floor until it has learned a
+  baseline, then the higher of the floor and three times that baseline.
+  While learning, `reconnects` raises nothing and `db_writer_wait`
+  and `delivery` raise at the floor; samples above the floor are not learned.
+- A warning's `id` is its signal's id. A signal that keeps failing updates
+  `last_observed`. One that recovers gets `recovered_at` and is listed for 24
+  hours; if it fails again in that window, the same entry reopens and
+  `occurrences` increments. Active warnings are listed first, critical before
+  warning. The state is in memory, so a restart resets warning history;
+  active problems re-raise within the next sample intervals, about two
+  minutes (a rate needs a first sample plus two sustained ones).
+- `evaluated_at` is `null` until the first sample.
+
+#### Response 500
+
+`INTERNAL_ERROR` "attention service unavailable" when the server was built
+without the attention service (partial wirings in tests).
 
 ---
 
