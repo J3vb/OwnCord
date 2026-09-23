@@ -81,6 +81,9 @@ export interface ChannelControllerOptions {
   /** Close the image lightbox when the mounted channel falls behind the
    *  NSFW gate (ChatArea closes the pins and search overlays itself). */
   readonly onContentGated?: () => void;
+  /** Move focus somewhere reachable after the NSFW gate that held it is
+   *  removed (accepted, declined or dismissed with Escape). */
+  readonly focusFallback?: () => void;
 }
 
 export interface ChannelController {
@@ -120,6 +123,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     chatHeaderName,
     chatHeaderRefs,
     onContentGated,
+    focusFallback,
   } = opts;
 
   let currentChannelId: number | null = null;
@@ -275,6 +279,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+
+    function mountConsentBar(): void {
+      nsfwConsentUi = createNsfwConsentBar({
+        onRevoke: () =>
+          api.revokeNsfw(channelId).then(
+            () => {
+              if (ownsAccountSession()) setNsfwAcknowledged(channelId, false);
+            },
+            (err: unknown) => {
+              log.error("NSFW consent revoke failed", { channelId, error: String(err) });
+              if (ownsSession()) showToast(nsfwConsentText("bar.revokeFailed"), "error");
+            },
+          ),
+      });
+      nsfwConsentUi.mount(slots.messagesSlot);
+    }
 
     function performSend(
       content: string,
@@ -542,9 +562,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // NSFW consent gates composition, not just display (B9-7): until the
     // server has confirmed this account's acknowledgement, the channel's
     // content is neither mounted nor fetched, and any rows left from before
-    // consent was withdrawn are dropped. Any change in that state — accepted
-    // here, revoked here or on another device, relabelled, or restated by a
-    // reconnect's ready — remounts the channel on the other side of the gate.
+    // consent was withdrawn are dropped. Any change that crosses the gate —
+    // accepted here, revoked here or on another device, relabelled, or
+    // restated by a reconnect's ready — remounts the channel on the other
+    // side of it; labelling or unlabelling consented content only adds or
+    // removes the withdraw bar, so the composer keeps its draft.
+    const storedChannel = channelsStore.getState().channels.get(channelId);
+    const gated = nsfwConsentRequired(storedChannel);
     composerGatingUnsubs.push(
       channelsStore.subscribeSelector(
         (s) => {
@@ -554,15 +578,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         },
         (state) => {
           if (currentChannelId !== channelId) return;
+          if ((state === "gated") === gated) {
+            nsfwConsentUi?.destroy?.();
+            nsfwConsentUi = null;
+            if (state === "consented") mountConsentBar();
+            return;
+          }
+          const gateHadFocus = slots.messagesSlot.contains(document.activeElement);
           const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
           destroyChannel();
           mountChannel(channelId, name, channelType);
           if (state === "gated") onContentGated?.();
+          else if (gateHadFocus) focusFallback?.();
         },
       ),
     );
-    const storedChannel = channelsStore.getState().channels.get(channelId);
-    if (nsfwConsentRequired(storedChannel)) {
+    if (gated) {
       clearChannelContent(channelId);
       nsfwConsentUi = createNsfwGate({
         channelName,
@@ -576,6 +607,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // is not also "continue".
           destroyChannel();
           setActiveChannel(null);
+          focusFallback?.();
         },
       });
       nsfwConsentUi.mount(slots.messagesSlot);
@@ -665,21 +697,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
     });
     messageList.mount(slots.messagesSlot);
-    if (storedChannel?.nsfw === true) {
-      nsfwConsentUi = createNsfwConsentBar({
-        onRevoke: () =>
-          api.revokeNsfw(channelId).then(
-            () => {
-              if (ownsAccountSession()) setNsfwAcknowledged(channelId, false);
-            },
-            (err: unknown) => {
-              log.error("NSFW consent revoke failed", { channelId, error: String(err) });
-              if (ownsSession()) showToast(nsfwConsentText("bar.revokeFailed"), "error");
-            },
-          ),
-      });
-      nsfwConsentUi.mount(slots.messagesSlot);
-    }
+    if (storedChannel?.nsfw === true) mountConsentBar();
 
     // TypingIndicator
     typingIndicator = createTypingIndicator({

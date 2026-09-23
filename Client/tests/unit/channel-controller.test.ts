@@ -2188,6 +2188,78 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("keeps the composer and its draft when a consented channel's label changes", async () => {
+      seedChannel(true, true);
+      const opts = consentOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      mockMessageInputDestroy.mockClear();
+      mockMessageListDestroy.mockClear();
+      const listMounts = mockMessageListMount.mock.calls.length;
+      const inputMounts = mockMessageInputMount.mock.calls.length;
+
+      updateChannel({ id: CH, nsfw: false });
+      await settle();
+      seedChannel(true, true); // a reconnect's ready restates label and consent
+      await settle();
+
+      expect(mockMessageInputDestroy).not.toHaveBeenCalled();
+      expect(mockMessageListDestroy).not.toHaveBeenCalled();
+      expect(mockMessageListMount).toHaveBeenCalledTimes(listMounts);
+      expect(mockMessageInputMount).toHaveBeenCalledTimes(inputMounts);
+      expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(1);
+      expect(mockConsentBarMount).toHaveBeenCalledTimes(2);
+      ctrl.destroyChannel();
+    });
+
+    it("moves focus out of the gate once an acknowledgement opens the channel", async () => {
+      seedChannel(true, false);
+      const focusFallback = vi.fn();
+      const opts = { ...consentOpts(), focusFallback };
+      document.body.appendChild(opts.slots.messagesSlot);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      const continueBtn = document.createElement("button");
+      opts.slots.messagesSlot.appendChild(continueBtn);
+      continueBtn.focus();
+
+      await capturedNsfwOpts.value.onAccept();
+      await settle();
+
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+      ctrl.destroyChannel();
+      opts.slots.messagesSlot.remove();
+    });
+
+    it("leaves focus alone when another device opens a gate the reader is not on", async () => {
+      seedChannel(true, false);
+      const focusFallback = vi.fn();
+      const opts = { ...consentOpts(), focusFallback };
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+
+      setNsfwAcknowledged(CH, true);
+      await settle();
+      setNsfwAcknowledged(CH, false);
+      await settle();
+
+      expect(focusFallback).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("moves focus somewhere reachable after the reader declines", () => {
+      seedChannel(true);
+      const focusFallback = vi.fn(() => {
+        expect(channelsStore.getState().activeChannelId).toBeNull();
+      });
+      const ctrl = createChannelController({ ...consentOpts(), focusFallback });
+      ctrl.mountChannel(CH, "spicy");
+
+      capturedNsfwOpts.value.onCancel();
+
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+    });
+
     it("destroys an unaccepted gate when the channel unmounts", () => {
       seedChannel(true);
       const ctrl = createChannelController(consentOpts());

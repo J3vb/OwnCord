@@ -535,7 +535,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // The composer of the channel on screen, else the sidebar's first control.
     const focusReachable = (): void => {
       const reachable =
-        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea") ??
+        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled") ??
         sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
       reachable?.focus();
     };
@@ -853,6 +853,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       chatHeaderName: chatAreaResult.chatHeaderName,
       chatHeaderRefs: chatAreaResult.chatHeaderRefs,
       onContentGated: closeActiveLightbox,
+      focusFallback: focusReachable,
     });
 
     // Wire voice error callback to toast
