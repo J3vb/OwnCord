@@ -399,7 +399,9 @@ so B7-18 stays `in-progress`. The phase closes when the owner resolves them.
    Limitations", `docs/trust-model.md` C-09 section). No per-deployment
    allowlist contract exists. The owner can do the work, accept the residual
    with a reason in the register, or re-tag the row to a later phase with a
-   written reason (roadmap rule 2).
+   written reason (roadmap rule 2). _Closed 2026-09-23: `connect-src` is now
+   `'self'`, IPC and loopback `http:`/`ws:` only, and a non-loopback LiveKit
+   `direct_url` goes through the TOFU tunnel (register C-10)._
 2. **Exit-gate evidence: there is no client voice-join budget.** The exit gate
    asks for startup, bundle, voice-join and long-session budgets that meet or
    improve the accepted baseline. B7 recorded three of them: startup and

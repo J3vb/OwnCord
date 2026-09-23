@@ -943,10 +943,9 @@ three stated limits, which carry forward:
   leg is N/A;
 - the owner still has to run the real-desktop Linux device check.
 
-The exit gate is **not yet met**, because three items are open:
+The exit gate is **not yet met**. C-10's B7 half, the third item B7-18 found,
+closed on 2026-09-23 (the register's C-10 row). Two items are still open:
 
-- C-10's B7 half: the desktop CSP's `connect-src` still allows `https:` and
-  `wss:`;
 - no client voice-join budget has been recorded;
 - the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
   implemented.
