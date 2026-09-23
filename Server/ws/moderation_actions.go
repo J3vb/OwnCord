@@ -47,17 +47,40 @@ func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expir
 	}
 	h.RefreshUserChannels(userID)
 	if expiresAt != nil {
-		// ponytail: in-memory timer, lost on restart — harmless, since a
-		// restart puts every client back through a fresh ready. The second
-		// of slack covers expires_at's whole-second storage.
-		time.AfterFunc(time.Until(*expiresAt)+timeoutExpiryRefreshSlack, func() {
-			select {
-			case <-h.stop:
-				return
-			default:
-			}
-			h.RefreshUserChannels(userID)
-		})
+		h.scheduleTimeoutExpiryRefresh(userID, *expiresAt)
+	}
+}
+
+// scheduleTimeoutExpiryRefresh runs RefreshUserChannels for userID just
+// after expiresAt. The second of slack covers expires_at's whole-second
+// storage.
+//
+// ponytail: in-memory timer, lost on restart; RearmTimeoutExpiries re-arms
+// every active timeout's at startup.
+func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
+	time.AfterFunc(time.Until(expiresAt)+timeoutExpiryRefreshSlack, func() {
+		select {
+		case <-h.stop:
+			return
+		default:
+		}
+		h.RefreshUserChannels(userID)
+	})
+}
+
+// RearmTimeoutExpiries schedules the expiry refresh for every timeout active
+// right now, replacing the timers a previous process armed and lost.
+func (h *Hub) RearmTimeoutExpiries(ctx context.Context) {
+	if h.db == nil {
+		return
+	}
+	active, err := h.db.ListActiveTimeoutExpiries(ctx)
+	if err != nil {
+		slog.Warn("hub: RearmTimeoutExpiries could not list active timeouts", "err", err)
+		return
+	}
+	for _, t := range active {
+		h.scheduleTimeoutExpiryRefresh(t.UserID, t.ExpiresAt)
 	}
 }
 

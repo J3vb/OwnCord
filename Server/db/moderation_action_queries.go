@@ -411,6 +411,29 @@ func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, lifted
 	return out, rows.Err()
 }
 
+// ActiveTimeoutExpiry is one unlifted, unexpired timeout's target and expiry.
+type ActiveTimeoutExpiry struct {
+	UserID    int64
+	ExpiresAt time.Time
+}
+
+// ListActiveTimeoutExpiries lists every active timeout's target and expiry,
+// for the hub to re-arm its expiry refreshes at startup.
+func (d *DB) ListActiveTimeoutExpiries(ctx context.Context) ([]ActiveTimeoutExpiry, error) {
+	rows, err := d.q.ListActiveTimeoutExpiries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListActiveTimeoutExpiries: %w", err)
+	}
+	out := make([]ActiveTimeoutExpiry, 0, len(rows))
+	for _, r := range rows {
+		if r.ExpiresAt == nil {
+			continue
+		}
+		out = append(out, ActiveTimeoutExpiry{UserID: r.TargetID, ExpiresAt: parseSQLiteTime(*r.ExpiresAt)})
+	}
+	return out, nil
+}
+
 // HasActiveTimeout is the one indexed lookup permissions.Checker.Subject and
 // service.PermissionService.Subject run, uncached, to fill Subject.TimedOut.
 func (d *DB) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {

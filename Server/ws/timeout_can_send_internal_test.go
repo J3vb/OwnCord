@@ -121,6 +121,23 @@ func TestTimeout_ExpiryPushesCanSend(t *testing.T) {
 	}
 }
 
+// A timeout already active when the hub starts has no timer from the process
+// that issued it; RearmTimeoutExpiries gives it one, so its expiry still
+// pushes can_send.
+func TestTimeout_RearmedExpiryPushesCanSend(t *testing.T) {
+	f := newTimeoutCanSendFixture(t)
+	ctx := context.Background()
+
+	expires := time.Now().Add(2 * time.Second)
+	if _, _, err := f.database.TimeoutUser(ctx, f.targetID, f.actorID, nil, "brief", expires); err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	f.hub.RearmTimeoutExpiries(ctx)
+	if !waitCanSend(t, f.send, f.chID, 5*time.Second) {
+		t.Fatal("can_send = false after the re-armed timeout expired, want true")
+	}
+}
+
 // A refresh landing inside reconnectRegister, after its watermark re-check
 // and before registerNow, must wait for the registration rather than find no
 // client and return, which would leave the resumed client on stale can_send.
