@@ -983,13 +983,15 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return { element };
   }
 
-  it("hides the volume, sensitivity and RNNoise controls and explains why", async () => {
+  it("hides the input volume, sensitivity and RNNoise controls and explains why", async () => {
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll("h3")].map((h) => h.textContent);
     expect(headings).not.toContain("Input Volume");
     expect(headings).not.toContain("Input Sensitivity");
-    expect(headings).not.toContain("Output Volume");
-    expect(headings).toEqual(expect.arrayContaining(["Input Device", "Output Device"]));
+    // The engine's playout mixer applies output volume.
+    expect(headings).toEqual(
+      expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
+    );
     const labels = [...tab.element.querySelectorAll(".setting-label")].map((l) => l.textContent);
     expect(labels).not.toContain("Enhanced Noise Suppression");
     expect(labels).toEqual(

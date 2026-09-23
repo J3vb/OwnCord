@@ -21,6 +21,7 @@ import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
+import { isLinuxDesktop } from "../features/voice/native/platform";
 
 const log = createLogger("screenShare");
 
@@ -365,7 +366,12 @@ export async function enableScreenshare(
   let removeEndedListener: (() => void) | undefined;
   try {
     stopManualScreenTracks(state, room);
-    const screenTracks = await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
+    // Linux captures in the native backend (no getDisplayMedia behind a
+    // WebRTC-less webview): its room's picker-and-capture stands in.
+    const captureOptions = getScreenShareCaptureOptions(quality, fps);
+    const screenTracks = isLinuxDesktop()
+      ? await room.localParticipant.createScreenTracks(captureOptions)
+      : await createLocalScreenTracks(captureOptions);
     if ((state.generation ?? 0) !== generation) {
       // A disableScreenshare ran to completion while the OS picker was still
       // up — it already reset localScreenshare and sent voice_screenshare
