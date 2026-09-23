@@ -27,6 +27,7 @@ import { quiesce } from "../support/quiesce";
 
 const CYCLES = 10;
 const SAMPLED = new Set([0, 5, 6, 9, 10]);
+const OTHER_CHANNEL = "soak-other";
 
 async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): Promise<void> {
   const input = page.locator("[data-testid='message-input'] textarea");
@@ -57,9 +58,16 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await edited.locator(".reaction-chip.me").click();
   await expect(edited.locator(".reaction-chip.me")).toHaveCount(0);
   // Drained each cycle, as in the fullstack soak, so rows are not growth by
-  // construction.
+  // construction. The purge leaves each row as a "[message deleted]" tombstone
+  // until the channel is refetched; leaving #general and returning refetches it,
+  // as the fullstack soak's channel switch does.
   await purge();
   await expect(edited).toHaveCount(0);
+  await page.locator(".channel-item:not(.voice)", { hasText: OTHER_CHANNEL }).click();
+  await expect(page.locator(".chat-header .ch-name")).toHaveText(OTHER_CHANNEL);
+  await page.locator(".channel-item:not(.voice)", { hasText: "general" }).click();
+  await expect(page.locator(".chat-header .ch-name")).toHaveText("general");
+  await expect(page.locator(".message")).toHaveCount(0);
 
   await openSettings(page);
   for (const tab of [
@@ -115,6 +123,12 @@ test("the desktop shell does not grow its lifecycle footprint within a session",
   const general = channels.find(
     (c: { name: string; type: string }) => c.name === "general" && c.type === "text",
   );
+  await server.api(
+    "/admin/api/channels",
+    { name: OTHER_CHANNEL, type: "text" },
+    server.owner!.token,
+  );
+  await expect(page.locator(".channel-item:not(.voice)", { hasText: OTHER_CHANNEL })).toBeVisible();
   const purge = async () => {
     await server.api(
       `/api/v1/channels/${general.id}/messages/purge`,
