@@ -2252,8 +2252,10 @@ has acknowledged it themselves (`PUT /api/v1/channels/{id}/nsfw-acknowledgement`
 — no bit, `ADMINISTRATOR` included, bypasses this. Label and
 acknowledgement are read on every request, so a revoke, an unlabel and
 relabel, or a label added after filing applies to the next read. When the
-source channel has been deleted, `evidence` is `[]` and `evidence_withheld`
-is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
+source channel has been deleted, the snapshot stays readable only if that
+channel was never labelled while the report existed (`reports.source_nsfw`,
+migration 052). Otherwise, including when that is unknown, `evidence` is
+`[]` and `evidence_withheld` is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
 snapshot is returned. Files the snapshot references are served by
 `GET /api/v1/files/{id}` under that route's own channel and consent checks.
 

@@ -318,18 +318,55 @@ func TestModerationEvidence_SourceChannelRelabelling(t *testing.T) {
 }
 
 // TestModerationEvidence_SourceChannelDeletion: a deleted source channel
-// leaves no label to read and no acknowledgement to hold, so the snapshot
-// is withheld even from a moderator who had acknowledged, and the file —
-// unlinked by the cascade — is refused to them as well.
+// leaves no label to read and no acknowledgement to hold, so migration
+// 052's sticky flag decides. Labelled at filing or at any time since — even
+// if unlabelled again before the delete — or unknown (a report filed before
+// 052 whose channel was already gone): withheld, even from a moderator who
+// had acknowledged. Never labelled: the snapshot stays readable. Either way
+// the file itself, unlinked by the cascade, is refused to a moderator.
 func TestModerationEvidence_SourceChannelDeletion(t *testing.T) {
-	f := newEvidenceFixture(t, "message", true)
-	mod := f.moderator("ev-mod", 0)
-	f.ack(mod)
-	f.expectEvidence(mod, "")
+	t.Run("labelled then deleted", func(t *testing.T) {
+		f := newEvidenceFixture(t, "message", true)
+		mod := f.moderator("ev-mod", 0)
+		f.ack(mod)
+		f.expectEvidence(mod, "")
 
-	f.deleteChannel()
-	f.expectEvidence(mod, service.EvidenceSourceChannelUnavailable)
-	f.expectFile(mod, http.StatusForbidden, "FORBIDDEN")
+		f.deleteChannel()
+		f.expectEvidence(mod, service.EvidenceSourceChannelUnavailable)
+		f.expectFile(mod, http.StatusForbidden, "FORBIDDEN")
+	})
+	t.Run("ordinary then deleted", func(t *testing.T) {
+		f := newEvidenceFixture(t, "message", false)
+		mod := f.moderator("ev-mod", 0)
+
+		f.deleteChannel()
+		f.expectEvidence(mod, "")
+		f.expectFile(mod, http.StatusForbidden, "FORBIDDEN")
+	})
+	t.Run("labelled after filing, unlabelled, then deleted", func(t *testing.T) {
+		f := newEvidenceFixture(t, "message", false)
+		mod := f.moderator("ev-mod", 0)
+		f.relabel(true)
+		f.relabel(false)
+		f.expectEvidence(mod, "")
+
+		f.deleteChannel()
+		f.expectEvidence(mod, service.EvidenceSourceChannelUnavailable)
+	})
+	t.Run("label unknown then deleted", func(t *testing.T) {
+		f := newEvidenceFixture(t, "message", false)
+		mod := f.moderator("ev-mod", 0)
+		// The state 052's backfill leaves for a pre-052 report whose channel
+		// no longer exists.
+		if _, err := f.database.ExecContext(context.Background(),
+			`UPDATE reports SET source_nsfw = NULL WHERE public_id = ?`, f.reportID); err != nil {
+			t.Fatalf("clear source_nsfw: %v", err)
+		}
+		f.expectEvidence(mod, "")
+
+		f.deleteChannel()
+		f.expectEvidence(mod, service.EvidenceSourceChannelUnavailable)
+	})
 }
 
 // TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement is the

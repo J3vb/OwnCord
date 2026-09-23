@@ -488,6 +488,13 @@ for: "an audit row names two principals, so an erased actor needs a token of
 its own rather than sharing the subject's". A report has a reporter and a
 subject, and either can erase; B5-8 needs the two-token pattern, not one.
 
+**Consent extension:** `052_report_source_nsfw.sql` adds
+`reports.source_nsfw` to S5-a, a sticky record that the report's source
+channel was labelled (S4), kept by triggers at filing and on any later
+labelling. It lets the evidence read keep a deleted labelled channel's
+snapshot withheld once the label and acknowledgements are gone. It is part
+of the report row, so it shares S5-a's ownership and lifecycle.
+
 ### Abuse cases
 
 | Adversary                                                           | Goal                                                                                                                              | Mechanism                                                                                                  | Control                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Tested at                                                                                                                                                     |

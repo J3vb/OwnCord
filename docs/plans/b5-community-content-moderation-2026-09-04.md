@@ -2949,26 +2949,34 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   only read of the snapshot, applies decision 13 to it: a labelled source
   channel's evidence reaches a caller only with their own acknowledgement,
   with no bit or administrator bypass, and label and acknowledgement are
-  read on every request. A deleted source channel, or one whose label or
-  acknowledgement cannot be read, withholds the snapshot. A withheld
-  response carries `evidence: []` and `evidence_withheld`
-  (`NSFW_ACKNOWLEDGEMENT_REQUIRED` or `SOURCE_CHANNEL_UNAVAILABLE`,
-  documented in `docs/api.md`). Snapshot files are served only through
-  `GET /api/v1/files/{id}`, whose existing `UploadService.Authorize` gate
-  already applies the same consent. `Server/api/moderation_evidence_consent_test.go`
-  drives both reads over HTTP — the queue detail for the text, the file
-  route for the attachment — for message and attachment reports, with
-  consent changed through the real acknowledge/revoke routes and
-  `ChannelService`'s relabel and delete: refused before acknowledgement,
-  authorized after, refused again after revocation
-  (`TestModerationEvidence_AcknowledgeAndRevoke`); per-moderator consent
-  (`TestModerationEvidence_ConsentIsPerModerator`); no administrator bypass
-  (`TestModerationEvidence_AdministratorHasNoBypass`); unlabel, relabel, and
-  a label added after filing (`TestModerationEvidence_SourceChannelRelabelling`);
-  source-channel deletion (`TestModerationEvidence_SourceChannelDeletion`);
-  and an unlabelled control (`TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement`).
-  Revert-proof: skipping the gate, reading a deleted channel as unlabelled,
-  and ignoring the acknowledgement each turn the matching tests red.
+  read on every request. After the source channel is deleted, migration
+  `052_report_source_nsfw` decides: its sticky `reports.source_nsfw` is set
+  from the label at filing and by any later labelling (two triggers, never
+  cleared), and the snapshot stays readable only when it records that the
+  channel was never labelled — labelled or unknown (a pre-052 report whose
+  channel was already gone) is withheld. A withheld response carries
+  `evidence: []` and `evidence_withheld` (`NSFW_ACKNOWLEDGEMENT_REQUIRED` or
+  `SOURCE_CHANNEL_UNAVAILABLE`, documented in `docs/api.md`). Snapshot files
+  are served only through `GET /api/v1/files/{id}`, whose existing
+  `UploadService.Authorize` gate already applies the same consent.
+  `Server/api/moderation_evidence_consent_test.go` drives both reads over
+  HTTP — the queue detail for the text, the file route for the attachment —
+  for message and attachment reports, with consent changed through the real
+  acknowledge/revoke routes and `ChannelService`'s relabel and delete:
+  refused before acknowledgement, authorized after, refused again after
+  revocation (`TestModerationEvidence_AcknowledgeAndRevoke`); per-moderator
+  consent (`TestModerationEvidence_ConsentIsPerModerator`); no administrator
+  bypass (`TestModerationEvidence_AdministratorHasNoBypass`); unlabel,
+  relabel, and a label added after filing
+  (`TestModerationEvidence_SourceChannelRelabelling`); deletion of a
+  labelled, an ordinary, a once-labelled and an unknown-label source channel
+  (`TestModerationEvidence_SourceChannelDeletion`); and an unlabelled control
+  (`TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement`).
+  `Server/db/report_source_nsfw_test.go` pins 052's backfill and the
+  triggers' stickiness, and `052_report_source_nsfw.down.sql` joins the
+  rehearsed reversals. Revert-proof: skipping the gate, ignoring the
+  acknowledgement, reading a deleted channel's flag as always or never
+  labelled, and dropping either trigger each turn the matching tests red.
   Security-review status stays in the private review trail.
 
 - **Condition 6 — B5-11 follow-up:** prove that current device-subscription

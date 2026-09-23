@@ -36,6 +36,10 @@ type Report struct {
 	CreatedAt     string
 	UpdatedAt     string
 	ClosedAt      *string
+	// SourceNSFW is migration 052's sticky flag: true once the source
+	// channel was labelled at filing or since, false if it never was, nil
+	// when unknown (see the migration) or when there is no source channel.
+	SourceNSFW *bool
 }
 
 // ReportQueueRow is one row of the moderation queue listing, with reporter
@@ -127,7 +131,16 @@ func reportFromRow(r dbgen.Report) Report {
 		TargetType: r.TargetType, TargetRef: r.TargetRef, ChannelID: r.ChannelID,
 		Reason: r.Reason, Detail: r.Detail, State: r.State, AssigneeID: r.AssigneeID,
 		Outcome: r.Outcome, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ClosedAt: r.ClosedAt,
+		SourceNSFW: i64PtrToBoolPtr(r.SourceNsfw),
 	}
+}
+
+func i64PtrToBoolPtr(v *int64) *bool {
+	if v == nil {
+		return nil
+	}
+	b := *v != 0
+	return &b
 }
 
 func strOrEmpty(s *string) string {
