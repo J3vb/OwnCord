@@ -315,12 +315,13 @@ describe("message request decisions", () => {
     button(2, "ignore").click();
     fx.decisions[0]!.resolve();
     await settle();
-    expect(document.activeElement).toBe(button(1, "accept"));
+    // The row, not a decision: a repeated Enter must not decide another request.
+    expect(document.activeElement).toBe(row(1));
 
     button(1, "ignore").click();
     fx.decisions[1]!.resolve();
     await settle();
-    expect(document.activeElement).toBe(button(3, "accept"));
+    expect(document.activeElement).toBe(row(3));
 
     button(3, "ignore").click();
     fx.decisions[2]!.resolve();
@@ -347,7 +348,7 @@ describe("message request decisions", () => {
     handleDmRequest({ ...item(2), state: "accepted", preview: null, decided_at: "x" });
     messageRequestsStore.flush();
     expect(dialog()).toBeNull();
-    expect(document.activeElement).toBe(button(1, "accept"));
+    expect(document.activeElement).toBe(row(1));
   });
 
   it("drops a decision that lands after the view closed or the account changed", async () => {

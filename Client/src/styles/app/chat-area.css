@@ -272,6 +272,11 @@
   padding: 10px 8px;
   border-bottom: 1px solid var(--border);
 }
+/* Takes focus when the request before it is decided. */
+.requests-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .requests-item-head {
   display: flex;
   flex-wrap: wrap;
