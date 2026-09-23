@@ -95,6 +95,10 @@ interpolated values (shown with `{…}` in the baseline).
 **Progress.** B9-18 (2026-09-23) moved or exempted all 388 of its literals:
 the baseline lists no B9-18 file. Its record is in
 [the B9-18 plan](../../.claude/plans/b9-18-english-shell-connect.plan.md#implementation-record-2026-09-23).
+B9-20 (2026-09-23) moved or exempted all 624 of its literals: the baseline
+lists no B9-20 file, and the 1,428-literal inventory is down to B9-19's 416.
+Its record is in
+[the B9-20 plan](../../.claude/plans/b9-20-english-settings-and-native.plan.md#implementation-record-2026-09-23).
 
 Owners come from the B9-18/19/20 plans' file tables. A file no table names
 falls to B9-20, whose Task 4 merges the final inventory of every `Client/src`
