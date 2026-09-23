@@ -3427,16 +3427,23 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().isAuthenticated).toBe(false);
     const error = uiStore.getState().transientError;
     expect(error).toBe(
-      `You have been banned from this server ${safetyText("appeals.unavailable")}`,
+      `You have been banned from this server. ${safetyText("appeals.unavailable")}`,
     );
     expect(error).toContain("contact the server's operator directly");
+  });
+
+  it("wires error BANNED to keep a server message that already ends a sentence", () => {
+    mock.dispatch("error", { code: "BANNED", message: "You are banned!" });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    const error = uiStore.getState().transientError;
+    expect(error).toBe(`You are banned! ${safetyText("appeals.unavailable")}`);
   });
 
   it("wires error BANNED with empty message uses default", () => {
     mock.dispatch("error", { code: "BANNED", message: "" });
     expectConsole("error", /\[dispatcher\] Server error/);
     const error = uiStore.getState().transientError;
-    expect(error).toBe(`You have been banned ${safetyText("appeals.unavailable")}`);
+    expect(error).toBe(`You have been banned. ${safetyText("appeals.unavailable")}`);
   });
 
   it("wires error BANNED to disconnect the ws client (OC-0107: without this the banned token reconnects forever)", () => {

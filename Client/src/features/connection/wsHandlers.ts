@@ -98,7 +98,7 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     // directly: it's idempotent with that subscriber's own
     // ws.disconnect() and covers every router state, not just "main".
     setTransientError(
-      `${payload.message || "You have been banned"} ${safetyText("appeals.unavailable")}`,
+      `${(payload.message || "You have been banned").replace(/([^.!?])$/, "$1.")} ${safetyText("appeals.unavailable")}`,
     );
     ws.disconnect();
     clearAuth();
