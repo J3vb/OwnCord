@@ -42,7 +42,8 @@
     "test:mutate": "stryker run",
     "test:mutate:dry": "stryker run --dryRunOnly",
     "test:e2e:build-server": "node tests/e2e/scripts/build-server.mjs",
-    "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config playwright.config.fullstack.ts"
+    "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config playwright.config.fullstack.ts",
+    "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config playwright.config.soak.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
