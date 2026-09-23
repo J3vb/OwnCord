@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnReportSummary } from "@lib/api";
 import { buildMyReportsSection, reportStateKey } from "./myReports";
 import { buildSafetyPane } from "./safetyPane";
+import { expectConsole } from "../../../tests/helpers/console";
 
 interface Deferred {
   resolve: (rows: OwnReportSummary[]) => void;
@@ -144,6 +145,22 @@ describe("My reports", () => {
     expect(pane.className).toBe("settings-pane active");
     await vi.waitFor(() => expect(pane.querySelector("section.my-reports")).not.toBeNull());
     expect(signals).toEqual([tab.signal]);
+  });
+
+  it("says so in the pane when the section fails to load", async () => {
+    vi.doMock("./myReports", () => Promise.reject(new Error("chunk failed")));
+    try {
+      const pane = buildSafetyPane(tab.signal, api);
+      await vi.waitFor(() =>
+        expect(pane.querySelector("[role=alert]")?.textContent).toBe(
+          "Couldn't load the Safety tab. Close Settings and try again.",
+        ),
+      );
+      expect(signals).toEqual([]);
+      expectConsole("error", /\[safety-tab\] Safety tab failed to load/);
+    } finally {
+      vi.doUnmock("./myReports");
+    }
   });
 
   it("adds nothing to a pane closed before its section loads", async () => {

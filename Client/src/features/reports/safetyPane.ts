@@ -1,6 +1,7 @@
 import type { ApiClient } from "@lib/api";
 import { createElement } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { reportEntryText } from "../../i18n/reportEntry";
 
 const log = createLogger("safety-tab");
 
@@ -18,7 +19,17 @@ export function buildSafetyPane(
     ({ buildMyReportsSection }) => {
       if (!signal.aborted) pane.appendChild(buildMyReportsSection(signal, api));
     },
-    (err: unknown) => log.error("Safety tab failed to load", { error: String(err) }),
+    (err: unknown) => {
+      log.error("Safety tab failed to load", { error: String(err) });
+      if (signal.aborted) return;
+      pane.appendChild(
+        createElement(
+          "div",
+          { class: "form-error", role: "alert" },
+          reportEntryText("safetyLoadFailed"),
+        ),
+      );
+    },
   );
   return pane;
 }

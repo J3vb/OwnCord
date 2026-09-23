@@ -8,4 +8,5 @@ import { defineCatalog } from "./format";
 export const reportEntryText = defineCatalog("reportEntry", {
   report: "Report",
   reportMessage: "Report message",
+  safetyLoadFailed: "Couldn't load the Safety tab. Close Settings and try again.",
 });

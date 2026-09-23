@@ -743,6 +743,32 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
   });
 
+  it("describes each row by its custom status and presence, kept current (B9-10)", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
+      makeMember({ id: 2, username: "bob", status: "idle" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const description = (testId: string): string =>
+      container
+        .querySelector(`[data-testid="${testId}"]`)!
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => {
+          const el = document.getElementById(id)!;
+          return el.getAttribute("aria-label") ?? el.textContent;
+        })
+        .join(" ");
+    expect(description("member-1")).toBe("shipping online");
+    expect(description("member-2")).toBe("idle");
+
+    updatePresence(1, "dnd");
+    membersStore.flush();
+    expect(description("member-1")).toBe("shipping dnd");
+  });
+
   it("renders an invisible member the way it renders an offline one", () => {
     // Only ever the signed-in user's own row — everyone else is mapped to
     // offline server-side — but it has to look like what others see.

@@ -20,6 +20,8 @@ vi.mock("@components/MemberList", () => ({
   })),
 }));
 
+vi.mock("../../src/features/reports/openers", () => ({ openUserReport: vi.fn() }));
+
 import {
   createSidebarMemberSection,
   type SidebarMemberSectionOptions,
@@ -28,6 +30,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { addMember, membersStore, removeMember } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
+import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -704,6 +707,35 @@ describe("SidebarMemberSection", () => {
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
       const lastCall = calls[calls.length - 1]![0];
       expect(lastCall.currentUserRole).toBe("member");
+
+      section.destroy();
+    });
+  });
+
+  describe("user report focus (B9-10)", () => {
+    it("falls back to the member's rebuilt row, else the list's first row", async () => {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+      calls[calls.length - 1]![0].onReportUser(7, "bob");
+      const open = openUserReport as ReturnType<typeof vi.fn>;
+      await vi.waitFor(() => expect(open).toHaveBeenCalled());
+      const { fallbackFocus, userId } = open.mock.calls[open.mock.calls.length - 1]![0];
+      expect(userId).toBe(7);
+
+      const content = container.querySelector(".sidebar-members-content")!;
+      const row = (id: number): HTMLElement => {
+        const el = document.createElement("div");
+        el.className = "member-item";
+        el.dataset.testid = `member-${id}`;
+        return el;
+      };
+      const first = row(3);
+      const bob = row(7);
+      content.prepend(first, bob);
+      expect(fallbackFocus()).toBe(bob);
+      bob.remove();
+      expect(fallbackFocus()).toBe(first);
 
       section.destroy();
     });

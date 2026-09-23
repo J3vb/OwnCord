@@ -212,6 +212,8 @@ function createMemberItem(
     "aria-haspopup": "dialog",
     "aria-label": memberDisplayName(member),
   });
+  const statusId = `mi-status-${member.id}`;
+  const customId = `mi-custom-status-${member.id}`;
 
   const avatar = createAvatarElement(
     { username: member.username, displayName: member.displayName, avatar: member.avatar },
@@ -220,6 +222,7 @@ function createMemberItem(
 
   const statusDot = createElement("div", {
     class: "mi-status",
+    id: statusId,
     style: `background: ${statusColor(member.status)}`,
     "aria-label": member.status,
     title: member.status,
@@ -237,9 +240,13 @@ function createMemberItem(
     const customEl = createElement("span", {
       class: "mi-custom-status",
       "data-testid": `member-custom-status-${member.id}`,
+      id: customId,
     });
     setText(customEl, custom);
     nameWrap.appendChild(customEl);
+    item.setAttribute("aria-describedby", `${customId} ${statusId}`);
+  } else {
+    item.setAttribute("aria-describedby", statusId);
   }
 
   appendChildren(item, avatar, nameWrap);
