@@ -203,7 +203,9 @@ agent.
 capture and output devices, in or out of a call (see Audio parity, below; in
 phase 1b this was the device module's list), and
 `native_voice_set_device(session, kind, id)` switches in place; an empty id is
-the default (the first device listed).
+the default (the first device listed). The capture list leaves out
+PulseAudio monitor sources (`<sink>.monitor`, the loopback of what a sink
+plays), as the phase-1b device module and Chrome do.
 `NativeRoom.switchActiveDevice` forwards `audioinput`/`audiooutput`, so the
 saved-device switches at join and the settings tab's selectors work unchanged;
 `features/voice/native/devices.ts` gives the settings tab and the device
