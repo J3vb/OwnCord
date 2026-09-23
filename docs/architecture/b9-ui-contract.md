@@ -12,7 +12,7 @@ against its own journey. The bar is Q1's WCAG 2.2 AA-oriented checklist, not a
 certification claim. Automated checks supplement the owner's NVDA/Orca review;
 they never replace it.
 
-Three interpretations of Q1/Q8 made while implementing B9-2 were accepted by
+Four interpretations of Q1/Q8 made while implementing B9-2 were accepted by
 the owner on 2026-09-23:
 
 1. "Contrast against the theme background" means the minimum over all four
@@ -21,6 +21,11 @@ the owner on 2026-09-23:
    or the in-app toggle asks (see [Motion](#motion)).
 3. `--text-faint` and `--text-micro` are for incidental text only, and are
    measured but not qualified.
+4. The Q8 fallback target is the theme's tested `--accent-text`/`--focus-ring`
+   token. It equals the theme's default accent only where that accent passes
+   the threshold (neon-glow `#00c8ff`). On dark and midnight it is `#949cf7`
+   and on light `#4752c4`, because the default accent `#5865f2` is below Q1
+   there (2.74:1 on `#313338`).
 
 ## Thresholds (Q1)
 
@@ -95,6 +100,9 @@ accent's inline tokens. The math lives in `Client/src/lib/color-contrast.ts`.
   `[tabindex]` element except `tabindex="-1"` containers. Do not suppress it.
   If a control needs a different shape, replace the outline with another
   indicator of at least 2px at 3:1. Never remove it without a replacement.
+  The `[tabindex]` part is wrapped in `:where()`, so a component
+  `.x:focus-visible` rule overrides it; for the same reason, never set
+  `outline: none` outside a `:focus-visible` rule on a `[tabindex]` widget.
 - Dialogs use `createModal` (`Client/src/lib/modalFactory.ts`). It applies
   `role="dialog"` and `aria-modal`, traps Tab, closes on Escape, and restores
   focus to the opener on close.

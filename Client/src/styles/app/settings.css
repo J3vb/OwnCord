@@ -574,7 +574,6 @@
   border-radius: 50%;
   cursor: pointer;
   border: none;
-  outline: none;
   transition: transform 0.12s;
 }
 .accent-swatch:hover {

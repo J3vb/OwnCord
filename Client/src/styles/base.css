@@ -49,7 +49,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a[href]:focus-visible,
-[tabindex]:not([tabindex="-1"]):focus-visible {
+:where([tabindex]:not([tabindex="-1"])):focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
