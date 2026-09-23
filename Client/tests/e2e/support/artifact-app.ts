@@ -146,14 +146,14 @@ async function launchLinux(
   const port = await freePort();
   const nativePort = await freePort();
   const driver = startProcess(
-    process.env.OWNCORD_TAURI_DRIVER ?? "tauri-driver",
+    "tauri-driver",
     [
       "--port",
       String(port),
       "--native-port",
       String(nativePort),
       "--native-driver",
-      process.env.OWNCORD_WEBKIT_DRIVER ?? "/usr/bin/WebKitWebDriver",
+      "/usr/bin/WebKitWebDriver",
     ],
     tmpdir(),
     // FUSE is not assumed on runners; the AppImage runtime extracts instead.

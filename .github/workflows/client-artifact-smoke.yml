@@ -248,8 +248,15 @@ jobs:
             exit 1
           fi
           mkdir -p ../artifacts/previous
-          if ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$PATTERN" --dir ../artifacts/previous; then
+          assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          shipped=false
+          while IFS= read -r name; do
+            if [[ $name == $PATTERN ]]; then shipped=true; fi
+          done <<< "$assets"
+          if [ "$shipped" = false ]; then
             echo "::notice::$tag published no $PATTERN; update and rollback are declared not applicable for this target"
+          else
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$PATTERN" --dir ../artifacts/previous
           fi
           ls -l ../artifacts/previous
 
