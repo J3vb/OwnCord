@@ -68,8 +68,8 @@ sequenceDiagram
   state for uncached history ([messaging.md §1](messaging.md)), never a global block.
 - If the active channel is **deleted** server-side (`channel_delete`), redirect to
   the first text channel by position and toast "This channel was deleted."
-  (**✓ implemented 2026-08** — the `channel_delete` handler in
-  `wireDispatcher()`, `lib/dispatcher.ts`, redirects and toasts; a non-active
+  (**✓ implemented 2026-08** — `handleChannelDelete`,
+  `features/channels/wsHandlers.ts`, redirects and toasts; a non-active
   deletion stays silent).
 
 ### 1.3 Reorder & CRUD (admin)
@@ -86,14 +86,14 @@ back on failure.
 Renders from `members.store` (`members` map + `typingUsers`). Shows presence and
 role grouping.
 
-| State           | Trigger                    | Target reaction                                                                                                                        |
-| --------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`         | `ready.members`            | Grouped by role, sorted; presence dot per member                                                                                       |
-| `empty`         | No online members          | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                                     |
-| presence change | `presence` event           | Live dot update; offline members styled distinctly                                                                                     |
-| role change     | `member_update`            | Re-group live                                                                                                                          |
-| profile change  | `user_update`              | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| join/ban        | `member_join`/`member_ban` | Add/remove with no reflow flash                                                                                                        |
+| State           | Trigger                    | Target reaction                                                                                                         |
+| --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `ready`         | `ready.members`            | Grouped by role, sorted; presence dot per member                                                                        |
+| `empty`         | No online members          | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                      |
+| presence change | `presence` event           | Live dot update; offline members styled distinctly                                                                      |
+| role change     | `member_update`            | Re-group live                                                                                                           |
+| profile change  | `user_update`              | Name/avatar update; if it's us, also patch `auth.store` (already `handleUserUpdate`, `features/channels/wsHandlers.ts`) |
+| join/ban        | `member_join`/`member_ban` | Add/remove with no reflow flash                                                                                         |
 
 ### 2.1 Typing indicator
 
@@ -112,7 +112,7 @@ role), consistent with the affordance principle.
 
 > **✓ Resolved 2026-07-20 — single role store.** Roles live only in
 > `channels.store` (`roles`/`getRoleIdByName`), the store the dispatcher writes on
-> `ready` (`dispatcher.ts`). `SidebarMemberSection.ts` now reads from it, and the
+> `ready` (`applyReadyChannels`, `features/channels/wsHandlers.ts`). `SidebarMemberSection.ts` now reads from it, and the
 > parallel, never-updated `roles.store` has been deleted — so the member context
 > menu can no longer mis-map a role name→id from stale data.
 
@@ -176,7 +176,7 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 > **✅ Wired (composer gating).** DM block state now drives the same
 > disabled-with-reason composer mode (see [messaging.md §2](messaging.md)) via
 > `blocks.store`. `blockedByMe` is loaded authoritatively from `GET /blocks` on
-> every `ready` (`dispatcher.ts`) → the explicit "You've blocked this user…"
+> every `ready` (`applyReadyBlocks`, `features/direct-messages/wsHandlers.ts`) → the explicit "You've blocked this user…"
 > reason. `blockedByThem` is inferred from a refused DM send (`ErrBlocked` →
 > `FORBIDDEN`, bidirectional) → the neutral "You can't message this user right
 > now." reason, and is cleared on the next `ready` so a reconnect re-evaluates.
@@ -200,5 +200,5 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 `src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
-`members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts`;
+`members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);
 server `Server/service/channel.go`, `dm.go`, `block.go`.

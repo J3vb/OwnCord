@@ -17,6 +17,11 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+// vi.resetModules() below would hand the re-imported module a fresh logger,
+// which re-installs the logger's app-lifetime pref-change listener on every
+// reset. Those tests re-import against this already-loaded instance instead,
+// so the singleton stays one.
+import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
 
 describe("VoiceAudioTab camera preview", () => {
@@ -933,5 +938,90 @@ describe("VoiceAudioTab UI structure", () => {
     expect(abortListenerCount()).toBe(afterFirstBuild);
 
     ac.abort();
+  });
+});
+
+describe("VoiceAudioTab on the Linux native audio engine", () => {
+  const getUserMedia = vi.fn();
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.doMock("@lib/logger", () => appLogger);
+    vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../src/features/voice/native/devices", () => ({
+      nativeAudioDevices: async (kind: string) =>
+        kind === "audioinput"
+          ? [{ deviceId: "guid-mic", label: "USB Mic", kind }]
+          : [{ deviceId: "guid-spk", label: "Speakers", kind }],
+    }));
+    localStorage.clear();
+    document.body.innerHTML = "";
+    getUserMedia.mockReset();
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { deviceId: "web-mic", kind: "audioinput", label: "Webview Mic" },
+          { deviceId: "cam-1", kind: "videoinput", label: "Camera" },
+        ]),
+        getUserMedia,
+        addEventListener: vi.fn(),
+      },
+    });
+  });
+  afterEach(() => {
+    vi.doUnmock("../../src/features/voice/native/platform");
+    vi.doUnmock("../../src/features/voice/native/devices");
+    vi.doUnmock("@lib/logger");
+    vi.unstubAllGlobals();
+  });
+
+  async function mount() {
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    await new Promise((r) => setTimeout(r, 0));
+    return { element };
+  }
+
+  it("hides the input volume, sensitivity and RNNoise controls and explains why", async () => {
+    const tab = await mount();
+    const headings = [...tab.element.querySelectorAll("h3")].map((h) => h.textContent);
+    expect(headings).not.toContain("Input Volume");
+    expect(headings).not.toContain("Input Sensitivity");
+    // The engine's playout mixer applies output volume.
+    expect(headings).toEqual(
+      expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
+    );
+    const labels = [...tab.element.querySelectorAll(".setting-label")].map((l) => l.textContent);
+    expect(labels).not.toContain("Enhanced Noise Suppression");
+    expect(labels).toEqual(
+      expect.arrayContaining(["Echo Cancellation", "Noise Suppression", "Automatic Gain Control"]),
+    );
+    const note = tab.element.querySelector('[data-testid="native-audio-note"]');
+    expect(note?.textContent).toContain("system mixer");
+    expect(tab.element.querySelector(".mic-meter-wrap")).toBeNull();
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("tells the user the processing toggles apply on the next join", async () => {
+    const tab = await mount();
+    const descs = [...tab.element.querySelectorAll(".setting-desc")].map((d) => d.textContent);
+    expect(
+      descs.filter((d) => d?.endsWith("Applies when you next join a voice channel.")),
+    ).toHaveLength(3);
+  });
+
+  it("lists the native engine's audio devices, not the webview's", async () => {
+    const tab = await mount();
+    const selects = tab.element.querySelectorAll("select");
+    const inputOptions = [...selects[0]!.options].map((o) => o.value);
+    const outputOptions = [...selects[1]!.options].map((o) => o.value);
+    expect(inputOptions).toEqual(["", "guid-mic"]);
+    expect(outputOptions).toEqual(["", "guid-spk"]);
+    // The camera select still comes from the webview (index after the quality selects).
+    const videoSelect = [...selects].find((sel) =>
+      [...sel.options].some((o) => o.value === "cam-1"),
+    );
+    expect(videoSelect).toBeDefined();
   });
 });

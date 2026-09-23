@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+// The modules in SettingsOverlay's graph that install an app-lifetime window
+// listener at load. The re-import below reuses these instances, so the
+// vi.resetModules() does not install a second copy of each listener.
+import * as attachments from "@components/message-list/attachments";
+import * as formatting from "@components/message-list/formatting";
+import * as media from "@components/message-list/media";
+import * as channelMutes from "@lib/channel-mutes";
+
+const APP_LIFETIME_MODULES = [
+  ["@components/message-list/attachments", attachments],
+  ["@components/message-list/formatting", formatting],
+  ["@components/message-list/media", media],
+  ["@lib/channel-mutes", channelMutes],
+] as const;
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -663,6 +677,50 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  // B7-15c owner decision: the dialog states immediacy, backups and cached
+  // images, and never a retention window — erasure hard-deletes at once.
+  it("delete warning discloses immediacy, backups and cached images, and no retention window", () => {
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      getRetentionNotice: () => "By default this server deletes messages after 30 days.",
+    });
+    overlay.mount(container);
+    (container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+
+    const warning = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    )!.textContent!;
+    expect(warning).toContain("immediate and permanent");
+    expect(warning).toContain("backups made before you delete keep a copy until they rotate out");
+    expect(warning).toContain("your deletion is applied again");
+    expect(warning).toContain("cached on other people's devices");
+    expect(warning).not.toMatch(/\bdays?\b/);
+    expect(warning).not.toContain("By default this server");
+
+    overlay.destroy?.();
+  });
+
+  it("shows the retention window in its own Account section when the server reported one", () => {
+    const notice = "By default this server deletes messages after 30 days.";
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => notice });
+    overlay.mount(container);
+
+    const section = container.querySelector("[data-testid='account-retention']")!;
+    expect(section.textContent).toContain(notice);
+    expect(
+      section.contains(container.querySelector("[data-testid='delete-account-confirm-area']")),
+    ).toBe(false);
+
+    overlay.destroy?.();
+  });
+
+  it("omits the retention section when the server did not report one", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => null });
+    overlay.mount(container);
+    expect(container.querySelector("[data-testid='account-retention']")).toBeNull();
+    overlay.destroy?.();
+  });
+
   it("shows error when confirming delete without password", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
@@ -1138,6 +1196,8 @@ describe("SettingsOverlay", () => {
     expect(secondPane).not.toBe(firstPane);
     // Exactly one pane — the old one was replaced, not appended to.
     expect(container.querySelectorAll(".settings-content .settings-pane").length).toBe(1);
+
+    overlay.destroy?.();
   });
 
   it("re-reads preferences when reopened", () => {
@@ -1159,6 +1219,8 @@ describe("SettingsOverlay", () => {
 
     slider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(slider.value).toBe("20");
+
+    overlay.destroy?.();
   });
 
   // --- Listener retention across tab switches (OC-0268) ---
@@ -1226,11 +1288,13 @@ describe("SettingsOverlay", () => {
 describe("SettingsOverlay - mount() with settingsOpen already true", () => {
   afterEach(() => {
     vi.doUnmock("@stores/ui.store");
+    for (const [id] of APP_LIFETIME_MODULES) vi.doUnmock(id);
     vi.resetModules();
   });
 
   it("moves focus into the dialog when the store is already open at mount time", async () => {
     vi.resetModules();
+    for (const [id, mod] of APP_LIFETIME_MODULES) vi.doMock(id, () => mod);
     vi.doMock("@stores/ui.store", () => ({
       uiStore: {
         getState: () => ({ settingsOpen: true }),

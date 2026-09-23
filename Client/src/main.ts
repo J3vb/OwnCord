@@ -11,6 +11,7 @@ import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { cleanupNotificationAudio } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
@@ -48,7 +49,7 @@ import {
   type Compatibility,
 } from "@lib/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
-import { parseRegistrationMode } from "@lib/types";
+import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { ServerInfoResponse } from "@lib/types";
 import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
@@ -153,6 +154,9 @@ function handleUnauthorized(): void {
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 configureConnectionDiagnostics(api, ws);
+// Registered here rather than imported by auth.store: notifications imports
+// auth.store, so that import was a cycle.
+onAuthCleared(cleanupNotificationAudio);
 onAuthCleared((reason) => {
   // Server switches retain their account-scoped drafts. Explicit logout and
   // invalid credentials discard pending sends.
@@ -316,8 +320,8 @@ let currentPage: { destroy?(): void } | null = null;
 
 /**
  * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
- * it for the advisory epoch badge and the incompatible notice; B7-15 will read
- * the same snapshot for `registration_mode`/retention.
+ * it for the advisory epoch badge and the incompatible notice; B7-15 reads the
+ * same snapshot for `registration_mode` and the retention notice.
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
 
@@ -675,6 +679,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           const info = serverInfoByHost.get(host);
           return parseRegistrationMode(info?.registration_mode);
         },
+        getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
         async onLogin(host, username, password) {
           api.endSession();
           api.setConfig({ host });
@@ -1027,7 +1032,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // A newer navigation may have superseded this one while the chunk loaded;
     // mounting now would fight the page that navigation rendered.
     if (!isCurrentNavigation()) return;
-    const mainPage = createMainPage({ ws, api });
+    const mainPage = createMainPage({
+      ws,
+      api,
+      getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
+    });
     safeMount(mainPage, appEl!);
     currentPage = mainPage;
   }

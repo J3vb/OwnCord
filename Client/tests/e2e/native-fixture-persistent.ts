@@ -46,6 +46,14 @@ export const test = base.extend<Fixtures, Workers>({
   nativePage: async ({ nativeApp, nativeServer }, use, testInfo) => {
     // Reset transient UI using user actions; retain login in the same process.
     await nativeApp.page.keyboard.press("Escape");
+    // Leave DM mode (a prior test may have opened a conversation): the sidebar
+    // mode is app state, not per-test, so a spec that expects the channel list
+    // would otherwise find no .channel-item and fail its own login check.
+    const backHeader = nativeApp.page.locator("[data-testid='dm-back-header']");
+    if (await backHeader.isVisible().catch(() => false)) {
+      await backHeader.click();
+      await expect(backHeader).not.toBeVisible({ timeout: 5_000 });
+    }
     const disconnect = nativeApp.page.locator(
       ".voice-widget.visible button[aria-label='Disconnect']",
     );

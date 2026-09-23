@@ -29,6 +29,12 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
+const { mockExportSupportBundle } = vi.hoisted(() => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockExportSupportBundle: vi.fn<any>(),
+}));
+vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
+
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
 
@@ -463,5 +469,50 @@ describe("LogsTab", () => {
 
     const diagPanel = el.querySelector("[style*='monospace']");
     expect(diagPanel).not.toBeNull();
+  });
+
+  // B7-15c: the support bundle is exported locally and the UI says plainly
+  // that log lines go out verbatim.
+  describe("support bundle", () => {
+    function build() {
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      document.body.appendChild(el);
+      return el;
+    }
+
+    it("states that nothing is uploaded and that logs are exported verbatim", () => {
+      const el = build();
+      expect(el.textContent).toContain("Nothing is uploaded");
+      expect(el.textContent).toContain("Log lines are exported verbatim, without redaction");
+      el.remove();
+    });
+
+    it("exports on click and reports the save", async () => {
+      mockExportSupportBundle.mockResolvedValue(true);
+      const el = build();
+      const btn = el.querySelector("[data-testid='export-support-bundle']") as HTMLButtonElement;
+      btn.click();
+      expect(btn.disabled).toBe(true);
+      const status = el.querySelector("[data-testid='support-bundle-status']")!;
+      await vi.waitFor(() => expect(status.textContent).toBe("Support bundle saved."));
+      expect(mockExportSupportBundle).toHaveBeenCalledTimes(1);
+      expect(btn.disabled).toBe(false);
+      el.remove();
+    });
+
+    it("says nothing when the dialog is cancelled and reports a failure", async () => {
+      mockExportSupportBundle.mockResolvedValueOnce(false);
+      const el = build();
+      const btn = el.querySelector("[data-testid='export-support-bundle']") as HTMLButtonElement;
+      const status = el.querySelector("[data-testid='support-bundle-status']")!;
+      btn.click();
+      await vi.waitFor(() => expect(btn.disabled).toBe(false));
+      expect(status.textContent).toBe("");
+
+      mockExportSupportBundle.mockRejectedValueOnce(new Error("disk full"));
+      btn.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Export failed: disk full"));
+      el.remove();
+    });
   });
 });

@@ -17,13 +17,21 @@ const join = vi.fn();
 const mkdir = vi.fn();
 const writeTextFile = vi.fn();
 const readDir = vi.fn();
+const readTextFile = vi.fn();
 const remove = vi.fn();
 const exists = vi.fn();
 
 let capturedListener: ((entry: LogEntry) => void) | null = null;
 
 vi.mock("@tauri-apps/api/path", () => ({ appLogDir, join }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ mkdir, writeTextFile, readDir, remove, exists }));
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  mkdir,
+  writeTextFile,
+  readDir,
+  readTextFile,
+  remove,
+  exists,
+}));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   addLogListener: (listener: (entry: LogEntry) => void) => {
@@ -36,7 +44,16 @@ vi.mock("@lib/logger", () => ({
 async function freshModule(): Promise<typeof import("../../../src/platform/desktop/logFiles")> {
   vi.resetModules();
   capturedListener = null;
-  for (const mock of [appLogDir, join, mkdir, writeTextFile, readDir, remove, exists]) {
+  for (const mock of [
+    appLogDir,
+    join,
+    mkdir,
+    writeTextFile,
+    readDir,
+    readTextFile,
+    remove,
+    exists,
+  ]) {
     mock.mockReset();
   }
   join.mockImplementation((base: string, sub: string) => Promise.resolve(`${base}/${sub}`));
@@ -135,5 +152,60 @@ describe("LogFiles.clearAll", () => {
     await mod.logFiles.flush();
 
     expect(writeTextFile).not.toHaveBeenCalled();
+  });
+});
+
+// The support bundle's log half (B7-15c).
+describe("LogFiles.readAll", () => {
+  test("reads every persisted log file oldest first, verbatim, and nothing else", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([
+      { name: "2026-09-20.jsonl", isDirectory: false },
+      { name: "notes.txt", isDirectory: false },
+      { name: "2026-09-19.jsonl", isDirectory: false },
+      { name: "subdir", isDirectory: true },
+    ]);
+    readTextFile.mockImplementation((path: string) => Promise.resolve(`contents of ${path}\n`));
+
+    await expect(mod.logFiles.readAll()).resolves.toEqual([
+      { name: "2026-09-19.jsonl", text: "contents of /logs/client-logs/2026-09-19.jsonl\n" },
+      { name: "2026-09-20.jsonl", text: "contents of /logs/client-logs/2026-09-20.jsonl\n" },
+    ]);
+  });
+
+  test("flushes buffered entries before reading, so the bundle has the latest lines", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    await mod.logFiles.init();
+    capturedListener?.({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      component: "test",
+      message: "a log entry",
+    });
+
+    await mod.logFiles.readAll();
+
+    expect(writeTextFile).toHaveBeenCalledTimes(1);
+    expect(writeTextFile.mock.invocationCallOrder[0]!).toBeLessThan(
+      readDir.mock.invocationCallOrder.at(-1)!,
+    );
+  });
+
+  test("is empty when the log directory does not exist yet", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockRejectedValue(new Error("No such file or directory (os error 2)"));
+
+    await expect(mod.logFiles.readAll()).resolves.toEqual([]);
+  });
+
+  test("propagates a failure that is not a missing directory", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockRejectedValue(new Error("permission denied"));
+
+    await expect(mod.logFiles.readAll()).rejects.toThrow("permission denied");
   });
 });

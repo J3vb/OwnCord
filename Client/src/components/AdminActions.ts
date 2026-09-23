@@ -3,6 +3,7 @@
  * Provides confirmation steps for destructive actions (force logout, ban, delete).
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendPurgeSection } from "./purge-prompt";
 
@@ -161,7 +162,7 @@ function withConfirmation(
 // ---------------------------------------------------------------------------
 
 export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const menu = createElement("div", { class: "context-menu" });
 
   // Block / Unblock — available to every member, not just admins. Blocking is
@@ -193,14 +194,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         };
         void options.onToggleBlock().then(done, done);
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   } else {
     withConfirmation(
       blockItem,
       "Are you sure?",
       () => options.onToggleBlock(),
-      ac.signal,
+      disposable.signal,
       "Blocking...",
     );
   }
@@ -214,7 +215,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     return {
       element: menu,
       destroy(): void {
-        ac.abort();
+        disposable.destroy();
         menu.remove();
       },
     };
@@ -253,7 +254,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
           };
           options.onChangeRole(role).then(done, done);
         },
-        ac.signal,
+        disposable.signal,
       );
       roleSub.appendChild(roleOption);
     }
@@ -263,14 +264,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       () => {
         roleSub.style.display = "";
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     roleItem.addEventListener(
       "mouseleave",
       () => {
         roleSub.style.display = "none";
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     roleSub.style.display = "none";
@@ -296,19 +297,19 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       kickItem,
       "Log them out?",
       () => options.onKick(),
-      ac.signal,
+      disposable.signal,
       "Logging out...",
     );
     menu.appendChild(kickItem);
   }
 
-  if (canBan) appendBanFlow(menu, options, ac.signal);
+  if (canBan) appendBanFlow(menu, options, disposable.signal);
 
   menu.appendChild(createSeparator());
   menu.appendChild(blockItem);
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     menu.remove();
   }
 
@@ -419,7 +420,7 @@ function appendBanFlow(
 // ---------------------------------------------------------------------------
 
 export function createChannelContextMenu(options: ChannelContextMenuOptions): ContextMenuResult {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const menu = createElement("div", { class: "context-menu" });
 
   // Edit Channel
@@ -427,7 +428,7 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
     "Edit Channel",
     "context-menu__item",
     () => options.onEdit(),
-    ac.signal,
+    disposable.signal,
   );
   menu.appendChild(editItem);
 
@@ -436,7 +437,7 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
     "Create Channel",
     "context-menu__item",
     () => options.onCreate(),
-    ac.signal,
+    disposable.signal,
   );
   menu.appendChild(createItem);
 
@@ -450,7 +451,13 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
     },
     "Delete Channel",
   );
-  withConfirmation(deleteItem, "Are you sure?", () => options.onDelete(), ac.signal, "Deleting...");
+  withConfirmation(
+    deleteItem,
+    "Are you sure?",
+    () => options.onDelete(),
+    disposable.signal,
+    "Deleting...",
+  );
   menu.appendChild(deleteItem);
 
   const onPurge = options.onPurge;
@@ -460,12 +467,12 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
       dangerItemClass: "context-menu__item context-menu__item--danger",
       separatorClass: "context-menu__separator",
       onPurge: (count) => onPurge(count),
-      signal: ac.signal,
+      signal: disposable.signal,
     });
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     menu.remove();
   }
 

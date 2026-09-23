@@ -4,6 +4,7 @@
  * Voice channels show connected users and join/leave on click.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -788,18 +789,18 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onVoiceModerate,
     onPurgeChannel,
   } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
   // renderChannels() rebuilds every row from scratch on every channels-store
   // notification (unread count, active channel, role change, mute toggle,
   // ...). Per-row listeners (context menu, drag handlers) must NOT be
-  // registered on the sidebar-lifetime `ac.signal`, which only aborts once,
+  // registered on the sidebar-lifetime `disposable.signal`, which only aborts once,
   // at destroy() -- addEventListener({ signal }) keeps a detached row alive
   // via that signal's own retained "abort" listener list until it fires, so
   // every re-render would otherwise leak one full set of detached rows
-  // (OC-0229). renderAc is aborted and replaced at the top of every
+  // (OC-0229). renderOwner is aborted and replaced at the top of every
   // renderChannels() call, so only the CURRENT render's rows stay reachable;
-  // header/root listeners registered once in mount() keep using `ac.signal`.
-  let renderAc: AbortController | null = null;
+  // header/root listeners registered once in mount() keep using `disposable.signal`.
+  let renderOwner: Disposable | null = null;
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
@@ -836,9 +837,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Abort the previous render's row-scoped listeners before the rows they
     // belong to are detached below, so a stale row can never outlive the
     // render that replaced it (OC-0229).
-    renderAc?.abort();
-    const currentRenderAc = new AbortController();
-    renderAc = currentRenderAc;
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
     clearChildren(channelList);
     voiceRowByUserId.clear();
 
@@ -864,12 +865,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           category,
           channels,
           state.activeChannelId,
-          currentRenderAc.signal,
+          currentRender.signal,
           // Sidebar-lifetime signal (aborted only in destroy()) for anything
           // that owns DOM mounted outside this render's rows -- a menu or
           // modal on document.body must not be torn down by an unrelated
           // re-render (OC-0281, OC-0282).
-          ac.signal,
+          disposable.signal,
           onVoiceJoin,
           onVoiceLeave,
           onCreateChannel,
@@ -893,7 +894,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
-    root.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: ac.signal });
+    root.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
@@ -917,7 +918,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         e.stopPropagation();
         markAllRead();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     header.appendChild(markAllBtn);
 
@@ -1044,11 +1045,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   }
 
   function destroy(): void {
-    // ac.abort() also releases this sidebar's hold on the shared document-level
+    // disposable.destroy() also releases this sidebar's hold on the shared document-level
     // drag listeners (drag-reorder.ts tracks owners by signal).
-    ac.abort();
-    renderAc?.abort();
-    renderAc = null;
+    disposable.destroy();
+    renderOwner?.destroy();
+    renderOwner = null;
     for (const unsub of unsubscribers) {
       unsub();
     }

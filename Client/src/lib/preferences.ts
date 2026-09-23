@@ -5,10 +5,6 @@
  * depend on these utilities without importing from the component layer.
  */
 
-import { createLogger } from "./logger";
-
-const log = createLogger("preferences");
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -40,7 +36,12 @@ export function savePref(key: string, value: unknown): void {
     // The native `storage` event only fires for cross-tab changes.
     window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
   } catch (err) {
-    log.warn("Failed to save preference (localStorage may be full or disabled)", { key, err });
+    // console, not ./logger: logger reads its level from this module, so
+    // importing it here would be an import cycle.
+    console.warn("[preferences] Failed to save preference (localStorage may be full or disabled)", {
+      key,
+      err,
+    });
   }
 }
 

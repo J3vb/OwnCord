@@ -88,8 +88,9 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Ledger at 2026-09-20: **441 fixed / 4 open / 4 declined / 1 duplicate = 450**
-(B3-9, PR #1454, closed the five B3-tagged records; OC-0379 records and fixes
+Ledger at 2026-09-23: **442 fixed / 4 open / 4 declined / 1 duplicate = 451**
+(PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
+change; B3-9, PR #1454, closed the five B3-tagged records; OC-0379 records and fixes
 OC-0345's leftover role re-read; B4-3 closed OC-0321, the phase's named
 must-close; B4-12(a) closed OC-0313 and OC-0329; B4-12(b)'s client half closed OC-0314; B4-12(d) closed OC-0340 and OC-0341; B4-7's second half closed OC-0354).
 The 2026-08-25 sweep resolved every record then open to a live `file:line` at

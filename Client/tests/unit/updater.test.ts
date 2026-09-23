@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { expectConsole } from "../helpers/console";
+import * as appLogger from "@lib/logger";
 
 const invoke = vi.fn();
 const relaunch = vi.fn();
@@ -30,12 +31,12 @@ const unlisten = vi.fn();
 
 beforeEach(async () => {
   vi.resetModules();
+  // Hand the fresh updater the app's already-loaded logger: a fresh one would
+  // re-install its app-lifetime pref-change listener on every reset, and its
+  // level would default back to "debug", undoing tests/setup.ts's floor.
+  vi.doMock("@lib/logger", () => appLogger);
   ({ checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } =
     await import("@lib/updater"));
-  // vi.resetModules() hands the updater a *fresh* logger module, whose level
-  // defaults back to "debug" — undoing tests/setup.ts's floor for this file
-  // and printing every updater info line. Re-apply it to that instance.
-  (await import("@lib/logger")).setLogLevel("warn");
   invoke.mockReset().mockResolvedValue(undefined);
   relaunch.mockReset().mockResolvedValue(undefined);
   unlisten.mockReset();

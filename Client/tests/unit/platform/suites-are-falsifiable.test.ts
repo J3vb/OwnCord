@@ -76,6 +76,9 @@ import { describeNotifierSuite } from "./notifier.suite";
 import type { NativeControl as NotifierNativeControl } from "./notifier.suite";
 import { describeUrlOpenerSuite } from "./opener.suite";
 import type { NativeControl as UrlOpenerNativeControl } from "./opener.suite";
+import { describeNativeVoiceSuite } from "./nativeVoice.suite";
+import type { NativeControl as NativeVoiceNativeControl } from "./nativeVoice.suite";
+import type { NativeVoice } from "../../../src/platform/contracts/nativeVoice";
 import { describeTrayStatusSuite } from "./trayStatus.suite";
 import type { NativeControl as TrayStatusNativeControl } from "./trayStatus.suite";
 import { describeWindowControlSuite } from "./window.suite";
@@ -367,6 +370,32 @@ describeAppProcessSuite(async () => {
 describeTrayStatusSuite(async () => {
   const subject = { onStatusChange: () => () => undefined } as unknown as TrayStatus;
   const native: TrayStatusNativeControl = {
+    emits: async () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeNativeVoiceSuite(async () => {
+  const subject = {
+    setRoomKey: async () => undefined,
+    clearRoomKey: async () => undefined,
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    setMicrophone: async () => undefined,
+    setSubscribed: async () => undefined,
+    setVolume: async () => undefined,
+    setScreenshareVolume: async () => undefined,
+    debugInfo: async () => undefined,
+    listDevices: async () => undefined,
+    setDevice: async () => undefined,
+    onEvent: () => () => undefined,
+  } as unknown as NativeVoice;
+  const native: NativeVoiceNativeControl = {
+    connectsAs: () => undefined,
+    publishesCameraAs: () => undefined,
+    hasDevices: () => undefined,
+    sharesScreenAs: () => undefined,
+    commands: () => [],
     emits: async () => undefined,
   };
   return { subject, native };

@@ -176,6 +176,8 @@ describe("media.ts", () => {
   });
 
   afterEach(() => {
+    // Close a lightbox a test left open, releasing its document listeners.
+    closeActiveLightbox();
     // Clean up any lightboxes left on body
     document.querySelectorAll(".image-lightbox").forEach((el) => el.remove());
     document.body.innerHTML = "";

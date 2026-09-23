@@ -2,6 +2,7 @@
 // Composes standalone components; never sets innerHTML with user content.
 // Delegates sidebar and chat-area DOM construction to sub-orchestrators.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -42,6 +43,7 @@ import { setServerHost } from "@components/message-list/renderers";
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
+  pruneAttachmentCacheScope,
   setAttachmentCacheScope,
 } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
@@ -89,6 +91,8 @@ const SESSION_NOTICE_TOAST_MS = 12_000;
 export interface MainPageOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
+  /** The connected server's retention sentence, or null when unknown. */
+  readonly getRetentionNotice?: () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +178,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a
   // profile switch isolates the cache even before this page is destroyed.
-  setAttachmentCacheScope(apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null);
+  const cacheScope = apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null;
+  setAttachmentCacheScope(cacheScope);
   const unsubCacheScope = onAuthCleared(() => setAttachmentCacheScope(null));
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
@@ -408,8 +413,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
 
     // A sign-in not yet reviewed: listed on connect and on window focus.
-    const sessionNotice = new AbortController();
-    unsubscribers.push(() => sessionNotice.abort());
+    const sessionNotice = new Disposable();
+    unsubscribers.push(() => sessionNotice.destroy());
     const pollSessions = startSessionNotice({
       fetchSessions: (signal) => api.getSessions(signal),
       notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),
@@ -581,9 +586,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onLogout: () => logout(api),
+      getRetentionNotice: options.getRetentionNotice,
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
+        // The account is gone, so its cached server images go too (B7-15c).
+        // clearAuth has already disarmed the scope, so no late write follows.
+        if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
         showToast("Account deleted successfully", "success");
       },
       onEnableTotp: async (password) => {

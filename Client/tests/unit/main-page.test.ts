@@ -124,6 +124,14 @@ const {
   },
 }));
 
+const { mockPruneAttachmentCacheScope } = vi.hoisted(() => ({
+  mockPruneAttachmentCacheScope: vi.fn(async () => {}),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+  pruneAttachmentCacheScope: mockPruneAttachmentCacheScope,
+}));
+
 vi.mock("../../src/pages/main-page/ChannelController", () => ({
   createChannelController: (...args: unknown[]) => {
     mockCreateChannelController(...args);
@@ -1294,10 +1302,12 @@ describe("MainPage — presence", () => {
     onStatusChange("online");
     expect(ws.send).not.toHaveBeenCalled();
 
-    // Once the limiter's 10s window reopens, the deferred "online" frame must
-    // still go out — without a retry the server and every other client stay
-    // stuck on "idle" forever with no further trigger to correct it.
-    vi.advanceTimersByTime(10_000);
+    // Once the limiter's 10s window reopens (plus the OC-0451 margin that
+    // clears the server's receipt-measured window), the deferred "online"
+    // frame must still go out — without a retry the server and every other
+    // client stay stuck on "idle" forever with no further trigger to correct
+    // it.
+    vi.advanceTimersByTime(11_000);
 
     expect(ws.send).toHaveBeenCalledWith({
       type: "presence_update",
@@ -1421,5 +1431,60 @@ describe("MainPage — mark-all-read teardown (OC-0418)", () => {
       ),
     ).toBe(false);
     expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(1);
+  });
+});
+
+// B7-15c: a successful self-deletion drops that account's cached server
+// images from disk, keyed by the same host#userId scope B7-13 caches under.
+describe("MainPage — account deletion", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    mockPruneAttachmentCacheScope.mockClear();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+  });
+
+  async function deleteAccount(api: ApiClient): Promise<void> {
+    page = createMainPage({ ws: fakeWs(), api });
+    page.mount(container);
+    (document.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+    (document.querySelector("[data-testid='delete-account-password']") as HTMLInputElement).value =
+      "pw";
+    (document.querySelector("[data-testid='delete-account-confirm']") as HTMLElement).click();
+    await vi.waitFor(() => expect(api.deleteAccount).toHaveBeenCalledWith("pw"));
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it("prunes the deleted account's image cache scope after the server confirms", async () => {
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {}),
+    }) as ApiClient;
+    await deleteAccount(api);
+
+    await vi.waitFor(() =>
+      expect(mockPruneAttachmentCacheScope).toHaveBeenCalledWith("chat.example#1"),
+    );
+    expect(authStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it("prunes nothing when the server refuses the deletion", async () => {
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {
+        throw new Error("Wrong password");
+      }),
+    }) as ApiClient;
+    await deleteAccount(api);
+
+    expect(mockPruneAttachmentCacheScope).not.toHaveBeenCalled();
+    expect(authStore.getState().isAuthenticated).toBe(true);
   });
 });

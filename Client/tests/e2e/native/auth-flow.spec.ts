@@ -1,12 +1,69 @@
 /**
  * Native E2E: Authentication flows against the real server.
  *
- * Tests real login, invalid credentials, credential persistence,
- * and the connect page UI with actual server responses.
+ * Tests real login, invalid credentials, the loading state, saved server
+ * profiles and the connect page UI.
+ *
+ * The fixture server uses a self-signed certificate. The Rust proxy refuses
+ * the first TLS contact until the fingerprint is trusted — the real first-use
+ * ceremony. The connect page's mount-time health probe only touches the
+ * default localhost profile, so the submit is the first contact with the
+ * fixture host and `submitLogin` trusts the prompt that follows it. Without
+ * this the submit never reaches the server.
  */
 
 import { test, expect } from "../native-fixture";
+import type { Page } from "@playwright/test";
 import { SERVER_URL, TEST_USER, TEST_PASS, SKIP_SERVER, hasCredentials } from "./helpers";
+
+/** Fill the login form. Does not submit. */
+async function fillLogin(page: Page, username: string, password: string): Promise<void> {
+  await page.locator("#host").fill(SERVER_URL);
+  await page.locator("#username").fill(username);
+  await page.locator("#password").fill(password);
+}
+
+/**
+ * Trust the fixture server's first-use certificate if the prompt is up within
+ * `timeoutMs`. Returns whether it trusted. The fingerprint stays pinned for
+ * the life of the page, so a second call after the first is a no-op.
+ */
+async function trustCertIfPrompted(page: Page, timeoutMs: number): Promise<boolean> {
+  const dialog = page.getByRole("dialog", { name: "New Server Certificate" });
+  const appeared = await dialog
+    .waitFor({ state: "visible", timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false);
+  if (!appeared) return false;
+  await dialog.getByRole("button", { name: "Trust This Certificate", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  return true;
+}
+
+/** Submit the filled form for real, trusting the certificate on first contact. */
+async function submitLogin(page: Page): Promise<void> {
+  const submit = page.locator("button.btn-primary[type='submit']");
+  await submit.click();
+
+  // First TLS contact with the fixture host: the proxy refuses and the UI asks
+  // for confirmation (the mount-time probe only ever touches the default
+  // localhost profile, so the prompt reliably appears here).
+  if (await trustCertIfPrompted(page, 15_000)) {
+    // Accepting the fingerprint writes it asynchronously in Rust; confirming
+    // the pin landed before resubmitting avoids a second first_use refusal —
+    // the same wait helpers.nativeLogin performs.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (host) => (window as any).__TAURI_INTERNALS__.invoke("get_cert_fingerprint", { host }),
+          SERVER_URL,
+        ),
+      )
+      .toMatch(/^[0-9A-Fa-f:]+$/);
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+  }
+}
 
 test.describe("Authentication Flow", () => {
   test.beforeEach(async ({ nativePage }) => {
@@ -46,84 +103,98 @@ test.describe("Authentication Flow", () => {
   });
 
   test("login with invalid credentials shows server error", async ({ nativePage }) => {
-    await nativePage.locator("#host").fill(SERVER_URL);
-    await nativePage.locator("#username").fill("nonexistent_user_e2e_test");
-    await nativePage.locator("#password").fill("wrong_password_e2e_test");
-    await nativePage.locator("button.btn-primary[type='submit']").click();
+    await fillLogin(nativePage, "nonexistent_user_e2e_test", "wrong_password_e2e_test");
+    await submitLogin(nativePage);
 
-    // The real server should return an error — error banner appears
-    const errorBanner = nativePage.locator(".error-banner");
+    // The real server returns 400 INVALID_CREDENTIALS — the error banner
+    // appears with the server's message, and the app layout is NOT reached.
+    const errorBanner = nativePage.locator(".error-banner.visible");
     await expect(errorBanner).toBeVisible({ timeout: 10_000 });
+    await expect(errorBanner).toContainText(/invalid/i);
+    await expect(nativePage.locator("[data-testid='app-layout']")).not.toBeVisible();
   });
 
-  test("submit button shows loading spinner during request", async ({ nativePage }) => {
-    await nativePage.locator("#host").fill(SERVER_URL);
-    await nativePage.locator("#username").fill("spinner_test_user");
-    await nativePage.locator("#password").fill("spinner_test_pass");
-    await nativePage.locator("button.btn-primary[type='submit']").click();
+  test("submit button enters a loading state during the request", async ({ nativePage }) => {
+    // Use a wrong password so this real request is refused by the server: it
+    // still proves the loading state, without spending a successful login
+    // against the 5/min per-IP login budget the whole no-auth project shares.
+    await fillLogin(nativePage, "nonexistent_user_e2e_test", "wrong_password_e2e_test");
 
-    // The spinner should appear while the request is in flight
-    const spinner = nativePage.locator("button.btn-primary .spinner");
-    // It may be very brief, so check it was at least attached
-    await expect(spinner).toBeAttached({ timeout: 5_000 });
+    const submit = nativePage.locator("button.btn-primary[type='submit']");
+    await submit.click();
+
+    // First TLS contact: trust the certificate, then resubmit for real.
+    if (await trustCertIfPrompted(nativePage, 15_000)) {
+      await expect(submit).toBeEnabled({ timeout: 10_000 });
+    }
+
+    // `transitionTo("loading")` runs synchronously in the submit handler,
+    // before its first await, so clicking and reading the class in one
+    // evaluate captures the real state without racing a fast response.
+    const sawLoading = await nativePage.evaluate(() => {
+      const btn = document.querySelector<HTMLButtonElement>("button.btn-primary[type='submit']");
+      btn!.click();
+      return { loading: btn!.classList.contains("loading"), disabled: btn!.disabled };
+    });
+    expect(sawLoading.loading).toBe(true);
+    expect(sawLoading.disabled).toBe(true);
+
+    // The server's refusal settles and the button leaves the loading state.
+    await expect(submit).not.toHaveClass(/loading/, { timeout: 30_000 });
   });
 
-  test("successful login reaches main app layout", async ({ nativePage }) => {
+  test("successful login reaches main app layout and completes the WS handshake", async ({
+    nativePage,
+  }) => {
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
 
-    await nativePage.locator("#host").fill(SERVER_URL);
-    await nativePage.locator("#username").fill(TEST_USER);
-    await nativePage.locator("#password").fill(TEST_PASS);
-    await nativePage.locator("button.btn-primary[type='submit']").click();
+    await fillLogin(nativePage, TEST_USER, TEST_PASS);
+    await submitLogin(nativePage);
 
-    // Should reach main app layout
-    const appLayout = nativePage.locator("[data-testid='app-layout']");
-    await expect(appLayout).toBeVisible({ timeout: 20_000 });
+    // HTTP login succeeded...
+    await expect(nativePage.locator("[data-testid='app-layout']")).toBeVisible({
+      timeout: 20_000,
+    });
+    // ...and the WS ready payload populated channels from the real server.
+    await expect(nativePage.locator(".channel-item").first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("successful login completes WS handshake", async ({ nativePage }) => {
-    test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
+  test("saved server profile renders with name and host", async ({ nativePage }) => {
+    // The fresh-profile fixture guarantees no saved servers on launch, so
+    // create one through the real Add Server modal instead of skipping: a
+    // conditional skip here meant this surface was never exercised in CI.
+    const host = "saved-profile.example:8443";
+    await nativePage.locator(".btn-add-server").click();
 
-    await nativePage.locator("#host").fill(SERVER_URL);
-    await nativePage.locator("#username").fill(TEST_USER);
-    await nativePage.locator("#password").fill(TEST_PASS);
-    await nativePage.locator("button.btn-primary[type='submit']").click();
+    const modal = nativePage.locator(".modal-overlay.visible .modal");
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await modal.locator(".modal-body .form-input").nth(0).fill("Saved Profile");
+    await modal.locator(".modal-body .form-input").nth(1).fill(host);
+    await modal.locator(".modal-footer .btn-primary").click();
 
-    // Wait for app layout
-    await expect(nativePage.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 20_000 });
-
-    // Channels should populate from the real ready payload
-    const channelItem = nativePage.locator(".channel-item").first();
-    await expect(channelItem).toBeVisible({ timeout: 15_000 });
+    const serverItem = nativePage.locator(`.server-item[data-host='${host}']`);
+    await expect(serverItem).toBeVisible({ timeout: 5_000 });
+    await expect(serverItem.locator(".srv-name")).toHaveText("Saved Profile");
+    await expect(serverItem.locator(".srv-meta .srv-host").first()).toHaveText(host);
   });
 
-  test("saved server profile shows in sidebar", async ({ nativePage }) => {
-    // If a server has been connected before, it should appear in the sidebar.
-    // On first-time launch there may be no saved profiles — conditionally verify.
-    const serverItem = nativePage.locator(".server-item").first();
-    const hasSavedServer = await serverItem.isVisible({ timeout: 3_000 }).catch(() => false);
-    test.skip(!hasSavedServer, "No saved server profiles (first-time launch)");
+  test("clicking a saved server auto-fills the host field", async ({ nativePage }) => {
+    const host = "auto-fill.example:8443";
+    await nativePage.locator(".btn-add-server").click();
 
-    // Verify server item has name and host info
-    await expect(serverItem.locator(".srv-name")).toBeVisible();
-    // srv-meta may contain multiple spans (host + username), just check the container
-    await expect(serverItem.locator(".srv-meta")).toBeVisible();
-  });
+    const modal = nativePage.locator(".modal-overlay.visible .modal");
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await modal.locator(".modal-body .form-input").nth(0).fill("Auto Fill");
+    await modal.locator(".modal-body .form-input").nth(1).fill(host);
+    await modal.locator(".modal-footer .btn-primary").click();
 
-  test("clicking saved server auto-fills host field", async ({ nativePage }) => {
-    // Wait for the connect form to be ready, then check for saved server profiles
-    const serverItem = nativePage.locator(".server-item").first();
-    const hasSavedServer = await serverItem.isVisible({ timeout: 5_000 }).catch(() => false);
-    test.skip(!hasSavedServer, "No saved server profiles (first-time launch)");
+    const serverItem = nativePage.locator(`.server-item[data-host='${host}']`);
+    await expect(serverItem).toBeVisible({ timeout: 5_000 });
 
-    // Click the server item to auto-fill
-    await serverItem.click();
-
-    // Wait for the host field to be populated after click
-    const hostInput = nativePage.locator("#host");
-    await expect(hostInput).not.toHaveValue("", { timeout: 5_000 });
-    const hostValue = await hostInput.inputValue();
-    expect(hostValue).toBeTruthy();
+    // Click the row (not the action buttons) and assert the form's host input
+    // picks up exactly this profile's host.
+    await serverItem.locator(".srv-info").click();
+    await expect(nativePage.locator("#host")).toHaveValue(host, { timeout: 5_000 });
   });
 
   test("can switch between login and register modes", async ({ nativePage }) => {

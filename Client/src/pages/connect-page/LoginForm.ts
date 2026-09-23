@@ -1,7 +1,7 @@
 // LoginForm — login/register form sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import { createElement, setText, appendChildren, qs } from "@lib/dom";
+import { createElement, setText, appendChildren, qs, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -88,6 +88,9 @@ export interface LoginFormOptions {
    * widened on an unreadable mode.
    */
   readonly getRegistrationMode?: (host: string) => RegistrationMode | null;
+  /** The server-default retention sentence for a host, shown at sign-up;
+   *  null when unknown, and then nothing is shown (B7-15c). */
+  readonly getRetentionNotice?: (host: string) => string | null;
 }
 
 export interface LoginFormApi {
@@ -145,6 +148,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onSettingsOpen,
     onAutoLoginCancel,
     getRegistrationMode,
+    getRetentionNotice,
   } = opts;
 
   let usingSavedPassword = false;
@@ -719,7 +723,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     inviteGroup.classList.toggle("form-group--hidden", !(registering && requiresInvite));
 
-    const text = registering ? registrationNoticeText(mode) : null;
+    // Where registration is possible, the server's retention window is part
+    // of what the user signs up to, so it is disclosed here too.
+    const host = hostInput.value.trim();
+    const retention =
+      registering && mode !== "closed" && host ? (getRetentionNotice?.(host) ?? null) : null;
+    const text =
+      [registering ? registrationNoticeText(mode) : null, retention]
+        .filter((part) => part !== null)
+        .join(" ") || null;
     if (text !== null) {
       setText(registrationNotice, text);
       registrationNotice.classList.add("visible");
@@ -875,7 +887,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (!TOTP_OR_RECOVERY_CODE.test(code)) {
       // Simple inline feedback — add error class to the input
       totpInput.classList.add("error");
-      setTimeout(() => totpInput.classList.remove("error"), 500);
+      setOwnedTimeout(signal, () => totpInput.classList.remove("error"), 500);
       return;
     }
 

@@ -2044,6 +2044,40 @@ describe("ConnectPage", () => {
 
     page.destroy?.();
   });
+  // B7-15c: the server-default retention window is disclosed at sign-up.
+  it("discloses the retention window in register mode, not at login or when closed", () => {
+    const retention = "By default this server deletes messages after 30 days.";
+    const getRetentionNotice = vi.fn((host: string) =>
+      host === "localhost:8443" ? retention : null,
+    );
+    let mode: import("../../src/lib/types").RegistrationMode = "open";
+    const page = createConnectPage(
+      makeCallbacks({ getRegistrationMode: () => mode, getRetentionNotice }),
+      testProfiles,
+    );
+    page.mount(container);
+    const notice = container.querySelector(".registration-notice")!;
+    const host = container.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).not.toContain(retention);
+
+    (container.querySelector(".form-switch a") as HTMLElement).click();
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toBe(retention);
+
+    mode = "approval";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).toContain("admin must approve");
+    expect(notice.textContent).toContain(retention);
+
+    mode = "closed";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).toBe("Registration is closed on this server.");
+
+    page.destroy?.();
+  });
+
   it("an unavailable mode (no snapshot) still requires an invite code", async () => {
     // No `getRegistrationMode` callback at all — the older-server / failed-read
     // fallback. Registration must not be silently widened.

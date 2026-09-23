@@ -10,6 +10,7 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
+import { Disposable } from "@lib/disposable";
 import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -89,8 +90,8 @@ const STATUS_LABELS: Record<UserStatus, string> = {
 export function createUserProfilePopup(
   options: UserProfilePopupOptions,
 ): UserProfilePopupComponent {
-  const ac = new AbortController();
-  const { signal } = ac;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   let overlay: HTMLDivElement | null = null;
   let popup: HTMLDivElement | null = null;
@@ -106,7 +107,7 @@ export function createUserProfilePopup(
       overlay = null;
     }
     popup = null;
-    ac.abort();
+    disposable.destroy();
 
     // Return focus to the element that was focused before opening
     if (previousFocus instanceof HTMLElement) {

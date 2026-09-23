@@ -2,7 +2,7 @@
  * Logs settings tab — log viewer with filtering, level control, live updates.
  */
 
-import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setOwnedTimeout } from "@lib/dom";
 import {
   getLogBuffer,
   clearLogBuffer,
@@ -240,15 +240,23 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
           .writeText(text)
           .then(() => {
             copyBtn.textContent = "Copied!";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = "Copy All";
+              },
+              1500,
+            );
           })
           .catch(() => {
             copyBtn.textContent = "Failed to copy";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = "Copy All";
+              },
+              1500,
+            );
           });
       },
       { signal: buildSignal },
@@ -315,15 +323,60 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
           .writeText(diagPanel.textContent ?? "")
           .then(() => {
             diagCopy.textContent = "Copied!";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = "Copy Diagnostics";
+              },
+              1500,
+            );
           })
           .catch(() => {
             diagCopy.textContent = "Failed to copy";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = "Copy Diagnostics";
+              },
+              1500,
+            );
+          });
+      },
+      { signal: buildSignal },
+    );
+
+    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
+    // startup path. Everything is read and written on this machine.
+    const bundleBtn = createElement(
+      "button",
+      { class: "ac-btn", style: "margin: 6px 0 0 6px;", "data-testid": "export-support-bundle" },
+      "Export Support Bundle",
+    );
+    const bundleNote = createElement(
+      "div",
+      { style: "font-size: 12px; color: var(--text-muted); margin-top: 6px;" },
+      "Saves a zip on this computer with your log files, these diagnostics, your saved servers and display and voice settings. Nothing is uploaded, and passwords, tokens, recovery kits, recovery codes and 2FA secrets are never read into it. Log lines are exported verbatim, without redaction \u2014 read them before sharing.",
+    );
+    const bundleStatus = createElement("div", {
+      style: "font-size: 12px; margin-top: 4px;",
+      role: "status",
+      "data-testid": "support-bundle-status",
+    });
+    bundleBtn.addEventListener(
+      "click",
+      () => {
+        bundleBtn.disabled = true;
+        bundleStatus.textContent = "";
+        void import("@lib/supportBundle")
+          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
+          .then((saved) => {
+            bundleStatus.textContent = saved ? "Support bundle saved." : "";
+          })
+          .catch((err: unknown) => {
+            bundleStatus.textContent = `Export failed: ${err instanceof Error ? err.message : String(err)}`;
+          })
+          .finally(() => {
+            bundleBtn.disabled = false;
           });
       },
       { signal: buildSignal },
@@ -331,8 +384,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     section.appendChild(diagPanel);
     const diagBtns = createElement("div", { style: "display: flex; flex-wrap: wrap;" });
-    appendChildren(diagBtns, diagRefresh, diagCopy);
+    appendChildren(diagBtns, diagRefresh, diagCopy, bundleBtn);
     section.appendChild(diagBtns);
+    appendChildren(section, bundleNote, bundleStatus);
 
     // Log count
     countEl = createElement(

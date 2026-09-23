@@ -1,7 +1,7 @@
 /**
  * Shared modal overlay factory.
  * Creates a modal with backdrop, optional click-outside and Escape key
- * dismissal, and clean lifecycle management via AbortController.
+ * dismissal, and clean lifecycle management via Disposable.
  *
  * Every factory modal carries the dialog accessibility contract (DC-13):
  * role="dialog" + aria-modal on the container, focus moved into the dialog on
@@ -12,6 +12,7 @@
  *   - div.modal                  (content container)
  */
 
+import { Disposable } from "./disposable";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 
@@ -67,7 +68,7 @@ export function createModal(
     signal,
   } = options;
 
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   // Build overlay
   const overlayBaseAttrs: Record<string, string> = {
@@ -82,7 +83,7 @@ export function createModal(
   const modalClass = className !== undefined ? `modal ${className}` : "modal";
   const modal = createElement("div", { class: modalClass });
   applyDialogSemantics(modal, { label: ariaLabel, labelledBy: ariaLabelledBy });
-  trapFocus(modal, ac.signal);
+  trapFocus(modal, disposable.signal);
   modal.appendChild(content);
   overlay.appendChild(modal);
 
@@ -93,7 +94,7 @@ export function createModal(
     if (closed) return;
     closed = true;
     overlay.remove();
-    ac.abort();
+    disposable.destroy();
     restoreFocus?.();
     if (onClose !== undefined) {
       onClose();
@@ -109,7 +110,7 @@ export function createModal(
           handleClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
@@ -122,7 +123,7 @@ export function createModal(
           handleClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
@@ -136,12 +137,12 @@ export function createModal(
           overlay.remove();
           restoreFocus?.();
           onClose?.();
-          if (!ac.signal.aborted) {
-            ac.abort();
+          if (!disposable.signal.aborted) {
+            disposable.destroy();
           }
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
