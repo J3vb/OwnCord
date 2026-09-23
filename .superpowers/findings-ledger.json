@@ -1,5 +1,5 @@
 {
-  "nextId": 451,
+  "nextId": 460,
   "findings": [
     {
       "id": "OC-0001",
@@ -10423,6 +10423,28 @@
         "commit": "b44f1554",
         "test": "Server/service/push_dispatch_test.go",
         "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0459",
+      "status": "fixed",
+      "title": "App.Run could return with the hub dispatch goroutine still running",
+      "file": "Server/internal/app/lifecycle.go",
+      "line": 313,
+      "severity": "low",
+      "why": "Affected property: when Run returns, every goroutine a started stage spawned has exited. The hub close step called GracefulStopContext, which only closes the hub's stop channel and never waits for Run to return. On an early start failure right after the hub stage (event-persistence, router), the `go hub.Run()` StartRuntime spawned may not even have been scheduled yet, so Close finished and Run returned with DispatchAlive still true and the loop yet to run. Not a test bug: TestAppRun_EveryStageFailure_ReleasesEverythingItStarted asserts exactly the contract, and failed intermittently in CI's deadlock-tag pass (2026-09-23, on a PR that touched no Server code) with \"hub dispatch is still alive after Run returned\".",
+      "repro": "cd Server && go test -race -tags deadlock -c -o app.test ./internal/app/, then run app.test -test.run 'TestAppRun_EveryStageFailure_ReleasesEverythingItStarted/event-persistence' -test.count=200 -test.cpu=1,2 alongside six busy-loop processes on a 4-core box: 24 of 400 failed on dev at 233b93f. An idle -count=200 run passed, which is why it surfaced only as a rare CI flake.",
+      "suggestedFix": "Give the hub a Done channel closed when Run returns, and have the app's hub close step wait on it after GracefulStopContext, bounded by the shutdown budget.",
+      "confidence": "high",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-2026-09-23",
+      "lens": "ordering-boundary",
+      "finder": "claude",
+      "fixed": "2026-09-23",
+      "fix": {
+        "commit": "bbebc39",
+        "test": "Server/internal/app/close_test.go TestStopHub_WaitsForTheDispatchLoopToExit / TestStopHub_BoundedByTheShutdownBudget; Server/ws/observability_test.go TestDone_ClosesOnlyOnceDispatchHasExited",
+        "revertProof": "both TestStopHub_* fail with the join removed from stopHub; the stress repro above goes from 24/400 failed to 400/400 passed"
       }
     }
   ]
