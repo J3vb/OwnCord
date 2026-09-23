@@ -9,7 +9,8 @@
  * the only way to the ordinary conversation.
  *
  * Rows are keyed by request id and kept while the request stays pending, so
- * a frame about one request never moves focus off another. When the row
+ * a frame about one request never moves focus off another; a newer copy of
+ * the request redraws only its sender line and preview. When the row
  * holding focus leaves, focus moves to the next request's row, else the
  * previous one, else the view's heading. The row, not its Accept button: a
  * repeated Enter must not trust a different sender.
@@ -36,6 +37,11 @@ const DECISIONS = {
 
 interface Row {
   readonly li: HTMLLIElement;
+  /** The latest store copy; its shown fields are refreshed in place. */
+  request: MessageRequest;
+  head: HTMLElement;
+  text: HTMLElement;
+  readonly actions: HTMLElement;
   readonly buttons: ReadonlyMap<DmRequestDecision, HTMLButtonElement>;
   readonly error: HTMLParagraphElement;
   busy: boolean;
@@ -45,6 +51,39 @@ interface Row {
 
 const senderName = (r: MessageRequest): string =>
   r.sender.displayName || r.sender.username || t("unknownSender");
+
+const sameShown = (a: MessageRequest, b: MessageRequest): boolean =>
+  a.sender.displayName === b.sender.displayName &&
+  a.sender.username === b.sender.username &&
+  a.preview?.content === b.preview?.content &&
+  a.createdAt === b.createdAt;
+
+/** The row's sender line and preview, all plain text. */
+function renderShown(r: MessageRequest): { head: HTMLElement; text: HTMLElement } {
+  const name = senderName(r);
+  const head = createElement("div", { class: "requests-item-head" });
+  head.appendChild(createElement("h3", { class: "requests-sender" }, name));
+  if (r.sender.username !== "" && r.sender.username !== name) {
+    head.appendChild(
+      createElement("span", { class: "requests-username" }, `@${r.sender.username}`),
+    );
+  }
+  const at = new Date(r.createdAt);
+  if (!Number.isNaN(at.getTime())) {
+    head.appendChild(
+      createElement(
+        "time",
+        { class: "requests-time", datetime: r.createdAt },
+        formatDate(at, { dateStyle: "medium", timeStyle: "short" }),
+      ),
+    );
+  }
+  const text =
+    r.preview === null
+      ? createElement("p", { class: "requests-preview requests-preview-empty" }, t("noText"))
+      : createElement("p", { class: "requests-preview" }, r.preview.content);
+  return { head, text };
+}
 
 function setBusy(row: Row, decision: DmRequestDecision | null): void {
   row.busy = decision !== null;
@@ -83,8 +122,9 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   const rows = new Map<number, Row>();
   const say = (message: string): void => setText(outcome, message);
 
-  const run = (r: MessageRequest, row: Row, decision: DmRequestDecision): void => {
+  const run = (row: Row, decision: DmRequestDecision): void => {
     if (row.busy) return;
+    const r = row.request;
     const name = senderName(r);
     const api = requestsApi();
     const decideDmRequest = api?.decideDmRequest;
@@ -120,37 +160,16 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   };
 
   const renderRow = (r: MessageRequest): Row => {
-    const name = senderName(r);
     const li = createElement("li", {
       class: "requests-item",
       tabindex: "-1",
       "data-testid": "request-item",
     });
-    const head = createElement("div", { class: "requests-item-head" });
-    head.appendChild(createElement("h3", { class: "requests-sender" }, name));
-    if (r.sender.username !== "" && r.sender.username !== name) {
-      head.appendChild(
-        createElement("span", { class: "requests-username" }, `@${r.sender.username}`),
-      );
-    }
-    const at = new Date(r.createdAt);
-    if (!Number.isNaN(at.getTime())) {
-      head.appendChild(
-        createElement(
-          "time",
-          { class: "requests-time", datetime: r.createdAt },
-          formatDate(at, { dateStyle: "medium", timeStyle: "short" }),
-        ),
-      );
-    }
-    const text =
-      r.preview === null
-        ? createElement("p", { class: "requests-preview requests-preview-empty" }, t("noText"))
-        : createElement("p", { class: "requests-preview" }, r.preview.content);
+    const { head, text } = renderShown(r);
     const actions = createElement("div", {
       class: "requests-actions",
       role: "group",
-      "aria-label": t("actions.label", { name }),
+      "aria-label": t("actions.label", { name: senderName(r) }),
     });
     const buttons = new Map<DmRequestDecision, HTMLButtonElement>();
     const error = createElement("p", {
@@ -158,7 +177,17 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
       "data-testid": "request-error",
     });
     error.hidden = true;
-    const row: Row = { li, buttons, error, busy: false, dialog: null };
+    const row: Row = {
+      li,
+      request: r,
+      head,
+      text,
+      actions,
+      buttons,
+      error,
+      busy: false,
+      dialog: null,
+    };
     for (const d of Object.keys(DECISIONS) as DmRequestDecision[]) {
       const b = createElement(
         "button",
@@ -175,14 +204,14 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
         () => {
           if (row.busy) return;
           if (d === "delete" || d === "block") {
-            row.dialog = confirmDecision(r, d, name, signal, {
-              onConfirm: () => run(r, row, d),
+            row.dialog = confirmDecision(row.request, d, senderName(row.request), signal, {
+              onConfirm: () => run(row, d),
               onClose: () => {
                 row.dialog = null;
               },
             });
           } else {
-            run(r, row, d);
+            run(row, d);
           }
         },
         { signal },
@@ -192,6 +221,19 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     }
     li.append(head, text, actions, error);
     return row;
+  };
+
+  /** Show a newer copy of a kept row's request. Its buttons, busy state and dialog stay. */
+  const refresh = (row: Row, r: MessageRequest): void => {
+    const same = sameShown(row.request, r);
+    row.request = r;
+    if (same) return;
+    const { head, text } = renderShown(r);
+    row.head.replaceWith(head);
+    row.text.replaceWith(text);
+    row.head = head;
+    row.text = text;
+    row.actions.setAttribute("aria-label", t("actions.label", { name: senderName(r) }));
   };
 
   /** Focus the row after the one that left (else the one before), else the heading. */
@@ -241,6 +283,7 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
       const r = pending[i]!;
       const existing = rows.get(r.id);
       if (existing !== undefined) {
+        refresh(existing, r);
         before = existing.li;
         continue;
       }
