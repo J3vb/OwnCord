@@ -27,6 +27,8 @@ func TestFindClientAssets_ByTarget(t *testing.T) {
 		Assets: []Asset{
 			{Name: "OwnCord_1.0.0_x64-setup.nsis.zip", DownloadURL: "https://example.com/installer.zip"},
 			{Name: "OwnCord_1.0.0_x64-setup.nsis.zip.sig", DownloadURL: "https://example.com/installer.zip.sig"},
+			{Name: "OwnCord_1.0.0_arm64-setup.nsis.zip", DownloadURL: "https://example.com/arm64-installer.zip"},
+			{Name: "OwnCord_1.0.0_arm64-setup.nsis.zip.sig", DownloadURL: "https://example.com/arm64-installer.zip.sig"},
 			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz", DownloadURL: "https://example.com/amd64.AppImage.tar.gz"},
 			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz.sig", DownloadURL: "https://example.com/amd64.AppImage.tar.gz.sig"},
 			{Name: "OwnCord_1.0.0_aarch64.AppImage.tar.gz", DownloadURL: "https://example.com/aarch64.AppImage.tar.gz"},
@@ -42,6 +44,8 @@ func TestFindClientAssets_ByTarget(t *testing.T) {
 		wantSig       string
 	}{
 		{"windows-x86_64-nsis", "https://example.com/installer.zip", "https://example.com/installer.zip.sig"},
+		// Each Windows arch gets its own NSIS pair, never the other one's.
+		{"windows-aarch64-nsis", "https://example.com/arm64-installer.zip", "https://example.com/arm64-installer.zip.sig"},
 		{"linux-x86_64-appimage", "https://example.com/amd64.AppImage.tar.gz", "https://example.com/amd64.AppImage.tar.gz.sig"},
 		{"linux-aarch64-appimage", "https://example.com/aarch64.AppImage.tar.gz", "https://example.com/aarch64.AppImage.tar.gz.sig"},
 		// No deb updater artifact is published — a deb client must get
@@ -49,6 +53,7 @@ func TestFindClientAssets_ByTarget(t *testing.T) {
 		{"linux-x86_64-deb", "", ""},
 		{"darwin-aarch64-app", "", ""},
 		{"windows-x86_64-unknown", "", ""},
+		{"windows-aarch64-msi", "", ""},
 		{"", "", ""},
 	}
 	for _, tc := range cases {

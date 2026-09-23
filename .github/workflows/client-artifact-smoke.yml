@@ -1,0 +1,318 @@
+# Desktop artifact smoke (B7-17). INSTALLS each of the four shipped desktop
+# artifacts — Windows x64/ARM64 NSIS, Linux x64/ARM64 AppImage (+ .deb) — on
+# its own architecture and drives the real UI through the owner journey:
+# install, boot, connect, use media, recover an account; at release time also
+# update from the previous release and roll back to it. A compile is not a
+# smoke: the release build is never executed anywhere else.
+#
+# Two callers, one harness (Client/tests/e2e/artifact-smoke, driven by
+# support/artifact-app.ts):
+#
+#   * release.yml calls this with `release-artifacts: true` BEFORE `publish`,
+#     on the signed bundles its build jobs uploaded — the files that ship.
+#     Only that path runs update and rollback, because only it has artifacts
+#     signed with the production updater key.
+#   * The nightly schedule (and workflow_dispatch) builds the four bundles
+#     itself, UNSIGNED — no signing secret, no generated key — and smokes
+#     install, boot, connect, media and recovery, so the harness and the
+#     shared staging script do not rot between releases.
+#
+# The schedule only fires from the default branch (main); until this file is
+# carried there it runs only when dispatched.
+#
+# No job here is a required status context, for the reason
+# nightly-docker-smoke.yml's header gives: a scheduled run lands its check on
+# the default branch's tip, and verify-gate-evidence.mjs does not count a
+# `skipped` or red context there as success.
+#
+# No cache is restored anywhere in this file: it runs inside the tag-triggered
+# release, which must not consume a cache an attacker could have poisoned.
+name: Desktop Artifact Smoke
+
+on:
+  schedule:
+    # After upgrade-rehearsal.yml (04:00) so they do not compete for runners.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release-artifacts:
+        description: "Smoke the caller's uploaded release bundles, including update and rollback"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build unsigned bundle (${{ matrix.label }})
+    if: ${{ !inputs.release-artifacts }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            platform: windows
+            arch: x64
+            bundles: nsis
+            artifact: windows-release-assets
+          - label: Windows ARM64
+            os: windows-11-arm
+            platform: windows
+            arch: arm64
+            bundles: nsis
+            artifact: windows-arm64-release-assets
+          - label: Linux x64
+            os: ubuntu-22.04
+            platform: linux
+            arch: x64
+            bundles: "appimage,deb"
+            artifact: linux-release-assets
+          - label: Linux ARM64
+            os: ubuntu-22.04-arm
+            platform: linux
+            arch: arm64
+            bundles: "appimage,deb"
+            artifact: linux-arm64-release-assets
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libsecret-1-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libssl-dev \
+            patchelf \
+            librsvg2-dev \
+            xdg-utils
+
+      # clang >= 21 and the pinned, digest-verified libwebrtc the Linux client
+      # links for native voice — the release jobs' step, same no-cache rule.
+      - name: Install native-voice build prerequisites
+        if: runner.os == 'Linux'
+        run: bash Client/scripts/linux-webrtc-toolchain.sh
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Install npm dependencies
+        working-directory: Client
+        run: npm ci
+
+      # The release build with one difference: no updater artifacts, which
+      # would need the signing key this workflow never has.
+      - name: Build Tauri bundles (unsigned)
+        working-directory: Client
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+        shell: bash
+        run: npm run tauri build -- --bundles "$BUNDLES" --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Check the binary's glibc floor
+        if: runner.os == 'Linux'
+        working-directory: Client
+        run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      # The same strip the release applies before re-signing, so the nightly
+      # boots the image an owner would download.
+      - name: Strip host-incompatible libs from AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash Client/scripts/strip-appimage-bundled-libs.sh Client/src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Stage bundles as a release would
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+        run: bash Client/scripts/stage-release-assets.sh "$PLATFORM" "$ARCH" release-staging
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-staging/
+          retention-days: 3
+
+  smoke:
+    name: Smoke installed artifact (${{ matrix.label }})
+    needs: build
+    # Called from release.yml the build job is skipped and the bundles come
+    # from the caller's run.
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "Windows x64"
+            os: windows-latest
+            artifact: windows-release-assets
+            previous: "*_x64-setup.exe"
+          - label: "Windows ARM64, native windows-11-arm"
+            os: windows-11-arm
+            artifact: windows-arm64-release-assets
+            previous: "*_arm64-setup.exe"
+          - label: "Linux x64"
+            os: ubuntu-22.04
+            artifact: linux-release-assets
+            previous: "*_amd64.AppImage"
+          - label: "Linux ARM64"
+            os: ubuntu-22.04-arm
+            artifact: linux-arm64-release-assets
+            previous: "*_aarch64.AppImage"
+    defaults:
+      run:
+        shell: bash
+        working-directory: Client
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+
+      # WebKitWebDriver comes from the same WebKitGTK packaging the AppImage
+      # bundles from its ubuntu-22.04 build host, so driver and engine match.
+      # The keyring backs the stored credential an update must preserve.
+      # Linux voice runs in the native LiveKit backend, which captures and
+      # plays through the sound server; a runner has no sound card, so a
+      # PulseAudio null sink (and its monitor as the source) stands in.
+      - name: Install the Linux WebDriver and audio stack
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webkit2gtk-driver xvfb dbus-x11 gnome-keyring pulseaudio
+          cargo install tauri-driver --locked --version 2.0.6
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=smoke
+          pactl set-default-sink smoke
+          pactl set-default-source smoke.monitor
+
+      - run: npm ci
+      - run: npm run test:e2e:build-server
+      - run: node tests/e2e/scripts/install-livekit.mjs
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/current
+
+      # At tag time this runs before `publish`, so the newest published
+      # release is the previous one (skipping this tag's own release on a
+      # re-pushed tag, as upgrade-rehearsal.yml does). A target the previous
+      # release did not ship leaves the directory empty and the update spec
+      # skips with that reason.
+      - name: Download the previous release's installer
+        if: ${{ inputs.release-artifacts }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ github.ref_name }}
+          PATTERN: ${{ matrix.previous }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 5 --exclude-drafts --json tagName \
+            --jq 'first(.[] | select(.tagName != env.CURRENT_TAG) | .tagName)')
+          if [ -z "$tag" ]; then
+            echo "::error::no published release to update from"
+            exit 1
+          fi
+          mkdir -p ../artifacts/previous
+          assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          shipped=false
+          while IFS= read -r name; do
+            # PATTERN is a glob, so it must stay unquoted to match as one.
+            # shellcheck disable=SC2053
+            if [[ $name == $PATTERN ]]; then shipped=true; fi
+          done <<< "$assets"
+          if [ "$shipped" = false ]; then
+            echo "::notice::$tag published no $PATTERN; update and rollback are declared not applicable for this target"
+          else
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$PATTERN" --dir ../artifacts/previous
+          fi
+          ls -l ../artifacts/previous
+
+      - name: Install, boot, connect, media and recovery (Windows)
+        if: runner.os == 'Windows'
+        env:
+          OWNCORD_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/current
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
+        run: npx playwright test --config playwright.config.artifact.ts --project artifact-journey
+
+      - name: Install, boot, connect, media and recovery (Linux)
+        if: runner.os == 'Linux'
+        env:
+          OWNCORD_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/current
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
+        run: |
+          dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-journey'
+
+      # A native crash of the app leaves nothing in the driver log; the
+      # kernel's segfault line names the faulting library.
+      - name: Kernel log on failure (Linux)
+        if: failure() && runner.os == 'Linux'
+        run: sudo dmesg | tail -n 60
+
+      # Installer descendants must not hold Actions' output pipes, the same
+      # reason the native lane runs its updater through this wrapper.
+      - name: Update from the previous release, then roll back (Windows)
+        if: ${{ inputs.release-artifacts && runner.os == 'Windows' }}
+        timeout-minutes: 12
+        env:
+          OWNCORD_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/current
+          OWNCORD_PREVIOUS_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/previous
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/artifact-update
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/artifact-update-junit.xml
+        run: node tests/e2e/scripts/run-native-updater.mjs artifact-update --config playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update
+
+      - name: Update from the previous release, then roll back (Linux)
+        if: ${{ inputs.release-artifacts && runner.os == 'Linux' }}
+        timeout-minutes: 12
+        env:
+          OWNCORD_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/current
+          OWNCORD_PREVIOUS_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/previous
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/artifact-update
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/artifact-update-junit.xml
+        run: |
+          dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: artifact-smoke-report-${{ matrix.artifact }}
+          path: |
+            Client/playwright-report/
+            Client/test-results/
+          retention-days: 7

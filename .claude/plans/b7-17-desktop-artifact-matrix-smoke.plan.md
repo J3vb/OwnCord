@@ -12,6 +12,90 @@
 > was re-derived with the command shown except row 20, which is marked
 > **unverified** and is Task 0's first job.
 
+## Implementation status — landed 2026-09-23
+
+Held 2026-09-22 (owner decision, option C) until Linux desktop voice/video
+worked — the webview has no WebRTC on any mainstream WebKitGTK — and resumed
+2026-09-23 once Linux voice, camera and screen share moved into the Rust
+backend (#1697, #1700, #1704, #1706, #1711, #1719). The manual real-desktop
+Linux device check (device switching, headset hot-plug) is an owner task
+outside this milestone; the smoke proves a join with working controls, not
+device handling.
+
+**Owner answers to the open questions** (they replace the recommendations
+below): (1) release-time before `publish` plus a nightly drift run, never per
+PR; (2) `tauri-driver` + `webkit2gtk-driver` under `xvfb-run` on both Linux
+arches, driving the real UI — no fallback leg was needed; (3) **no signing in
+the nightly** — it builds unsigned bundles, skips update and rollback,
+references no signing secret and generates no key; update/rollback run only at
+release time on the real signed artifacts; (4) a declared cross-compile
+fallback would not fail the milestone — **not needed**, `windows-11-arm` builds
+and smokes natively (row 20).
+
+**What landed, by task:**
+
+- Task 1 — `windows-aarch64-nsis` row in `Server/updater/assets.go`, with
+  `coverage_boost_test.go` and two `client_update_test.go` cases (arm64 pair
+  served; a `.sig`-only release yields 204); `docs/api.md` target list.
+- Task 2 — `release.yml`: `release-client-windows` is a two-leg matrix
+  (`windows-latest` x64, `windows-11-arm` ARM64, artifact
+  `windows-arm64-release-assets`); all three client jobs stage through the
+  shared `Client/scripts/stage-release-assets.sh`; `publish` downloads the ARM64
+  assets and needs `client-artifact-smoke`.
+- Task 3 — `Client/tests/e2e/support/artifact-app.ts` (one `ArtifactDriver`
+  over both OSes), `artifact-smoke/journey.spec.ts`,
+  `playwright.config.artifact.ts`, `npm run test:e2e:artifact`. Plan
+  correction: **the shipped artifact has no CDP port** (that is a test-build
+  flag, `native-test-config.mjs`), so Windows attaches through a WebView2
+  `AdditionalBrowserArguments` policy for `owncord-client.exe` (HKLM); Linux
+  uses tauri-driver, which release builds honour (`TAURI_WEBVIEW_AUTOMATION`).
+  There is no `run-artifact-smoke.mjs`: the workflow calls Playwright directly.
+- Task 4 — LiveKit arm64 archives + digests (match LiveKit's
+  `checksums.txt`). Linux media runs in the native backend, which captures and
+  plays through the sound server, so the Linux smoke legs start a PulseAudio
+  null sink (its monitor is the source).
+- Task 5 — `update.spec.ts` and a target-filtering release mode in
+  `native-update-server.ts`; `run-native-updater.mjs` accepts custom Playwright
+  args for the Windows step. Rollback reinstalls the previous release and
+  requires it to auto-connect from the profile the update kept. Proven by a
+  probe-only workflow (never committed: it generates a key) that built an
+  "old" `1.2.0-alpha.3` and a "new" bundle per target, both trusting a
+  run-generated key.
+- Task 6 — recovery leg in `journey.spec.ts` (issue kit in settings, log out,
+  recover, then the server proves the new password works, the old one is
+  refused and the kit reads used).
+- Task 7 — `.github/workflows/client-artifact-smoke.yml`
+  (`schedule`/`workflow_dispatch` build unsigned; `workflow_call` with
+  `release-artifacts: true` smokes the caller's bundles and adds update +
+  rollback). The nightly build carries the release's native-voice toolchain
+  step and glibc-floor check. actionlint and `zizmor --offline` clean. Its
+  schedule is inert until the file reaches `main`.
+- Task 8 — BPR-010 evidence and the BG-04 B7-half note; `docs/contributing.md`
+  and `docs/architecture/client.md`.
+
+**Found by the smoke and fixed here:**
+
+- **The Linux app aborted at sign-in on X11** (`[xcb] Too much data requested
+from _XRead`, both arches, intermittent). libwebrtc's audio device module
+  (`audio_device_pulse_linux.o`, `audio_device_alsa_linux.o`) opens and queries
+  its own X display for typing detection from whichever thread creates it — a
+  Tokio worker listing devices at sign-in — racing GTK's main-thread Xlib use,
+  and nothing called `XInitThreads`. Bisected on the runners (PulseAudio and
+  keyring on/off), then `main.rs` calls `XInitThreads()` first: 3/3 journeys
+  green on each arch in the crashing environment, where the unpatched build
+  failed most runs. The unpatched binary passed locally on Ubuntu 24.04 — a
+  race, which is why this needed the runner. #1722 (merged in afterwards)
+  replaced that device module with the session's own `cpal` streams; the call
+  stays, because libwebrtc's screen capture and `device_query` (push-to-talk)
+  still open X displays off the main thread.
+- Harness fixes the runners exposed: Git Bash's GNU `tar` read `D:\...` as a
+  remote host (`install-livekit.mjs` now names `System32\tar.exe`); WMI's
+  process query outlasted its budget on `windows-11-arm` (`killInstalled` now
+  kills by image name); the Linux driver's `press()` always sent Escape; and
+  a Linux WebDriver click could land mid-animation (the settings panel scales
+  in), so `click()` now waits for finite animations to settle, as Playwright
+  does on Windows.
+
 ## Summary
 
 The milestone outcome is one sentence: "An owner can install, boot, connect,
@@ -115,28 +199,28 @@ Every row was re-derived at `92242f4a` with the command shown unless marked
 otherwise. If a row is false at your HEAD, **stop that task and record it**; do
 not improvise around it.
 
-| #   | Claim                                                                                                                                                                                                   | How to re-check                                                                                                                                                                   | Verified       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| 1   | `release.yml` has exactly three client build jobs (Windows x64 NSIS, Linux x64 AppImage+deb, Linux ARM64 AppImage+deb) and no Windows ARM64 client job                                                  | `grep -n "^  release-client" .github/workflows/release.yml` → `94,154,379`; `grep -n "runs-on:" .github/workflows/release.yml` → `97,157,382`                                     | yes            |
-| 2   | `windows-11-arm` is used in `release.yml` only by the server matrix leg                                                                                                                                 | `grep -n "windows-11-arm" .github/workflows/release.yml` → one hit at `:273` (`release-server`'s matrix)                                                                          | yes            |
-| 3   | The updater asset map has three rows and no `windows-aarch64` row                                                                                                                                       | `sed -n '39,43p' Server/updater/assets.go` → `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`                                                             | yes            |
-| 4   | Windows staging hardcodes the x64 NSIS suffix, so an ARM64 artifact would not be collected                                                                                                              | `.github/workflows/release.yml:143,145` (`*_x64-setup.nsis.zip` / `*.sig`)                                                                                                        | yes            |
-| 5   | No client artifact is executed in `release.yml`; only the server binary and the server Docker image are smoked                                                                                          | `grep -ni "smoke" .github/workflows/release.yml` → `:329` (`go run ./cmd/smoke`), `:491` (`smoke-server-docker`); no client launch step anywhere                                  | yes            |
-| 6   | `tauri-driver` / WebDriver is wired into nothing in the tracked tree                                                                                                                                    | `git grep -il "tauri-driver\|tauri_driver\|WebKitWebDriver\|msedgedriver"` → empty                                                                                                | yes            |
-| 7   | `Client E2E (Windows native)` is a required check, runs on `windows-latest`, builds a `--no-bundle` exe and drives it over CDP, then drives signed NSIS test packages                                   | `docs/plans/b0-dev-branch-protection.sh:73`; `ci.yml:1263-1268,1298-1302,1317,1324`; `Client/tests/e2e/support/native-app.ts:11,31`                                               | yes            |
-| 8   | The packaged-update journey already covers corrupt/interrupted downloads, a successful update to a newer version, and relaunch persistence — but starts from test-built packages, not shipped artifacts | `Client/tests/e2e/native/packaged-update.spec.ts:15,57-126`; `Client/tests/e2e/scripts/build-native-updates.mjs:27-30`                                                            | yes            |
-| 9   | The client's updater endpoint is derived from the signed-in server URL; a static endpoint list is forbidden                                                                                             | `Client/src-tauri/src/update_commands.rs:127-136`; `Client/src-tauri/src/config_gates.rs:31-51`; `tauri.conf.json:61` (`"endpoints": []`)                                         | yes            |
-| 10  | The update fixture serves `/api/v1/client-update/{target}/{current}` and a signed artifact over real TLS                                                                                                | `Client/tests/e2e/support/native-update-server.ts:41-71`                                                                                                                          | yes            |
-| 11  | The Linux **media** helper refuses anything but x64, so an ARM64 media smoke needs arm64 archives added                                                                                                 | `Client/tests/e2e/scripts/install-livekit.mjs:8-13` (`archives` has `linux`/`win32` x64 only; `process.arch !== "x64"` throws)                                                    | yes            |
-| 12  | `release.yml`'s hardening must be preserved: no cache restore, no persisted credentials, least privilege, tag-only gate                                                                                 | `release.yml:3-6,21`; `grep -c "package-manager-cache: false" .github/workflows/release.yml` → 9; `grep -c "persist-credentials: false"` → 9                                      | yes            |
-| 13  | The reusable-workflow pattern for a non-required smoke already exists and is called from `release.yml`                                                                                                  | `.github/workflows/upgrade-rehearsal.yml:52-68,81-88`; `.github/workflows/release.yml:601-609`                                                                                    | yes            |
-| 14  | `AppImage`s run without FUSE on CI runners via `--appimage-extract-and-run`                                                                                                                             | `Client/scripts/strip-appimage-bundled-libs.sh:44,47`                                                                                                                             | yes            |
-| 15  | `scripts/ci-select.mjs` gates jobs by capability; a `Client/` change selects `client,browser,integration,native`, and a `.github/` or `scripts/` change selects everything                              | `scripts/ci-select.mjs:56-66,195-203,240-246`                                                                                                                                     | yes            |
-| 16  | The tag workflow re-runs no required check, so a job that first executes at tag time is the wrong place to find its bugs                                                                                | `release.yml:24-37`; `scripts/verify-gate-evidence.mjs:14-19`                                                                                                                     | yes            |
-| 17  | BPR-010's evidence home is the traceability row, and its B7-half register row is BG-04                                                                                                                  | `docs/plans/beta-requirements-traceability-2026-08-23.md:56`; `docs/plans/repo-health-issue-register-2026-08-23.md:298`; `prd.md:378`                                             | yes            |
-| 18  | The four artifacts' update identity is `{os}-{arch}-{installer}` and the Windows updater artifact is the `.nsis.zip` pair, not the `.exe`                                                               | `Client/src-tauri/src/update_commands.rs:124-136`; `Server/updater/assets.go:39-43`; `release.yml:143-146`                                                                        | yes            |
-| 19  | LiveKit `1.13.5` publishes `linux_arm64` and `windows_arm64` archives alongside the x64 pair the repo pins                                                                                              | GitHub release `livekit/livekit` `v1.13.5` asset list (fetched 2026-09-21); NOT a local command — re-confirm in Task 0                                                            | external       |
-| 20  | The Tauri v2 ARM64 NSIS updater artifact is suffixed `_arm64-setup.nsis.zip`, so the staging and updater rows must learn that name                                                                      | **Unverified at this base.** Task 0 must produce it by building the NSIS bundle on `windows-11-arm` (or reading `@tauri-apps/cli`'s bundler naming) and record the exact filename | **unverified** |
+| #   | Claim                                                                                                                                                                                                   | How to re-check                                                                                                                                                                                                         | Verified    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1   | `release.yml` has exactly three client build jobs (Windows x64 NSIS, Linux x64 AppImage+deb, Linux ARM64 AppImage+deb) and no Windows ARM64 client job                                                  | `grep -n "^  release-client" .github/workflows/release.yml` → `94,154,379`; `grep -n "runs-on:" .github/workflows/release.yml` → `97,157,382`                                                                           | yes         |
+| 2   | `windows-11-arm` is used in `release.yml` only by the server matrix leg                                                                                                                                 | `grep -n "windows-11-arm" .github/workflows/release.yml` → one hit at `:273` (`release-server`'s matrix)                                                                                                                | yes         |
+| 3   | The updater asset map has three rows and no `windows-aarch64` row                                                                                                                                       | `sed -n '39,43p' Server/updater/assets.go` → `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`                                                                                                   | yes         |
+| 4   | Windows staging hardcodes the x64 NSIS suffix, so an ARM64 artifact would not be collected                                                                                                              | `.github/workflows/release.yml:143,145` (`*_x64-setup.nsis.zip` / `*.sig`)                                                                                                                                              | yes         |
+| 5   | No client artifact is executed in `release.yml`; only the server binary and the server Docker image are smoked                                                                                          | `grep -ni "smoke" .github/workflows/release.yml` → `:329` (`go run ./cmd/smoke`), `:491` (`smoke-server-docker`); no client launch step anywhere                                                                        | yes         |
+| 6   | `tauri-driver` / WebDriver is wired into nothing in the tracked tree                                                                                                                                    | `git grep -il "tauri-driver\|tauri_driver\|WebKitWebDriver\|msedgedriver"` → empty                                                                                                                                      | yes         |
+| 7   | `Client E2E (Windows native)` is a required check, runs on `windows-latest`, builds a `--no-bundle` exe and drives it over CDP, then drives signed NSIS test packages                                   | `docs/plans/b0-dev-branch-protection.sh:73`; `ci.yml:1263-1268,1298-1302,1317,1324`; `Client/tests/e2e/support/native-app.ts:11,31`                                                                                     | yes         |
+| 8   | The packaged-update journey already covers corrupt/interrupted downloads, a successful update to a newer version, and relaunch persistence — but starts from test-built packages, not shipped artifacts | `Client/tests/e2e/native/packaged-update.spec.ts:15,57-126`; `Client/tests/e2e/scripts/build-native-updates.mjs:27-30`                                                                                                  | yes         |
+| 9   | The client's updater endpoint is derived from the signed-in server URL; a static endpoint list is forbidden                                                                                             | `Client/src-tauri/src/update_commands.rs:127-136`; `Client/src-tauri/src/config_gates.rs:31-51`; `tauri.conf.json:61` (`"endpoints": []`)                                                                               | yes         |
+| 10  | The update fixture serves `/api/v1/client-update/{target}/{current}` and a signed artifact over real TLS                                                                                                | `Client/tests/e2e/support/native-update-server.ts:41-71`                                                                                                                                                                | yes         |
+| 11  | The Linux **media** helper refuses anything but x64, so an ARM64 media smoke needs arm64 archives added                                                                                                 | `Client/tests/e2e/scripts/install-livekit.mjs:8-13` (`archives` has `linux`/`win32` x64 only; `process.arch !== "x64"` throws)                                                                                          | yes         |
+| 12  | `release.yml`'s hardening must be preserved: no cache restore, no persisted credentials, least privilege, tag-only gate                                                                                 | `release.yml:3-6,21`; `grep -c "package-manager-cache: false" .github/workflows/release.yml` → 9; `grep -c "persist-credentials: false"` → 9                                                                            | yes         |
+| 13  | The reusable-workflow pattern for a non-required smoke already exists and is called from `release.yml`                                                                                                  | `.github/workflows/upgrade-rehearsal.yml:52-68,81-88`; `.github/workflows/release.yml:601-609`                                                                                                                          | yes         |
+| 14  | `AppImage`s run without FUSE on CI runners via `--appimage-extract-and-run`                                                                                                                             | `Client/scripts/strip-appimage-bundled-libs.sh:44,47`                                                                                                                                                                   | yes         |
+| 15  | `scripts/ci-select.mjs` gates jobs by capability; a `Client/` change selects `client,browser,integration,native`, and a `.github/` or `scripts/` change selects everything                              | `scripts/ci-select.mjs:56-66,195-203,240-246`                                                                                                                                                                           | yes         |
+| 16  | The tag workflow re-runs no required check, so a job that first executes at tag time is the wrong place to find its bugs                                                                                | `release.yml:24-37`; `scripts/verify-gate-evidence.mjs:14-19`                                                                                                                                                           | yes         |
+| 17  | BPR-010's evidence home is the traceability row, and its B7-half register row is BG-04                                                                                                                  | `docs/plans/beta-requirements-traceability-2026-08-23.md:56`; `docs/plans/repo-health-issue-register-2026-08-23.md:298`; `prd.md:378`                                                                                   | yes         |
+| 18  | The four artifacts' update identity is `{os}-{arch}-{installer}` and the Windows updater artifact is the `.nsis.zip` pair, not the `.exe`                                                               | `Client/src-tauri/src/update_commands.rs:124-136`; `Server/updater/assets.go:39-43`; `release.yml:143-146`                                                                                                              | yes         |
+| 19  | LiveKit `1.13.5` publishes `linux_arm64` and `windows_arm64` archives alongside the x64 pair the repo pins                                                                                              | GitHub release `livekit/livekit` `v1.13.5` asset list (fetched 2026-09-21); NOT a local command — re-confirm in Task 0                                                                                                  | external    |
+| 20  | The Tauri v2 ARM64 NSIS updater artifact is suffixed `_arm64-setup.nsis.zip`, so the staging and updater rows must learn that name                                                                      | Built natively on `windows-11-arm` in probe run https://github.com/J3vb/OwnCord/actions/runs/35688561456 (2026-09-22): `OwnCord_1.2.0-alpha.4_arm64-setup.exe`, `OwnCord_1.2.0-alpha.4_arm64-setup.nsis.zip` (+ `.sig`) | yes (probe) |
 
 **Row 20 is the first thing Task 0 settles.** Rows 1–3 are the gap the PRD's
 evidence section names (`prd.md:132-138`); rows 4–5 are why "built" is not

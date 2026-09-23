@@ -4301,10 +4301,10 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                          |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                      |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
 
 #### Response 200 OK (update available)
 
