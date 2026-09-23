@@ -1,10 +1,10 @@
 /**
  * B9-4: the shared navigation seams in the real shell.
  *
- * This build ships no destination yet — Message Requests (B9-5), the
- * Moderation Center (B9-11) and the Safety tab (B9-10/15/16) each add their
- * own entry — so what the running app must show is the owner's Q2 rule: no
- * empty or nonfunctional destination, and the familiar channel, DM and
+ * Message Requests (B9-5) and the Moderation Center (B9-11) add their own
+ * entries later; the Safety tab ships with B9-15 (its journey is in
+ * b9-moderation-notices.spec.ts). What the running app must show is the
+ * owner's Q2 rule: no empty or nonfunctional destination, and the familiar channel, DM and
  * settings routes unchanged with the content-view column in place. The
  * transitions through a destination (open, Close/Escape back to the channel,
  * replacement, permission loss, sign-out) run against inert views in
@@ -67,7 +67,9 @@ test.describe("B9-4 shared navigation", () => {
     await signIn(page);
   });
 
-  test("shows no destination entry before its feature ships (Q2)", async ({ page }) => {
+  test("shows no Requests or Moderation entry before their features ship (Q2)", async ({
+    page,
+  }) => {
     // Moderation would sit beside Audit Log; Audit Log is there, Moderation is not.
     await expect(page.locator("[data-testid='audit-log-btn']")).toBeVisible();
     await expect(page.locator("[data-testid='moderation-btn']")).toHaveCount(0);
@@ -81,12 +83,14 @@ test.describe("B9-4 shared navigation", () => {
     await expect(page.locator("[data-testid='dm-requests-entry']")).toHaveCount(0);
     await expectNoView(page);
 
-    // Settings has no Safety tab, and the arrow keys skip nothing hidden.
+    // Settings has the Safety tab (B9-15) after Account, in the arrow-key order.
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
     const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
-    await expect(tabs.filter({ hasText: "Safety" })).toHaveCount(0);
+    await expect(tabs.filter({ hasText: "Safety" })).toHaveCount(1);
     await page.getByRole("tab", { name: "Account" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("tab", { name: "Safety" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
   });

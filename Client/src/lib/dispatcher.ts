@@ -73,6 +73,12 @@ import {
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
+import {
+  applyReadySafety,
+  handleModAction,
+  handleTimedOutRefusal,
+  refreshSafetyOnResume,
+} from "../features/safety/wsHandlers";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -101,7 +107,12 @@ export function wireDispatcher(
     Partial<
       Pick<
         ApiClient,
-        "updateProfile" | "getConfig" | "listEmoji" | "getMessages" | "getMessagesAround"
+        | "updateProfile"
+        | "getConfig"
+        | "listEmoji"
+        | "getMessages"
+        | "getMessagesAround"
+        | "getOwnModeration"
       >
     >,
 ): DispatcherCleanup {
@@ -118,7 +129,12 @@ export function wireDispatcher(
   setActiveChannelProvider(() => channelsStore.select((s) => s.activeChannelId));
   unsubs.push(() => setActiveChannelProvider(null));
 
-  unsubs.push(ws.on(S.AUTH_OK, (payload) => handleAuthOk(ws, clock, payload)));
+  unsubs.push(
+    ws.on(S.AUTH_OK, (payload) => {
+      handleAuthOk(ws, clock, payload);
+      refreshSafetyOnResume(api, payload);
+    }),
+  );
 
   unsubs.push(ws.on(S.AUTH_ERROR, (payload) => handleAuthError(api, payload)));
 
@@ -143,6 +159,7 @@ export function wireDispatcher(
       markReadyActiveChannelRead(readyActive);
       applyReadyBlocks(api);
       applyReadyEmoji(api);
+      applyReadySafety(api, payload);
 
       log.info("Ready payload applied", {
         channels: payload.channels.length,
@@ -196,6 +213,9 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.MEMBER_JOIN, handleMemberJoin));
 
   unsubs.push(ws.on(S.MEMBER_BAN, handleMemberBan));
+
+  // mod_action: a warning or timeout applied to this user (B9-15).
+  unsubs.push(ws.on(S.MOD_ACTION, (payload) => handleModAction(api, payload)));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 
@@ -254,6 +274,8 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // Never consumes the frame: the refused send/reaction/join still rolls back below.
+      handleTimedOutRefusal(api, payload);
       if (handleMessagingError(payload, id)) return;
       handleVoiceJoinRollback();
       if (handleVoiceError(payload, id)) return;
