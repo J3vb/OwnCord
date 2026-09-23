@@ -235,7 +235,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   `MemberList`) now loads on first open too, and the member report's focus
   fallback moved into the lazy openers. Merged, MainPage is 59,997 B: the
   budget holds, with 3 B left for the next lane. Merging `dev` again after
-  B9-5 (#1761) applied Firstmate's shared B9 lane budgets of 2026-09-23
+  B9-5 (#1761) applied Firstmate's shared B9 lane budgets of 2026-09-23, a
+  design call under the owner's standing delegation
   (MainPage 64,000 B, startup 93,000 B; re-baselined at B9-26): merged,
   MainPage is 60,133 B and the startup closure 91,282 B.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
