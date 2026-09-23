@@ -804,6 +804,29 @@ describe("MemberList profile fields", () => {
     expect(document.activeElement).toBe(rowB);
   });
 
+  it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const before = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    before.focus();
+    before.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+    );
+
+    updateMemberRole(3, "admin");
+    membersStore.flush();
+    const after = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    expect(after).not.toBe(before);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).toBe(after);
+  });
+
   it("describes each row by its custom status and presence, kept current (B9-10)", () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", customStatus: "shipping" }),

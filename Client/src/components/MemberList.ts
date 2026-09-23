@@ -272,6 +272,7 @@ function createMemberItem(
     // row, so that snapshot's `status` can be stale. Re-resolve against the
     // live store so the popup always agrees with the dot it was opened from.
     const live = membersStore.getState().members.get(member.id) ?? member;
+    const list = item.parentElement;
     // Loaded on first open: the popup is only ever needed after a click, so
     // it stays out of the main-page bundle.
     const seq = ++popupSeq;
@@ -298,6 +299,10 @@ function createMemberItem(
         onClose: () => {
           if (activePopup === popup) activePopup = null;
         },
+        fallbackFocus: () =>
+          list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
+          list?.querySelector<HTMLElement>(".member-item") ??
+          null,
       });
       activePopup = popup;
       popup.mount(document.body);

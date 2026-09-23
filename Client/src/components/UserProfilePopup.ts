@@ -53,6 +53,8 @@ export interface UserProfilePopupOptions {
   readonly onReport?: (userId: number) => void;
   /** Called once when the popup closes, however it was closed. */
   readonly onClose?: () => void;
+  /** Where focus goes on close when the opener has left the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export type UserProfilePopupComponent = MountableComponent & {
@@ -114,8 +116,10 @@ export function createUserProfilePopup(
     disposable.destroy();
 
     // Return focus to the element that was focused before opening
-    if (previousFocus instanceof HTMLElement) {
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus();
+    } else {
+      options.fallbackFocus?.()?.focus();
     }
     options.onClose?.();
   }
