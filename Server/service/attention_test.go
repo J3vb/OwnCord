@@ -486,7 +486,7 @@ func TestAttention_RunStopsWithContext(t *testing.T) {
 
 func TestBackupScheduleInterval(t *testing.T) {
 	for schedule, want := range map[string]time.Duration{
-		"daily": 24 * time.Hour, " Weekly ": 7 * 24 * time.Hour, "off": 0, "": 0, "hourly": 0,
+		"daily": 24 * time.Hour, " Weekly ": 7 * 24 * time.Hour, "off": 0, "": 0, "hourly": 0, //nolint:gocritic // padded key proves trimming and case folding
 	} {
 		if got := BackupScheduleInterval(schedule); got != want {
 			t.Errorf("BackupScheduleInterval(%q) = %v, want %v", schedule, got, want)
