@@ -202,7 +202,19 @@ async function launchLinux(
   return {
     evaluate,
     async click(css, text) {
-      await call("POST", `/session/${session}/element/${await element(css, text)}/click`, {});
+      const id = await element(css, text);
+      // WebDriver clicks the element's centre as computed now; Playwright (the
+      // Windows side) first waits for it to stop moving. Match that: a click
+      // during an entry animation (the settings panel scales in) can miss.
+      // Looping animations (spinners, speaking rings) never finish; skip them.
+      await expect
+        .poll(() =>
+          evaluate<boolean>(
+            `() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity)`,
+          ),
+        )
+        .toBe(true);
+      await call("POST", `/session/${session}/element/${id}/click`, {});
     },
     async fill(css, value) {
       const id = await element(css);
