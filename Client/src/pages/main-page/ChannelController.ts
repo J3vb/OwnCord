@@ -596,10 +596,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const gateHadFocus = [slots.messagesSlot, slots.typingSlot, slots.inputSlot].some(
             (slot) => slot.contains(active),
           );
-          const focusGate = gateHadFocus || active === null || active === document.body;
+          const takeFocus = gateHadFocus || active === null || active === document.body;
           const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
           destroyChannel();
-          mountChannel(channelId, name, channelType, focusGate);
+          mountChannel(channelId, name, channelType, takeFocus);
           if (state === "gated") onContentGated?.();
           else if (gateHadFocus) focusFallback?.();
         },
