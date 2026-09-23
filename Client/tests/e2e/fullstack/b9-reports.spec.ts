@@ -203,8 +203,11 @@ test.describe("Local report intake (real server)", () => {
     expect(await status(server, "/api/v1/moderation/queue", carol)).toBe(403);
 
     // Network destinations: the client wrote reports and read its own
-    // summary on this server, and never touched the moderation queue.
-    const reportSends = sends.filter((s) => s.includes("/reports") || s.includes("/moderation"));
+    // summary on this server, and never touched the moderation queue. The
+    // Safety tab's only moderation read is the caller's own history (B9-15).
+    const moderationReads = new Set(sends.filter((s) => s.includes("/moderation")));
+    expect([...moderationReads]).toEqual(["GET /api/v1/users/me/moderation"]);
+    const reportSends = sends.filter((s) => s.includes("/reports"));
     expect(reportSends).toEqual([
       "POST /api/v1/reports",
       "POST /api/v1/reports",
