@@ -32,6 +32,7 @@ type Config struct {
 	Logging          LoggingConfig          `yaml:"logging"`
 	Moderation       ModerationConfig       `yaml:"moderation"`
 	Push             PushConfig             `yaml:"push"`
+	Attention        AttentionConfig        `yaml:"attention"`
 }
 
 // ModerationConfig holds the report queue's retention window (B5-8, plan
@@ -474,6 +475,7 @@ func defaults() Config {
 			ReportRetentionDays: 180,
 			ActionRetentionDays: 90,
 		},
+		Attention: AttentionConfig{DiskWarnFreeMB: 1024, WriterWaitMsPerMin: 5000, ReconnectsPerMin: 30, DeliveryDropsPerMin: 1},
 		Push: PushConfig{
 			Enabled:             false,
 			SubscriptionTTLDays: 90,
@@ -631,6 +633,14 @@ voice:
 #                                # is pruned; 0 = never. Open reports are never touched.
 #   action_retention_days: 90   # days after acknowledgement (warning) or expiry/lift
 #                                # (timeout) before the row retires; 0 = never.
+
+# Admin attention panel (Dashboard): warning floors, raised for rates by the
+# learned baseline. Shown only in the admin panel; never exported off-host.
+# attention:
+#   disk_warn_free_mb: 1024     # warn below this much free space on the data volume
+#   writer_wait_ms_per_min: 5000  # warn when writes queue longer than this per minute
+#   reconnects_per_min: 30      # warn when clients resume sessions faster than this
+#   delivery_drops_per_min: 1   # warn when deliveries drop or slow clients are cut off
 `
 
 // Load reads configuration from the given YAML file path, merging with
@@ -825,6 +835,10 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows"},
+		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 to warn only at server.min_free_disk_mb"},
+		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute"},
+		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute"},
+		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute"},
 		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days"},
 	}
 }

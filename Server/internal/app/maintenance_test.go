@@ -190,22 +190,22 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
 	got := make([]string, 0, len(m.steps()))
 	for _, step := range m.steps() {
-		got = append(got, step.name)
+		got = append(got, step.job+": "+step.name)
 	}
 	want := []string{
-		"failed to delete expired sessions",
-		"failed to delete expired message delivery receipts",
-		"failed to clean up expired second-factor state",
-		"push subscription sweep failed",
-		"backup maintenance failed",
-		"failed to delete orphaned attachments",
-		"retention sweep failed",
-		"report content retention failed",
-		"moderation action retention failed",
-		"orphaned voice mute reconciliation failed",
-		"erasure jobs still pending",
-		"storage reconciliation failed",
-		"storage recount failed",
+		"Expired sessions: failed to delete expired sessions",
+		"Delivery receipts: failed to delete expired message delivery receipts",
+		"Second-factor cleanup: failed to clean up expired second-factor state",
+		"Push subscriptions: push subscription sweep failed",
+		"Backups: backup maintenance failed",
+		"Orphaned attachments: failed to delete orphaned attachments",
+		"Message retention: retention sweep failed",
+		"Report content retention: report content retention failed",
+		"Moderation action retention: moderation action retention failed",
+		"Voice mute reconciliation: orphaned voice mute reconciliation failed",
+		"Account erasure: erasure jobs still pending",
+		"Storage reconciliation: storage reconciliation failed",
+		"Storage recount: storage recount failed",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("maintenance steps =\n  %q\nwant\n  %q", got, want)
@@ -462,5 +462,23 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("push_subscriptions after loop()'s start-up sweep = %d, want 0 (the row was under a rotated-away key)", n)
+	}
+}
+
+// TestMaintenance_TickRecordsJobHealth pins the RI-07 seam: every step's
+// outcome lands on the attention panel under its job name.
+func TestMaintenance_TickRecordsJobHealth(t *testing.T) {
+	attention := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
+	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
+	m.tick(context.Background())
+	attention.Evaluate(context.Background(), time.Now())
+	status := map[string]string{}
+	for _, sig := range attention.Report().Signals {
+		status[sig.ID] = sig.Status
+	}
+	for _, step := range m.steps() {
+		if got := status["job:"+step.job]; got != service.AttentionStatusOK {
+			t.Errorf("job %q status = %q, want ok after a clean tick", step.job, got)
+		}
 	}
 }

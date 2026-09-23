@@ -241,14 +241,38 @@ unlinking — is never pruned; only its content is bounded.
 | `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.       |
 | `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires, unless an appeal references it. `0` = never retire. Ban, kick and removal rows are never touched. A negative value falls back to the default with a warning. |
 
+### Admin attention panel (`attention`)
+
+Warning floors for the Dashboard's attention panel (RI-07). The server samples
+each signal once a minute; a disk or rate level must hold for two samples to
+raise or clear, a raised rate clears only below half its threshold, and a
+disk warning clears only 10% above its floor. Each rate first learns a
+baseline over ten samples (raising nothing meanwhile) and then raises at this
+floor or three times that baseline, whichever is higher. Critical disk is
+`server.min_free_disk_mb`. Attention state stays on the server: it is served
+only to `ADMINISTRATOR` holders through `GET /admin/api/attention` and is not
+exported to telemetry. Below each key's minimum the default applies, with a
+warning.
+
+| Key                                | Type | Default | Description                                                                                                  |
+| ---------------------------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `attention.disk_warn_free_mb`      | int  | `1024`  | Warn when free space on the data volume is below this many MiB. `0` warns only at `server.min_free_disk_mb`. |
+| `attention.writer_wait_ms_per_min` | int  | `5000`  | Warn when requests spend more than this many ms per minute queueing for the single SQLite writer.            |
+| `attention.reconnects_per_min`     | int  | `30`    | Warn when clients resume sessions faster than this.                                                          |
+| `attention.delivery_drops_per_min` | int  | `1`     | Warn when dropped deliveries plus slow-client disconnects exceed this rate.                                  |
+
 ## Key index (generated)
 
 <!-- gendocs:config:start -->
 
-Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 67 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 71 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
+| `attention.delivery_drops_per_min`          | Admin attention panel (`attention`)     |
+| `attention.disk_warn_free_mb`               | Admin attention panel (`attention`)     |
+| `attention.reconnects_per_min`              | Admin attention panel (`attention`)     |
+| `attention.writer_wait_ms_per_min`          | Admin attention panel (`attention`)     |
 | `backup.dir`                                | Backups (`backup`)                      |
 | `database.max_readers`                      | Database (`database`)                   |
 | `database.path`                             | Database (`database`)                   |
