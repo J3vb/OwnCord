@@ -88,7 +88,7 @@ func (q *Queries) FindOpenOrAssignedReport(ctx context.Context, arg FindOpenOrAs
 const getReportByID = `-- name: GetReportByID :one
 SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
        target_ref, channel_id, reason, detail, state, assignee_id, outcome,
-       created_at, updated_at, closed_at
+       created_at, updated_at, closed_at, source_nsfw
   FROM reports WHERE id = ?
 `
 
@@ -113,6 +113,7 @@ func (q *Queries) GetReportByID(ctx context.Context, id int64) (Report, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ClosedAt,
+		&i.SourceNsfw,
 	)
 	return i, err
 }
@@ -120,7 +121,7 @@ func (q *Queries) GetReportByID(ctx context.Context, id int64) (Report, error) {
 const getReportByPublicID = `-- name: GetReportByPublicID :one
 SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
        target_ref, channel_id, reason, detail, state, assignee_id, outcome,
-       created_at, updated_at, closed_at
+       created_at, updated_at, closed_at, source_nsfw
   FROM reports WHERE public_id = ?
 `
 
@@ -147,6 +148,7 @@ func (q *Queries) GetReportByPublicID(ctx context.Context, publicID string) (Rep
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ClosedAt,
+		&i.SourceNsfw,
 	)
 	return i, err
 }
