@@ -284,8 +284,9 @@ outcome, created_at, closed_at`; the moderator's queue holds the three actual
 targets; the subject's own queue excludes them; the bystander has no reports
 and a 403 on the queue. The client's report traffic at the transport
 boundary, which refuses any origin but the test server, is four
-`POST /api/v1/reports` and one `GET /api/v1/reports/mine`; nothing reads
-`/moderation`.
+`POST /api/v1/reports` and one `GET /api/v1/reports/mine`; the only
+`/moderation` read is B9-15's `GET /api/v1/users/me/moderation` (the caller's
+own history), and nothing reads the moderation queue.
 
 **Failing controls.** Each guard below was removed in turn and its suite
 re-run; every one failed and was restored before commit: the late-send drop,
