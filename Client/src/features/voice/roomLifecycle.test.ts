@@ -140,7 +140,7 @@ describe("leaveVoice", () => {
       removeAllListeners: vi.fn(),
       disconnect: vi.fn(async () => {}),
     } as unknown as Room;
-    const { host, lifecycle, ws, e2ee, getState } = setup({
+    const { host, lifecycle, ws, e2ee, audioElements, getState } = setup({
       type: "connected",
       room,
       channelId: 1,
@@ -158,6 +158,8 @@ describe("leaveVoice", () => {
     expect(host.setPendingMicrophoneRoom).toHaveBeenCalledWith(null);
     expect(getState()).toEqual({ type: "idle" });
     expect(setVoiceStatus).toHaveBeenCalledWith("idle");
+    // A native room's screen-share volume listener is released with it.
+    expect(audioElements.setScreenshareGainListener).toHaveBeenLastCalledWith(null);
   });
 
   it("aborts an in-flight reconnect and sends nothing when asked not to", () => {

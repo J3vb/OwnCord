@@ -327,7 +327,7 @@ describe("NativeRoom room surface", () => {
     expect(host.calls.at(-1)).toEqual(["disconnect", [1]]);
   });
 
-  it("forwards each participant's screen-share audio volume when it changes", async () => {
+  it("sends each participant's screen-share audio volume, again after a rejoin", async () => {
     const volumes = new Map([["user-2", 0.4]]);
     const room = createNativeRoom(audio, undefined, (identity) => volumes.get(identity) ?? 1);
     await room.connect("u", "t");
@@ -337,15 +337,24 @@ describe("NativeRoom room surface", () => {
     });
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     const sent = () => host.calls.filter(([n]) => n === "setScreenshareVolume");
-    // Unity is the backend's default, so only user-2's saved volume is sent.
-    expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 0.4]]]);
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+    ]);
+    host.calls.length = 0;
     volumes.set("user-3", 0);
-    room.applyScreenshareVolumes();
     room.applyScreenshareVolumes();
     expect(sent()).toEqual([
       ["setScreenshareVolume", [1, "user-2", 0.4]],
       ["setScreenshareVolume", [1, "user-3", 0]],
     ]);
+    // The backend keeps a gain for the session: a participant who left while
+    // it changed is sent the current one when they return.
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
+    volumes.set("user-2", 1);
+    host.calls.length = 0;
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+    expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {

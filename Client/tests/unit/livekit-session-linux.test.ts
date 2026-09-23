@@ -324,6 +324,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     await flush();
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
       ["setSubscribed", [1, "user-3", "TR_b", false]],
     ]);
   });
@@ -338,7 +339,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     emit({ session: 1, event: { type: "participantConnected", identity: "user-4" } });
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 0.5]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
       ["setVolume", [1, "user-4", 1]],
+      ["setScreenshareVolume", [1, "user-4", 1]],
     ]);
     host.commands.length = 0;
     // The volume menu, then the master output volume scaling everyone.

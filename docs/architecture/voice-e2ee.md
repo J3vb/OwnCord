@@ -424,7 +424,7 @@ shared `AudioElements` unchanged. The screen-share volume lives on
 `AudioElements`' audio elements on the web path, which native never creates,
 so `AudioElements` tells the native room when a tile's volume or mute or the
 output volume changes (a listener only `RoomLifecycle.createNativeRoom` sets)
-and the room re-sends the gains that changed. The volume menu, the tile's
+and the room re-sends every participant's gain. The volume menu, the tile's
 stream volume and mute, and the settings tab's Output Volume slider (no
 longer hidden on Linux) thus work as on Windows, persisted the same way
 (`userVolume_<id>:<host>`, `outputVolume`).

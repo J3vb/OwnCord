@@ -304,6 +304,7 @@ export class RoomLifecycle {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
+    this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
     if (room !== null) {
       room.removeAllListeners();
