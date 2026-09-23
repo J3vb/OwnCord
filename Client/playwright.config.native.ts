@@ -1,11 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
 /** Built Windows WebView2 app, isolated credentials/profile and local Go server.
- * Four projects share one built binary: `native-core` is the required CI
+ * Five projects share one built binary: `native-core` is the required CI
  * journey and `native-updater` the installer journey, while `native-no-auth`
- * (connect page, auth) and `native-authenticated` (layout, channel nav, chat,
- * DMs, settings, appearance, overlays) run in the same CI job. Binaries are
- * built in CI only.
+ * (connect page, auth), `native-authenticated` (layout, channel nav, chat,
+ * DMs, settings, appearance, overlays) and `native-extra` (window state, tray
+ * status, reload/DevTools keys, external links, push-to-talk) run in the same
+ * CI job. Binaries are built in CI only.
  */
 export default defineConfig({
   outputDir: "test-results/native",
@@ -54,6 +55,7 @@ export default defineConfig({
         "voice-controls.spec.ts",
         "pending-messages.spec.ts",
         "http-cancellation.spec.ts",
+        "long-session.spec.ts",
       ],
     },
     {
@@ -74,6 +76,13 @@ export default defineConfig({
         "overlays.spec.ts",
       ],
       dependencies: ["native-no-auth"],
+    },
+    {
+      // Own project, so its own worker: the window-state test launches its
+      // own app instances before the shared persistent app starts.
+      name: "native-extra",
+      testDir: "./tests/e2e/native",
+      testMatch: ["native-extra.spec.ts"],
     },
   ],
 });

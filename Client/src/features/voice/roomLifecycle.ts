@@ -29,7 +29,7 @@ import {
 } from "../../lib/screenShare";
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
-import type { SessionState } from "./sessionState";
+import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
@@ -149,6 +149,15 @@ export class RoomLifecycle {
     // OC-0438: publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
     const audioOptions = this.configuredAudioOptions(channelId ?? null);
+    // livekit-client 2.22's Room constructor, when this registry exists,
+    // registers its navigator.mediaDevices devicechange listener as a
+    // WeakRef closure that only the registry removes. The closure's scope
+    // still captures the Room, so the Room is never collected and every join
+    // leaked a whole Room (engine, participants, E2EE manager) for the page's
+    // lifetime. Without the registry it registers `handleDeviceChange`, which
+    // disconnect() removes from a Room that connected, and releaseRoom()
+    // removes from one discarded before it connected.
+    Room.cleanupRegistry = false;
     const newRoom = new Room({
       // Adaptive features reduce quality based on subscriber viewport —
       // disable for "source" quality to maintain full resolution.
@@ -209,11 +218,17 @@ export class RoomLifecycle {
    *  event wiring applies. */
   private async createNativeRoom(): Promise<Room> {
     const { createNativeRoom } = await import("./native/nativeRoom");
-    const nativeRoom = createNativeRoom({
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      autoGainControl: loadPref("autoGainControl", true),
-    });
+    const nativeRoom = createNativeRoom(
+      {
+        echoCancellation: loadPref("echoCancellation", true),
+        noiseSuppression: loadPref("noiseSuppression", true),
+        autoGainControl: loadPref("autoGainControl", true),
+        enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+      },
+      (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
+      (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
+    );
+    this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
     // The adapter is structurally the subset of Room the modules call; the
     // cast is the one seam where the two backends meet.
     const newRoom = nativeRoom as unknown as Room;
@@ -299,6 +314,7 @@ export class RoomLifecycle {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
+    this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
     if (room !== null) {
       room.removeAllListeners();

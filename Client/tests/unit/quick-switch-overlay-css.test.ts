@@ -7,12 +7,11 @@
 // it overflowed the fixed backdrop symmetrically above and below the fold
 // with nothing to scroll -- the first profile row and the "Add new server"
 // row (both children of .quick-switch-list) became unreachable.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe(".quick-switch-modal", () => {
-  const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+  const css = readAppCss();
 
   it("clamps its own height instead of overflowing the fixed backdrop", () => {
     const match = /\.quick-switch-modal\s*\{([^}]*)\}/.exec(css);

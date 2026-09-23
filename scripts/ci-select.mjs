@@ -158,6 +158,20 @@ const HARNESS_PREFIXES = ["Client/tests/e2e/", "Client/tests/browser/"];
  */
 const HARNESS_FILES = new Set(["Client/package.json", "Client/package-lock.json"]);
 
+/**
+ * The k6 load harness and its offline contract test. Both live under `Server/`,
+ * so the prefix branch below already selects `server` — this set pins the
+ * dependency explicitly, so narrowing that prefix later cannot silently stop a
+ * change to the harness from running the job whose offline test executes it.
+ * `docs-consistency` runs the test unconditionally today; this entry is what
+ * keeps `server` selected with the change once that stops being true.
+ */
+const K6_HARNESS_PATHS = new Set([
+  "Server/scripts/k6/ws-load.js",
+  "Server/scripts/k6/ws-load.test.mjs",
+]);
+export { K6_HARNESS_PATHS };
+
 /** Root files that change how every component is built or installed. */
 const ROOT_BUILD_FILES = new Set([
   "package.json",
@@ -220,6 +234,7 @@ export function classify(paths) {
     if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
+    if (K6_HARNESS_PATHS.has(path)) add("server");
     if (DEPS_FILES.has(path)) add("deps");
     if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
       add("harness");

@@ -1,0 +1,48 @@
+/* ── NSFW age gate ── */
+
+/* Covers the message area of a flagged channel until the reader accepts. Not a
+   modal: the channel is mounted and live underneath, and the sidebar and header
+   stay usable, so declining is a normal navigation rather than a trap. */
+.nsfw-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-primary);
+}
+.nsfw-gate-card {
+  max-width: 420px;
+  text-align: center;
+}
+.nsfw-gate-icon {
+  color: var(--red);
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+}
+.nsfw-gate-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+}
+.nsfw-gate-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.nsfw-gate-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin-bottom: 20px;
+}
+.nsfw-gate-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}

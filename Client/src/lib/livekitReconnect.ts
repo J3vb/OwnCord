@@ -6,6 +6,7 @@ import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
+import { releaseRoom } from "../features/voice/releaseRoom";
 
 const log = createLogger("livekitReconnect");
 
@@ -120,9 +121,8 @@ export async function attemptAutoReconnect(
       const newRoom = await deps.createRoom();
       attemptRoom = newRoom;
       const cleanupAbortedReconnect = async (): Promise<void> => {
-        newRoom.removeAllListeners();
         try {
-          await newRoom.disconnect();
+          await releaseRoom(newRoom);
         } catch (disconnectErr) {
           log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
         }
@@ -266,12 +266,9 @@ export async function attemptAutoReconnect(
       // Disconnected event would spawn a second, uncancellable reconnect
       // loop. null only if createRoom() itself threw.
       if (attemptRoom !== null) {
-        attemptRoom.removeAllListeners();
-        attemptRoom
-          .disconnect()
-          .catch((disconnectErr) =>
-            log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
-          );
+        releaseRoom(attemptRoom).catch((disconnectErr) =>
+          log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
+        );
       }
       // Return to idle so the next attempt starts fresh.
       const current = deps.getState();

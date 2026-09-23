@@ -13,12 +13,11 @@
 // except it writes the inline override on document.body instead of
 // documentElement -- so the override also needs a selector that reaches body
 // while high-contrast is active, not just one that targets html.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe("high-contrast CSS overrides beat inline theme styles", () => {
-  const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+  const css = readAppCss();
 
   function highContrastRuleBody(): string {
     const match = /\.high-contrast[^{]*\{([^}]*)\}/.exec(css);
