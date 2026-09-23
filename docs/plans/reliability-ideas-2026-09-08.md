@@ -216,17 +216,18 @@ Implemented 2026-09-23 against `dev` at
   is raised, not learned. After that each rate raises at the floor or three
   times the baseline, and learns only from healthy samples. Hysteresis: the
   first disk level and a stopped dispatch loop commit at once, and every other
-  change, including a rate's first warning, must hold for two samples; a rate clears below half its threshold, disk 10% above
-  its floor. A job warns after two consecutive failures and clears on one
-  success. Backups warn at 1.5× the schedule interval and go critical at 3×.
+  change, including a rate's first warning, must hold for two samples; a rate
+  clears below half its threshold, disk 10% above its floor. A job warns after
+  two consecutive failures and clears on one success. Backups warn at 1.5× the
+  schedule interval and go critical at 3×.
 - Warnings are deduplicated per signal and record first and last observation,
   occurrences, an action and `recovered_at`. Recovered entries are listed for
   24 hours and reopen in place. The state is in memory and served only to the
   admin API; nothing is exported to telemetry. Limit: a restart forgets
   recovered history, though the next samples re-raise any active condition.
 - Tests: `Server/service/attention_test.go` covers unknown handling, first
-  samples, hysteresis, warm-up, boot pressure, baseline, deduplication, expiry, dispatch,
-  jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
+  samples, hysteresis, warm-up, boot pressure, baseline, deduplication,
+  expiry, dispatch, jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
   the maintenance recording has `TestMaintenance_TickRecordsJobHealth`, and the
   panel has `Client/tests/contract/server-admin-static-attention.test.ts`.
 
