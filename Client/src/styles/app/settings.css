@@ -5,7 +5,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--bg-overlay);
   backdrop-filter: blur(8px);
   z-index: 500;
   display: none;
@@ -22,9 +22,9 @@
   height: 80vh;
   max-height: 720px;
   background: var(--bg-primary);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   position: relative;
 }
 .settings-sidebar {
@@ -35,11 +35,11 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-radius: 12px 0 0 12px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 .settings-cat {
   padding: 8px 12px 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -53,7 +53,7 @@
   margin: 1px 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: var(--text-muted);
   transition: all 0.1s;
   background: transparent;
@@ -66,7 +66,7 @@
 }
 .settings-nav-item.active {
   background: var(--bg-active);
-  color: white;
+  color: var(--header-primary);
 }
 .settings-sep {
   height: 1px;
@@ -77,7 +77,7 @@
   color: var(--red);
 }
 .settings-nav-item.danger:hover {
-  background: rgba(242, 63, 67, 0.1);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .settings-content {
@@ -87,13 +87,13 @@
   max-width: 720px;
 }
 .settings-content h1 {
-  font-size: 20px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  color: white;
+  color: var(--header-primary);
   margin-bottom: 24px;
 }
 .settings-content h3 {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -137,19 +137,19 @@
   border-bottom: none;
 }
 .setting-label {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: var(--text-normal);
   margin-bottom: 2px;
 }
 .setting-desc {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   margin-top: 4px;
 }
 .toggle {
   width: 40px;
   height: 24px;
-  border-radius: 12px;
+  border-radius: var(--radius-pill);
   background: var(--text-faint);
   cursor: pointer;
   position: relative;
@@ -164,8 +164,8 @@
   position: absolute;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
-  background: white;
+  border-radius: var(--radius-circle);
+  background: var(--on-fill);
   top: 3px;
   left: 3px;
   transition: transform 0.2s;
@@ -180,16 +180,16 @@
 .mic-meter-bar {
   position: relative;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   overflow: visible;
   cursor: pointer;
 }
 .mic-meter-level {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   width: 0%;
-  background: #43b581;
+  background: var(--green);
   transition: width 50ms linear;
   pointer-events: none;
 }
@@ -198,15 +198,15 @@
   top: -5px;
   width: 12px;
   height: 18px;
-  background: #fff;
-  border-radius: 6px;
+  background: var(--on-fill);
+  border-radius: var(--radius-sm);
   left: 50%;
   transform: translateX(-50%);
   opacity: 0.9;
   cursor: grab;
   pointer-events: auto;
   z-index: 1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-sm);
   transition: opacity 0.1s;
 }
 .mic-meter-threshold:hover {
@@ -226,7 +226,7 @@
   -webkit-appearance: none;
   appearance: none;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   outline: none;
 }
@@ -234,12 +234,12 @@
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent);
   cursor: pointer;
 }
 .slider-val {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   min-width: 40px;
   text-align: right;
@@ -255,7 +255,7 @@
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   transition: background 0.15s;
   margin-left: auto;
@@ -264,19 +264,20 @@
   background: var(--accent-hover);
 }
 .ac-btn.account-delete-btn {
-  background: var(--red);
+  background: var(--danger-fill);
+  color: var(--on-fill);
   margin-left: 0;
 }
 .ac-btn.account-delete-btn:hover {
-  background: #d83135;
+  background: var(--danger-fill-hover);
 }
 .ac-btn.account-delete-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 .account-delete-confirm {
-  background: rgba(242, 63, 67, 0.06);
-  border: 1px solid rgba(242, 63, 67, 0.2);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 20%, transparent);
   border-radius: var(--radius-sm);
   padding: 16px;
   margin-top: 12px;
@@ -297,7 +298,7 @@
 .account-avatar-large {
   width: 80px;
   height: 80px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent);
   display: flex;
   align-items: center;
@@ -313,7 +314,7 @@
   right: 4px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--green);
   border: 3px solid var(--bg-secondary);
 }
@@ -324,9 +325,9 @@
   padding: 12px 16px 16px;
 }
 .account-header-name {
-  font-size: 20px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  color: white;
+  color: var(--header-primary);
 }
 .account-fields {
   background: var(--bg-primary);
@@ -345,13 +346,13 @@
   border-bottom: none;
 }
 .account-field-label {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
 }
 .account-field-value {
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   color: var(--text-normal);
   margin-top: 4px;
 }
@@ -359,8 +360,8 @@
   padding: 4px 16px;
   border-radius: var(--radius-sm);
   background: var(--bg-active);
-  color: white;
-  font-size: 13px;
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s;
@@ -389,30 +390,30 @@
   min-width: 0;
 }
 .session-device {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .session-current {
   margin-left: 8px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--green);
-  color: #fff;
-  font-size: 11px;
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 .session-detail {
   margin-top: 2px;
   color: var(--text-normal);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 /* Section title (larger heading like Discord's "Password and Authentication") */
 .settings-section-title {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  color: white;
+  color: var(--header-primary);
   margin-bottom: 16px;
 }
 
@@ -426,7 +427,7 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   gap: 12px;
   transition: background 0.1s ease;
@@ -440,16 +441,16 @@
 .settings-status-dot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   flex-shrink: 0;
 }
 .settings-status-label {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--text-normal);
 }
 .settings-status-desc {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   margin-top: 1px;
 }
@@ -466,7 +467,7 @@
 .settings-sidebar-avatar {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent);
   display: flex;
   align-items: center;
@@ -477,12 +478,12 @@
   flex-shrink: 0;
 }
 .settings-sidebar-name {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: white;
+  color: var(--header-primary);
 }
 .settings-sidebar-edit {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -515,7 +516,7 @@
   gap: 4px;
 }
 .settings-esc-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   font-weight: 600;
 }
@@ -539,7 +540,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   transition: all 0.15s;
 }
@@ -549,17 +550,23 @@
 .theme-opt.active {
   border-color: var(--accent);
 }
+/* Each tile previews its own theme whatever theme is active, so these are
+   that theme's surface and text colours, not tokens (THEMES in helpers.ts). */
 .theme-opt.dark {
   background: #313338;
-  color: white;
+  color: #f2f3f5;
+}
+.theme-opt.neon-glow {
+  background: #17181b;
+  color: #f4f5f7;
 }
 .theme-opt.light {
   background: #f2f3f5;
-  color: #313338;
+  color: #2a2c31;
 }
 .theme-opt.midnight {
-  background: #0d0d0d;
-  color: #b5bac1;
+  background: #1a1a2e;
+  color: #f4f5fa;
 }
 /* Accent color picker */
 .accent-swatches {
@@ -571,7 +578,7 @@
 .accent-swatch {
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   cursor: pointer;
   border: none;
   transition: transform 0.12s;
@@ -581,7 +588,7 @@
 }
 .accent-swatch.active {
   box-shadow:
-    0 0 0 2px white,
+    0 0 0 2px var(--bg-primary),
     0 0 0 4px currentColor;
 }
 .accent-hex-row {
@@ -591,12 +598,12 @@
   margin-top: 4px;
 }
 .accent-hex-prefix {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: var(--text-muted);
   user-select: none;
 }
 .keybind-section-header {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -616,20 +623,20 @@
   border-radius: var(--radius-sm);
   padding: 4px 8px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-normal);
 }
 
 /* ── Safety: My reports (B9-10) ── */
 .my-reports h2 {
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--header-primary);
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
 }
 .my-reports-status {
-  margin: 12px 0;
-  font-size: 14px;
+  margin: var(--space-3) 0;
+  font-size: var(--font-size-md);
   color: var(--text-muted);
 }
 .my-reports-status:empty {
@@ -637,30 +644,30 @@
 }
 .my-reports-list {
   list-style: none;
-  margin: 12px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .my-reports-item {
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   overflow-wrap: anywhere;
 }
 .my-reports-what {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: var(--text-normal);
 }
 .my-reports-state {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--header-primary);
 }
 .my-reports-when {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
 }

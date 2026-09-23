@@ -52,6 +52,7 @@ import { getUserRole, resolveAuthor, roleColorVar } from "./formatting";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
+import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
 import { reactionLockReason, renderReactions, wireReactionControl } from "./reactions";
@@ -233,6 +234,7 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
+  const roleColor = roleColorVar(role);
   const authorEl = createElement(
     "span",
     {
@@ -240,7 +242,8 @@ export function renderMessage(
       // The username stays as the title so the handle you would @mention is
       // one hover away even when a display name is standing in for it.
       title: author.username,
-      style: `color: ${roleColorVar(role)}`,
+      style: `color: ${readableRoleColor(roleColor)}`,
+      "data-role-color": roleColor,
     },
     resolveDisplayName(author),
   );

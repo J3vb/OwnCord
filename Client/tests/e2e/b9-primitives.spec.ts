@@ -63,13 +63,16 @@ const TEXT_TOKENS = [
 const UNQUALIFIED_TEXT = ["--text-faint", "--text-micro"] as const;
 const ACCENT_FILLS = ["--accent", "--accent-hover", "--accent-active"] as const;
 
-/** Each theme's tested accent text/focus colour: the Q8 fallback target. */
+/** Each theme's tested accent text and focus colours: the Q8 fallback targets. */
 const THEME_ACCENT_TEXT: Record<Theme, string> = {
-  dark: "#949cf7",
-  "neon-glow": "#00c8ff",
-  midnight: "#949cf7",
-  light: "#4752c4",
+  dark: "#a3aaf8",
+  "neon-glow": "#2fd0ff",
+  midnight: "#a3aaf8",
+  light: "#4150c4",
 };
+const THEME_FOCUS_RING: Record<Theme, string> = { ...THEME_ACCENT_TEXT, light: "#4752c4" };
+/** The surfaces a control sits on: its edge must reach 3:1 on each (B9 Q13, 1.4.11). */
+const CONTROL_SURFACES = ["--bg-primary", "--bg-secondary"] as const;
 
 async function openApp(page: Page): Promise<void> {
   await mockTauriConnect(page);
@@ -100,11 +103,13 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
           const textPairs = TEXT_TOKENS.flatMap((t) => SURFACES.map((s) => [t, s] as const));
           const focusPairs = SURFACES.map((s) => ["--focus-ring", s] as const);
           const onAccentPairs = ACCENT_FILLS.map((f) => ["--on-accent", f] as const);
+          const controlPairs = CONTROL_SURFACES.map((s) => ["--border-control", s] as const);
           const extraPairs = UNQUALIFIED_TEXT.flatMap((t) => SURFACES.map((s) => [t, s] as const));
           const ratios = await tokenContrasts(page, [
             ...textPairs,
             ...focusPairs,
             ...onAccentPairs,
+            ...controlPairs,
             ...extraPairs,
           ]);
           const check = (
@@ -127,6 +132,8 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
           at += focusPairs.length;
           const onAccent = check(onAccentPairs, at, Q1.text);
           at += onAccentPairs.length;
+          const controlEdge = check(controlPairs, at, Q1.nonText);
+          at += controlPairs.length;
           const unqualified = check(extraPairs, at, 0);
 
           // Q8 as aligned with Q1: the accent is the text colour only at
@@ -139,15 +146,15 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
               : Math.min(
                   ...surfaces.map((s) => contrastRatio(parseColor(accent)!, parseColor(s)!)),
                 );
-          const honoured = (min: number): string =>
-            accent !== null && !highContrast && accentMin >= min
-              ? accent
-              : THEME_ACCENT_TEXT[theme];
+          const honoured = (min: number, fallback: string): string =>
+            accent !== null && !highContrast && accentMin >= min ? accent : fallback;
+          const expectedText = honoured(Q1.text, THEME_ACCENT_TEXT[theme]);
+          const expectedFocus = honoured(Q1.focus, THEME_FOCUS_RING[theme]);
           const accentText = await tokenHex(page, "--accent-text");
           const focusRing = await tokenHex(page, "--focus-ring");
-          if (accentText !== honoured(Q1.text) || focusRing !== honoured(Q1.focus)) {
+          if (accentText !== expectedText || focusRing !== expectedFocus) {
             failures.push(
-              `${label}: --accent-text ${accentText} (expected ${honoured(Q1.text)}), --focus-ring ${focusRing} (expected ${honoured(Q1.focus)})`,
+              `${label}: --accent-text ${accentText} (expected ${expectedText}), --focus-ring ${focusRing} (expected ${expectedFocus})`,
             );
           }
           rows.push({
@@ -161,6 +168,7 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
             text,
             focus,
             onAccent_fills: onAccent,
+            controlEdge,
             unqualified,
           });
         }
@@ -168,6 +176,50 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
 
       await testInfo.attach(`token-matrix-${theme}.json`, {
         body: JSON.stringify(rows, null, 2),
+        contentType: "application/json",
+      });
+      expect(failures).toEqual([]);
+    });
+  }
+});
+
+test.describe("B9 Q13 role colours as text (role clamp)", () => {
+  // Role colours are server-set: MOCK_ROLES paints admins #ff0000 (4.00:1 on
+  // white, 2.84:1 on dark) and moderators #00aaff. A role colour is a name's
+  // colour only at 4.5:1 on every surface, otherwise the name is --text-normal.
+  const NAMES = ".msg-author, .member-item:not(.offline) .mi-name";
+
+  for (const theme of THEMES) {
+    test(`${theme}: every role-coloured name reads at 4.5:1, in High Contrast too`, async ({
+      page,
+    }, testInfo) => {
+      await mockTauriFullSessionWithMessages(page);
+      await page.goto("/");
+      await navigateToMainPageReady(page);
+      const measured: Record<string, number> = {};
+      const failures: string[] = [];
+      for (const highContrast of [false, true]) {
+        await setAppearance(page, { theme, highContrast, accent: null });
+        await navigateToMainPageReady(page);
+        const names = page.locator(NAMES);
+        await expect(names.first()).toBeVisible();
+        expect(await names.count()).toBeGreaterThan(1);
+        for (let i = 0; i < (await names.count()); i++) {
+          const name = names.nth(i);
+          const label = `hc=${highContrast} ${await name.getAttribute("data-role-color")} ${await name.textContent()}`;
+          const { ratio } = await textContrast(name);
+          measured[label] = Number(ratio.toFixed(2));
+          if (ratio < Q1.text) failures.push(`${label} ${ratio.toFixed(2)} < ${Q1.text}`);
+        }
+      }
+
+      // Control: the raw server colour is what the clamp stood between.
+      const admin = page.locator(".msg-author[data-role-color='#ff0000']").first();
+      await admin.evaluate((el: HTMLElement) => (el.style.color = el.dataset["roleColor"]!));
+      expect((await textContrast(admin)).ratio).toBeLessThan(Q1.text);
+
+      await testInfo.attach(`role-clamp-${theme}.json`, {
+        body: JSON.stringify(measured, null, 2),
         contentType: "application/json",
       });
       expect(failures).toEqual([]);

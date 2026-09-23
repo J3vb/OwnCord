@@ -21,6 +21,7 @@ import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
+import { readableRoleColor } from "@lib/themes";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -233,7 +234,11 @@ function createMemberItem(
   // Name + custom status stack. The custom status is only rendered when there
   // is one, so a member without it keeps the single-line row it always had.
   const nameWrap = createElement("div", { class: "mi-text" });
-  const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
+  const name = createElement("span", {
+    class: "mi-name",
+    style: `color: ${readableRoleColor(colorVar)}`,
+    "data-role-color": colorVar,
+  });
   setText(name, memberDisplayName(member));
   nameWrap.appendChild(name);
   const custom = member.customStatus;

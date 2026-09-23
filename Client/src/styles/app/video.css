@@ -14,7 +14,7 @@
   height: 100%;
   align-content: center;
   justify-content: center;
-  background: var(--bg-primary, #313338);
+  background: var(--bg-primary);
 }
 
 .video-cell {
@@ -39,18 +39,18 @@
   position: absolute;
   bottom: 8px;
   left: 8px;
-  color: #fff;
-  font-size: 13px;
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 3px var(--scrim);
   padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
 }
 
 .vw-controls .active-ctrl {
-  background: var(--brand-primary, #5865f2);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* ── Video tile overlay (mute button) ── */
@@ -71,9 +71,9 @@
   opacity: 1;
 }
 .tile-mute-btn {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--text-normal);
   padding: 4px;
   cursor: pointer;
@@ -82,29 +82,29 @@
   justify-content: center;
 }
 .tile-mute-btn:hover {
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--scrim-strong);
 }
 .tile-volume-slider {
   width: 80px;
   height: 4px;
   appearance: none;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 2px;
+  background: var(--scrim-hover);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .tile-volume-slider::-webkit-slider-thumb {
   appearance: none;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  background: #fff;
+  border-radius: var(--radius-circle);
+  background: var(--on-fill);
   cursor: pointer;
 }
 .tile-volume-slider::-moz-range-thumb {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  background: #fff;
+  border-radius: var(--radius-circle);
+  background: var(--on-fill);
   border: none;
   cursor: pointer;
 }
@@ -144,7 +144,7 @@
   height: 100%;
   cursor: pointer;
   border: 2px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .video-focus-strip .video-cell video {
   object-fit: cover;

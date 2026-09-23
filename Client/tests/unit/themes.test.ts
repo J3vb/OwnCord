@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyAccent, applyThemeByName, getActiveThemeName, restoreTheme } from "@lib/themes";
+import {
+  applyAccent,
+  applyThemeByName,
+  getActiveThemeName,
+  readableRoleColor,
+  restoreTheme,
+} from "@lib/themes";
 
 describe("themes", () => {
   beforeEach(() => {
@@ -145,5 +151,63 @@ describe("applyAccent (B9-2, owner decision Q8)", () => {
     applyAccent("url(evil)");
     expect(html.length).toBe(0);
     expect(body.length).toBe(0);
+  });
+});
+
+describe("readableRoleColor (B9 Q13 role clamp)", () => {
+  const html = document.documentElement.style;
+
+  function setSurfaces(surfaces: readonly [string, string, string, string]): void {
+    for (const [i, token] of [
+      "--bg-primary",
+      "--bg-secondary",
+      "--bg-tertiary",
+      "--bg-input",
+    ].entries()) {
+      html.setProperty(token, surfaces[i]!);
+    }
+    // A theme switch is what re-reads the surfaces and empties the cache.
+    applyThemeByName("dark");
+  }
+  const DARK = ["#313338", "#2b2d31", "#1e1f22", "#383a40"] as const;
+  const LIGHT = ["#ffffff", "#f2f3f5", "#e3e5e8", "#ebedef"] as const;
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    for (let i = html.length - 1; i >= 0; i--) html.removeProperty(html.item(i));
+  });
+
+  it("keeps a role colour that reads at 4.5:1 on every surface", () => {
+    setSurfaces(DARK);
+    expect(readableRoleColor("#57f287")).toBe("#57f287");
+    expect(readableRoleColor("rgb(87, 242, 135)")).toBe("#57f287");
+  });
+
+  it("falls back to --text-normal below 4.5:1, like --accent-text", () => {
+    setSurfaces(LIGHT);
+    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 4.00:1 on white
+    expect(readableRoleColor("#57f287")).toBe("var(--text-normal)");
+    setSurfaces(DARK);
+    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 2.9:1 on #383a40
+  });
+
+  it("never hands back the raw server string", () => {
+    setSurfaces(DARK);
+    const out = readableRoleColor("#57f287; background: url(https://example.invalid/x)");
+    expect(out).toMatch(/^(#[0-9a-f]{6}|var\(--text-normal\))$/);
+  });
+
+  it("re-clamps rendered names when the theme changes", () => {
+    setSurfaces(DARK);
+    const name = document.createElement("span");
+    name.dataset["roleColor"] = "#57f287";
+    name.style.color = readableRoleColor("#57f287");
+    document.body.appendChild(name);
+    expect(name.style.color).toBe("rgb(87, 242, 135)");
+
+    setSurfaces(LIGHT);
+    expect(name.style.color).toBe("var(--text-normal)");
+    setSurfaces(DARK);
+    expect(name.style.color).toBe("rgb(87, 242, 135)");
   });
 });

@@ -8,25 +8,21 @@
   overflow: hidden;
 }
 .unified-sidebar-header {
-  height: 44px;
-  padding: 0 14px;
+  min-height: 44px;
+  padding: 8px 14px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   border-bottom: 1px solid var(--border-glow, var(--border));
   flex-shrink: 0;
 }
-/* Invite, Audit Log and Moderation are wider together than the sidebar, so
-   with the Moderation entry shown the header wraps the buttons that do not
-   fit onto a second, right-aligned row instead of pushing one under the chat
-   column. */
-.unified-sidebar-header.with-moderation {
-  height: auto;
-  min-height: 44px;
-  padding: 8px 14px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  row-gap: 6px;
+/* The server name owns the first row, so Invite, Audit Log and Moderation
+   wrap onto a row under it instead of truncating the name (B9 Q13, F8). The
+   name column is the icon's next sibling; 38px is the icon plus the gap. */
+.unified-sidebar-header > .server-icon-sm + * {
+  flex: 1 1 calc(100% - 38px);
+  min-width: 0;
 }
 .unified-sidebar-header .server-icon-sm {
   width: 28px;
@@ -41,21 +37,24 @@
   font-weight: 700;
 }
 .unified-sidebar-header .server-name {
-  color: white;
+  color: var(--header-primary);
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .unified-sidebar-header .server-online {
   color: var(--text-micro);
-  font-size: 9px;
+  font-size: var(--font-size-xxs);
 }
 .sidebar-invite-btn {
-  margin-left: auto;
+  margin-left: 38px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   background: var(--accent-primary, var(--accent));
   color: var(--on-accent);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -92,9 +91,9 @@
   background: var(--bg-hover);
 }
 .channel-sidebar-header h2 {
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
-  color: white;
+  color: var(--header-primary);
 }
 /* Mark All as Read — only rendered visible while something is unread. */
 .sidebar-mark-all-read {
@@ -139,7 +138,7 @@
   align-items: center;
 }
 .category-name {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   letter-spacing: 0.5px;
@@ -147,7 +146,7 @@
 }
 .category-add-btn {
   margin-left: auto;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   color: var(--text-faint);
   cursor: pointer;
   padding: 0 4px;
@@ -190,7 +189,7 @@
 }
 .channel-item.active {
   background: var(--bg-active);
-  color: white;
+  color: var(--header-primary);
 }
 /* Voice join/leave frozen while the WS socket is down (docs/architecture/ux/README.md §3). */
 .channel-item.voice.disabled {
@@ -205,7 +204,7 @@
 .ch-restriction {
   padding: 0 8px 4px 36px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 .channel-draggable {
@@ -228,7 +227,7 @@
   box-shadow:
     0 2px 0 var(--accent) inset,
     0 -2px 0 var(--accent) inset;
-  background: rgba(88, 101, 242, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-sm);
 }
 .channel-item .ch-icon {
@@ -244,17 +243,17 @@
   opacity: 1;
 }
 .channel-item .ch-name {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   flex: 1;
 }
 .channel-item .unread-badge {
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 10px;
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   min-width: 18px;
   height: 18px;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -265,13 +264,13 @@
 }
 /* Mention badge — red, and rendered instead of (never beside) the unread badge. */
 .channel-item .mention-badge {
-  background: var(--red);
-  color: white;
-  font-size: 10px;
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   min-width: 18px;
   height: 18px;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -281,11 +280,11 @@
   display: none;
 }
 .channel-item.mentioned .ch-name {
-  color: white;
+  color: var(--header-primary);
   font-weight: 600;
 }
 .channel-item.unread .ch-name {
-  color: white;
+  color: var(--header-primary);
   font-weight: 600;
 }
 .channel-item.unread::before {
@@ -296,8 +295,8 @@
   transform: translateY(-50%);
   width: 4px;
   height: 8px;
-  border-radius: 0 4px 4px 0;
-  background: white;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--header-primary);
 }
 
 /* Voice users nested in sidebar */
@@ -311,7 +310,7 @@
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   overflow: hidden;
 }
@@ -334,13 +333,13 @@
   justify-content: center;
   font-size: 9px;
   font-weight: 700;
-  color: white;
+  color: var(--on-fill);
   flex-shrink: 0;
 }
 .voice-user-item.speaking .vu-avatar {
   box-shadow:
     0 0 0 2px var(--green),
-    0 0 8px rgba(35, 165, 90, 0.3);
+    0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
   animation: speak-pulse 1.5s ease-in-out infinite;
 }
 @keyframes speak-pulse {
@@ -348,12 +347,12 @@
   100% {
     box-shadow:
       0 0 0 2px var(--green),
-      0 0 8px rgba(35, 165, 90, 0.3);
+      0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
   }
   50% {
     box-shadow:
       0 0 0 2px var(--green),
-      0 0 14px rgba(35, 165, 90, 0.5);
+      0 0 14px color-mix(in srgb, var(--green) 50%, transparent);
   }
 }
 .voice-user-item .vu-status,
@@ -386,12 +385,12 @@
 
 /* ── LIVE badge (voice channel sidebar) ── */
 .vu-live-badge {
-  background: #ed4245;
-  color: white;
-  font-size: 10px;
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   margin-left: 2px;
   flex-shrink: 0;
 }
@@ -408,8 +407,8 @@
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
-  border: 1px solid rgba(0, 200, 255, 0.15);
-  box-shadow: 0 0 4px rgba(0, 200, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
   display: block;
 }
 .vu-preview video.preview-camera {
@@ -423,7 +422,7 @@
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
-  border: 1px solid rgba(0, 200, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--accent) 8%, transparent);
   display: flex;
   flex-direction: column;
   align-items: center;

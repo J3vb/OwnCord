@@ -3,6 +3,18 @@
    Extracted from ui-mockup.html
    ═══════════════════════════════════════════ */
 
+/* Inter Variable (SIL OFL 1.1, assets/fonts/Inter-OFL.txt), bundled so the
+   Linux builds get a designed UI font. It is only a fallback after Segoe UI
+   in --font-body/--font-display, so Windows never loads it; font-src is
+   'self', and it is never fetched from a CDN. */
+@font-face {
+  font-family: "Inter Variable";
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -90,11 +102,11 @@ a {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-auto-thumb);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #232428;
+  background: var(--interactive-muted);
 }
 
 /* Thin scrollbar for sidebars */

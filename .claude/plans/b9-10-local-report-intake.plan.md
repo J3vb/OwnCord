@@ -238,7 +238,9 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   B9-5 (#1761) applied Firstmate's shared B9 lane budgets of 2026-09-23, a
   design call under the owner's standing delegation
   (MainPage 64,000 B, startup 93,000 B; re-baselined at B9-26): merged,
-  MainPage is 60,133 B and the startup closure 91,282 B.
+  MainPage is 60,133 B and the startup closure 91,282 B; after Refined Neon
+  (#1764), 60,176 B and 91,816 B, with the report CSS on the new spacing and
+  type-scale tokens.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
   and its Report button, could not be reached from the keyboard. A row is now a
   named `role="button"` with `tabindex="0"` that opens the profile on Enter or
