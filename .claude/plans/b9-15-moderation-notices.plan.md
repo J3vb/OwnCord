@@ -228,9 +228,11 @@ render path as a fallback; fail closed and record a blocker instead.
   history read measures the offset from that row's `created_at` (a fast or
   slow local clock both end the timeout at the server's expiry). A
   `TIMED_OUT` refusal that the local clock contradicts pulls the clock back
-  to a minute before the newest unlifted timeout's expiry; the next refusal
-  revalidates it. A fast clock never silently drops a server-confirmed
-  timeout.
+  only to 2 s inside the newest unlifted timeout's expiry, so a 3 s-fast
+  clock unlocks within seconds of the real expiry, not a minute later. A
+  badly skewed clock may unlock early and be refused again; each refusal
+  re-pulls the offset. A fast clock never silently drops a
+  server-confirmed timeout.
 - **History as authority:** each read sets the timeout from the unlifted,
   unexpired row, drops notices acknowledged on another device, restores an
   unacknowledged warning whose frame was missed, and replaces a live
@@ -302,7 +304,7 @@ At `fm/b9-15-impl` (commit on the branch; exact-SHA CI in the PR):
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Types           | `npx tsc --noEmit`; `npx tsc -p tsconfig.e2e.json --noEmit`                                                                                 | clean                                                                                                                                |
 | Lint            | `npm run lint` (oxlint, cycles, eslint)                                                                                                     | clean                                                                                                                                |
-| Unit            | `npx vitest run --maxWorkers=4`                                                                                                             | all pass, incl. `src/features/safety/safety.test.ts` (23) and the new cases in `channel-controller`/`channel-sidebar`/`message-list` |
+| Unit            | `npx vitest run --maxWorkers=4`                                                                                                             | all pass, incl. `src/features/safety/safety.test.ts` (24) and the new cases in `channel-controller`/`channel-sidebar`/`message-list` |
 | Failing control | gates removed one at a time (composer/reaction/voice timeout checks, latest-read guard, pending-ack keep, focus-safe reorder, 404 handling) | 19 tests failed, all restored                                                                                                        |
 | Budgets         | `npm run build:budget && npm run check:budgets`                                                                                             | MainPage 59,928 B / 60,000; startup 89,836 B / 91,000 (no budget raised)                                                             |
 | Docs/hygiene    | `npm run check:docs`; `npm run check:hygiene`                                                                                               | pass                                                                                                                                 |

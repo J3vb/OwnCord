@@ -291,14 +291,43 @@ describe("safety ws handlers", () => {
       handleTimedOutRefusal(api, { code: "TIMED_OUT", message: "you are timed out" });
       await settle();
       expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
-      // With no server clock to read, it stays advisory: it lapses after a minute
-      // and the next refusal revalidates it.
-      await vi.advanceTimersByTimeAsync(MIN + 1);
+      // With no server clock to read, it stays advisory: it lapses just inside
+      // the expiry and the next refusal revalidates it.
+      await vi.advanceTimersByTimeAsync(2_001);
       expect(safetyStore.getState().timeout).toBeNull();
       handleTimedOutRefusal(api, { code: "TIMED_OUT", message: "you are timed out" });
       await settle();
       expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
     });
+  });
+
+  it("a refusal on a clock 3 s fast unlocks within seconds of the real expiry", async () => {
+    const SERVER_NOW = Date.UTC(2026, 8, 23, 12, 0, 0);
+    vi.useFakeTimers({ now: SERVER_NOW + 3_000 });
+    try {
+      const until = new Date(SERVER_NOW + 10 * 60_000).toISOString();
+      const api = {
+        listBlocks: vi.fn(),
+        getOwnModeration: vi
+          .fn()
+          .mockResolvedValue([
+            row({ id: 4, kind: "timeout", created_at: earlier(), expires_at: until }),
+          ]),
+      };
+      applyReadySafety(api, ready([]));
+      await settle();
+      expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+      // The local clock ends it 3 s early, and the send that follows is refused.
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 3_000);
+      expect(safetyStore.getState().timeout).toBeNull();
+      handleTimedOutRefusal(api, { code: "TIMED_OUT", message: "you are timed out" });
+      await settle();
+      expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect(safetyStore.getState().timeout).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a TIMED_OUT refusal revalidates against the server; other errors do not", () => {

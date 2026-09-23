@@ -64,13 +64,12 @@ let confirmed: { readonly at: number; readonly id: number | null } | null = null
 const MAX_DELAY_MS = 2 ** 31 - 1;
 
 /**
- * How long a server-confirmed timeout that the local clock already reads as
- * expired is assumed to have left.
- * ponytail: the server's clock is never read directly, so a fast clock the
- * server contradicts is only corrected to this margin; the next refusal
- * revalidates it.
+ * How far inside its expiry a server-confirmed timeout that the local clock
+ * already reads as expired is assumed to be.
+ * ponytail: the server's clock is never read directly, so a badly skewed
+ * clock may unlock early and be refused again; each refusal re-pulls the skew.
  */
-const REVALIDATE_MS = 60_000;
+const REFUSAL_MARGIN_MS = 2_000;
 
 /** The server's clock, as far as the client can tell. */
 export function serverNow(): number {
@@ -160,11 +159,8 @@ export function activeTimeoutIn(rows: readonly OwnModerationAction[]): string | 
 }
 
 /** A clock reading past a timeout the server said was in force at `at` is fast: pull it back inside. */
-function assumeInForce(at: number, expiresAt: string, createdAt?: string): void {
-  const end = serverTime(expiresAt);
-  if (at - clockSkewMs < end) return;
-  const start = createdAt === undefined ? -Infinity : serverTime(createdAt);
-  clockSkewMs = at - Math.max(start, end - REVALIDATE_MS);
+function assumeInForce(at: number, expiresAt: string): void {
+  clockSkewMs = Math.max(clockSkewMs, at - serverTime(expiresAt) + REFUSAL_MARGIN_MS);
 }
 
 /**
@@ -195,7 +191,7 @@ function measureClock(rows: readonly OwnModerationAction[]): void {
     undefined,
   );
   if (newest !== undefined && newest.expires_at !== null) {
-    assumeInForce(at, newest.expires_at, newest.created_at);
+    assumeInForce(at, newest.expires_at);
   }
 }
 
