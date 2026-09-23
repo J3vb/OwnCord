@@ -15,8 +15,9 @@ import { dmStore } from "@stores/dm.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { NAVIGATION_DESTINATIONS } from "../navigation/destinations";
-import { buildInbox } from "./Inbox";
+import { renderInbox } from "./Inbox";
 import { messageRequestsStore, pendingRequestCount, resetMessageRequests } from "./store";
+import { buildInbox } from "./view";
 import { applyReadyDmRequests, handleDmRequest } from "./wsHandlers";
 
 function item(id: number, content: string | null = `hello ${id}`): DmRequestListItem {
@@ -213,9 +214,23 @@ function authOk(replaySource: "none" | "buffer" | "db") {
 }
 
 describe("wiring", () => {
-  it("is the registered requests destination", () => {
+  it("is the registered requests destination, and loads the inbox on open", async () => {
     expect(NAVIGATION_DESTINATIONS.requests?.build).toBe(buildInbox);
     expect(NAVIGATION_DESTINATIONS.requests?.pending).toBe(pendingRequestCount);
+
+    const owner = new AbortController();
+    const root = buildInbox({ signal: owner.signal, close: () => {} });
+    expect(root.dataset["testid"]).toBe("requests-inbox");
+    await vi.waitFor(() => expect(root.querySelector("[role='status']")).not.toBeNull());
+    owner.abort();
+
+    // Closed before the view loaded: nothing renders into it.
+    const gone = new AbortController();
+    const late = buildInbox({ signal: gone.signal, close: () => {} });
+    gone.abort();
+    await import("./Inbox");
+    await settle();
+    expect(late.childElementCount).toBe(0);
   });
 
   it("routes dm_request frames into the inbox", () => {
@@ -256,7 +271,8 @@ describe("inbox view", () => {
 
   function open(): HTMLElement {
     owner = new AbortController();
-    root = buildInbox({ signal: owner.signal });
+    root = document.createElement("div");
+    renderInbox(root, owner.signal);
     document.body.appendChild(root);
     return root;
   }

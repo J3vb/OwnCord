@@ -43,9 +43,8 @@ function renderRequest(r: MessageRequest): HTMLLIElement {
   return item;
 }
 
-/** The requests destination's view builder (navigation/destinations.ts). */
-export function buildInbox({ signal }: { readonly signal: AbortSignal }): HTMLElement {
-  const root = createElement("div", { class: "requests-inbox", "data-testid": "requests-inbox" });
+/** Fill the inbox view's root (view.ts loads this module on first open). */
+export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   const intro = createElement("p", { class: "requests-intro" }, t("intro"));
   const status = createElement("p", {
     class: "requests-status",
@@ -89,5 +88,4 @@ export function buildInbox({ signal }: { readonly signal: AbortSignal }): HTMLEl
     uiStore.subscribeSelector((s) => s.connectionStatus, render),
   ];
   signal.addEventListener("abort", () => unsubs.forEach((u) => u()), { once: true });
-  return root;
 }
