@@ -4,10 +4,8 @@ Investigation: 2026-09-23. Base: `dev` at
 `233b93f42ad941e00f43f2a62494707bdd30fe6e`. **Status: open pending operational
 qualification on both TLS legs.** Published capacity budgets are unchanged.
 
-The exact proposed ledger evidence update is preserved in
-`ledger-update.patch` (`git apply docs/performance/oc-0445/ledger-update.patch`).
-The 1.5-MB ledger upload was interrupted before reaching GitHub; the existing
-entry remains open and the evidence is recorded here for review.
+The OC-0445 ledger entry carries this evidence and stays open until the
+operational run below qualifies the fix.
 
 ## Validation
 
