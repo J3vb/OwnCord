@@ -377,7 +377,7 @@ describe("AppearanceTab — Accessibility", () => {
     light.click();
 
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
-    expect(document.documentElement.style.getPropertyValue("--text-normal")).toBe("#313338");
+    expect(document.documentElement.style.getPropertyValue("--text-normal")).toBe("#2a2c31");
   });
 
   // --- Hex input truncates to 6 chars ---

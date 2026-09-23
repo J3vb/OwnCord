@@ -29,8 +29,13 @@
      text colour below 4.5:1 and its focus colour below 3:1.
      See docs/architecture/b9-ui-contract.md. */
   --on-accent: #ffffff;
-  --accent-text: #949cf7;
-  --focus-ring: #949cf7;
+  /* Text and icons on a saturated or media fill that is the same in every
+     theme: --danger-fill, status and role-coloured avatars, dark scrims. */
+  --on-fill: #ffffff;
+  /* Text on the --yellow warning fill, the same in every theme. */
+  --on-warning: #1e1f22;
+  --accent-text: #a3aaf8;
+  --focus-ring: #a3aaf8;
 
   /* Theme contract — overrideable by custom themes */
   --accent-primary: var(--accent);
@@ -42,15 +47,15 @@
   --text-normal: #dbdee1;
   /* Qualified text (>= 4.5:1 on every --bg-* surface, B9-2). --text-faint and
      --text-micro are NOT qualified: decorative or incidental text only. */
-  --text-muted: #a0a6ae;
+  --text-muted: #a9aeb6;
   --text-faint: #80848e;
   --text-micro: #6d6f78;
-  --text-link: #14affc;
+  --text-link: #4cc0ff;
 
   /* Semantic text aliases */
-  --text-positive: #51b87d;
-  --text-warning: #f0b232;
-  --text-danger: #f78487;
+  --text-positive: #62c28c;
+  --text-warning: #f2b84b;
+  --text-danger: #ff9a9c;
 
   /* Header colors */
   --header-primary: #f2f3f5;
@@ -71,12 +76,15 @@
   --red: #f23f43;
 
   /* Destructive button fill: white text needs >= 4.5:1, which --red misses */
-  --danger-fill: #d83135;
+  --danger-fill: #d0302f;
   --danger-fill-hover: #b3272a;
 
-  /* Borders */
+  /* Borders. --border-control is the edge of an input or other control:
+     >= 3:1 against --bg-primary and --bg-secondary (WCAG 1.4.11, B9 Q13).
+     --border and --border-strong are decorative separators only. */
   --border: #3f4147;
   --border-strong: #4e5058;
+  --border-control: #7a7f89;
 
   /* Role colors */
   --role-owner: #e74c3c;
@@ -87,6 +95,17 @@
   /* Elevation shadows */
   --elevation-low: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(4, 4, 5, 0.05);
   --elevation-high: 0 8px 16px rgba(0, 0, 0, 0.24);
+  /* Floating surfaces: buttons and chips, then menus and toasts, then pickers
+     and dialogs. */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+
+  /* Scrims over media (video, images, GIFs) and the controls drawn on them:
+     dark in every theme, with --on-fill text. --bg-overlay is the 0.7 step. */
+  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim-strong: rgba(0, 0, 0, 0.85);
+  --scrim-hover: rgba(255, 255, 255, 0.2);
 
   /* Scrollbar colors */
   --scrollbar-thin-thumb: #1a1b1e;
@@ -98,26 +117,41 @@
   --transition-normal: 170ms ease;
   --transition-slow: 200ms ease;
 
-  /* Typography */
-  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* Typography. Segoe UI Variable on Windows; everywhere else (the Linux
+     builds) the bundled Inter Variable from base.css, never a CDN. */
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", "Inter Variable", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", monospace;
 
-  /* Typography scale */
-  --font-size-xxs: 10px;
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
-  --font-size-md: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 20px;
-  --font-size-xxl: 24px;
+  /* Typography scale. Every step follows the app text scale: --font-size is
+     the Appearance/Large Font size (12-20px, default 16px) that appearance.ts
+     writes on <html>, so at the default each step is the px in its comment.
+     Glyphs sized to a fixed box (avatar initials, icon buttons, emoji) stay px. */
+  --font-size-xxs: calc(var(--font-size, 16px) * 0.625); /* 10px */
+  --font-size-xs: calc(var(--font-size, 16px) * 0.75); /* 12px */
+  --font-size-sm: calc(var(--font-size, 16px) * 0.8125); /* 13px */
+  --font-size-md: calc(var(--font-size, 16px) * 0.875); /* 14px */
+  --font-size-lg: var(--font-size, 16px); /* 16px */
+  --font-size-xl: calc(var(--font-size, 16px) * 1.25); /* 20px */
+  --font-size-xxl: calc(var(--font-size, 16px) * 1.5); /* 24px */
+  --font-size-display: calc(var(--font-size, 16px) * 1.75); /* 28px */
 
-  /* Radii */
+  /* Radii: 4 / 8 / 12 / pill */
   --radius-sm: 4px;
   --radius-md: 8px;
-  --radius-lg: 16px;
-  --radius-pill: 24px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
   --radius-circle: 50%;
+
+  /* Spacing scale, a 4px step */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
 
   /* Spacing */
   --sidebar-width: 240px;
@@ -130,4 +164,18 @@
   --avatar-offset-left: 16px;
   --message-content-left: 72px;
   --message-content-right: 48px;
+}
+
+/* Light's own accent (B9 Q13): white on it reads at 5.54:1, where dark's
+   blurple reads 4.61:1. A body class, not a THEMES key, so applyTheme's clear
+   never touches --accent and a custom accent (inline on body) still wins. The
+   derived tokens are re-declared here because :root resolved them from the
+   dark accent, as theme-neon-glow.css does for cyan. */
+body.theme-light {
+  --accent: #4f5bd5;
+  --accent-hover: #4150c4;
+  --accent-active: #3740a8;
+  --accent-primary: var(--accent);
+  --accent-secondary: var(--accent-hover);
+  --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 }

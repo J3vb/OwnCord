@@ -24,19 +24,19 @@
   justify-content: center;
 }
 .nsfw-gate-title {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-normal);
   margin-bottom: 8px;
 }
 .nsfw-gate-body {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.6;
   color: var(--text-muted);
   margin-bottom: 8px;
 }
 .nsfw-gate-note {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   color: var(--text-faint);
   margin-bottom: 20px;

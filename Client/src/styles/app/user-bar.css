@@ -1,7 +1,7 @@
 /* ── User Bar ── */
 .user-bar {
   height: 52px;
-  background: rgba(17, 18, 20, 0.6);
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -19,7 +19,7 @@
   justify-content: center;
   font-weight: 700;
   font-size: 14px;
-  color: white;
+  color: var(--on-fill);
   cursor: pointer;
 }
 /* The status picker's own trigger dot now lives here instead of a separate
@@ -46,16 +46,16 @@
   flex-direction: column;
 }
 .user-bar .ub-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  color: white;
+  color: var(--header-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.2;
 }
 .user-bar .ub-status {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   line-height: 1.2;
 }
@@ -72,7 +72,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   transition: all 0.1s;
 }
 .user-bar .ub-controls button:hover {
@@ -101,7 +101,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
   z-index: 100;
   display: none;
   min-width: 160px;
@@ -128,7 +128,7 @@
 .user-bar .status-picker-dot {
   width: 12px;
   height: 12px;
-  border: 3px solid rgba(17, 18, 20, 0.6);
+  border: 3px solid color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
 }
 .status-picker-option {
   display: flex;
@@ -137,7 +137,7 @@
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-normal);
   transition: background 0.1s ease;
 }

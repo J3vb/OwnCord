@@ -35,10 +35,10 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  font-size: 20px;
+  font-size: var(--font-size-xl);
 }
 .attachment-preview-name {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   max-width: 80px;
   overflow: hidden;
@@ -52,9 +52,9 @@
   width: 20px;
   height: 20px;
   border-radius: var(--radius-circle);
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
-  font-size: 14px;
+  background: var(--bg-overlay);
+  color: var(--on-fill);
+  font-size: var(--font-size-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -63,7 +63,7 @@
   transition: background 0.15s;
 }
 .attachment-preview-remove:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrim-hover);
 }
 .attachment-preview-item.uploading {
   opacity: 0.6;
@@ -93,9 +93,9 @@
 }
 .attachment-upload-error {
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--red);
-  background: rgba(237, 66, 69, 0.1);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
   border-radius: var(--radius-sm);
 }
 .attachment-preview-bar.visible + .message-input-box {
@@ -108,12 +108,18 @@
   display: flex;
   align-items: flex-end;
   padding: 4px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-control);
   transition: border-color 0.15s ease;
 }
-.message-input-box:focus-within {
-  border-color: var(--focus-ring);
-  box-shadow: 0 0 0 1px var(--focus-ring);
+/* One ring for the composer (B9 Q13): the box draws the textarea's focus
+   indicator around the whole composer, so the textarea's own outline would
+   be a second ring inside it. Buttons in the box keep their own ring. */
+.message-input-box:has(.msg-textarea:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.msg-textarea:focus-visible {
+  outline: none;
 }
 .input-btn {
   width: 36px;
@@ -138,7 +144,7 @@
   flex: 1;
   background: transparent;
   color: var(--text-normal);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   resize: none;
   padding: 8px 4px;
   min-height: 36px;
@@ -146,7 +152,7 @@
   line-height: 1.4;
 }
 .msg-textarea::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 .msg-textarea:disabled {
   cursor: not-allowed;
@@ -174,8 +180,8 @@
   align-items: center;
   gap: 8px;
   margin-top: 4px;
-  font-size: 12px;
-  color: var(--danger, #e57373);
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
 }
 .msg-send-failed-text {
   flex-shrink: 0;
@@ -185,12 +191,12 @@
   background: transparent;
   border: 1px solid currentColor;
   color: inherit;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 .msg-send-retry:hover,
 .msg-send-discard:hover {
-  background: rgba(229, 115, 115, 0.15);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
 }

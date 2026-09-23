@@ -14,7 +14,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .vw-connected {
   color: var(--green);
@@ -23,24 +23,24 @@
 /* In-progress lifecycle states use amber; the call is not yet secured/live. */
 .vw-connected.vw-securing,
 .vw-connected.vw-reconnecting {
-  color: var(--yellow, #f0b232);
+  color: var(--yellow);
 }
 .vw-secured {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   color: var(--green);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 /* OC-0002: the E2EE worker died after the key exchange already succeeded —
    still shown (never silently hidden), but never green/"Secured" again. */
 .vw-secured.vw-secured--degraded {
-  color: var(--red, #f23f43);
+  color: var(--red);
 }
 .vw-timer {
   color: var(--green);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
@@ -67,7 +67,7 @@
   border-radius: var(--radius-sm);
   background: var(--bg-active);
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   transition: all 0.1s;
   display: flex;
   align-items: center;
@@ -78,7 +78,7 @@
   color: var(--text-normal);
 }
 .vw-controls button.active-ctrl {
-  background: rgba(242, 63, 67, 0.2);
+  background: color-mix(in srgb, var(--red) 20%, transparent);
   color: var(--red);
 }
 .vw-controls button.disconnect {
@@ -86,7 +86,7 @@
   color: var(--red);
 }
 .vw-controls button.disconnect:hover {
-  background: rgba(242, 63, 67, 0.15);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
 }
 .vw-grant-mic {
   display: block;
@@ -97,7 +97,7 @@
   border: none;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   font-family: var(--font-body);
   cursor: pointer;
@@ -124,7 +124,7 @@
   background: var(--bg-active);
 }
 .vw-ping {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 .vw-stats {
@@ -137,7 +137,7 @@
   display: block;
 }
 .vw-stats-title {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-normal);
   text-transform: uppercase;
@@ -151,7 +151,7 @@
   margin-bottom: 8px;
 }
 .vw-stats-col-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   margin-bottom: 4px;
 }
@@ -159,10 +159,10 @@
   color: var(--green);
 }
 .vw-stats-col-label.in {
-  color: var(--yellow, #f0b232);
+  color: var(--yellow);
 }
 .vw-stats-row {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   line-height: 1.7;
 }
@@ -174,7 +174,7 @@
   padding-top: 8px;
 }
 .vw-stats-totals-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--accent-text);
   margin-bottom: 4px;
@@ -182,7 +182,7 @@
 .vw-stats-totals-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 .vw-stats-totals-row span {

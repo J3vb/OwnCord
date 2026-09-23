@@ -1,8 +1,8 @@
 /* ── DM Profile Sidebar ── */
 .dm-profile-sidebar {
   width: 340px;
-  background: var(--bg-secondary, #111214);
-  border-left: 1px solid var(--border-glow, rgba(0, 200, 255, 0.08));
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-glow);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -13,7 +13,7 @@
 .dps-avatar {
   width: 80px;
   height: 80px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -23,12 +23,12 @@
   margin: 24px auto 12px;
   position: relative;
   flex-shrink: 0;
-  background: var(--accent, #5865f2);
+  background: var(--accent);
 }
 .dps-avatar-img {
   width: 80px;
   height: 80px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 .dps-status-dot {
   position: absolute;
@@ -36,8 +36,8 @@
   right: 2px;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
-  border: 3px solid var(--bg-secondary, #111214);
+  border-radius: var(--radius-circle);
+  border: 3px solid var(--bg-secondary);
 }
 .dps-close {
   position: absolute;
@@ -45,7 +45,7 @@
   right: 8px;
   background: none;
   border: none;
-  color: var(--text-muted, #949ba4);
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 18px;
   line-height: 1;
@@ -59,9 +59,9 @@
 }
 .dps-username {
   text-align: center;
-  font-size: 20px;
+  font-size: var(--font-size-xl);
   font-weight: 600;
-  color: var(--text-primary, #f2f3f5);
+  color: var(--header-primary);
   margin-bottom: 4px;
 }
 .dps-status {
@@ -70,45 +70,45 @@
   justify-content: center;
   gap: 6px;
   margin-bottom: 16px;
-  font-size: 13px;
-  color: var(--text-muted, #949ba4);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
 }
 .dps-status-dot-inline {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: inline-block;
 }
 .dps-divider {
   height: 1px;
-  background: var(--border-glow, rgba(0, 200, 255, 0.08));
+  background: var(--border-glow);
   margin: 12px 0;
 }
 .dps-section-title {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
-  color: var(--text-muted, #949ba4);
+  color: var(--text-muted);
   text-transform: uppercase;
   margin-bottom: 8px;
 }
 .dps-about-text {
-  font-size: 14px;
-  color: var(--text-secondary, #dbdee1);
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
   line-height: 1.4;
   word-break: break-word;
 }
 .dps-join-text {
-  font-size: 14px;
-  color: var(--text-secondary, #dbdee1);
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
 }
 .dps-note {
   width: 100%;
   resize: vertical;
-  background: var(--bg-primary, #1e1f22);
+  background: var(--bg-primary);
   border: none;
-  border-radius: 4px;
-  color: var(--text-primary, #f2f3f5);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
   padding: 8px;
   font-family: inherit;
 }

@@ -366,20 +366,21 @@ test.describe("Settings — Accessibility Tab", () => {
     page,
   }) => {
     await emitChat(page, 9401, "colored when roles on");
-    const onColor = await page
-      .locator("[data-testid='message-9401'] .msg-author")
-      .evaluate((el) => getComputedStyle(el).color);
-    expect(onColor).toBe("rgb(255, 0, 0)");
+    const onAuthor = page.locator("[data-testid='message-9401'] .msg-author");
+    await expect(onAuthor).toHaveAttribute("data-role-color", "#ff0000");
+    // #ff0000 reads 3.92:1 on neon-glow, so the role clamp (B9 Q13) shows the
+    // admin's name in --text-normal rather than unreadable red.
+    const onColor = await onAuthor.evaluate((el) => getComputedStyle(el).color);
+    expect(onColor).toBe("rgb(223, 226, 230)");
 
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
     await toggleFor(page, "Role Colors").click();
     await closeSettings(page);
     await emitChat(page, 9402, "member color when roles off");
-    const offColor = await page
-      .locator("[data-testid='message-9402'] .msg-author")
-      .evaluate((el) => getComputedStyle(el).color);
-    expect(offColor).not.toBe("rgb(255, 0, 0)");
+    const offAuthor = page.locator("[data-testid='message-9402'] .msg-author");
+    await expect(offAuthor).toHaveAttribute("data-role-color", "var(--role-member)");
+    const offColor = await offAuthor.evaluate((el) => getComputedStyle(el).color);
     expect(offColor).toBe("rgb(148, 155, 164)");
   });
 });

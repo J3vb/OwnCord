@@ -10,7 +10,7 @@
   text-align: center;
   color: var(--text-muted);
   padding: 32px 0;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 .invite-item {
   background: var(--bg-secondary);
@@ -29,8 +29,8 @@
 }
 .invite-item__code {
   font-family: "Consolas", "Courier New", monospace;
-  font-size: 14px;
-  color: white;
+  font-size: var(--font-size-md);
+  color: var(--header-primary);
   font-weight: 600;
 }
 .invite-item__actions {
@@ -44,7 +44,7 @@
   gap: 4px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   transition: all 0.15s;
   background: transparent;
@@ -53,16 +53,16 @@
   color: var(--text-positive);
 }
 .invite-item__copy:hover {
-  background: rgba(35, 165, 90, 0.15);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
 }
 .invite-item__revoke {
   color: var(--text-danger);
 }
 .invite-item__revoke:hover {
-  background: rgba(242, 63, 67, 0.15);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
 }
 .invite-item__revoke--confirming {
-  background: rgba(242, 63, 67, 0.2);
+  background: color-mix(in srgb, var(--red) 20%, transparent);
   font-weight: 600;
 }
 .invite-item__revoke:disabled,
@@ -71,6 +71,6 @@
   cursor: default;
 }
 .invite-item__meta {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }

@@ -16,7 +16,9 @@ import {
 const FALLBACK_ACCENT = "#5865f2";
 
 function getDefaultAccent(themeName: string): string {
-  return themeName === "neon-glow" ? "#00c8ff" : FALLBACK_ACCENT;
+  if (themeName === "neon-glow") return "#00c8ff";
+  // Light's own accent (B9 Q13): white on it reads at 5.54:1.
+  return themeName === "light" ? "#4f5bd5" : FALLBACK_ACCENT;
 }
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
