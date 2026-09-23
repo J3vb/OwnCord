@@ -2244,6 +2244,19 @@ report's REPORTER may read it (their own filing, already visible via
 `GET /api/v1/reports/mine`), but `notes` is always `[]` for them — internal
 notes never reach the person who filed the report.
 
+The evidence snapshot is content from the report's source channel
+(`channel_id`), so it follows that channel's NSFW consent (B5-7, decision
+13): while the channel is labelled, `evidence` is `[]` and
+`evidence_withheld` is `NSFW_ACKNOWLEDGEMENT_REQUIRED` unless the caller
+has acknowledged it themselves (`PUT /api/v1/channels/{id}/nsfw-acknowledgement`)
+— no bit, `ADMINISTRATOR` included, bypasses this. Label and
+acknowledgement are read on every request, so a revoke, an unlabel and
+relabel, or a label added after filing applies to the next read. When the
+source channel has been deleted, `evidence` is `[]` and `evidence_withheld`
+is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
+snapshot is returned. Files the snapshot references are served by
+`GET /api/v1/files/{id}` under that route's own channel and consent checks.
+
 ---
 
 ### POST /api/v1/moderation/queue/{id}/assign

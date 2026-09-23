@@ -2943,6 +2943,34 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   and attachment retrieval through the real service/HTTP paths, with
   authorized and refused cases. This is the existing server-side consent
   contract and must close before the B9 interface is built.
+
+  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.**
+  `ReportService.Get` (`Server/service/report.go`, `evidenceWithheld`), the
+  only read of the snapshot, applies decision 13 to it: a labelled source
+  channel's evidence reaches a caller only with their own acknowledgement,
+  with no bit or administrator bypass, and label and acknowledgement are
+  read on every request. A deleted source channel, or one whose label or
+  acknowledgement cannot be read, withholds the snapshot. A withheld
+  response carries `evidence: []` and `evidence_withheld`
+  (`NSFW_ACKNOWLEDGEMENT_REQUIRED` or `SOURCE_CHANNEL_UNAVAILABLE`,
+  documented in `docs/api.md`). Snapshot files are served only through
+  `GET /api/v1/files/{id}`, whose existing `UploadService.Authorize` gate
+  already applies the same consent. `Server/api/moderation_evidence_consent_test.go`
+  drives both reads over HTTP — the queue detail for the text, the file
+  route for the attachment — for message and attachment reports, with
+  consent changed through the real acknowledge/revoke routes and
+  `ChannelService`'s relabel and delete: refused before acknowledgement,
+  authorized after, refused again after revocation
+  (`TestModerationEvidence_AcknowledgeAndRevoke`); per-moderator consent
+  (`TestModerationEvidence_ConsentIsPerModerator`); no administrator bypass
+  (`TestModerationEvidence_AdministratorHasNoBypass`); unlabel, relabel, and
+  a label added after filing (`TestModerationEvidence_SourceChannelRelabelling`);
+  source-channel deletion (`TestModerationEvidence_SourceChannelDeletion`);
+  and an unlabelled control (`TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement`).
+  Revert-proof: skipping the gate, reading a deleted channel as unlabelled,
+  and ignoring the acknowledgement each turn the matching tests red.
+  Security-review status stays in the private review trail.
+
 - **Condition 6 — B5-11 follow-up:** prove that current device-subscription
   consent and current block state govern every queued/retried delivery.
   Revoke a subscription and apply a block between attempts; assert that
