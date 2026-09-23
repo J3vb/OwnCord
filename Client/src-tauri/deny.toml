@@ -21,15 +21,6 @@ unused-ignored-advisory = "deny"
 # and a yank is usually a version-resolution hazard rather than a vulnerability.
 yanked = "warn"
 ignore = [
-  # rustls 0.23.43 accepts a TLS 1.3 handshake message sent at the wrong
-  # encryption level. The handshake transcript stays authenticated, so no
-  # network attacker can alter or complete a handshake with it — the effect is
-  # a stricter peer being accepted in cleartext rather than a break. Arrives
-  # through reqwest and tokio-tungstenite. `cargo update -p rustls` to >=0.23.45
-  # clears it; the bump is deliberately left to the dependency-owning PR, not
-  # folded into a tooling change.
-  { id = "RUSTSEC-2026-0285", reason = "low-impact; fixed in rustls 0.23.45, a lockfile bump for its own PR" },
-
   # The rust-unic family (unic-char-property/-range/-common/-ucd-ident/
   # -ucd-version) is unmaintained upstream. It arrives only through urlpattern
   # 0.3.0, a tauri-utils dependency; no replacement version is in range.
