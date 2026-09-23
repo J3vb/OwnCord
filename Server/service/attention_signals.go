@@ -53,6 +53,19 @@ func (s *AttentionService) evalDisk(r attentionReadings, now time.Time) {
 		return
 	}
 	warnAt, critAt := float64(s.thresholds.DiskWarnFreeBytes), float64(s.thresholds.DiskCriticalFreeBytes)
+	var floors []string
+	if warnAt > critAt {
+		floors = append(floors, "warn below "+attentionMB(s.thresholds.DiskWarnFreeBytes))
+	}
+	if critAt > 0 {
+		floors = append(floors, "critical below "+attentionMB(s.thresholds.DiskCriticalFreeBytes))
+	}
+	sig.Value = fmt.Sprintf("%s free", attentionMB(r.diskFree))
+	if len(floors) == 0 {
+		sig.Status, sig.Detail = AttentionStatusUnknown, "not checked: attention.disk_warn_free_mb and server.min_free_disk_mb are both 0"
+		s.settle(sig, title, action)
+		return
+	}
 	free, cur := float64(r.diskFree), s.disk.current()
 	raw := AttentionStatusOK
 	switch {
@@ -62,8 +75,7 @@ func (s *AttentionService) evalDisk(r attentionReadings, now time.Time) {
 		raw = AttentionStatusWarning
 	}
 	sig.Status = s.disk.settle(raw, attentionSustain)
-	sig.Value = fmt.Sprintf("%s free", attentionMB(r.diskFree))
-	sig.Threshold = fmt.Sprintf("warn below %s, critical below %s", attentionMB(s.thresholds.DiskWarnFreeBytes), attentionMB(s.thresholds.DiskCriticalFreeBytes))
+	sig.Threshold = strings.Join(floors, ", ")
 	s.settle(sig, title, action)
 }
 

@@ -150,9 +150,6 @@ func WriterWaitSource(database *db.DB) func() time.Duration {
 
 // NewAttentionService builds the service over its thresholds and sources.
 func NewAttentionService(t AttentionThresholds, src AttentionSources) *AttentionService {
-	if t.DiskWarnFreeBytes < t.DiskCriticalFreeBytes {
-		t.DiskWarnFreeBytes = t.DiskCriticalFreeBytes
-	}
 	return &AttentionService{thresholds: t, src: src, warnings: map[string]*AttentionWarning{}}
 }
 

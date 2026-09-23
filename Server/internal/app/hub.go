@@ -145,8 +145,8 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 
 // newAttention builds the admin attention panel (RI-07) over counters the
 // server already keeps: the data volume's free space, the writer pool's
-// cumulative wait, the reconnect tiers, the hub's drop and backpressure
-// totals, and the newest backup file.
+// cumulative wait, the reconnect tiers, the hub's broadcast drops and
+// send-queue overflow disconnects, and the newest backup file.
 func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *service.SettingsService) *service.AttentionService {
 	return service.NewAttentionService(service.AttentionThresholds{
 		DiskWarnFreeBytes:     cfg.Attention.DiskWarnFreeBytes(),
@@ -161,10 +161,7 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			buffer, cold, full := hub.ReconnectTierStats()
 			return buffer + cold + full
 		},
-		DeliveryDrops: func() uint64 {
-			queueDisconnects, _, lowDrops := hub.BackpressureStats()
-			return hub.BroadcastDropCount() + queueDisconnects + lowDrops
-		},
+		DeliveryDrops: hub.DeliveryDropCount,
 		DispatchAlive: hub.DispatchAlive,
 		BackupSchedule: func(ctx context.Context) (string, error) {
 			return settings.Setting(ctx, "backup_schedule")

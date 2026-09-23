@@ -145,6 +145,44 @@ func TestAttention_DiskHysteresis(t *testing.T) {
 	}
 }
 
+// The disk threshold lists only the enabled levels; a 0 warn floor leaves
+// only the critical level, and no floor at all is not checked rather than
+// healthy.
+func TestAttention_DiskFloors(t *testing.T) {
+	disk := func(warn, crit, free uint64) AttentionReport {
+		s := NewAttentionService(AttentionThresholds{DiskWarnFreeBytes: warn, DiskCriticalFreeBytes: crit},
+			AttentionSources{DiskFree: func() (uint64, error) { return free, nil }})
+		now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+		for range 2 {
+			now = now.Add(time.Minute)
+			s.Evaluate(context.Background(), now)
+		}
+		return s.Report()
+	}
+
+	if got := signal(t, disk(1024<<20, 0, 10<<30), "disk").Threshold; got != "warn below 1024 MB" {
+		t.Errorf("critical disabled: threshold = %q, want only the warn floor", got)
+	}
+
+	rep := disk(0, 256<<20, 200<<20)
+	if got := signal(t, rep, "disk").Threshold; got != "critical below 256 MB" {
+		t.Errorf("warn disabled: threshold = %q, want only the critical floor", got)
+	}
+	wantStatus(t, rep, "disk", AttentionStatusCritical)
+	if got := signal(t, disk(0, 256<<20, 10<<30), "disk").Status; got != AttentionStatusOK {
+		t.Errorf("warn disabled, plenty free: status = %q, want ok", got)
+	}
+
+	rep = disk(0, 0, 1<<20)
+	sig := signal(t, rep, "disk")
+	if sig.Status != AttentionStatusUnknown || sig.Threshold != "" || sig.Detail == "" {
+		t.Errorf("both floors 0: disk = %+v, want unknown with a not-checked detail and no threshold", sig)
+	}
+	if len(rep.Warnings) != 0 {
+		t.Errorf("both floors 0 raised warnings: %+v", rep.Warnings)
+	}
+}
+
 // A single noisy sample neither raises nor clears.
 func TestAttention_SingleSpikeDoesNotRaise(t *testing.T) {
 	f := newAttentionFixture(t)

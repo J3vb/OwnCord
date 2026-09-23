@@ -227,8 +227,9 @@ Implemented 2026-09-23 against `dev` at
 
 - `service.AttentionService` samples once a minute, reusing counters the server
   already keeps: data-volume free space, the writer pool's cumulative
-  `WaitDuration`, the reconnect-tier totals, and broadcast drops plus
-  slow-client disconnects and low-priority drops. It adds the newest backup
+  `WaitDuration`, the reconnect-tier totals, and hub broadcast drops plus
+  send-queue overflow disconnects; low-priority typing and presence drops
+  are left out because they lose nothing. It adds the newest backup
   file as the last successful backup, since a failed backup leaves no file.
   Each maintenance step reports its outcome under a job name. The Dashboard
   shows the result to `ADMINISTRATOR` holders through

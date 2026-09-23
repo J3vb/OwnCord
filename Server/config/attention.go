@@ -7,14 +7,17 @@ package config
 // only to the admin panel and is never exported off the host.
 type AttentionConfig struct {
 	// DiskWarnFreeMB warns when free space on the data volume drops below it.
+	// 0, or a value at or below server.min_free_disk_mb, leaves only the
+	// critical level.
 	DiskWarnFreeMB int `yaml:"disk_warn_free_mb"`
 	// WriterWaitMsPerMin warns when requests spend more than this many
 	// milliseconds per minute queueing for the single SQLite writer.
 	WriterWaitMsPerMin int `yaml:"writer_wait_ms_per_min"`
 	// ReconnectsPerMin warns when clients resume sessions faster than this.
 	ReconnectsPerMin int `yaml:"reconnects_per_min"`
-	// DeliveryDropsPerMin warns when dropped deliveries plus slow-client
-	// disconnects exceed this rate.
+	// DeliveryDropsPerMin warns when hub broadcast drops plus send-queue
+	// overflow disconnects exceed this rate. Low-priority typing and presence
+	// drops are not counted.
 	DeliveryDropsPerMin int `yaml:"delivery_drops_per_min"`
 }
 

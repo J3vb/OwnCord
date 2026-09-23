@@ -3175,7 +3175,7 @@ Aggregate counts for the admin dashboard.
 The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
-reconnect resumes, dropped deliveries plus slow-client disconnects, the newest
+reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
 backup file and each maintenance job's last run); this route only reads that
 state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).

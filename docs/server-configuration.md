@@ -258,12 +258,12 @@ only to `ADMINISTRATOR` holders through `GET /admin/api/attention` and is not
 exported to telemetry. Below each key's minimum the default applies, with a
 warning.
 
-| Key                                | Type | Default | Description                                                                                                  |
-| ---------------------------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `attention.disk_warn_free_mb`      | int  | `1024`  | Warn when free space on the data volume is below this many MiB. `0` warns only at `server.min_free_disk_mb`. |
-| `attention.writer_wait_ms_per_min` | int  | `5000`  | Warn when requests spend more than this many ms per minute queueing for the single SQLite writer.            |
-| `attention.reconnects_per_min`     | int  | `30`    | Warn when clients resume sessions faster than this.                                                          |
-| `attention.delivery_drops_per_min` | int  | `1`     | Warn when dropped deliveries plus slow-client disconnects exceed this rate.                                  |
+| Key                                | Type | Default | Description                                                                                                                                                                                                                              |
+| ---------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `attention.disk_warn_free_mb`      | int  | `1024`  | Warn when free space on the data volume is below this many MiB. `0` (or a value at or below `server.min_free_disk_mb`) leaves only the critical level at `server.min_free_disk_mb`; with both at `0` disk space is shown as not checked. |
+| `attention.writer_wait_ms_per_min` | int  | `5000`  | Warn when requests spend more than this many ms per minute queueing for the single SQLite writer.                                                                                                                                        |
+| `attention.reconnects_per_min`     | int  | `30`    | Warn when clients resume sessions faster than this.                                                                                                                                                                                      |
+| `attention.delivery_drops_per_min` | int  | `1`     | Warn when hub broadcast drops plus send-queue overflow disconnects exceed this rate. Low-priority typing and presence drops are not counted.                                                                                             |
 
 ## Key index (generated)
 

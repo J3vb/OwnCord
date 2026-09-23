@@ -637,10 +637,12 @@ voice:
 # Admin attention panel (Dashboard): warning floors, raised for rates by the
 # learned baseline. Shown only in the admin panel; never exported off-host.
 # attention:
-#   disk_warn_free_mb: 1024     # warn below this much free space on the data volume
+#   disk_warn_free_mb: 1024     # warn below this much free space on the data volume;
+#                               # 0 = only critical, at server.min_free_disk_mb
 #   writer_wait_ms_per_min: 5000  # warn when writes queue longer than this per minute
 #   reconnects_per_min: 30      # warn when clients resume sessions faster than this
-#   delivery_drops_per_min: 1   # warn when deliveries drop or slow clients are cut off
+#   delivery_drops_per_min: 1   # warn when broadcasts drop or full send queues cut
+#                               # clients off (typing/presence drops not counted)
 `
 
 // Load reads configuration from the given YAML file path, merging with
@@ -835,7 +837,7 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows"},
-		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 to warn only at server.min_free_disk_mb"},
+		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb"},
 		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute"},
 		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute"},
 		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute"},
