@@ -142,6 +142,14 @@ test("unsafe ceiling inputs fail before sockets; custom maximum/step/rate still 
   for (const knob of ["K6_CEILING_STEP", "K6_SEND_INTERVAL_MS"]) {
     assert.throws(() => harness({ K6_PROFILE: "ceiling-search", [knob]: "0" }), /requires/);
   }
+  // A per-user rate the server will not admit (service/message_crud.go caps
+  // each user at 10 sends/second) would measure only the admitted subset.
+  for (const interval of ["1", "50", "99"]) {
+    assert.throws(
+      () => harness({ K6_PROFILE: "ceiling-search", K6_SEND_INTERVAL_MS: interval }),
+      /requires/,
+    );
+  }
   const h = harness({
     K6_PROFILE: "ceiling-search",
     K6_CEILING_MAX: "250",

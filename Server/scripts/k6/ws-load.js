@@ -83,7 +83,9 @@
 //   K6_PEAK_VUS         - Peak simultaneous connections (default: 100)
 //   K6_RAMP             - Ramp-up duration (default: 60s)
 //   K6_SUSTAIN          - Duration at peak (default: 180s)
-//   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000)
+//   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000).
+//                         ceiling-search requires >= 100: the server admits at
+//                         most 10 sends/second per user (service/message_crud.go)
 //   K6_VOICE_CHANNEL_ID - Voice channel id; unset disables the voice leg
 //   K6_CEILING_CHANNELS - Comma-separated text channel ids the ceiling search
 //                         spreads its cohort over. Must contain enough distinct
@@ -316,6 +318,13 @@ const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
 // This is generator shaping, not a change to the server's limit.
 const TOPIC_LIMIT_PER_SECOND = 100; // ws/hub_stats.go; pinned by the offline test
 const CEILING_TOPIC_BUDGET = TOPIC_LIMIT_PER_SECOND / 2;
+// Each user is capped at 10 sends/second (service/message_crud.go
+// `limiter.Allow(ratKey, 10, time.Second)`), so a send interval below the
+// reciprocal makes the server admit only a subset -- the same "code cap
+// masquerading as hardware" defect OC-0447 closed, one layer up. Pinned by the
+// offline test.
+const SEND_LIMIT_PER_SECOND = 10;
+const MIN_SEND_INTERVAL_MS = 1000 / SEND_LIMIT_PER_SECOND;
 let CHANNEL_IDS = [CHANNEL_ID];
 let ceilingMaxVUsPerChannel = 0;
 let ceilingBurstPerVU = 0;
@@ -326,10 +335,10 @@ if (IS_CEILING) {
     !Number.isInteger(CEILING_STEP) ||
     CEILING_STEP <= 0 ||
     !Number.isInteger(SEND_INTERVAL_MS) ||
-    SEND_INTERVAL_MS <= 0
+    SEND_INTERVAL_MS < MIN_SEND_INTERVAL_MS
   ) {
     throw new Error(
-      "ceiling-search requires K6_CEILING_MAX >= 100, K6_CEILING_STEP > 0 and K6_SEND_INTERVAL_MS > 0",
+      `ceiling-search requires K6_CEILING_MAX >= 100, K6_CEILING_STEP > 0 and K6_SEND_INTERVAL_MS >= ${MIN_SEND_INTERVAL_MS} (each user is capped at ${SEND_LIMIT_PER_SECOND} sends/second)`,
     );
   }
   CHANNEL_IDS = (__ENV.K6_CEILING_CHANNELS || String(CHANNEL_ID))

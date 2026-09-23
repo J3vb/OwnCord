@@ -315,6 +315,13 @@ Manual runs must supply the ids; missing, duplicate, invalid or insufficient
 lists fail at init instead of silently measuring a topic cap. Faster custom
 send intervals need more channels. The server's rate limit is unchanged.
 
+The send interval itself is also bounded: each user may send at most 10
+messages/second (`Server/service/message_crud.go`), so `ceiling-search` rejects
+`K6_SEND_INTERVAL_MS` below 100 at init. A faster interval would be admitted
+only for the subscribed subset and would silently publish that subset's latency
+as the hardware ceiling — the same code-cap-masquerading-as-hardware defect
+OC-0447 closed, one layer up.
+
 `k6-summary.json` and stdout include `load_measurement.steps`: hold boundaries,
 planned total and mean per-channel message rates, a conservative per-channel
 one-second send bound, and **each channel's observed send-attempt count/rate**
