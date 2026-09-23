@@ -20,6 +20,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   never reorder imports or move rules between fragments in a visual PR.
   Unit tests that pin CSS source read it through `tests/helpers/app-css.ts`
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
+- `src/i18n/` holds the English catalogs (B9-3); rules are in `format.ts`'s
+  header. `tests/unit/ui-strings.test.ts` fails on new UI text outside a
+  catalog, against the shrink-only `scripts/ui-strings-baseline.json`
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
   `tests/browser` (vitest browser mode)
