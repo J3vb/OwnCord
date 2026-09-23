@@ -263,8 +263,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
     appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
 
-    // NSFW flag. The copy states the limit of the feature: the server does not
-    // filter anything, so promising otherwise here would be a lie.
+    // NSFW flag. The hint says what the label does (B5-7/B9-7): the server
+    // withholds the channel's content from each member until they agree.
     const nsfwGroup = createElement("div", { class: "form-group" });
     const nsfwLabelRow = createElement("label", { class: "form-check" });
     const nsfwInput = createElement("input", {

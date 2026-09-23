@@ -85,6 +85,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -103,6 +104,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -178,6 +180,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -409,6 +412,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });

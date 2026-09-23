@@ -6,6 +6,7 @@ import {
   reduceSetAroundMessages,
   reduceInvalidateLoadedMessageWindows,
   reduceInvalidateChannelMessageWindow,
+  reduceClearChannelContent,
   reduceReattachToPresent,
   reducePrependMessages,
 } from "./historyWindows";
@@ -226,6 +227,34 @@ describe("reduceInvalidateChannelMessageWindow / reduceReattachToPresent", () =>
     expect([...next.loadedChannels]).toEqual([2]);
     expect(next.detachedChannels.has(1)).toBe(true);
     expect(reduceReattachToPresent(loaded, 2)).toBe(loaded);
+  });
+});
+
+describe("reduceClearChannelContent", () => {
+  it("forgets one channel's delivered rows and window, keeping the user's unsent text", () => {
+    const prev = state([row({ id: 1 }), pending], {
+      loadedChannels: new Set([1, 2]),
+      hasMore: new Map([
+        [1, true],
+        [2, true],
+      ]),
+      detachedChannels: new Set([1]),
+    });
+    const next = reduceClearChannelContent(prev, 1);
+    expect(next.messagesByChannel.get(1)).toEqual([pending]);
+    expect([...next.loadedChannels]).toEqual([2]);
+    expect([...next.hasMore.keys()]).toEqual([2]);
+    expect(next.detachedChannels.size).toBe(0);
+  });
+
+  it("drops the channel entry when nothing unsent is left", () => {
+    const next = reduceClearChannelContent(state([row({ id: 1 })]), 1);
+    expect(next.messagesByChannel.has(1)).toBe(false);
+  });
+
+  it("returns prev by identity for a channel it knows nothing about", () => {
+    const prev = state([row({ id: 1 })]);
+    expect(reduceClearChannelContent(prev, 3)).toBe(prev);
   });
 });
 

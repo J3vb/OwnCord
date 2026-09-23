@@ -53,9 +53,19 @@ fn native_voice_state() -> native_voice::NativeVoiceState {
 #[cfg(not(target_os = "linux"))]
 fn native_voice_state() -> () {}
 
-// Only used by the desktop-only single-instance closure below.
-#[cfg(desktop)]
+// Used by the single-instance closure and the startup log below.
 use tauri::Manager;
+
+/// Whether a forwarded single-instance launch should restore the main window.
+///
+/// Once an installer is launching the old process must not take handoffs: the
+/// plugin has already hidden the window and is blocked in `ShellExecuteW`, so
+/// re-showing it puts the old version on screen for the whole install gap
+/// (the reported "old version stays up for ~90 s" symptom).
+#[cfg(desktop)]
+fn should_restore_on_second_launch(installer_launching: bool) -> bool {
+    !installer_launching
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -67,10 +77,17 @@ pub fn run() {
     // "deep-link" feature this also routes an owncord:// link to the running app.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
+        let launching = update_commands::installer_launching();
+        log::info!(
+            "[update] second-instance launch forwarded (update in progress: {}, installer launching: {launching})",
+            update_commands::update_in_progress()
+        );
+        if should_restore_on_second_launch(launching) {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
         }
     }));
 
@@ -194,6 +211,14 @@ pub fn run() {
         ])
         .setup(|app| {
             // Rust logging is initialized by tauri_plugin_log (registered above).
+            // Record the version and PID first: paired with the "[update]
+            // installer launching" line, they bound the install gap a report
+            // describes (time from that line to this startup line).
+            log::info!(
+                "[startup] OwnCord {} starting (pid {})",
+                app.package_info().version,
+                std::process::id()
+            );
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
@@ -228,5 +253,19 @@ pub fn run() {
                 .show();
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod tests {
+    use super::should_restore_on_second_launch;
+
+    #[test]
+    fn forwarded_launch_restores_window_unless_installer_is_launching() {
+        // Normal forwarded launch: the running instance should come forward.
+        assert!(should_restore_on_second_launch(false));
+        // Installer launching: the window is hidden and the old version must
+        // not come back for the launch to hand off to it.
+        assert!(!should_restore_on_second_launch(true));
     }
 }
