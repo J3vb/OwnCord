@@ -64,7 +64,9 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO rate_lockouts (key, expires_at) VALUES ('login_user_lock:other-user', datetime('now', '+15 minutes'))`)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'x')`, otherMsg.ID, uid)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'y')`, msg.ID, other)
-	exec(`INSERT INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, 0)`, uid, chID)
+	// The subject's send above already advanced their read state here
+	// (advanceAuthorReadState); OR IGNORE keeps the row seeded either way.
+	exec(`INSERT OR IGNORE INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, 0)`, uid, chID)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-1', ?, 'a.png', 'stored-a.png', 'image/png', 1, ?)`, msg.ID, uid)
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('avatar-subject', 'me.png', 'stored-avatar.png', 'image/png', 1, ?)`, uid)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-other', ?, 'o.png', 'stored-other.png', 'image/png', 1, ?)`, otherMsg.ID, other)
