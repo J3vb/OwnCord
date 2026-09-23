@@ -341,6 +341,16 @@ export interface ModActionPayload {
   readonly expires_at: string | null;
 }
 
+/**
+ * appeal_status (B5-10): the caller's own appeal changed state, targeted and
+ * not replayed (Server/ws/appeal_status.go). decision_note is null until decided.
+ */
+export interface AppealStatusPayload {
+  readonly id: string;
+  readonly state: "assigned" | "upheld" | "overturned" | "withdrawn";
+  readonly decision_note: string | null;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -866,6 +876,7 @@ export type ServerMessage =
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
+  | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })

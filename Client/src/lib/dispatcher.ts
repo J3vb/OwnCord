@@ -76,6 +76,7 @@ import {
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
 import {
   applyReadySafety,
+  handleAppealStatus,
   handleModAction,
   handleTimedOutRefusal,
   refreshSafetyOnResume,
@@ -117,6 +118,7 @@ export function wireDispatcher(
         | "decideDmRequest"
         | "getDmChannels"
         | "getOwnModeration"
+        | "getMyAppeals"
       >
     >,
 ): DispatcherCleanup {
@@ -228,6 +230,8 @@ export function wireDispatcher(
 
   // mod_action: a warning or timeout applied to this user (B9-15).
   unsubs.push(ws.on(S.MOD_ACTION, (payload) => handleModAction(api, payload)));
+  // appeal_status: the caller's own appeal changed state (B9-16).
+  unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 
