@@ -1545,7 +1545,10 @@ and re-enter the scorecard when it does._
 _Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
 and B5-11 are merged, with B5-12's initial reconciliation also merged.
 B5-10 is in progress. Complete the existing B5 exit follow-ups and final
-reconciliation before B6 entry. The 2026-08-29 sequence below is retained
+reconciliation before B6 entry. _Reconciled 2026-09-23 at `6fd8cc0c`:_ B5-10
+merged as #1555; B5 is not accepted — the plan's [exit-gate
+reconciliation](b5-community-content-moderation-2026-09-04.md#exit-gate-reconciliation-2026-09-23)
+names what remains. The 2026-08-29 sequence below is retained
 as historical execution evidence, not today's instruction to start B3.
 
 _Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
