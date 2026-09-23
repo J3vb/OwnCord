@@ -94,8 +94,9 @@ func TestAdminPanelRetentionIsWired(t *testing.T) {
 	for _, call := range []string{
 		`api('GET','/retention')`,
 		`api('GET','/retention/preview')`,
-		`api('PUT','/channels/'+id+'/retention'`,
-		`api('DELETE','/channels/'+id+'/retention')`,
+		`api('POST','/retention/preview',`,
+		`api('PUT','/channels/'+change.channel_id+'/retention'`,
+		`api('DELETE','/channels/'+change.channel_id+'/retention',undefined,headers)`,
 	} {
 		if !strings.Contains(source, call) {
 			t.Errorf("no caller for %s", call)

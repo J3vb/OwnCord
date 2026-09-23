@@ -2,7 +2,7 @@
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
 the first four. RI-01 through RI-04 are implemented and merged into `dev` in
-PR #1573 (commit `3221fe9e`); RI-05 through RI-08 remain backlog ideas. The
+PR #1573 (commit `3221fe9e`); RI-05 through RI-07 remain backlog ideas. RI-08 is implemented (2026-09-23). The
 validation record and remaining limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
@@ -23,7 +23,7 @@ remains B6/B10. Implementing one item does not close those phases.
 | RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Backlog | B6 capacity; B7 reconnect behavior               |
 | RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog | B9 administration                                |
 | RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog | B6 operations; B9 administration                 |
-| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Backlog | B9; existing BPR-054 retention controls          |
+| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Done    | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
 
@@ -179,11 +179,30 @@ and policy revision on apply; concurrent changes must not silently overwrite
 another admin's work. Existing confirmation and current-policy previews
 remain useful parts of this workflow.
 
+RI-08 implementation (2026-09-23), based on `dev` commit
+`0beee8e4c50ca18823750e381d3a1d6e327029b8`:
+
+- Proposed server windows, channel overrides and override removal receive a
+  read-only snapshot with per-channel counts, protected exclusions and UTC
+  observation time. The existing saved-policy preview stays available.
+- A 15-minute signed preview binds the exact edit, actor and durable revision.
+  Apply resolves the current bearer permissions again; a transaction rejects
+  stale revisions with HTTP 409 and a reload/preview message. Server settings,
+  override writes and cascade deletions invalidate outstanding previews, even
+  when a value changes back within the same second.
+- The panel requires preview followed by confirmation, discards canceled or
+  failed previews and displays apply failures without silently retrying.
+- Regression coverage: `Server/service/retention_preview_test.go`,
+  `Server/admin/retention_test.go` and the executable admin-panel contract in
+  `Client/tests/contract/server-admin-static-panel.test.ts` cover preview/sweep
+  maths, indefinite override removal, concurrent writes, stale edits, token
+  binding, expiry, permission revocation and confirmation state.
+
 ## Delivery evidence
 
 The first batch is implemented and merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
-RI-05 through RI-08 remain backlog ideas. This does not close a broader roadmap
+RI-05 through RI-07 remain backlog ideas. RI-08 is implemented (2026-09-23). This does not close a broader roadmap
 phase.
 
 Verified in the Linux development environment:

@@ -160,6 +160,9 @@ type Store interface {
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
 	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
+	RetentionPolicySnapshot(ctx context.Context) (*db.RetentionPolicySnapshot, error)
+	PreviewRetentionChange(ctx context.Context, change db.RetentionChange, revision string, observed time.Time) (*db.RetentionChangeEffect, error)
+	ApplyRetentionChange(ctx context.Context, actorID int64, change db.RetentionChange, revision string) (string, error)
 	// Retention (B4-11): the policy, the sweep and its run journal.
 	ServerRetentionDays(ctx context.Context) (int, error)
 	ListChannelRetention(ctx context.Context) ([]db.ChannelRetention, error)
