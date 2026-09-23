@@ -1,8 +1,9 @@
 # B9-1 CSS source split — evidence
 
 **Measured:** 2026-09-23
-**Base commit:** `c80c809401ce264eda56b83003536be775ccfa5e` (`origin/dev`, after PR #1726)
-**Branch:** `fm/b9-1-impl`
+**Base commit:** `c80c809401ce264eda56b83003536be775ccfa5e` (`origin/dev`, after PR #1726), where the split was first measured
+**Merge base:** `3c7dd486` (`dev`, after PRs #1727 and #1725); emitted CSS re-run there, see [Equality proof](#equality-proof)
+**Branch:** `fm/b9-1-impl-2`
 **Plan:** `.claude/plans/b9-1-css-source-split.plan.md` (B9-1)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 **Requirements:** BPR-090, BPR-091
@@ -80,6 +81,17 @@ Vite inlines each relative `@import` before minifying, so the shipped
 stylesheet is the same bytes whether the rules live in one file or 28. The
 content-hashed filename is unchanged too, which also means nothing that
 references the stylesheet changed.
+
+**Re-run at the merge base.** This PR's branch, `fm/b9-1-impl-2`, sits on
+`dev` `3c7dd486`, two commits past `c80c8094` (PRs #1727 and #1725).
+`git diff --stat c80c8094 3c7dd486 -- Client` touches only
+`Client/src-tauri/src/native_voice/playout.rs`: no CSS, lockfile, Vite config
+or other build input. Under `nvm use 26`, `npm run build:budget` from
+`Client/` was run again on this branch and once with `Client/src/styles`
+checked out at `3c7dd486` (the only `Client/src` difference from the
+branch). Both emitted `style-w1RbVdF1.css`, 105 090 bytes, sha256
+`788f21f90f5dc7454df2de53e4bda3c2ac49e834d3d1cd21909f4e2d91ebac32`, the same as
+at `c80c8094`.
 
 ## Tests
 

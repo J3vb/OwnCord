@@ -7,7 +7,8 @@ amendment lets the serialized foundation lane B9-0 → B9-3 start now; B9-4 onwa
 **B9-0 complete 2026-09-23** at `dev` `f32149c47756b06f2400d484b3347fd782586ff3`:
 [b9-entry-baseline-2026-09-23.md](b9-entry-baseline-2026-09-23.md) records the drift, verdicts and baselines.
 **B9-1 complete — native AT recordings pending owner — 2026-09-23**:
-[b9-css-split-evidence-2026-09-23.md](b9-css-split-evidence-2026-09-23.md) records the byte-identical emitted CSS and before/after evidence.
+[b9-css-split-evidence-2026-09-23.md](b9-css-split-evidence-2026-09-23.md) records the byte-identical emitted CSS (measured at `dev` `c80c8094`, re-run
+unchanged at merge base `3c7dd486`) and before/after evidence.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.
