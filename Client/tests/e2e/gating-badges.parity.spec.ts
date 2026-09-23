@@ -41,6 +41,8 @@ async function mockTauriSessionWithChannels(page: Page, channels: unknown[]): Pr
           status: 200,
           body: { token: "mock-session-token-abc123", requires_2fa: false },
         },
+        // B9-7: continuing past the gate records consent with the server first.
+        { pattern: "/nsfw-acknowledgement", method: "PUT", status: 204, body: null },
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],

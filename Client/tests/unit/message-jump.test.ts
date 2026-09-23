@@ -251,6 +251,33 @@ describe("createMessageJumper", () => {
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
   });
 
+  it("leaves a gated NSFW channel's refusal to its gate, without a toast", async () => {
+    const ctrl = {
+      currentChannelId: 1,
+      messageList: { scrollToMessage: vi.fn().mockReturnValue(false) },
+    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const toastsBefore = toastCalls.length;
+    const jumper = createMessageJumper({
+      api: fakeApi(
+        vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(
+              403,
+              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+            ),
+          ),
+      ),
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
+
+    expect(toastCalls.length).toBe(toastsBefore);
+  });
+
   it("surfaces a transport failure without detaching the channel", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
     const ctrl = {

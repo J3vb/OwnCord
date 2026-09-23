@@ -17,6 +17,7 @@ import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
+import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@components/message-list/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { shellText } from "../../i18n/shell";
@@ -271,6 +272,8 @@ export function createInviteManagerController(opts: {
 export interface PinnedPanelController {
   toggle(): Promise<void>;
   cleanup(): void;
+  /** Close the panel if it was opened for `channelId`. */
+  closeFor(channelId: number): void;
 }
 
 export function createPinnedPanelController(opts: {
@@ -298,7 +301,9 @@ export function createPinnedPanelController(opts: {
     getRoot: opts.getRoot,
     canOpen: () => {
       channelId = opts.getCurrentChannelId();
-      return channelId !== null;
+      // A gated NSFW channel's pins are its content (B9-7): the gate already
+      // says why nothing is shown, so the panel stays shut.
+      return channelId !== null && !nsfwContentBlocked(channelId);
     },
     load: () => opts.api.getPins(channelId as number),
     build: (resp, _liveRoot, close) => {
@@ -341,7 +346,13 @@ export function createPinnedPanelController(opts: {
     await controller.open();
   }
 
-  return { toggle, cleanup: controller.close };
+  return {
+    toggle,
+    cleanup: controller.close,
+    closeFor: (id: number) => {
+      if (channelId === id) controller.close();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +389,9 @@ export function createSearchOverlayController(opts: {
     const root = opts.getRoot();
     if (instance !== null || root === null) return;
 
-    const channelId = opts.getCurrentChannelId();
+    const current = opts.getCurrentChannelId();
+    // Behind the NSFW gate only a server-wide search is offered (B9-7).
+    const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
     instance = createSearchOverlay({
       currentChannelId: channelId ?? undefined,

@@ -323,16 +323,6 @@
       "Welcome to #{…}!": 1
     }
   },
-  "src/components/NsfwGate.ts": {
-    "owner": "B9-19",
-    "strings": {
-      "Age restricted channel {…}": 1,
-      "Continue": 1,
-      "Go Back": 1,
-      "The channel has been marked age-restricted by a moderator. Nothing is filtered — you are only being asked once per session.": 1,
-      "This channel may contain sensitive content — Continue?": 1
-    }
-  },
   "src/components/PinnedMessages.ts": {
     "owner": "B9-19",
     "strings": {

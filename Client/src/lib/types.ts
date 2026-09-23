@@ -175,13 +175,18 @@ export interface ReadyChannel {
    */
   readonly mention_count?: number;
   /**
-   * Whether the channel is flagged as possibly carrying sensitive content.
-   * A pure label: the server stores and ships it but applies no content
-   * behaviour of its own, so what it means is entirely this client's choice
-   * (a one-time-per-session age gate and a sidebar marker). Absent from older
-   * servers, which is read as "not flagged".
+   * Whether the channel is labelled age-restricted. The server enforces it
+   * (B5-7): none of its content reaches a caller without their own
+   * acknowledgement. Absent from older servers, which is read as "not
+   * labelled".
    */
   readonly nsfw?: boolean;
+  /**
+   * Whether the CALLER has acknowledged this labelled channel (B5-7) — per
+   * account, so every device inherits it. Always false for an unlabelled
+   * channel. Absent reads as "not acknowledged": the gate fails closed.
+   */
+  readonly nsfw_acknowledged?: boolean;
   /**
    * Voice capacity limits (0 = unlimited), the same values the server enforces
    * on join with CHANNEL_FULL / VIDEO_LIMIT. Shipped so the sidebar can show
@@ -444,7 +449,7 @@ export interface ChannelCreatePayload {
   readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
-  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
@@ -479,11 +484,17 @@ export interface ChannelUpdatePayload {
   readonly category?: string | null;
   readonly position?: number;
   readonly slow_mode?: number;
-  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+}
+
+/** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device (B5-7). */
+export interface NsfwAckPayload {
+  readonly channel_id: number;
+  readonly acknowledged: boolean;
 }
 
 export interface ChannelDeletePayload {
@@ -863,6 +874,7 @@ export type ServerMessage =
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })
+  | (WsEnvelope<NsfwAckPayload> & { readonly type: "nsfw_ack" })
   | (WsEnvelope<VoiceStatePayload> & { readonly type: "voice_state" })
   | (WsEnvelope<VoiceLeavePayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })

@@ -6,6 +6,11 @@ import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
 import { isValidHost } from "./hostValidation";
 import { SessionScope } from "./sessionScope";
+import {
+  NSFW_ACKNOWLEDGEMENT_REQUIRED,
+  nsfwContentBlocked,
+} from "../features/content-consent/nsfw";
+import { setNsfwAcknowledged } from "../stores/channels.store";
 import type {
   AuthResponse,
   AdminUser,
@@ -239,6 +244,33 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
+  }
+
+  /**
+   * A content read from one channel, admitted only with NSFW consent (B9-7):
+   * refused locally, with the server's own error, before any request while
+   * the channel is gated, and discarded if consent was withdrawn while it was
+   * in flight — so nothing from a labelled channel is fetched or delivered
+   * pre-consent, whichever feature asked.
+   */
+  async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
+    const refusal = (): ApiClientError =>
+      new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
+    if (nsfwContentBlocked(channelId)) throw refusal();
+    let result: T;
+    try {
+      result = await load();
+    } catch (err) {
+      // The server's refusal outranks a stale local "consented". A resume
+      // that missed an nsfw_ack already gets a full ready (the revoke bumps
+      // the server's visibility watermark), so this is defence in depth.
+      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
+        setNsfwAcknowledged(channelId, false);
+      }
+      throw err;
+    }
+    if (nsfwContentBlocked(channelId)) throw refusal();
+    return result;
   }
 
   function adminRequest<T>(
@@ -534,11 +566,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       if (options?.before !== undefined) params.set("before", String(options.before));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
-      return request<MessagesResponse>(
-        "GET",
-        `/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<MessagesResponse>(
+          "GET",
+          `/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
+          undefined,
+          signal,
+        ),
       );
     },
 
@@ -557,11 +591,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const params = new URLSearchParams();
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
-      return request<MessagesAroundResponse>(
-        "GET",
-        `/channels/${channelId}/messages/around/${messageId}${qs ? `?${qs}` : ""}`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<MessagesAroundResponse>(
+          "GET",
+          `/channels/${channelId}/messages/around/${messageId}${qs ? `?${qs}` : ""}`,
+          undefined,
+          signal,
+        ),
       );
     },
 
@@ -595,16 +631,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       emoji: string,
       signal?: AbortSignal,
     ): Promise<ReactionUsersResponse> {
-      return request<ReactionUsersResponse>(
-        "GET",
-        `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/users`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<ReactionUsersResponse>(
+          "GET",
+          `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/users`,
+          undefined,
+          signal,
+        ),
       );
     },
 
     getPins(channelId: number, signal?: AbortSignal): Promise<MessagesResponse> {
-      return request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal);
+      return channelContent(channelId, () =>
+        request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal),
+      );
     },
 
     pinMessage(channelId: number, messageId: number, signal?: AbortSignal): Promise<void> {
@@ -625,7 +665,26 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const params = new URLSearchParams({ q: query });
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
-      return request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
+      const send = (): Promise<SearchResponse> =>
+        request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
+      // A server-wide search already omits channels the caller has not
+      // acknowledged; a single-channel one is a content read like any other.
+      return options?.channelId === undefined ? send() : channelContent(options.channelId, send);
+    },
+
+    /** Acknowledge a labelled channel for this account, on every device (B5-7). */
+    acknowledgeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("PUT", `/channels/${channelId}/nsfw-acknowledgement`, undefined, signal);
+    },
+
+    /** Withdraw this account's acknowledgement of a labelled channel (B5-7). */
+    revokeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "DELETE",
+        `/channels/${channelId}/nsfw-acknowledgement`,
+        undefined,
+        signal,
+      );
     },
 
     // ── GIFs ──────────────────────────────────────────────
@@ -878,8 +937,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         position?: number;
         archived?: boolean;
         /**
-         * Age-restriction label. Stored, broadcast and audited by the server,
-         * which applies no content behaviour of its own to a flagged channel.
+         * Age-restriction label. The server withholds a labelled channel's
+         * content from anyone who has not acknowledged it (B5-7); clearing
+         * the label drops every acknowledgement.
          */
         nsfw?: boolean;
         /**

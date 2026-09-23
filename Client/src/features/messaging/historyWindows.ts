@@ -196,6 +196,26 @@ export function reduceInvalidateChannelMessageWindow(
   return { ...prev, loadedChannels: updatedLoaded };
 }
 
+/** clearChannelContent's reducer: forget one channel's delivered rows and window. */
+export function reduceClearChannelContent(prev: MessagesState, channelId: number): MessagesState {
+  const existing = prev.messagesByChannel.get(channelId);
+  if (existing === undefined && !prev.loadedChannels.has(channelId)) return prev;
+  const messagesByChannel = new Map(prev.messagesByChannel);
+  const carried = existing?.filter((m) => m.status !== "sent") ?? [];
+  if (carried.length > 0) {
+    messagesByChannel.set(channelId, carried);
+  } else {
+    messagesByChannel.delete(channelId);
+  }
+  const loadedChannels = new Set(prev.loadedChannels);
+  loadedChannels.delete(channelId);
+  const hasMore = new Map(prev.hasMore);
+  hasMore.delete(channelId);
+  const detachedChannels = new Set(prev.detachedChannels);
+  detachedChannels.delete(channelId);
+  return { ...prev, messagesByChannel, loadedChannels, hasMore, detachedChannels };
+}
+
 /** reattachToPresent's reducer. */
 export function reduceReattachToPresent(prev: MessagesState, channelId: number): MessagesState {
   if (!prev.detachedChannels.has(channelId)) return prev;

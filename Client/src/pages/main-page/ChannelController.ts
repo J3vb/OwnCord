@@ -15,8 +15,7 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
-import { createNsfwGate } from "@components/NsfwGate";
-import { nsfwGateRequired } from "@lib/nsfw-gate";
+import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
   getChannelMessages,
   setMessagePinned,
@@ -26,6 +25,7 @@ import {
   reattachToPresent,
   isWindowDetached,
   invalidateChannelMessageWindow,
+  clearChannelContent,
 } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
@@ -39,7 +39,7 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
-import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
@@ -76,6 +76,12 @@ export interface ChannelControllerOptions {
   };
   readonly chatHeaderName: HTMLSpanElement | null;
   readonly chatHeaderRefs: ChatHeaderRefs | null;
+  /** Close the image lightbox when the mounted channel falls behind the
+   *  NSFW gate (ChatArea closes the pins and search overlays itself). */
+  readonly onContentGated?: () => void;
+  /** Move focus somewhere reachable after the NSFW gate that held it is
+   *  removed (accepted, declined or dismissed with Escape). */
+  readonly focusFallback?: () => void;
 }
 
 export interface ChannelController {
@@ -114,6 +120,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     slots,
     chatHeaderName,
     chatHeaderRefs,
+    onContentGated,
+    focusFallback,
   } = opts;
 
   let currentChannelId: number | null = null;
@@ -121,8 +129,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
-  // The age gate covering the message area of an NSFW channel, while it is up.
-  let nsfwGate: MountableComponent | null = null;
+  // An NSFW channel's consent UI: the gate mounted instead of its content, or
+  // the withdraw bar above content the reader has consented to.
+  let nsfwConsentUi: MountableComponent | null = null;
+  // Bumped whenever that UI is torn down, so a lazy load that resolves late
+  // cannot mount a gate or bar that no longer belongs to the channel.
+  let nsfwConsentUiGen = 0;
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
@@ -195,9 +207,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelAbort = null;
     }
 
-    if (nsfwGate !== null) {
-      nsfwGate.destroy?.();
-      nsfwGate = null;
+    nsfwConsentUiGen++;
+    if (nsfwConsentUi !== null) {
+      nsfwConsentUi.destroy?.();
+      nsfwConsentUi = null;
     }
     if (messageList !== null) {
       messageList.destroy?.();
@@ -230,7 +243,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     currentChannelId = null;
   }
 
-  function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
+  function mountChannel(
+    channelId: number,
+    channelName: string,
+    channelType?: ChannelType,
+    focusGate = true,
+  ): void {
     if (currentChannelId === channelId) return;
 
     const previousChannelId = currentChannelId;
@@ -268,6 +286,43 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+
+    /**
+     * Mount the gate or the withdraw bar. Their module (with its catalog) is
+     * loaded on first use so only a labelled channel pays for it (B9 shared
+     * MainPage budget); the gated path mounts no content while it loads.
+     */
+    function mountConsentUi(
+      build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    ): void {
+      const gen = ++nsfwConsentUiGen;
+      import("@components/NsfwGate").then(
+        (ui) => {
+          if (signal.aborted || gen !== nsfwConsentUiGen) return;
+          nsfwConsentUi = build(ui);
+          nsfwConsentUi.mount(slots.messagesSlot);
+        },
+        (err: unknown) =>
+          log.error("NSFW consent UI failed to load", { channelId, error: String(err) }),
+      );
+    }
+
+    function mountConsentBar(): void {
+      mountConsentUi((ui) =>
+        ui.createNsfwConsentBar({
+          onRevoke: () =>
+            api.revokeNsfw(channelId).then(
+              () => {
+                if (ownsAccountSession()) setNsfwAcknowledged(channelId, false);
+              },
+              (err: unknown) => {
+                log.error("NSFW consent revoke failed", { channelId, error: String(err) });
+                if (ownsSession()) showToast(ui.nsfwConsentText("bar.revokeFailed"), "error");
+              },
+            ),
+        }),
+      );
+    }
 
     function performSend(
       content: string,
@@ -454,6 +509,149 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       removeOptimistic(correlationId);
     }
 
+    // Block gating is a 1:1 rule (Discord semantics, mirrored by the server's
+    // requireDMNotBlocked): a group DM is a shared room, and gating one
+    // member's composer over a block with one other member would leave the
+    // group reading a conversation that person cannot join.
+    const gatedDm =
+      channelType === "dm"
+        ? dmStore.getState().channels.find((c) => c.channelId === channelId)
+        : undefined;
+    const dmRecipientId = gatedDm !== undefined && !gatedDm.isGroup ? gatedDm.recipient.id : null;
+
+    // Update header
+    if (chatHeaderRefs !== null && channelType === "dm") {
+      const refreshDmHeader = (): void => {
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+        // A group has no single presence to show, so the subtitle lists who is
+        // in it instead — that is the fact a group header is asked for, and a
+        // first member's status presented as the group's would be a lie.
+        let subtitle = "Offline";
+        if (dmChannel !== undefined && dmChannel.isGroup) {
+          const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
+          subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
+        } else if (dmChannel !== undefined) {
+          const member = membersStore.getState().members.get(dmChannel.recipient.id);
+          const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
+          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
+        updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
+      };
+      refreshDmHeader();
+      // Keep the subtitle live across presence and roster changes — otherwise
+      // it is set once from a snapshot and never updated until the channel is
+      // re-mounted, same as the topic subscription below does for text
+      // channels. destroyChannel already tears these down.
+      if (dmRecipientId !== null) {
+        composerGatingUnsubs.push(
+          membersStore.subscribeSelector(
+            (s) => s.members.get(dmRecipientId)?.status,
+            refreshDmHeader,
+          ),
+        );
+      }
+      composerGatingUnsubs.push(
+        dmStore.subscribeSelector(
+          (s) => s.channels.find((c) => c.channelId === channelId),
+          refreshDmHeader,
+        ),
+      );
+    } else if (chatHeaderRefs !== null) {
+      updateChatHeaderForDm(chatHeaderRefs, null);
+      if (chatHeaderName !== null) {
+        setText(chatHeaderName, channelName);
+        // Keep the header name live across channel_update events (a rename),
+        // same as the topic subscription right below — otherwise it is set
+        // once from the mount-time snapshot and disagrees with the sidebar
+        // row (which does re-render off the live store) until the channel is
+        // remounted.
+        const nameEl = chatHeaderName;
+        composerGatingUnsubs.push(
+          channelsStore.subscribeSelector(
+            (s) => s.channels.get(channelId)?.name ?? channelName,
+            (name) => setText(nameEl, name),
+          ),
+        );
+      }
+      // Show the channel topic and keep it live across channel_update events.
+      const topicEl = chatHeaderRefs.topicEl;
+      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
+      composerGatingUnsubs.push(
+        channelsStore.subscribeSelector(
+          (s) => s.channels.get(channelId)?.topic ?? "",
+          (topic) => setText(topicEl, topic),
+        ),
+      );
+    } else if (chatHeaderName !== null) {
+      setText(chatHeaderName, channelName);
+    }
+
+    // NSFW consent gates composition, not just display (B9-7): until the
+    // server has confirmed this account's acknowledgement, the channel's
+    // content is neither mounted nor fetched, and any rows left from before
+    // consent was withdrawn are dropped. Any change that crosses the gate —
+    // accepted here, revoked here or on another device, relabelled, or
+    // restated by a reconnect's ready — remounts the channel on the other
+    // side of it; labelling or unlabelling consented content only adds or
+    // removes the withdraw bar, so the composer keeps its draft.
+    const storedChannel = channelsStore.getState().channels.get(channelId);
+    const gated = nsfwConsentRequired(storedChannel);
+    composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => {
+          const ch = s.channels.get(channelId);
+          if (ch?.nsfw !== true) return "none";
+          return nsfwConsentRequired(ch) ? "gated" : "consented";
+        },
+        (state) => {
+          if (currentChannelId !== channelId) return;
+          if ((state === "gated") === gated) {
+            nsfwConsentUiGen++;
+            nsfwConsentUi?.destroy?.();
+            nsfwConsentUi = null;
+            if (state === "consented") mountConsentBar();
+            return;
+          }
+          // A remount caused elsewhere (another device, a moderator, a
+          // reconnect) takes focus only from the content it replaces, never
+          // from an open dialog or another part of the app.
+          const active = document.activeElement;
+          const gateHadFocus = [slots.messagesSlot, slots.typingSlot, slots.inputSlot].some(
+            (slot) => slot.contains(active),
+          );
+          const takeFocus = gateHadFocus || active === null || active === document.body;
+          const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
+          destroyChannel();
+          mountChannel(channelId, name, channelType, takeFocus);
+          if (state === "gated") onContentGated?.();
+          else if (gateHadFocus) focusFallback?.();
+        },
+      ),
+    );
+    if (gated) {
+      clearChannelContent(channelId);
+      mountConsentUi((ui) =>
+        ui.createNsfwGate({
+          channelName,
+          focusOnMount: focusGate,
+          onAccept: () =>
+            api.acknowledgeNsfw(channelId).then(() => {
+              if (ownsAccountSession()) setNsfwAcknowledged(channelId, true);
+            }),
+          onCancel: () => {
+            // Leave the channel entirely: keeping the gate up over a channel the
+            // reader declined would strand them on a screen with no way out that
+            // is not also "continue".
+            destroyChannel();
+            setActiveChannel(null);
+            focusFallback?.();
+          },
+        }),
+      );
+      return;
+    }
+
     void msgCtrl.loadMessages(channelId, signal);
 
     // MessageList
@@ -537,6 +735,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
     });
     messageList.mount(slots.messagesSlot);
+    if (storedChannel?.nsfw === true) mountConsentBar();
 
     // TypingIndicator
     typingIndicator = createTypingIndicator({
@@ -595,15 +794,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // composer disables (with a reason) when the socket is down or the user
     // may not post here, instead of accepting a click and failing. For DM
     // channels the reason also covers block state (channels-members-dms.md §3.2).
-    // Block gating is a 1:1 rule (Discord semantics, mirrored by the server's
-    // requireDMNotBlocked): a group DM is a shared room, and gating one
-    // member's composer over a block with one other member would leave the
-    // group reading a conversation that person cannot join.
-    const gatedDm =
-      channelType === "dm"
-        ? dmStore.getState().channels.find((c) => c.channelId === channelId)
-        : undefined;
-    const dmRecipientId = gatedDm !== undefined && !gatedDm.isGroup ? gatedDm.recipient.id : null;
     // Slow mode as affordance: after an accepted send the composer disables
     // itself for the channel's cooldown with a live countdown, instead of
     // taking a message the server will bounce with SLOW_MODE (UX spec §5,
@@ -790,99 +980,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       { signal },
     );
-
-    // Age gate. Mounted over the message area — the channel is live underneath,
-    // so accepting reveals it without a refetch, and declining leaves the
-    // channel rather than pretending it is empty. Only the first open of a
-    // flagged channel in a session shows it (see @lib/nsfw-gate).
-    const storedChannel = channelsStore.getState().channels.get(channelId);
-    if (storedChannel !== undefined && nsfwGateRequired(storedChannel)) {
-      const gate = createNsfwGate({
-        channelId,
-        channelName,
-        onContinue: () => {
-          gate.destroy?.();
-          if (nsfwGate === gate) nsfwGate = null;
-        },
-        onCancel: () => {
-          // Leave the channel entirely: keeping the gate up over a channel the
-          // reader declined would strand them on a screen with no way out that
-          // is not also "continue".
-          destroyChannel();
-          setActiveChannel(null);
-        },
-      });
-      gate.mount(slots.messagesSlot);
-      nsfwGate = gate;
-    }
-
-    // Update header
-    if (chatHeaderRefs !== null && channelType === "dm") {
-      const refreshDmHeader = (): void => {
-        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-        // A group has no single presence to show, so the subtitle lists who is
-        // in it instead — that is the fact a group header is asked for, and a
-        // first member's status presented as the group's would be a lie.
-        let subtitle = "Offline";
-        if (dmChannel !== undefined && dmChannel.isGroup) {
-          const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
-          subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
-        } else if (dmChannel !== undefined) {
-          const member = membersStore.getState().members.get(dmChannel.recipient.id);
-          const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
-          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
-        }
-        const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
-        updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
-      };
-      refreshDmHeader();
-      // Keep the subtitle live across presence and roster changes — otherwise
-      // it is set once from a snapshot and never updated until the channel is
-      // re-mounted, same as the topic subscription below does for text
-      // channels. destroyChannel already tears these down.
-      if (dmRecipientId !== null) {
-        composerGatingUnsubs.push(
-          membersStore.subscribeSelector(
-            (s) => s.members.get(dmRecipientId)?.status,
-            refreshDmHeader,
-          ),
-        );
-      }
-      composerGatingUnsubs.push(
-        dmStore.subscribeSelector(
-          (s) => s.channels.find((c) => c.channelId === channelId),
-          refreshDmHeader,
-        ),
-      );
-    } else if (chatHeaderRefs !== null) {
-      updateChatHeaderForDm(chatHeaderRefs, null);
-      if (chatHeaderName !== null) {
-        setText(chatHeaderName, channelName);
-        // Keep the header name live across channel_update events (a rename),
-        // same as the topic subscription right below — otherwise it is set
-        // once from the mount-time snapshot and disagrees with the sidebar
-        // row (which does re-render off the live store) until the channel is
-        // remounted.
-        const nameEl = chatHeaderName;
-        composerGatingUnsubs.push(
-          channelsStore.subscribeSelector(
-            (s) => s.channels.get(channelId)?.name ?? channelName,
-            (name) => setText(nameEl, name),
-          ),
-        );
-      }
-      // Show the channel topic and keep it live across channel_update events.
-      const topicEl = chatHeaderRefs.topicEl;
-      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
-      composerGatingUnsubs.push(
-        channelsStore.subscribeSelector(
-          (s) => s.channels.get(channelId)?.topic ?? "",
-          (topic) => setText(topicEl, topic),
-        ),
-      );
-    } else if (chatHeaderName !== null) {
-      setText(chatHeaderName, channelName);
-    }
   }
 
   return {

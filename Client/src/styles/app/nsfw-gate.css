@@ -1,20 +1,23 @@
 /* ── NSFW age gate ── */
 
-/* Covers the message area of a flagged channel until the reader accepts. Not a
-   modal: the channel is mounted and live underneath, and the sidebar and header
-   stay usable, so declining is a normal navigation rather than a trap. */
+/* Fills the message area of a labelled channel in place of its content, which
+   is not mounted or fetched until the server confirms consent (B9-7). Not a
+   modal: the sidebar and header stay usable, so declining is a normal
+   navigation rather than a trap. */
 .nsfw-gate {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow-y: auto;
   padding: 24px;
   background: var(--bg-primary);
 }
+/* margin: auto centres the card but, unlike align-items: center, lets it
+   scroll from its top when large text makes it taller than the slot. */
 .nsfw-gate-card {
   max-width: 420px;
+  margin: auto;
   text-align: center;
 }
 .nsfw-gate-icon {
@@ -38,11 +41,54 @@
 .nsfw-gate-note {
   font-size: var(--font-size-xs);
   line-height: 1.5;
-  color: var(--text-faint);
+  color: var(--text-muted);
   margin-bottom: 20px;
 }
 .nsfw-gate-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
+}
+.nsfw-gate-error:empty {
+  display: none;
+}
+.nsfw-gate-error {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-danger);
+  margin-bottom: var(--space-4);
+}
+.nsfw-gate-actions button[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+/* Above an acknowledged labelled channel's messages: why they are showing,
+   and the way to withdraw consent. */
+.nsfw-consent-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: 6px var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.nsfw-consent-bar-revoke {
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-link);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.nsfw-consent-bar-revoke[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.7;
 }

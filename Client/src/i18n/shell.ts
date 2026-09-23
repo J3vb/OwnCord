@@ -83,7 +83,7 @@ export const shellText = defineCatalog("shell", {
     "Members must wait this long between messages. Holders of Manage Messages are exempt.",
   "channelForm.nsfw": "Age-restricted (NSFW)",
   "channelForm.nsfwHint":
-    "Members see a one-time warning each session before opening the channel, and the channel is marked in the sidebar. Nothing is filtered.",
+    "Each member must agree before the channel's messages, images and files load; the server withholds them until then. The channel is marked in the sidebar.",
   "channelForm.voiceLimits": "Voice Limits",
   "channelForm.userLimit": "User Limit",
   "channelForm.userLimitHint": "How many members may be connected at once. 0 = unlimited.",

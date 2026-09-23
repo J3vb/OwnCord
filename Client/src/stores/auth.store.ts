@@ -9,7 +9,6 @@ import { resetMessagesStore } from "@stores/messages.store";
 import { resetChannelsStore } from "@stores/channels.store";
 import { resetBlocksStore } from "@stores/blocks.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { clearNsfwAcknowledgements } from "@lib/nsfw-gate";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("auth.store");
@@ -154,11 +153,6 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   resetChannelsStore();
   resetBlocksStore();
   setSidebarMode("channels");
-  // NSFW acknowledgements are per-viewer consent, not per-device: without this
-  // the next account signed into the same server inherits the previous user's
-  // acks and the age gate silently never appears for them. Host-scoping the
-  // keys cannot cover that case — only clearing on logout can.
-  clearNsfwAcknowledgements();
   authStore.setState(() => ({
     ...INITIAL_STATE,
     logoutReason: reason,
