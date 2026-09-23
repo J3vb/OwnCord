@@ -79,8 +79,8 @@ function applyAck(row: NoticeRow, n: ModerationNotice): void {
 /** The persistent warning banner. Mount it on the page root. */
 export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   const { api, signal } = opts;
-  // The Safety tab's appeals use this page's client (its seam takes only a
-  // signal). The tab lives inside this page, so it never outlives it.
+  // The Safety tab's appeals use this page's client (buildSafetyTab takes only
+  // a signal). The tab lives inside this page, so it never outlives it.
   tabApi = api;
   const root = createElement("section", {
     class: "moderation-notices",
@@ -180,7 +180,7 @@ const log = createLogger("safety");
 /** The mounted banner's client, for the Safety tab's appeal actions. */
 let tabApi: AppealsApi | null = null;
 
-/** The Settings "Safety" tab (the B9-4 destination). Its body loads on first open. */
+/** B9-15's section of the Settings "Safety" tab (see buildSafetyPane). Its body loads on first open. */
 export function buildSafetyTab(signal: AbortSignal): HTMLDivElement {
   const pane = createElement("div", { class: "settings-pane active safety-tab" });
   // A slot of its own keeps this body first, above sections added after it.

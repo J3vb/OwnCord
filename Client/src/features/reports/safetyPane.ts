@@ -4,8 +4,8 @@ import { reportEntryText } from "../../i18n/reportEntry";
 import { buildSafetyTab } from "../safety/Notices";
 
 /**
- * The Settings Safety tab's pane (Q2): B9-15's restrictions and history, then
- * B9-10's My reports; B9-16 adds appeals. The sections load on first open,
+ * The Settings Safety tab's pane (Q2): B9-15's restrictions and history with
+ * B9-16's appeals, then B9-10's My reports. The sections load on first open,
  * keeping them out of the main bundle; a section that cannot load says so.
  */
 export function buildSafetyPane(
